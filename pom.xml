@@ -121,6 +121,7 @@
                     </execution>
                 </executions>
                 <configuration>
+                    <jvmTarget>${java.version}</jvmTarget>
                     <args>
                         <arg>-Xjsr305=strict</arg>
                         <arg>-Xcontext-parameters</arg>
@@ -148,8 +149,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.2</version>
                 <configuration>
-                    <includes><include>**/*Test.kt</include></includes>
-                    <excludes><exclude>**/*IT.kt</exclude></excludes>
+                    <includes><include>**/*Test</include></includes>
+                    <excludes><exclude>**/*IT</exclude></excludes>
                 </configuration>
             </plugin>
             <plugin>
@@ -157,7 +158,7 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <version>3.5.2</version>
                 <configuration>
-                    <includes><include>**/*IT.kt</include></includes>
+                    <includes><include>**/*IT</include></includes>
                     <systemPropertyVariables>
                         <spring.profiles.active>it</spring.profiles.active>
                     </systemPropertyVariables>
