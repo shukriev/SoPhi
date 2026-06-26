@@ -86,6 +86,22 @@
                 <artifactId>sophi-infra</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <!-- Third-party libraries -->
+            <dependency>
+                <groupId>com.charleskorn.kaml</groupId>
+                <artifactId>kaml</artifactId>
+                <version>0.61.0</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.ajalt.clikt</groupId>
+                <artifactId>clikt-jvm</artifactId>
+                <version>4.4.0</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.ajalt.mordant</groupId>
+                <artifactId>mordant-jvm</artifactId>
+                <version>2.7.0</version>
+            </dependency>
             <!-- Test -->
             <dependency>
                 <groupId>io.kotest</groupId>

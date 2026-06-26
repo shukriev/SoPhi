@@ -22,11 +22,15 @@
         <dependency>
             <groupId>com.charleskorn.kaml</groupId>
             <artifactId>kaml</artifactId>
-            <version>0.61.0</version>
         </dependency>
         <dependency>
             <groupId>io.kotest</groupId>
             <artifactId>kotest-runner-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.mockk</groupId>
+            <artifactId>mockk</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
