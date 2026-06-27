@@ -122,7 +122,42 @@ sealed class LLMResponse {
 }
 ```
 
-_Remaining interfaces (`AgentSession`, `Tool`, `SessionManager`, `KharnessPlugin`, `AgentHook`) added as each module is implemented._
+### AgentSession (`dev.sophi.core.session`)
+
+The in-memory model of a conversation. Entries form a tree via `parentId` links;
+`branch()` returns the linear chain from root to the current tip; `checkout()` switches
+the active tip to enable branching.
+
+```kotlin
+class AgentSession(
+    val id: String,
+    val title: String? = null,
+    initialEntries: List<SessionEntry> = emptyList(),
+    initialTipId: String? = null
+) {
+    val tip: SessionEntry?
+    val entries: List<SessionEntry>
+    fun append(role: EntryRole, content: String, metadata: Map<String, String> = emptyMap()): SessionEntry
+    fun branch(): List<SessionEntry>
+    fun checkout(entryId: String)
+}
+```
+
+### SessionManager (`dev.sophi.core.session`)
+
+Creates, persists, and loads sessions. `FileSessionManager` is the only implementation
+in M1; the interface exists so `sophi-core` can be tested without touching the filesystem.
+
+```kotlin
+interface SessionManager {
+    fun create(title: String? = null): AgentSession
+    fun save(session: AgentSession)
+    fun load(sessionId: String): AgentSession
+    fun list(): List<SessionMeta>
+}
+```
+
+_Remaining interfaces (`Tool`, `KharnessPlugin`, `AgentHook`) added as each module is implemented._
 
 ---
 
@@ -134,6 +169,7 @@ _Remaining interfaces (`AgentSession`, `Tool`, `SessionManager`, `KharnessPlugin
 | [ADR-002](adr/ADR-002-spring-ai-for-providers.md) | LLM provider layer | Spring AI starters — no DIY HTTP clients |
 | [ADR-003](adr/ADR-003-maven-multi-module.md) | Build system | Maven multi-module — Gradle rejected |
 | [ADR-004](adr/ADR-004-llm-contract-placement.md) | LLM contract placement | Contract in `sophi-ai`, no `sophi-contracts` module |
+| [ADR-005](adr/ADR-005-jsonl-tree-sessions.md) | Session storage format | Append-only JSONL with parentId tree |
 
 ---
 
