@@ -80,7 +80,49 @@ _Added when sophi-core agent loop is implemented (Phase 5, Plan 3)._
 
 ## Key Interfaces
 
-_Added per module as each is implemented. Planned interfaces: `LLMProvider`, `AgentSession`, `Tool`, `SessionManager`, `KharnessPlugin`, `AgentHook`._
+### LLMProvider (`dev.sophi.ai.api`)
+
+The single boundary between `sophi-core` and the provider layer. `sophi-core` holds a
+`ProviderRegistry`, selects a provider by name, and calls `complete()`. Zero Spring AI imports
+anywhere in `sophi-core`.
+
+```kotlin
+interface LLMProvider {
+    val name: String
+    suspend fun complete(request: CompletionRequest): LLMResponse
+    fun stream(request: CompletionRequest): Flow<String>
+}
+```
+
+### CompletionRequest (`dev.sophi.ai.api`)
+
+Everything the provider needs to call the model. `tools` is empty unless the agent loop
+attaches tool definitions for the current turn.
+
+```kotlin
+data class CompletionRequest(
+    val messages: List<Message>,
+    val model: String,
+    val maxTokens: Int = 4096,
+    val temperature: Double = 0.7,
+    val systemPrompt: String? = null,
+    val tools: List<ToolDefinition> = emptyList()
+)
+```
+
+### LLMResponse (`dev.sophi.ai.api`)
+
+Sealed class. The agent loop pattern-matches on this in every turn.
+
+```kotlin
+sealed class LLMResponse {
+    data class Text(val content: String, val usage: TokenUsage, val stopReason: String? = null) : LLMResponse()
+    data class ToolUse(val calls: List<ToolCall>, val usage: TokenUsage) : LLMResponse()
+    data class Error(val message: String, val cause: Throwable? = null) : LLMResponse()
+}
+```
+
+_Remaining interfaces (`AgentSession`, `Tool`, `SessionManager`, `KharnessPlugin`, `AgentHook`) added as each module is implemented._
 
 ---
 
@@ -91,6 +133,7 @@ _Added per module as each is implemented. Planned interfaces: `LLMProvider`, `Ag
 | [ADR-001](adr/ADR-001-custom-core-vs-koog.md) | Custom agent loop vs Koog | Custom `sophi-core` — Koog rejected |
 | [ADR-002](adr/ADR-002-spring-ai-for-providers.md) | LLM provider layer | Spring AI starters — no DIY HTTP clients |
 | [ADR-003](adr/ADR-003-maven-multi-module.md) | Build system | Maven multi-module — Gradle rejected |
+| [ADR-004](adr/ADR-004-llm-contract-placement.md) | LLM contract placement | Contract in `sophi-ai`, no `sophi-contracts` module |
 
 ---
 
