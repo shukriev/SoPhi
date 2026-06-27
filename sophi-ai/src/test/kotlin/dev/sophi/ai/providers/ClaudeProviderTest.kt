@@ -17,6 +17,8 @@ import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.prompt.Prompt
+import kotlinx.coroutines.flow.toList
+import reactor.core.publisher.Flux
 
 class ClaudeProviderTest : FunSpec({
     val mockChatModel = mockk<AnthropicChatModel>()
@@ -160,5 +162,37 @@ class ClaudeProviderTest : FunSpec({
         val instructions = capturedPrompt.captured.instructions
         instructions.size shouldBe 1
         instructions[0].shouldBeInstanceOf<UserMessage>()
+    }
+
+    test("stream() emits non-empty text chunks from Flux") {
+        val chunk1 = mockk<ChatResponse> {
+            every { result } returns mockk {
+                every { output } returns mockk<AssistantMessage> {
+                    every { text } returns "hello"
+                    every { toolCalls } returns emptyList()
+                }
+            }
+        }
+        val chunk2 = mockk<ChatResponse> {
+            every { result } returns mockk {
+                every { output } returns mockk<AssistantMessage> {
+                    every { text } returns " world"
+                    every { toolCalls } returns emptyList()
+                }
+            }
+        }
+        val emptyChunk = mockk<ChatResponse> {
+            every { result } returns mockk {
+                every { output } returns mockk<AssistantMessage> {
+                    every { text } returns ""
+                    every { toolCalls } returns emptyList()
+                }
+            }
+        }
+        every { mockChatModel.stream(any<Prompt>()) } returns Flux.just(chunk1, emptyChunk, chunk2)
+
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
+        val chunks = provider.stream(req).toList()
+        chunks shouldBe listOf("hello", " world")
     }
 })

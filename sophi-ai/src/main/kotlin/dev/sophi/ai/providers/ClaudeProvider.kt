@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.withContext
 import org.springframework.ai.anthropic.AnthropicChatModel
@@ -31,6 +32,7 @@ class ClaudeProvider(
             .filter { it.result?.output?.text?.isNotEmpty() == true }
             .map { it.result!!.output!!.text!! }
             .asFlow()
+            .catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }
 
     private fun CompletionRequest.toPrompt(): Prompt {
         val springMessages = buildList {
@@ -42,6 +44,7 @@ class ClaudeProvider(
             .maxTokens(maxTokens)
             .temperature(temperature)
             .build()
+        // TODO M2: map request.tools to options.functions() when tool calling is wired in sophi-core
         return Prompt(springMessages, options)
     }
 }
