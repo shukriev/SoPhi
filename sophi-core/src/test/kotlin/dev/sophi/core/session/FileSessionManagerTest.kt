@@ -1,0 +1,106 @@
+package dev.sophi.core.session
+
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
+import kotlin.io.path.createTempDirectory
+
+class FileSessionManagerTest : FunSpec({
+    lateinit var manager: FileSessionManager
+
+    beforeTest {
+        manager = FileSessionManager(createTempDirectory("sophi-session-test"))
+    }
+
+    test("create() returns session with non-empty id and no entries") {
+        val session = manager.create()
+        session.id shouldNotBe ""
+        session.entries.shouldBeEmpty()
+        session.tip shouldBe null
+    }
+
+    test("create() with title preserves title on the returned session") {
+        val session = manager.create(title = "My Chat")
+        session.title shouldBe "My Chat"
+    }
+
+    test("save() and load() round-trip preserves entries with roles and content") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "hello")
+        session.append(EntryRole.ASSISTANT, "hi there")
+        manager.save(session)
+
+        val loaded = manager.load(session.id)
+        loaded.entries shouldHaveSize 2
+        loaded.entries[0].role shouldBe EntryRole.USER
+        loaded.entries[0].content shouldBe "hello"
+        loaded.entries[1].role shouldBe EntryRole.ASSISTANT
+        loaded.entries[1].content shouldBe "hi there"
+    }
+
+    test("load() restores parentId links so branch() works correctly") {
+        val session = manager.create()
+        val a = session.append(EntryRole.USER, "a")
+        val b = session.append(EntryRole.ASSISTANT, "b")
+        manager.save(session)
+
+        val loaded = manager.load(session.id)
+        loaded.tip?.id shouldBe b.id
+        val chain = loaded.branch()
+        chain shouldHaveSize 2
+        chain[0].id shouldBe a.id
+        chain[1].id shouldBe b.id
+        chain[1].parentId shouldBe a.id
+    }
+
+    test("load() for unknown session id throws IllegalArgumentException") {
+        shouldThrow<IllegalArgumentException> { manager.load("nonexistent") }
+    }
+
+    test("list() returns one SessionMeta per saved session") {
+        val s1 = manager.create()
+        s1.append(EntryRole.USER, "hi")
+        manager.save(s1)
+
+        val s2 = manager.create()
+        s2.append(EntryRole.USER, "hello")
+        s2.append(EntryRole.ASSISTANT, "world")
+        manager.save(s2)
+
+        val metas = manager.list()
+        metas shouldHaveSize 2
+        val meta1 = metas.first { it.id == s1.id }
+        val meta2 = metas.first { it.id == s2.id }
+        meta1.entryCount shouldBe 1
+        meta2.entryCount shouldBe 2
+    }
+
+    test("list() returns empty list when no sessions saved") {
+        manager.list().shouldBeEmpty()
+    }
+
+    test("save() overwrites previous file — re-saved session reflects latest entries") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "first")
+        manager.save(session)
+
+        session.append(EntryRole.ASSISTANT, "second")
+        manager.save(session)
+
+        val loaded = manager.load(session.id)
+        loaded.entries shouldHaveSize 2
+        loaded.entries[1].content shouldBe "second"
+    }
+
+    test("load() restores metadata on entries") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "hi", metadata = mapOf("src" to "cli"))
+        manager.save(session)
+
+        val loaded = manager.load(session.id)
+        loaded.entries[0].metadata shouldBe mapOf("src" to "cli")
+    }
+})
