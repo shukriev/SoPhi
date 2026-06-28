@@ -10,6 +10,9 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 class AgentLoop(
     private val provider: LLMProvider,
@@ -43,8 +46,28 @@ class AgentLoop(
                     if (toolRound >= config.maxToolRounds) {
                         throw IllegalStateException("Max tool rounds (${config.maxToolRounds}) exceeded")
                     }
-                    // Tool dispatch added in Task 4
-                    throw IllegalStateException("Tool use not yet implemented")
+                    messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = response.calls))
+
+                    val toolResults = coroutineScope {
+                        response.calls.map { call ->
+                            async {
+                                val result = registry.getOrNull(call.name)
+                                    ?.let { tool ->
+                                        runCatching { tool.execute(call.argumentsJson) }
+                                            .getOrElse { e -> "Error: ${e.message}" }
+                                    }
+                                    ?: "Error: Tool '${call.name}' not found"
+                                Message(
+                                    role = MessageRole.TOOL,
+                                    content = result,
+                                    toolCallId = call.id,
+                                    toolName = call.name
+                                )
+                            }
+                        }.awaitAll()
+                    }
+                    messages.addAll(toolResults)
+                    toolRound++
                 }
                 is LLMResponse.Error -> {
                     throw IllegalStateException("LLM error: ${response.message}", response.cause)
