@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.prompt.PromptBuilder
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -17,7 +18,8 @@ import kotlinx.coroutines.coroutineScope
 class AgentLoop(
     private val provider: LLMProvider,
     private val registry: ToolRegistry,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val compactor: ContextCompactor? = null
 ) {
     suspend fun turn(session: AgentSession, userInput: String, config: AgentConfig): AgentSession {
         val messages = PromptBuilder.build(session.branch()).toMutableList()
@@ -40,7 +42,12 @@ class AgentLoop(
                     session.append(EntryRole.USER, userInput)
                     session.append(EntryRole.ASSISTANT, response.content)
                     sessionManager.save(session)
-                    return session
+
+                    return if (compactor != null && session.branch().size > config.maxBranchLength) {
+                        compactor.compact(session, config).also { sessionManager.save(it) }
+                    } else {
+                        session
+                    }
                 }
                 is LLMResponse.ToolUse -> {
                     if (toolRound >= config.maxToolRounds) {

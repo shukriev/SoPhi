@@ -4,9 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M1 — sophi-core (session) |
-| Modules complete | sophi-ai, sophi-core (session) |
-| Last updated | 2026-06-27 |
+| Current milestone | M1 — sophi-core (loop + tools) |
+| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools) |
+| Last updated | 2026-06-28 |
 
 ---
 
@@ -74,7 +74,30 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 
 ## Data Flow
 
-_Added when sophi-core agent loop is implemented (Phase 5, Plan 3)._
+```
+User input
+    │
+    ▼
+AgentLoop.turn(session, userInput, config)
+    │
+    ├─ PromptBuilder.build(session.branch())
+    │       Converts SessionEntry list → List<Message> for CompletionRequest
+    │
+    ├─ loop (up to config.maxToolRounds):
+    │       provider.complete(CompletionRequest)
+    │           ├─ LLMResponse.Text   → append USER+ASSISTANT to session
+    │           │                        sessionManager.save()
+    │           │                        ContextCompactor.compact() if needed
+    │           │                        return session
+    │           ├─ LLMResponse.ToolUse → coroutineScope { async { tool.execute() }.awaitAll() }
+    │           │                        append ASSISTANT(toolCalls) + TOOL messages to
+    │           │                        in-memory list; loop
+    │           └─ LLMResponse.Error  → throw IllegalStateException
+    │
+    └─ throw IllegalStateException("Max tool rounds exceeded")
+```
+
+Session entries persisted: only USER + ASSISTANT (text). Tool call/result exchanges are ephemeral within a turn.
 
 ---
 
@@ -195,7 +218,7 @@ _Remaining interfaces (`KharnessPlugin`, `AgentHook`) added as each module is im
 | project skeleton | M0 | complete | — |
 | `sophi-ai` | M1 | complete | [article-04](articles/article-04.md) |
 | `sophi-core` (session) | M1 | complete | [article-05](articles/article-05.md) |
-| `sophi-core` (loop + tools) | M1 | pending | [article-06](articles/article-06.md) |
+| `sophi-core` (loop + tools) | M1 | complete | [article-06](articles/article-06.md) |
 | `sophi-cli` print mode | M1 | pending | [article-09](articles/article-09.md) |
 | `sophi-skills` | M3 | pending | [article-07](articles/article-07.md) |
 | `sophi-extensions` | M3 | pending | [article-08](articles/article-08.md) |
