@@ -26,7 +26,7 @@ existing entry, not necessarily the last one.
 ## Reasons
 
 1. **Durable writes.** Appending a line is atomic on all major filesystems. A crash
-   mid-write leaves at most one incomplete line, which is discarded on load.
+   mid-write leaves at most one incomplete line, which is discarded on load. (M1's `save()` performs a full file rewrite rather than a streaming append; atomic-append crash durability is the design target realized in the Phase 7 streaming-save enhancement — see Consequences.)
 
 2. **Branching without rewriting.** New branch entries are appended; old branch entries
    remain in the file. No destructive operations on past history.
