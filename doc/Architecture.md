@@ -157,7 +157,21 @@ interface SessionManager {
 }
 ```
 
-_Remaining interfaces (`Tool`, `KharnessPlugin`, `AgentHook`) added as each module is implemented._
+### Tool (`dev.sophi.core.tools`)
+
+The unit of capability the agent loop can invoke. Parameters and results are plain JSON strings;
+the loop handles error catching and forwards errors back to the LLM as `"Error: <message>"`.
+
+```kotlin
+interface Tool {
+    val name: String
+    val description: String
+    val parametersJson: String    // JSON Schema forwarded verbatim as ToolDefinition
+    suspend fun execute(argumentsJson: String): String
+}
+```
+
+_Remaining interfaces (`KharnessPlugin`, `AgentHook`) added as each module is implemented._
 
 ---
 
@@ -170,6 +184,7 @@ _Remaining interfaces (`Tool`, `KharnessPlugin`, `AgentHook`) added as each modu
 | [ADR-003](adr/ADR-003-maven-multi-module.md) | Build system | Maven multi-module — Gradle rejected |
 | [ADR-004](adr/ADR-004-llm-contract-placement.md) | LLM contract placement | Contract in `sophi-ai`, no `sophi-contracts` module |
 | [ADR-005](adr/ADR-005-jsonl-tree-sessions.md) | Session storage format | Append-only JSONL with parentId tree |
+| [ADR-006](adr/ADR-006-tool-interface.md) | Tool interface design | suspend execute returning String |
 
 ---
 
