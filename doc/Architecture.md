@@ -4,9 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M1 — sophi-core (loop + tools) |
-| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools) |
-| Last updated | 2026-06-28 |
+| Current milestone | M1 — sophi-cli (print mode) |
+| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools), sophi-cli (print mode) |
+| Last updated | 2026-06-29 |
 
 ---
 
@@ -219,7 +219,7 @@ _Remaining interfaces (`KharnessPlugin`, `AgentHook`) added as each module is im
 | `sophi-ai` | M1 | complete | [article-04](articles/article-04.md) |
 | `sophi-core` (session) | M1 | complete | [article-05](articles/article-05.md) |
 | `sophi-core` (loop + tools) | M1 | complete | [article-06](articles/article-06.md) |
-| `sophi-cli` print mode | M1 | pending | [article-09](articles/article-09.md) |
+| `sophi-cli` print mode | M1 | complete | [article-09](articles/article-09.md) |
 | `sophi-skills` | M3 | pending | [article-07](articles/article-07.md) |
 | `sophi-extensions` | M3 | pending | [article-08](articles/article-08.md) |
 | `sophi-cli` full TUI | M2 | pending | [article-09](articles/article-09.md) |
