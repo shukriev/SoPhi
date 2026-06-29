@@ -15,7 +15,6 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -68,6 +67,20 @@ class AgentLoopStreamTest : FunSpec({
     test("streamTurn() falls back to complete() when stream throws") {
         val session = AgentSession(id = "s1")
         every { provider.stream(any()) } returns flow { throw RuntimeException("stream error") }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("fallback", TokenUsage(0, 0))
+
+        loop.streamTurn(session, "hi", config) {}
+
+        coVerify { provider.complete(any()) }
+        session.branch().last().content shouldBe "fallback"
+    }
+
+    test("streamTurn() falls back to complete() when stream emits tokens then throws") {
+        val session = AgentSession(id = "s1")
+        every { provider.stream(any()) } returns flow {
+            emit("partial")
+            throw RuntimeException("mid-stream error")
+        }
         coEvery { provider.complete(any()) } returns LLMResponse.Text("fallback", TokenUsage(0, 0))
 
         loop.streamTurn(session, "hi", config) {}

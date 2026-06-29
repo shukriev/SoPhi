@@ -15,7 +15,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.Flow
 
 class AgentLoop(
     private val provider: LLMProvider,
@@ -104,14 +103,16 @@ class AgentLoop(
             tools = registry.definitions()
         )
         val buf = StringBuilder()
+        var streamCompleted = false
         try {
             provider.stream(request).collect { token ->
                 buf.append(token)
                 onToken(token)
             }
-        } catch (e: Exception) { /* stream failed or empty — fall through */ }
+            streamCompleted = true
+        } catch (e: Exception) { /* stream threw — fall through to complete() */ }
 
-        return if (buf.isNotEmpty()) {
+        return if (streamCompleted && buf.isNotEmpty()) {
             session.append(EntryRole.USER, userInput)
             session.append(EntryRole.ASSISTANT, buf.toString())
             sessionManager.save(session)

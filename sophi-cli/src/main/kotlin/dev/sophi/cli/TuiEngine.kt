@@ -12,18 +12,22 @@ class TuiEngine(
     private val config: AgentConfig,
     private val terminal: Terminal = Terminal()
 ) {
+    private companion object {
+        val EXIT_COMMANDS = setOf("exit", "quit")
+    }
+
     suspend fun run(session: AgentSession, lines: Sequence<String>) {
         var current = session
         for (line in lines) {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
-            if (trimmed.lowercase() in setOf("exit", "quit")) break
+            if (trimmed.lowercase() in EXIT_COMMANDS) break
             if (trimmed.startsWith("/")) {
                 current = slashHandler.handle(trimmed, current)
                 continue
             }
             terminal.print(TextColors.green("Sophi: "))
-            current = loop.streamTurn(current, trimmed, config) { token: String ->
+            current = loop.streamTurn(current, trimmed, config) { token ->
                 terminal.print(token)
             }
             terminal.println()
