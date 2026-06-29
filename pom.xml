@@ -93,6 +93,11 @@
                 <version>0.61.0</version>
             </dependency>
             <dependency>
+                <groupId>com.charleskorn.kaml</groupId>
+                <artifactId>kaml-jvm</artifactId>
+                <version>0.61.0</version>
+            </dependency>
+            <dependency>
                 <groupId>com.github.ajalt.clikt</groupId>
                 <artifactId>clikt-jvm</artifactId>
                 <version>4.4.0</version>
