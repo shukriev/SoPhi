@@ -14,6 +14,8 @@ import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.Flow
 
 class AgentLoop(
     private val provider: LLMProvider,
@@ -80,6 +82,44 @@ class AgentLoop(
                     throw IllegalStateException("LLM error: ${response.message}", response.cause)
                 }
             }
+        }
+    }
+
+    suspend fun streamTurn(
+        session: AgentSession,
+        userInput: String,
+        config: AgentConfig,
+        onToken: suspend (String) -> Unit
+    ): AgentSession {
+        val messages = buildList {
+            addAll(PromptBuilder.build(session.branch()))
+            add(Message(MessageRole.USER, userInput))
+        }
+        val request = CompletionRequest(
+            messages = messages,
+            model = config.model,
+            maxTokens = config.maxTokens,
+            temperature = config.temperature,
+            systemPrompt = config.systemPrompt,
+            tools = registry.definitions()
+        )
+        val buf = StringBuilder()
+        try {
+            provider.stream(request).collect { token ->
+                buf.append(token)
+                onToken(token)
+            }
+        } catch (e: Exception) { /* stream failed or empty — fall through */ }
+
+        return if (buf.isNotEmpty()) {
+            session.append(EntryRole.USER, userInput)
+            session.append(EntryRole.ASSISTANT, buf.toString())
+            sessionManager.save(session)
+            if (compactor != null && session.branch().size > config.maxBranchLength)
+                compactor.compact(session, config).also { sessionManager.save(it) }
+            else session
+        } else {
+            turn(session, userInput, config)
         }
     }
 }
