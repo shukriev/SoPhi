@@ -4,14 +4,17 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.mordant.rendering.TextColors
+import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
-class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness (print mode)") {
+class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness") {
 
     private val sessionId: String? by option(
         "--session", "-s",
@@ -39,15 +42,22 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val config = AgentConfig(model = model, systemPrompt = systemPrompt)
         val loop = AgentLoop(provider, registry, sessionManager)
-        val engine = ChatEngine(loop, config)
+        val compactor = ContextCompactor(provider)
+        val terminal = Terminal()
 
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
 
-        println("Sophi — session ${session.id}")
-        println("Type 'exit' or 'quit' to end.\n")
+        terminal.println(TextColors.cyan("Sophi — session ${session.id}"))
+        terminal.println("Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact\n")
 
-        engine.run(session, generateSequence { readLine() }, ::println)
+        val slashHandler = SlashHandler(sessionManager, compactor, config) { terminal.println(it) }
+        val engine = TuiEngine(loop, slashHandler, config, terminal)
 
-        println("\nSession ${session.id} ended.")
+        engine.run(session, generateSequence {
+            terminal.print(TextColors.blue("You: "))
+            readLine()
+        })
+
+        terminal.println(TextColors.cyan("\nSession ${session.id} ended."))
     }
 }
