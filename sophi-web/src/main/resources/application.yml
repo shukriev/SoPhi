@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: sophi-web
+server:
+  port: 8080
+# Wire up AgentLoop, SessionManager, and AgentConfig as @Bean in your @Configuration.
+# Example: inject ClaudeProvider from spring-ai-anthropic-spring-boot-starter.
