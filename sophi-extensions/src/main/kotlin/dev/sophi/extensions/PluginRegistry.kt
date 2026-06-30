@@ -2,6 +2,12 @@ package dev.sophi.extensions
 
 import java.util.ServiceLoader
 
+/**
+ * Registry for [SophiPlugin] instances discovered via [ServiceLoader] or registered manually.
+ *
+ * **Thread-safety:** Not thread-safe. All [register] and [discover] calls must complete before
+ * any [dispatch] or [hooksFor] calls begin. Concurrent mutation and dispatch is not supported.
+ */
 class PluginRegistry(
     private val classLoader: ClassLoader = Thread.currentThread().contextClassLoader
 ) {
