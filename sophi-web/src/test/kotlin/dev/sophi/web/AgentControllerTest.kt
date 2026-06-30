@@ -10,6 +10,7 @@ import dev.sophi.core.session.SessionMeta
 import dev.sophi.web.api.ChatRequest
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.coEvery
@@ -75,5 +76,18 @@ class AgentControllerTest : FunSpec({
         every { sessionManager.load("bad") } throws IllegalArgumentException("not found")
         val response = controller.turn("bad", ChatRequest("hi"))
         response.statusCode shouldBe HttpStatus.NOT_FOUND
+    }
+
+    test("streamTurn returns non-null SseEmitter for valid session") {
+        val session = AgentSession("s1")
+        every { sessionManager.load("s1") } returns session
+        coEvery { agentLoop.streamTurn(any(), any(), any(), any()) } returns session
+
+        controller.streamTurn("s1", "hello").shouldNotBeNull()
+    }
+
+    test("streamTurn returns SseEmitter even when session not found") {
+        every { sessionManager.load("bad") } throws IllegalArgumentException("not found")
+        controller.streamTurn("bad", "hello").shouldNotBeNull()
     }
 })
