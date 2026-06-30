@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M2 — sophi-cli (full TUI) |
-| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools), sophi-cli (print mode), sophi-cli (full TUI) |
+| Current milestone | M3 — sophi-skills + sophi-extensions |
+| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools), sophi-cli (print mode), sophi-cli (full TUI), sophi-skills, sophi-extensions |
 | Last updated | 2026-06-29 |
 
 ---
@@ -194,7 +194,58 @@ interface Tool {
 }
 ```
 
-_Remaining interfaces (`KharnessPlugin`, `AgentHook`) added as each module is implemented._
+### SophiPlugin + AgentHook (`dev.sophi.extensions`)
+
+Lifecycle hooks are the extension point for observability, logging, and side effects without
+modifying `AgentLoop`. A plugin declares which `HookPoint`s it cares about; `PluginRegistry`
+dispatches to them in registration order.
+
+```kotlin
+enum class HookPoint { BEFORE_TURN, AFTER_TURN, BEFORE_TOOL, AFTER_TOOL, ON_ERROR }
+
+data class HookContext(
+    val sessionId: String,
+    val userInput: String? = null,
+    val toolName: String? = null,
+    val error: Throwable? = null
+)
+
+interface AgentHook {
+    val point: HookPoint
+    suspend fun invoke(context: HookContext)
+}
+
+interface SophiPlugin {
+    val name: String
+    val version: String get() = "1.0.0"
+    fun hooks(): List<AgentHook>
+}
+```
+
+Plugins are discovered via JVM `ServiceLoader` (`PluginRegistry.discover()`) or registered
+programmatically (`PluginRegistry.register(plugin)`).
+
+### Skill + SkillLoader (`dev.sophi.skills`)
+
+Skills are Markdown files with YAML frontmatter. `SkillLoader` reads a directory and returns
+typed `Skill` objects; the module has no dependency on `sophi-core`.
+
+```kotlin
+@Serializable
+data class SkillMetadata(
+    val title: String,
+    val description: String = "",
+    val version: String = "1.0.0",
+    val tags: List<String> = emptyList()
+)
+
+data class Skill(val metadata: SkillMetadata, val body: String, val source: Path)
+
+class SkillLoader {
+    fun load(directory: Path): List<Skill>
+    fun loadFile(file: Path): Skill
+}
+```
 
 ---
 
@@ -220,8 +271,8 @@ _Remaining interfaces (`KharnessPlugin`, `AgentHook`) added as each module is im
 | `sophi-core` (session) | M1 | complete | [article-05](articles/article-05.md) |
 | `sophi-core` (loop + tools) | M1 | complete | [article-06](articles/article-06.md) |
 | `sophi-cli` print mode | M1 | complete | [article-09](articles/article-09.md) |
-| `sophi-skills` | M3 | pending | [article-07](articles/article-07.md) |
-| `sophi-extensions` | M3 | pending | [article-08](articles/article-08.md) |
+| `sophi-skills` | M3 | complete | [article-07](articles/article-07.md) |
+| `sophi-extensions` | M3 | complete | [article-08](articles/article-08.md) |
 | `sophi-cli` full TUI | M2 | complete | [article-09](articles/article-09.md) |
 | `sophi-web` | M5 | pending | [article-10](articles/article-10.md) |
 | `sophi-sdk` + `sophi-infra` | M5 | pending | [article-11](articles/article-11.md) |
