@@ -176,4 +176,31 @@ class OpenAICompatProviderTest : FunSpec({
         val chunks = provider.stream(req).toList()
         chunks shouldBe listOf("hello", " world")
     }
+
+    test("complete() maps request.tools into OpenAiChatOptions.toolCallbacks") {
+        val capturedPrompt = slot<Prompt>()
+        every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")
+
+        val req = CompletionRequest(
+            messages = listOf(Message(MessageRole.USER, "search for kotlin")),
+            model = "qwen2.5:7b",
+            tools = listOf(ToolDefinition("search", "Searches the web", """{"type":"object"}"""))
+        )
+        provider.complete(req)
+
+        val options = capturedPrompt.captured.options as org.springframework.ai.model.tool.ToolCallingChatOptions
+        options.toolCallbacks!!.size shouldBe 1
+        options.toolCallbacks!![0].toolDefinition.name() shouldBe "search"
+    }
+
+    test("complete() sends empty toolCallbacks when request.tools is empty") {
+        val capturedPrompt = slot<Prompt>()
+        every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")
+
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "gpt-4o")
+        provider.complete(req)
+
+        val options = capturedPrompt.captured.options as org.springframework.ai.model.tool.ToolCallingChatOptions
+        options.toolCallbacks shouldBe emptyList()
+    }
 })
