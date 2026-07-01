@@ -5,3 +5,199 @@ A Kotlin-native agent harness for the JVM.
 **Stack:** Kotlin 2.4 · Spring Boot 4.0 · Spring AI 2.0
 
 > Architecture: [doc/Architecture.md](doc/Architecture.md)
+
+Sophi is a set of small, composable Maven modules that together give you an
+LLM agent loop (tool calling, session persistence, context compaction) plus
+three ways to run it: a terminal app, a REST/SSE server, and an embeddable
+SDK. Pick the module that matches your use case — they all sit on the same
+core.
+
+## Modules
+
+| Module | What it gives you |
+|--------|--------------------|
+| `sophi-ai` | Provider abstraction (`LLMProvider`) + Spring AI-backed `ClaudeProvider` / `OpenAICompatProvider` |
+| `sophi-core` | The agent loop, session tree (JSONL, branch/checkout), tool dispatch, context compaction |
+| `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
+| `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
+| `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
+| `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
+| `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
+| `sophi-infra` | Ready-made plugins: `BudgetTracker`, `PermissionGatePlugin`, `MetricsPlugin` |
+
+## Build
+
+```bash
+mvn -q -DskipTests package
+```
+
+Requires an Anthropic API key for the Claude provider:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
+## Use case 1: Interactive terminal agent (`sophi-cli`)
+
+Run a chat session in your terminal, backed by Claude, with persistent
+sessions you can branch and resume.
+
+```bash
+mvn -pl sophi-cli -am package
+java -jar sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar --model claude-sonnet-4-5
+```
+
+Options:
+
+```bash
+sophi --session <id>          # resume an existing session
+sophi --model <name>          # LLM model (default: claude-3-5-sonnet-20241022)
+sophi --sessions-dir <path>   # where session JSONL files live (default: ~/.sophi/sessions)
+sophi --system "<prompt>"     # system prompt for every turn
+```
+
+In-session slash commands:
+
+```
+/list       list saved sessions
+/branch     print the active branch (entry ids + roles)
+/checkout <entry-id>   jump to a different point in the session tree
+/compact    summarize older turns to shrink context
+exit / quit  end the session
+```
+
+**Good for:** local dev-tool style usage, exploring the agent loop, quick
+one-off tasks — same category as a REPL.
+
+---
+
+## Use case 2: Agent-over-HTTP (`sophi-web`)
+
+Run Sophi as a Spring Boot service so a frontend, another service, or a
+mobile app can talk to it over REST/SSE.
+
+```bash
+mvn -pl sophi-web -am spring-boot:run
+```
+
+Endpoints (`AgentController`, base path `/api`):
+
+```
+POST /api/sessions?title=...          create a session -> {id, entryCount, lastModified}
+GET  /api/sessions                    list sessions
+POST /api/sessions/{id}/turn          { "input": "..." } -> { sessionId, reply }
+GET  /api/sessions/{id}/stream?input=...   Server-Sent Events, one event per token
+```
+
+Example:
+
+```bash
+curl -X POST localhost:8080/api/sessions
+curl -X POST localhost:8080/api/sessions/<id>/turn \
+  -H 'Content-Type: application/json' -d '{"input": "hello"}'
+curl -N "localhost:8080/api/sessions/<id>/stream?input=hello"   # SSE stream
+```
+
+**Good for:** powering a chat UI, a Slack/Discord bot, or any client that
+needs the agent behind a network boundary rather than in-process.
+
+---
+
+## Use case 3: Embedding Sophi in your own JVM app (`sophi-sdk`)
+
+Use the `RuntimeBuilder` DSL to wire up a runtime with your own tools and
+plugins, no CLI or HTTP layer required.
+
+```kotlin
+import dev.sophi.sdk.Sophi
+import dev.sophi.ai.providers.ClaudeProvider
+import dev.sophi.infra.PermissionGatePlugin
+import dev.sophi.infra.MetricsPlugin
+
+val runtime = Sophi.runtime {
+    provider = ClaudeProvider(chatModel)     // any LLMProvider
+    model = "claude-sonnet-4-5"
+    systemPrompt = "You are a build assistant."
+
+    tool(MyCustomTool())                     // implement dev.sophi.core.tools.Tool
+    plugin(PermissionGatePlugin(allowedTools = setOf("read_file")))
+    plugin(MetricsPlugin(meterRegistry))
+}
+
+val sessionId = runtime.newSession(title = "release-check")
+val reply = runtime.turn(sessionId, "What changed since the last tag?")
+```
+
+`provider` accepts any `LLMProvider` — for a local model instead of Claude, use
+`dev.sophi.ai.providers.buildOpenAiCompatProvider` (from `sophi-ai`):
+
+```kotlin
+import dev.sophi.ai.providers.buildOpenAiCompatProvider
+
+val runtime = Sophi.runtime {
+    provider = buildOpenAiCompatProvider(
+        baseUrl = "http://localhost:11434/v1", // Ollama; vLLM is typically :8000/v1
+        apiKey = null,                          // no-auth mode for local servers
+        model = "qwen2.5:7b"
+    )
+    systemPrompt = "You are a build assistant."
+}
+```
+
+A custom tool is just:
+
+```kotlin
+class MyCustomTool : dev.sophi.core.tools.Tool {
+    override val name = "my_tool"
+    override val description = "Does something useful"
+    override val parametersJson = """{"type":"object","properties":{}}"""
+    override suspend fun execute(argumentsJson: String): String = "result"
+}
+```
+
+**Good for:** bolting an agent onto an existing JVM app (CI tool, internal
+dashboard, batch job) without standing up a separate service.
+
+---
+
+## Cross-cutting: skills and plugins
+
+**Skills** (`sophi-skills`) are plain Markdown files with YAML frontmatter —
+drop them in a directory and load them with `SkillLoader().load(dir)`:
+
+```markdown
+---
+title: "Deploy runbook"
+description: "How to deploy this service safely"
+tags: [ops, deploy]
+---
+
+Steps to deploy...
+```
+
+See `.sophi/skills/` in this repo for real examples.
+
+**Plugins** (`sophi-extensions`) hook into the turn lifecycle
+(`BEFORE_TURN` / `AFTER_TURN` / `BEFORE_TOOL` / `AFTER_TOOL` / `ON_ERROR`).
+`sophi-infra` ships three ready to use:
+
+- `BudgetTracker` — throws `BudgetExceededException` once a token budget is exceeded
+- `PermissionGatePlugin(allowedTools)` — blocks any tool call not in an allowlist
+- `MetricsPlugin(meterRegistry)` — emits Micrometer counters for turns started/completed/errored
+
+Register plugins either manually (`RuntimeBuilder.plugin(...)` /
+`PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery
+(`PluginRegistry().discover()`).
+
+---
+
+## Choosing a use case
+
+- Testing the agent yourself, or scripting one-off tasks → **`sophi-cli`**
+- A frontend, bot, or another service needs to talk to the agent → **`sophi-web`**
+- You're adding agent capability inside an existing JVM application → **`sophi-sdk`**
+
+All three share the same `sophi-core` agent loop and session format, so
+switching between them later doesn't change how sessions or tools work.
