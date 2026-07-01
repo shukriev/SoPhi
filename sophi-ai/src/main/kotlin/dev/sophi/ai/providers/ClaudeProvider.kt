@@ -43,8 +43,8 @@ class ClaudeProvider(
             .model(model)
             .maxTokens(maxTokens)
             .temperature(temperature)
+            .toolCallbacks(tools.map { SophiToolCallback(it) })
             .build()
-        // TODO M2: map request.tools to options.functions() when tool calling is wired in sophi-core
         return Prompt(springMessages, options)
     }
 }

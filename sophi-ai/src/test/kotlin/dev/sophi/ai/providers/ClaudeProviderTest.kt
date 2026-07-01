@@ -195,4 +195,31 @@ class ClaudeProviderTest : FunSpec({
         val chunks = provider.stream(req).toList()
         chunks shouldBe listOf("hello", " world")
     }
+
+    test("complete() maps request.tools into AnthropicChatOptions.toolCallbacks") {
+        val capturedPrompt = slot<Prompt>()
+        every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")
+
+        val req = CompletionRequest(
+            messages = listOf(Message(MessageRole.USER, "search for kotlin")),
+            model = "claude-opus-4-8",
+            tools = listOf(ToolDefinition("search", "Searches the web", """{"type":"object"}"""))
+        )
+        provider.complete(req)
+
+        val options = capturedPrompt.captured.options as org.springframework.ai.model.tool.ToolCallingChatOptions
+        options.toolCallbacks!!.size shouldBe 1
+        options.toolCallbacks!![0].toolDefinition.name() shouldBe "search"
+    }
+
+    test("complete() sends empty toolCallbacks when request.tools is empty") {
+        val capturedPrompt = slot<Prompt>()
+        every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")
+
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
+        provider.complete(req)
+
+        val options = capturedPrompt.captured.options as org.springframework.ai.model.tool.ToolCallingChatOptions
+        options.toolCallbacks shouldBe emptyList()
+    }
 })
