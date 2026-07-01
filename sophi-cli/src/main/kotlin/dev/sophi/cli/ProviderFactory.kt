@@ -10,7 +10,7 @@ internal fun buildProvider(
     apiKeyOverride: String?,
     baseUrl: String?,
     model: String
-): LLMProvider = when (providerType) {
+): LLMProvider = when (providerType.lowercase()) {
     "claude" -> {
         val apiKey = apiKeyOverride ?: System.getenv("ANTHROPIC_API_KEY")
             ?: throw UsageError("ANTHROPIC_API_KEY environment variable is not set")

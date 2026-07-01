@@ -9,7 +9,7 @@ import org.springframework.ai.tool.definition.ToolDefinition as SpringToolDefini
  * Declares a Sophi tool's schema to Spring AI so the model knows it exists.
  * [call] is never invoked: AgentLoop executes tools itself via ToolRegistry and
  * reads tool_calls back out of the response (see ChatResponseMapper) — Spring AI's
- * internal tool-execution path is deprecated in this version and isn't used here.
+ * internal tool-execution path isn't used here.
  */
 class SophiToolCallback(private val definition: ToolDefinition) : ToolCallback {
 

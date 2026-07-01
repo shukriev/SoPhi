@@ -34,9 +34,10 @@ fun buildOpenAiCompatProvider(
     model: String,
     name: String = "openai-compat"
 ): LLMProvider {
+    val effectiveApiKey = apiKey ?: ""
     val client = OpenAiSetup.setupSyncClient(
         baseUrl,
-        apiKey ?: "",
+        effectiveApiKey,
         null,
         null,
         null,
@@ -54,7 +55,7 @@ fun buildOpenAiCompatProvider(
     )
     val options = OpenAiChatOptions.builder()
         .baseUrl(baseUrl)
-        .apiKey(apiKey ?: "")
+        .apiKey(effectiveApiKey)
         .model(model)
         .build()
     val chatModel = OpenAiChatModel.builder()

@@ -23,4 +23,9 @@ class ProviderFactoryTest : FunSpec({
     test("buildProvider throws UsageError for an unknown provider type") {
         shouldThrow<UsageError> { buildProvider("bogus", null, null, "some-model") }
     }
+
+    test("buildProvider matches provider type case-insensitively") {
+        val provider = buildProvider("Claude", "sk-ant-test", null, "claude-opus-4-8")
+        provider.name shouldBe "claude"
+    }
 })

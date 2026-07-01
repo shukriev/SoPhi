@@ -13,10 +13,13 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import java.nio.file.Path
 
-internal fun buildProviderFromProperties(props: ProviderProperties): LLMProvider = when (props.type) {
+internal fun buildProviderFromProperties(props: ProviderProperties): LLMProvider = when (props.type.lowercase()) {
     "claude" -> {
-        val apiKey = props.apiKey
-            ?: throw IllegalStateException("sophi.provider.api-key is required when sophi.provider.type=claude")
+        val apiKey = props.apiKey ?: System.getenv("ANTHROPIC_API_KEY")
+            ?: throw IllegalStateException(
+                "sophi.provider.api-key is required when sophi.provider.type=claude " +
+                    "(neither sophi.provider.api-key nor ANTHROPIC_API_KEY was set)"
+            )
         buildClaudeProvider(apiKey, props.model)
     }
     "openai-compat" -> {
