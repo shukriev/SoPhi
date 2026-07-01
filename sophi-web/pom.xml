@@ -16,6 +16,10 @@
     <dependencies>
         <dependency>
             <groupId>dev.sophi</groupId>
+            <artifactId>sophi-ai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.sophi</groupId>
             <artifactId>sophi-core</artifactId>
         </dependency>
         <dependency>
