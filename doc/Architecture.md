@@ -4,9 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M3 — sophi-skills + sophi-extensions |
-| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools), sophi-cli (print mode), sophi-cli (full TUI), sophi-skills, sophi-extensions |
-| Last updated | 2026-06-29 |
+| Current milestone | M4 — sophi-web + sophi-sdk + sophi-infra |
+| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools), sophi-cli (print mode), sophi-cli (full TUI), sophi-skills, sophi-extensions, sophi-web, sophi-sdk, sophi-infra |
+| Last updated | 2026-07-01 |
 
 ---
 
@@ -274,5 +274,5 @@ class SkillLoader {
 | `sophi-skills` | M3 | complete | [article-07](articles/article-07.md) |
 | `sophi-extensions` | M3 | complete | [article-08](articles/article-08.md) |
 | `sophi-cli` full TUI | M2 | complete | [article-09](articles/article-09.md) |
-| `sophi-web` | M5 | pending | [article-10](articles/article-10.md) |
-| `sophi-sdk` + `sophi-infra` | M5 | pending | [article-11](articles/article-11.md) |
+| `sophi-web` | M4 | complete | [article-10](articles/article-10.md) |
+| `sophi-sdk` + `sophi-infra` | M4 | complete | [article-11](articles/article-11.md) |
