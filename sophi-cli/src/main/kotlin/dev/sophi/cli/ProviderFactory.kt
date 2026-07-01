@@ -1,18 +1,25 @@
 package dev.sophi.cli
 
+import com.github.ajalt.clikt.core.UsageError
 import dev.sophi.ai.api.LLMProvider
-import dev.sophi.ai.providers.ClaudeProvider
-import org.springframework.ai.anthropic.AnthropicChatModel
-import org.springframework.ai.anthropic.AnthropicChatOptions
+import dev.sophi.ai.providers.buildClaudeProvider
+import dev.sophi.ai.providers.buildOpenAiCompatProvider
 
-internal fun buildClaudeProvider(apiKey: String, model: String = "claude-3-5-sonnet-20241022"): LLMProvider {
-    val options = AnthropicChatOptions.builder()
-        .apiKey(apiKey)
-        .model(model)
-        .maxTokens(4096)
-        .build()
-    val chatModel = AnthropicChatModel.builder()
-        .options(options)
-        .build()
-    return ClaudeProvider(chatModel)
+internal fun buildProvider(
+    providerType: String,
+    apiKeyOverride: String?,
+    baseUrl: String?,
+    model: String
+): LLMProvider = when (providerType) {
+    "claude" -> {
+        val apiKey = apiKeyOverride ?: System.getenv("ANTHROPIC_API_KEY")
+            ?: throw UsageError("ANTHROPIC_API_KEY environment variable is not set")
+        buildClaudeProvider(apiKey, model)
+    }
+    "openai-compat" -> {
+        val url = baseUrl
+            ?: throw UsageError("--base-url is required when --provider openai-compat is selected")
+        buildOpenAiCompatProvider(url, apiKeyOverride, model, name = "openai-compat")
+    }
+    else -> throw UsageError("Unknown provider: $providerType (expected 'claude' or 'openai-compat')")
 }

@@ -56,6 +56,19 @@ sophi --session <id>          # resume an existing session
 sophi --model <name>          # LLM model (default: claude-3-5-sonnet-20241022)
 sophi --sessions-dir <path>   # where session JSONL files live (default: ~/.sophi/sessions)
 sophi --system "<prompt>"     # system prompt for every turn
+sophi --provider <name>       # 'claude' (default) or 'openai-compat' (Ollama, vLLM, ...)
+sophi --base-url <url>        # required for --provider openai-compat
+sophi --api-key <key>         # optional; falls back to ANTHROPIC_API_KEY for claude
+```
+
+Examples with local models:
+
+```bash
+# Ollama
+sophi --provider openai-compat --base-url http://localhost:11434/v1 --model qwen2.5:7b
+
+# vLLM
+sophi --provider openai-compat --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-7B-Instruct
 ```
 
 In-session slash commands:

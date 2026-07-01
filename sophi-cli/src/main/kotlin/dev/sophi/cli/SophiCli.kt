@@ -1,7 +1,6 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
-import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.mordant.rendering.TextColors
@@ -22,8 +21,20 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
     )
     private val model: String by option(
         "--model", "-m",
-        help = "LLM model name"
+        help = "LLM model name (for --provider openai-compat, always set this explicitly — e.g. qwen2.5:7b)"
     ).default("claude-3-5-sonnet-20241022")
+    private val providerType: String by option(
+        "--provider",
+        help = "LLM provider: 'claude' (default) or 'openai-compat' (Ollama, vLLM, or any OpenAI-compatible server)"
+    ).default("claude")
+    private val baseUrl: String? by option(
+        "--base-url",
+        help = "Base URL for --provider openai-compat, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:8000/v1 (vLLM)"
+    )
+    private val apiKeyOption: String? by option(
+        "--api-key",
+        help = "API key (falls back to ANTHROPIC_API_KEY for --provider claude; omit for no-auth local servers)"
+    )
     private val sessionsDirStr: String by option(
         "--sessions-dir",
         help = "Directory for session JSONL files"
@@ -34,10 +45,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
     )
 
     override fun run() = runBlocking {
-        val apiKey = System.getenv("ANTHROPIC_API_KEY")
-            ?: throw UsageError("ANTHROPIC_API_KEY environment variable is not set")
-
-        val provider = buildClaudeProvider(apiKey, model)
+        val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
         val registry = ToolRegistry()
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val config = AgentConfig(model = model, systemPrompt = systemPrompt)
