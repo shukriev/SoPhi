@@ -9,6 +9,7 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.tools.FileReadTool
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -46,7 +47,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
     override fun run() = runBlocking {
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
-        val registry = ToolRegistry()
+        val registry = ToolRegistry().register(FileReadTool())
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val config = AgentConfig(model = model, systemPrompt = systemPrompt)
         val loop = AgentLoop(provider, registry, sessionManager)
