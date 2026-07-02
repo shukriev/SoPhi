@@ -7,3 +7,6 @@ target/
 .DS_Store
 *.log
 .env
+
+docs/superpowers/
+doc/articles/
