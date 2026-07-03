@@ -49,7 +49,7 @@ class SophiRuntimeTest : FunSpec({
             )
         )
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config) } returns updated
+        coEvery { agentLoop.turn(session, "hi", config, any()) } returns updated
         runtime.turn("s1", "hi") shouldBe "hello!"
     }
 
@@ -70,7 +70,7 @@ class SophiRuntimeTest : FunSpec({
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(errorPlugin), config)
         val session = AgentSession("s1")
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config) } throws RuntimeException("LLM error")
+        coEvery { agentLoop.turn(session, "hi", config, any()) } throws RuntimeException("LLM error")
 
         shouldThrow<RuntimeException> { rt.turn("s1", "hi") }
         log shouldBe listOf(HookPoint.ON_ERROR)

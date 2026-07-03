@@ -65,7 +65,7 @@ class AgentControllerTest : FunSpec({
             )
         )
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config) } returns updated
+        coEvery { agentLoop.turn(session, "hi", config, any()) } returns updated
 
         val response = controller.turn("s1", ChatRequest("hi"))
         response.statusCode shouldBe HttpStatus.OK

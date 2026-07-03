@@ -2,6 +2,7 @@ package dev.sophi.web
 
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.web.api.ChatRequest
@@ -67,8 +68,8 @@ class AgentController(
         }
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                agentLoop.streamTurn(session, input, config) { token ->
-                    emitter.send(SseEmitter.event().data(token).build())
+                agentLoop.streamTurn(session, input, config) { event ->
+                    if (event is TurnEvent.Token) emitter.send(SseEmitter.event().data(event.text).build())
                 }
                 emitter.complete()
             } catch (e: Exception) {
