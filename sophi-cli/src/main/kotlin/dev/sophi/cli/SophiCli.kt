@@ -6,13 +6,16 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.mordant.rendering.TextColors
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.FileReadTool
 import dev.sophi.core.tools.FileWriteTool
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.runBlocking
+import kotlin.io.path.createDirectories
 import java.nio.file.Path
 
 class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness") {
@@ -41,6 +44,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--sessions-dir",
         help = "Directory for session JSONL files"
     ).default("${System.getProperty("user.home")}/.sophi/sessions")
+    private val agentsDirStr: String by option(
+        "--agents-dir",
+        help = "Directory of subagent definition Markdown files"
+    ).default("${System.getProperty("user.home")}/.sophi/agents")
     private val systemPrompt: String? by option(
         "--system",
         help = "System prompt injected into every turn"
@@ -48,16 +55,32 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
     override fun run() = runBlocking {
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+        val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
+        val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
+        val config = AgentConfig(model = model, systemPrompt = systemPrompt)
+
+        val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
+        val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
+
         val registry = ToolRegistry()
             .register(FileReadTool())
             .register(FileWriteTool())
-        val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
-        val config = AgentConfig(model = model, systemPrompt = systemPrompt)
+        if (agentDefinitions.isNotEmpty()) {
+            registry.register(
+                SubagentTool(
+                    definitions = agentDefinitions,
+                    provider = provider,
+                    fullRegistry = registry,
+                    sessionManager = sessionManager,
+                    parentSessionId = session.id,
+                    parentConfig = config
+                )
+            )
+        }
+
         val loop = AgentLoop(provider, registry, sessionManager)
         val compactor = ContextCompactor(provider)
         val terminal = Terminal()
-
-        val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
 
         terminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         terminal.println("Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact\n")
