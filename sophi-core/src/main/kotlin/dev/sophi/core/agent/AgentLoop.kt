@@ -22,7 +22,12 @@ class AgentLoop(
     private val sessionManager: SessionManager,
     private val compactor: ContextCompactor? = null
 ) {
-    suspend fun turn(session: AgentSession, userInput: String, config: AgentConfig): AgentSession {
+    suspend fun turn(
+        session: AgentSession,
+        userInput: String,
+        config: AgentConfig,
+        onEvent: suspend (TurnEvent) -> Unit = {}
+    ): AgentSession {
         val messages = PromptBuilder.build(session.branch()).toMutableList()
         messages.add(Message(MessageRole.USER, userInput))
 
@@ -40,6 +45,7 @@ class AgentLoop(
 
             when (val response = provider.complete(request)) {
                 is LLMResponse.Text -> {
+                    onEvent(TurnEvent.Token(response.content))
                     session.append(EntryRole.USER, userInput)
                     session.append(EntryRole.ASSISTANT, response.content)
                     sessionManager.save(session)
@@ -59,12 +65,14 @@ class AgentLoop(
                     val toolResults = coroutineScope {
                         response.calls.map { call ->
                             async {
+                                onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
                                 val result = registry.getOrNull(call.name)
                                     ?.let { tool ->
                                         runCatching { tool.execute(call.argumentsJson) }
                                             .getOrElse { e -> "Error: ${e.message}" }
                                     }
                                     ?: "Error: Tool '${call.name}' not found"
+                                onEvent(TurnEvent.ToolCallFinished(call.name, result))
                                 Message(
                                     role = MessageRole.TOOL,
                                     content = result,
@@ -88,7 +96,7 @@ class AgentLoop(
         session: AgentSession,
         userInput: String,
         config: AgentConfig,
-        onToken: suspend (String) -> Unit
+        onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
         val messages = buildList {
             addAll(PromptBuilder.build(session.branch()))
@@ -107,10 +115,10 @@ class AgentLoop(
         try {
             provider.stream(request).collect { token ->
                 buf.append(token)
-                onToken(token)
+                onEvent(TurnEvent.Token(token))
             }
             streamCompleted = true
-        } catch (e: Exception) { /* stream threw — fall through to complete() */ }
+        } catch (e: Exception) { /* stream threw — fall through to turn() */ }
 
         return if (streamCompleted && buf.isNotEmpty()) {
             session.append(EntryRole.USER, userInput)
@@ -120,7 +128,7 @@ class AgentLoop(
                 compactor.compact(session, config).also { sessionManager.save(it) }
             else session
         } else {
-            turn(session, userInput, config)
+            turn(session, userInput, config, onEvent)
         }
     }
 }

@@ -27,8 +27,8 @@ class TuiEngine(
                 continue
             }
             terminal.print(TextColors.green("Sophi: "))
-            current = loop.streamTurn(current, trimmed, config) { token ->
-                terminal.print(token)
+            current = loop.streamTurn(current, trimmed, config) { event ->
+                if (event is dev.sophi.core.agent.TurnEvent.Token) terminal.print(event.text)
             }
             terminal.println()
         }

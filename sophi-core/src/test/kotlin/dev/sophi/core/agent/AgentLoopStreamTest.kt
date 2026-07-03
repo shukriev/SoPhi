@@ -27,14 +27,14 @@ class AgentLoopStreamTest : FunSpec({
 
     beforeTest { clearMocks(provider, sessionManager) }
 
-    test("streamTurn() calls onToken for each emitted token") {
+    test("streamTurn() emits a Token event for each emitted chunk") {
         val session = AgentSession(id = "s1")
         every { provider.stream(any()) } returns flowOf("Hello", " ", "World")
 
-        val tokens = mutableListOf<String>()
-        loop.streamTurn(session, "hi", config) { tokens.add(it) }
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "hi", config) { events.add(it) }
 
-        tokens shouldBe listOf("Hello", " ", "World")
+        events shouldBe listOf(TurnEvent.Token("Hello"), TurnEvent.Token(" "), TurnEvent.Token("World"))
     }
 
     test("streamTurn() appends USER then ASSISTANT entry from accumulated tokens") {
@@ -51,31 +51,33 @@ class AgentLoopStreamTest : FunSpec({
         branch[1].content shouldBe "streamed response"
     }
 
-    test("streamTurn() falls back to complete() when stream emits nothing") {
+    test("streamTurn() falls back to turn() and delivers its events when the stream emits nothing") {
         val session = AgentSession(id = "s1")
         every { provider.stream(any()) } returns emptyFlow()
         coEvery { provider.complete(any()) } returns LLMResponse.Text("fallback", TokenUsage(0, 0))
 
-        val tokens = mutableListOf<String>()
-        loop.streamTurn(session, "hi", config) { tokens.add(it) }
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "hi", config) { events.add(it) }
 
         coVerify { provider.complete(any()) }
-        tokens shouldBe emptyList()
+        events shouldBe listOf(TurnEvent.Token("fallback"))
         session.branch().last().content shouldBe "fallback"
     }
 
-    test("streamTurn() falls back to complete() when stream throws") {
+    test("streamTurn() falls back to turn() when the stream throws immediately") {
         val session = AgentSession(id = "s1")
         every { provider.stream(any()) } returns flow { throw RuntimeException("stream error") }
         coEvery { provider.complete(any()) } returns LLMResponse.Text("fallback", TokenUsage(0, 0))
 
-        loop.streamTurn(session, "hi", config) {}
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "hi", config) { events.add(it) }
 
         coVerify { provider.complete(any()) }
+        events shouldBe listOf(TurnEvent.Token("fallback"))
         session.branch().last().content shouldBe "fallback"
     }
 
-    test("streamTurn() falls back to complete() when stream emits tokens then throws") {
+    test("streamTurn() delivers the partial token then the fallback's event when the stream emits then throws") {
         val session = AgentSession(id = "s1")
         every { provider.stream(any()) } returns flow {
             emit("partial")
@@ -83,9 +85,11 @@ class AgentLoopStreamTest : FunSpec({
         }
         coEvery { provider.complete(any()) } returns LLMResponse.Text("fallback", TokenUsage(0, 0))
 
-        loop.streamTurn(session, "hi", config) {}
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "hi", config) { events.add(it) }
 
         coVerify { provider.complete(any()) }
+        events shouldBe listOf(TurnEvent.Token("partial"), TurnEvent.Token("fallback"))
         session.branch().last().content shouldBe "fallback"
     }
 })
