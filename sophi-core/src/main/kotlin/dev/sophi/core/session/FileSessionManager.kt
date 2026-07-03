@@ -66,6 +66,7 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
     private fun readParentSessionId(sessionId: String): String? {
         val sidecar = sessionsDir.resolve("$sessionId.meta.json")
         if (!sidecar.exists()) return null
-        return json.decodeFromString<SessionSidecar>(sidecar.readText()).parentSessionId
+        return runCatching { json.decodeFromString<SessionSidecar>(sidecar.readText()).parentSessionId }
+            .getOrNull()
     }
 }

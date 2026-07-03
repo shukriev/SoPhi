@@ -4,6 +4,7 @@ import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
@@ -151,5 +152,120 @@ class SubagentToolTest : FunSpec({
         runBlocking { tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
 
         capturedRequests.first().tools.map { it.name } shouldBe listOf("delegate_to_subagent")
+    }
+
+    // The tests below mirror the real CLI wiring: SubagentTool is registered into the very
+    // fullRegistry it holds a reference to (see SophiCli.kt), so `delegate_to_subagent` is a
+    // genuine, pre-existing entry in fullRegistry — not merely absent as in the test above.
+    // That means ToolRegistry.subset() actually copies an existing depth-0 SubagentTool entry
+    // before SubagentTool.execute() overwrites it with a depth-incremented instance, and a real
+    // nested AgentLoop.turn() drives a second, genuine level of recursion end-to-end.
+
+    test("execute() runs a real two-level delegation through a self-referential fullRegistry") {
+        val provider = mockk<LLMProvider>()
+        val sessionsDir = createTempDirectory("subagent-test")
+        val sessionManager = FileSessionManager(sessionsDir)
+        val fullRegistry = ToolRegistry().register(readTool)
+
+        val depth0Tool = SubagentTool(
+            definitions = listOf(recursive),
+            provider = provider,
+            fullRegistry = fullRegistry,
+            sessionManager = sessionManager,
+            parentSessionId = "parent-1",
+            parentConfig = AgentConfig(model = "parent-model")
+        )
+        // Self-referential registration, exactly as SophiCli.kt wires it in production.
+        fullRegistry.register(depth0Tool)
+
+        var callCount = 0
+        coEvery { provider.complete(any()) } answers {
+            callCount++
+            if (callCount == 1) {
+                // depth-0's own nested loop decides to delegate one level further.
+                LLMResponse.ToolUse(
+                    calls = listOf(
+                        ToolCall(
+                            id = "call-1",
+                            name = "delegate_to_subagent",
+                            argumentsJson = """{"subagent_type":"recursive","prompt":"nested task"}"""
+                        )
+                    ),
+                    usage = TokenUsage(5, 5)
+                )
+            } else {
+                // Every completion from here on (the depth-1 subagent's own turn, and the
+                // depth-0 loop's follow-up turn once the tool result comes back) settles on
+                // the same final text, so the value that survives to the top is unambiguously
+                // the depth-1 subagent's answer.
+                LLMResponse.Text("depth-1 subagent result", TokenUsage(5, 5))
+            }
+        }
+
+        val result = runBlocking { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
+
+        result shouldBe "depth-1 subagent result"
+
+        // Two distinct subagent sessions were really created — one per delegation level —
+        // proving genuine two-level recursion rather than a single level that merely saw the
+        // tool listed. SubagentTool intentionally threads the *original* parentSessionId
+        // unchanged through every nested level (see the design plan), so both sessions are
+        // tagged with "parent-1" rather than chaining to their immediate caller.
+        val sessions = sessionManager.list()
+        sessions shouldHaveSize 2
+        sessions.count { it.parentSessionId == "parent-1" } shouldBe 2
+    }
+
+    test("execute() refuses delegation at the max depth boundary through a self-referential fullRegistry") {
+        val provider = mockk<LLMProvider>()
+        val capturedRequests = mutableListOf<CompletionRequest>()
+        val sessionsDir = createTempDirectory("subagent-test")
+        val sessionManager = FileSessionManager(sessionsDir)
+        val fullRegistry = ToolRegistry().register(readTool)
+
+        val depth0Tool = SubagentTool(
+            definitions = listOf(recursive),
+            provider = provider,
+            fullRegistry = fullRegistry,
+            sessionManager = sessionManager,
+            parentSessionId = "parent-1",
+            parentConfig = AgentConfig(model = "parent-model"),
+            maxDelegationDepth = 1
+        )
+        fullRegistry.register(depth0Tool)
+
+        var callCount = 0
+        coEvery { provider.complete(any()) } answers {
+            callCount++
+            capturedRequests.add(firstArg())
+            if (callCount == 1) {
+                LLMResponse.ToolUse(
+                    calls = listOf(
+                        ToolCall(
+                            id = "call-1",
+                            name = "delegate_to_subagent",
+                            argumentsJson = """{"subagent_type":"recursive","prompt":"go deeper"}"""
+                        )
+                    ),
+                    usage = TokenUsage(5, 5)
+                )
+            } else {
+                LLMResponse.Text("stopped", TokenUsage(1, 1))
+            }
+        }
+
+        val result = runBlocking { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
+
+        result shouldBe "stopped"
+
+        // The depth-1 SubagentTool (registered by overwrite into the scoped registry) must have
+        // refused delegation itself, i.e. real recursion reached the boundary rather than the
+        // outer loop just declining to call the LLM again.
+        val toolResultMessage = capturedRequests[1].messages.last { it.toolName == "delegate_to_subagent" }
+        toolResultMessage.content shouldContain "max delegation depth (1) exceeded"
+
+        // The depth-1 attempt never created its own subagent session because it was refused
+        // before reaching the session/loop setup — only the depth-0 session exists.
+        sessionManager.list() shouldHaveSize 1
     }
 })
