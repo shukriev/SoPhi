@@ -19,4 +19,10 @@ class ToolRegistry {
         tools.values.map { ToolDefinition(it.name, it.description, it.parametersJson) }
 
     fun names(): List<String> = tools.keys.sorted()
+
+    fun subset(names: List<String>): ToolRegistry {
+        val filtered = ToolRegistry()
+        names.forEach { name -> tools[name]?.let { filtered.register(it) } }
+        return filtered
+    }
 }
