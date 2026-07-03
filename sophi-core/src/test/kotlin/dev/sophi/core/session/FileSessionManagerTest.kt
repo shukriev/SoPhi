@@ -103,4 +103,42 @@ class FileSessionManagerTest : FunSpec({
         val loaded = manager.load(session.id)
         loaded.entries[0].metadata shouldBe mapOf("src" to "cli")
     }
+
+    test("create() with parentSessionId preserves it on the returned session") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.parentSessionId shouldBe "parent-1"
+    }
+
+    test("save() and load() round-trip preserves parentSessionId") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        val loaded = manager.load(session.id)
+        loaded.parentSessionId shouldBe "parent-1"
+    }
+
+    test("load() returns null parentSessionId when no sidecar file exists") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.load(session.id).parentSessionId shouldBe null
+    }
+
+    test("list() includes parentSessionId for sessions that have one") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.list().first { it.id == session.id }.parentSessionId shouldBe "parent-1"
+    }
+
+    test("list() returns null parentSessionId for sessions without one") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.list().first { it.id == session.id }.parentSessionId shouldBe null
+    }
 })
