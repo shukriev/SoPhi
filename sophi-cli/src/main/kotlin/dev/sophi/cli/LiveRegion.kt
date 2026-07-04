@@ -23,8 +23,8 @@ class LiveRegion(
     private fun repositionForRewrite() {
         if (lastLineCount == 0) return
         out.append("\r")
-        if (lastLineCount > 1) out.append("[${lastLineCount - 1}A")
-        out.append("[0J")
+        if (lastLineCount > 1) out.append("[${lastLineCount - 1}A")
+        out.append("[0J")
     }
 
     private fun flushIfPossible() {
