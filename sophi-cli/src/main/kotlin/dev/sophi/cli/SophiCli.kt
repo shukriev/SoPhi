@@ -89,7 +89,16 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val slashHandler = SlashHandler(sessionManager, compactor, config) { mordantTerminal.println(it) }
         val inputSource: InputSource =
             if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
-        val liveRegion = LiveRegion(java.io.PrintWriter(System.out, true)) { mordantTerminal.info.width }
+        val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
+            java.io.PrintWriter(System.out, true)
+        } else {
+            object : Appendable {
+                override fun append(csq: CharSequence?): Appendable = this
+                override fun append(csq: CharSequence?, start: Int, end: Int): Appendable = this
+                override fun append(c: Char): Appendable = this
+            }
+        }
+        val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
         val turnController = TurnController(loop, config, inputSource, liveRegion) { mordantTerminal.println(it) }
         val engine = TuiEngine(turnController, slashHandler, inputSource)
 
