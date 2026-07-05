@@ -70,6 +70,11 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
 
     companion object {
         fun create(): SophiTerminal =
-            SophiTerminal(TerminalBuilder.builder().system(true).build())
+            // graphemeCluster(false): skip JLine's terminal capability auto-probe (a DA1-style
+            // query sent to detect Unicode grapheme-cluster width support). Some terminals
+            // (observed: iTerm2) reply after JLine's probe has already given up, so the reply
+            // bytes leak into the first prompt as literal text. We don't need grapheme-cluster
+            // detection for plain streamed chat text, so skipping the probe avoids the race.
+            SophiTerminal(TerminalBuilder.builder().system(true).graphemeCluster(false).build())
     }
 }
