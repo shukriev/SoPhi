@@ -93,9 +93,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val turnController = TurnController(loop, config, inputSource, liveRegion) { mordantTerminal.println(it) }
         val engine = TuiEngine(turnController, slashHandler, inputSource)
 
-        engine.run(session)
-
-        sophiTerminal.close()
+        try {
+            engine.run(session)
+        } finally {
+            sophiTerminal.close()
+        }
         mordantTerminal.println(TextColors.cyan("\nSession ${session.id} ended."))
     }
 }
