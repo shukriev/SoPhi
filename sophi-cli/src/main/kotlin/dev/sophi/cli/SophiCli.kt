@@ -80,19 +80,29 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
         val loop = AgentLoop(provider, registry, sessionManager)
         val compactor = ContextCompactor(provider)
-        val terminal = Terminal()
+        val mordantTerminal = Terminal()
+        val sophiTerminal = SophiTerminal.create()
 
-        terminal.println(TextColors.cyan("Sophi — session ${session.id}"))
-        terminal.println("Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact\n")
+        mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
+        mordantTerminal.println("Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact\n")
 
-        val slashHandler = SlashHandler(sessionManager, compactor, config) { terminal.println(it) }
-        val engine = TuiEngine(loop, slashHandler, config, terminal)
+        val slashHandler = SlashHandler(sessionManager, compactor, config) { mordantTerminal.println(it) }
+        val inputSource: InputSource =
+            if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
+        val liveRegion = LiveRegion(java.io.PrintWriter(System.out, true)) { mordantTerminal.info.width }
+        val turnController = TurnController(loop, config, inputSource, liveRegion) { mordantTerminal.println(it) }
+        val engine = TuiEngine(turnController, slashHandler, inputSource)
 
-        engine.run(session, generateSequence {
-            terminal.print(TextColors.blue("You: "))
-            readLine()
-        })
+        engine.run(session)
 
-        terminal.println(TextColors.cyan("\nSession ${session.id} ended."))
+        sophiTerminal.close()
+        mordantTerminal.println(TextColors.cyan("\nSession ${session.id} ended."))
+    }
+}
+
+private class LegacyReadLineInputSource : InputSource {
+    override suspend fun readLine(): String? = kotlin.io.readLine()
+    override suspend fun awaitEsc() {
+        kotlinx.coroutines.delay(Long.MAX_VALUE)
     }
 }
