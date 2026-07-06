@@ -2,10 +2,18 @@ package dev.sophi.sdk
 
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.ai.api.CompletionRequest
+import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.TokenUsage
+import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.Tool
 import dev.sophi.extensions.AgentHook
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
@@ -17,7 +25,10 @@ import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.runs
+import kotlin.io.path.createTempDirectory
 
 class SophiRuntimeTest : FunSpec({
     val agentLoop = mockk<AgentLoop>()
@@ -32,11 +43,13 @@ class SophiRuntimeTest : FunSpec({
 
     test("newSession returns session id") {
         every { sessionManager.create(null) } returns AgentSession("sess-1")
+        every { sessionManager.save(any()) } just runs
         runtime.newSession() shouldBe "sess-1"
     }
 
     test("newSession passes title to sessionManager") {
         every { sessionManager.create("My Chat") } returns AgentSession("sess-2", "My Chat")
+        every { sessionManager.save(any()) } just runs
         runtime.newSession("My Chat") shouldBe "sess-2"
     }
 
@@ -78,5 +91,38 @@ class SophiRuntimeTest : FunSpec({
 
     test("RuntimeBuilder build throws when no provider set") {
         shouldThrow<IllegalArgumentException> { RuntimeBuilder().build() }
+    }
+
+    test("RuntimeBuilder wires confirmationPolicy through to the built AgentLoop, denying a DESTRUCTIVE tool") {
+        val provider = mockk<LLMProvider>()
+        val destructiveTool = object : Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override val riskLevel = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "should not run"
+        }
+        val capturedRequests = mutableListOf<CompletionRequest>()
+        coEvery { provider.complete(any()) } answers {
+            capturedRequests.add(firstArg())
+            if (capturedRequests.size == 1)
+                LLMResponse.ToolUse(calls = listOf(ToolCall("c1", "danger", "{}")), usage = TokenUsage(1, 0))
+            else
+                LLMResponse.Text("done", TokenUsage(1, 1))
+        }
+
+        val builder = RuntimeBuilder()
+        builder.provider = provider
+        builder.sessionsDir = createTempDirectory("sophi-sdk-test")
+        val rt = builder
+            .tool(destructiveTool)
+            .confirmationPolicy(ConfirmationPolicy { _, _ -> false })
+            .build()
+
+        val sessionId = rt.newSession()
+        rt.turn(sessionId, "do it")
+
+        capturedRequests[1].messages.last().content shouldBe
+            "Error: Tool 'danger' execution denied by confirmation policy"
     }
 })

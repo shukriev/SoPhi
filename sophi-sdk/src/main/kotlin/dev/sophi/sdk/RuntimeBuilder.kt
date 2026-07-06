@@ -4,6 +4,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.PluginRegistry
@@ -19,9 +20,11 @@ class RuntimeBuilder {
 
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
+    private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
+    fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
 
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
@@ -32,7 +35,7 @@ class RuntimeBuilder {
             maxTokens = maxTokens,
             systemPrompt = systemPrompt
         )
-        val loop = AgentLoop(p, registry, sm)
+        val loop = AgentLoop(p, registry, sm, confirmationPolicy = confirmationPolicy)
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         return SophiRuntime(loop, sm, pluginRegistry, agentConfig)
     }
