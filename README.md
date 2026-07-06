@@ -38,7 +38,7 @@ app — same core, three ways to run it.
 They all sit on the same core, so switching between them later is a
 one-line change, not a rewrite.
 
-## Build
+## 🚀 Build
 
 ```bash
 mvn -q -DskipTests package
@@ -52,7 +52,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ---
 
-## Use case 1: Interactive terminal agent (`sophi-cli`)
+## 💻 Use case 1: Interactive terminal agent (`sophi-cli`)
 
 Run a chat session in your terminal, backed by Claude, with persistent
 sessions you can branch and resume.
@@ -68,6 +68,7 @@ Options:
 sophi --session <id>          # resume an existing session
 sophi --model <name>          # LLM model (default: claude-3-5-sonnet-20241022)
 sophi --sessions-dir <path>   # where session JSONL files live (default: ~/.sophi/sessions)
+sophi --agents-dir <path>     # directory of subagent definitions (default: ~/.sophi/agents)
 sophi --system "<prompt>"     # system prompt for every turn
 sophi --provider <name>       # 'claude' (default) or 'openai-compat' (Ollama, vLLM, ...)
 sophi --base-url <url>        # required for --provider openai-compat
@@ -93,6 +94,32 @@ In-session slash commands:
 /compact    summarize older turns to shrink context
 exit / quit  end the session
 ```
+
+The terminal redraws in place while a turn streams, instead of scrolling
+line by line:
+
+- **Live output** — streamed tokens and tool-call status update a single in-place region.
+- **ESC to interrupt** — cancel a turn mid-stream; the partial reply is kept, tagged `[interrupted]`, and the prompt returns immediately.
+- **Multi-line input** — end a line with `\` to continue on the next line, same convention as bash.
+- **Non-interactive fallback** — piped stdin or non-TTY output drops to plain line-mode automatically, so scripted usage still works.
+
+**Subagents:** `--agents-dir` points at a directory of Markdown files, each
+describing a subagent the CLI can delegate a task to mid-session:
+
+```markdown
+---
+name: researcher
+description: "Looks things up without touching any files"
+allowedTools: [read_file, web_search]
+---
+
+You are a research assistant. Investigate the task and report findings
+concisely. You cannot modify any files.
+```
+
+The frontmatter's `name` and `description` are what the main agent sees when
+choosing which subagent to delegate to; the Markdown body becomes that
+subagent's system prompt. Delegation nests up to 3 levels deep by default.
 
 **Good for:** local dev-tool style usage, exploring the agent loop, quick
 one-off tasks — same category as a REPL.
