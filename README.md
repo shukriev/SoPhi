@@ -215,7 +215,7 @@ dashboard, batch job) without standing up a separate service.
 
 ---
 
-## Cross-cutting: skills and plugins
+## 🧰 Cross-cutting: skills and plugins
 
 **Skills** (`sophi-skills`) are plain Markdown files with YAML frontmatter —
 drop them in a directory and load them with `SkillLoader().load(dir)`:
@@ -230,15 +230,13 @@ tags: [ops, deploy]
 Steps to deploy...
 ```
 
-See `.sophi/skills/` in this repo for real examples.
-
 **Plugins** (`sophi-extensions`) hook into the turn lifecycle
 (`BEFORE_TURN` / `AFTER_TURN` / `BEFORE_TOOL` / `AFTER_TOOL` / `ON_ERROR`).
 `sophi-infra` ships three ready to use:
 
-- `BudgetTracker` — throws `BudgetExceededException` once a token budget is exceeded
 - `PermissionGatePlugin(allowedTools)` — blocks any tool call not in an allowlist
 - `MetricsPlugin(meterRegistry)` — emits Micrometer counters for turns started/completed/errored
+- `BudgetTracker` — a standalone tracker (not a `SophiPlugin`) that throws `BudgetExceededException` once a token budget is exceeded; call `record()`/`used()` directly rather than registering it
 
 Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 `PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery
@@ -246,11 +244,14 @@ Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 
 ---
 
-## Choosing a use case
+## 🎯 Choosing a use case
 
-- Testing the agent yourself, or scripting one-off tasks → **`sophi-cli`**
-- A frontend, bot, or another service needs to talk to the agent → **`sophi-web`**
-- You're adding agent capability inside an existing JVM application → **`sophi-sdk`**
+| You want to... | Reach for |
+|---|---|
+| Poke at the agent yourself, or script one-off tasks | **`sophi-cli`** |
+| Let a frontend, bot, or service talk to the agent | **`sophi-web`** |
+| Add agent capability inside an existing JVM app | **`sophi-sdk`** |
 
 All three share the same `sophi-core` agent loop and session format, so
-switching between them later doesn't change how sessions or tools work.
+switching between them later doesn't change how sessions or tools work —
+start small, grow into the rest.
