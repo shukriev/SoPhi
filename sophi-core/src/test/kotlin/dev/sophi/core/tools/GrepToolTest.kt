@@ -63,4 +63,22 @@ class GrepToolTest : FunSpec({
     test("riskLevel is SAFE") {
         tool.riskLevel shouldBe RiskLevel.SAFE
     }
+
+    test("execute() should find matches even when root's ancestor is a skip directory name") {
+        // Regression test: root's parent is literally named "build"
+        // The old code checked absolute path components, so all files would be filtered out.
+        // The fixed code checks relative path components only.
+        val buildParent = createTempDirectory("build")
+        val projectRoot = buildParent.resolve("project")
+        projectRoot.createDirectory()
+
+        val toolWithBuildAncestor = GrepTool(projectRoot)
+        projectRoot.resolve("a.txt").writeText("target content\n")
+
+        val result = runBlocking { toolWithBuildAncestor.execute("""{"pattern":"target"}""") }
+
+        // Should find the file even though the absolute path contains "build" ancestor
+        result shouldContain "a.txt"
+        (result.contains("No matches found")) shouldBe false
+    }
 })

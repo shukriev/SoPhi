@@ -44,7 +44,10 @@ class GrepTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val allMatches = Files.walk(searchRoot).use { stream ->
             stream.asSequence()
                 .filter { it.isRegularFile() }
-                .filter { path -> DEFAULT_SKIP_DIRS.none { skip -> path.any { part -> part.toString() == skip } } }
+                .filter { path ->
+                    val relative = path.relativeTo(root)
+                    DEFAULT_SKIP_DIRS.none { skip -> relative.any { part -> part.toString() == skip } }
+                }
                 .filter { fileMatcher == null || fileMatcher.matches(it.fileName) }
                 .flatMap { file ->
                     val lines = runCatching { file.readLines() }.getOrDefault(emptyList())
