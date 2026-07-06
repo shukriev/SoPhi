@@ -259,6 +259,7 @@ class SkillLoader {
 | [ADR-004](adr/ADR-004-llm-contract-placement.md) | LLM contract placement | Contract in `sophi-ai`, no `sophi-contracts` module |
 | [ADR-005](adr/ADR-005-jsonl-tree-sessions.md) | Session storage format | Append-only JSONL with parentId tree |
 | [ADR-006](adr/ADR-006-tool-interface.md) | Tool interface design | suspend execute returning String |
+| [ADR-007](adr/ADR-007-subagent-delegation.md) | Subagent delegation | Tool-based nested AgentLoop — no core-loop changes |
 
 ---
 
@@ -276,3 +277,4 @@ class SkillLoader {
 | `sophi-cli` full TUI | M2 | complete | [article-09](articles/article-09.md) |
 | `sophi-web` | M4 | complete | [article-10](articles/article-10.md) |
 | `sophi-sdk` + `sophi-infra` | M4 | complete | [article-11](articles/article-11.md) |
+| `sophi-core` subagent delegation | M5 | complete | [article-13](articles/article-13.md) |

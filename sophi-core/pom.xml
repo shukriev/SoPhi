@@ -34,7 +34,7 @@
         </dependency>
         <dependency>
             <groupId>com.charleskorn.kaml</groupId>
-            <artifactId>kaml</artifactId>
+            <artifactId>kaml-jvm</artifactId>
         </dependency>
         <dependency>
             <groupId>io.kotest</groupId>

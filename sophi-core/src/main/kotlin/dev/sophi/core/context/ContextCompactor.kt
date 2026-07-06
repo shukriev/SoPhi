@@ -40,7 +40,7 @@ class ContextCompactor(private val provider: LLMProvider) {
             else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
         }
 
-        val compacted = AgentSession(id = session.id, title = session.title)
+        val compacted = AgentSession(id = session.id, title = session.title, parentSessionId = session.parentSessionId)
         compacted.append(
             role = EntryRole.SYSTEM,
             content = "Previous conversation summary:\n$summary",

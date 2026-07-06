@@ -1,36 +1,28 @@
 package dev.sophi.cli
 
-import com.github.ajalt.mordant.rendering.TextColors
-import com.github.ajalt.mordant.terminal.Terminal
-import dev.sophi.core.agent.AgentConfig
-import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.AgentSession
 
 class TuiEngine(
-    private val loop: AgentLoop,
+    private val turnController: TurnController,
     private val slashHandler: SlashHandler,
-    private val config: AgentConfig,
-    private val terminal: Terminal = Terminal()
+    private val input: InputSource
 ) {
     private companion object {
         val EXIT_COMMANDS = setOf("exit", "quit")
     }
 
-    suspend fun run(session: AgentSession, lines: Sequence<String>) {
+    suspend fun run(session: AgentSession) {
         var current = session
-        for (line in lines) {
+        while (true) {
+            val line = input.readLine() ?: break
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
             if (trimmed.lowercase() in EXIT_COMMANDS) break
-            if (trimmed.startsWith("/")) {
-                current = slashHandler.handle(trimmed, current)
-                continue
+            current = if (trimmed.startsWith("/")) {
+                slashHandler.handle(trimmed, current)
+            } else {
+                turnController.runTurn(current, trimmed)
             }
-            terminal.print(TextColors.green("Sophi: "))
-            current = loop.streamTurn(current, trimmed, config) { token ->
-                terminal.print(token)
-            }
-            terminal.println()
         }
     }
 }

@@ -246,4 +246,76 @@ class AgentLoopTest : FunSpec({
 
         shouldThrow<IllegalStateException> { loopWithTool.turn(session, "go", tightConfig) }
     }
+
+    // ── Turn events ──────────────────────────────────────────────────────────
+
+    test("turn() emits a single Token event with the final text when there are no tool calls") {
+        val session = AgentSession(id = "s1")
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("Hello!", TokenUsage(10, 5))
+        every { sessionManager.save(any()) } just Runs
+
+        val events = mutableListOf<TurnEvent>()
+        loop.turn(session, "Hi", config) { events.add(it) }
+
+        events shouldBe listOf(TurnEvent.Token("Hello!"))
+    }
+
+    test("turn() emits ToolCallStarted then ToolCallFinished around a tool call, then a final Token") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "calculator"
+            override val description = "Calculates"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "42"
+        })
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(
+                calls = listOf(dev.sophi.ai.api.ToolCall("call-1", "calculator", "{}")),
+                usage = TokenUsage(10, 0)
+            ),
+            LLMResponse.Text("The answer is 42", TokenUsage(5, 8))
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val events = mutableListOf<TurnEvent>()
+        loopWithTool.turn(session, "What is 6 times 7?", config) { events.add(it) }
+
+        events shouldBe listOf(
+            TurnEvent.ToolCallStarted("calculator", "{}"),
+            TurnEvent.ToolCallFinished("calculator", "42"),
+            TurnEvent.Token("The answer is 42")
+        )
+    }
+
+    test("turn() emits ToolCallFinished with the error string when a tool throws") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "broken"
+            override val description = "Always throws"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String =
+                throw RuntimeException("disk full")
+        })
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(
+                calls = listOf(dev.sophi.ai.api.ToolCall("c1", "broken", "{}")),
+                usage = TokenUsage(1, 0)
+            ),
+            LLMResponse.Text("recovered", TokenUsage(1, 1))
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val events = mutableListOf<TurnEvent>()
+        loopWithTool.turn(session, "test", config) { events.add(it) }
+
+        events shouldBe listOf(
+            TurnEvent.ToolCallStarted("broken", "{}"),
+            TurnEvent.ToolCallFinished("broken", "Error: disk full"),
+            TurnEvent.Token("recovered")
+        )
+    }
 })

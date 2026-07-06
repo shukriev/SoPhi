@@ -81,4 +81,31 @@ class ToolRegistryTest : FunSpec({
         result shouldBe registry
         registry.names() shouldContainExactly listOf("a", "b")
     }
+
+    test("subset() returns a registry containing only the named tools") {
+        val registry = ToolRegistry()
+        registry.register(echoTool("read_file"))
+        registry.register(echoTool("write_file"))
+        registry.register(echoTool("delegate_to_subagent"))
+
+        val scoped = registry.subset(listOf("read_file"))
+
+        scoped.names() shouldContainExactly listOf("read_file")
+    }
+
+    test("subset() silently ignores names not present in the source registry") {
+        val registry = ToolRegistry()
+        registry.register(echoTool("read_file"))
+
+        val scoped = registry.subset(listOf("read_file", "does_not_exist"))
+
+        scoped.names() shouldContainExactly listOf("read_file")
+    }
+
+    test("subset() returns an empty registry when given an empty list") {
+        val registry = ToolRegistry()
+        registry.register(echoTool("read_file"))
+
+        registry.subset(emptyList()).names().shouldBeEmpty()
+    }
 })

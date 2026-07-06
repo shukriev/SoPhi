@@ -5,6 +5,7 @@ import java.util.UUID
 class AgentSession(
     val id: String,
     val title: String? = null,
+    val parentSessionId: String? = null,
     initialEntries: List<SessionEntry> = emptyList(),
     initialTipId: String? = null
 ) {

@@ -1,5 +1,6 @@
 package dev.sophi.core.session
 
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -10,7 +11,11 @@ import kotlin.io.path.exists
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.readLines
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
+
+@Serializable
+private data class SessionSidecar(val parentSessionId: String? = null)
 
 class FileSessionManager(private val sessionsDir: Path) : SessionManager {
 
@@ -20,12 +25,17 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         sessionsDir.createDirectories()
     }
 
-    override fun create(title: String?): AgentSession =
-        AgentSession(id = UUID.randomUUID().toString(), title = title)
+    override fun create(title: String?, parentSessionId: String?): AgentSession =
+        AgentSession(id = UUID.randomUUID().toString(), title = title, parentSessionId = parentSessionId)
 
     override fun save(session: AgentSession) {
         val file = sessionsDir.resolve("${session.id}.jsonl")
         file.writeText(session.entries.joinToString("\n") { json.encodeToString(it) })
+
+        if (session.parentSessionId != null) {
+            val sidecar = sessionsDir.resolve("${session.id}.meta.json")
+            sidecar.writeText(json.encodeToString(SessionSidecar(session.parentSessionId)))
+        }
     }
 
     override fun load(sessionId: String): AgentSession {
@@ -34,7 +44,7 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         val entries = file.readLines()
             .filter { it.isNotBlank() }
             .map { json.decodeFromString<SessionEntry>(it) }
-        return AgentSession(id = sessionId, initialEntries = entries)
+        return AgentSession(id = sessionId, parentSessionId = readParentSessionId(sessionId), initialEntries = entries)
     }
 
     override fun list(): List<SessionMeta> {
@@ -42,12 +52,21 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         return sessionsDir.listDirectoryEntries("*.jsonl")
             .map { file ->
                 val lines = file.readLines().filter { it.isNotBlank() }
+                val id = file.fileName.toString().removeSuffix(".jsonl")
                 SessionMeta(
-                    id = file.fileName.toString().removeSuffix(".jsonl"),
+                    id = id,
                     entryCount = lines.size,
-                    lastModifiedMillis = file.getLastModifiedTime().toMillis()
+                    lastModifiedMillis = file.getLastModifiedTime().toMillis(),
+                    parentSessionId = readParentSessionId(id)
                 )
             }
             .sortedBy { it.id }
+    }
+
+    private fun readParentSessionId(sessionId: String): String? {
+        val sidecar = sessionsDir.resolve("$sessionId.meta.json")
+        if (!sidecar.exists()) return null
+        return runCatching { json.decodeFromString<SessionSidecar>(sidecar.readText()).parentSessionId }
+            .getOrNull()
     }
 }

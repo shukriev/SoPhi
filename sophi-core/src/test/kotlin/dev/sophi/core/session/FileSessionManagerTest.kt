@@ -7,12 +7,15 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.writeText
 
 class FileSessionManagerTest : FunSpec({
     lateinit var manager: FileSessionManager
+    lateinit var sessionsDir: java.nio.file.Path
 
     beforeTest {
-        manager = FileSessionManager(createTempDirectory("sophi-session-test"))
+        sessionsDir = createTempDirectory("sophi-session-test")
+        manager = FileSessionManager(sessionsDir)
     }
 
     test("create() returns session with non-empty id and no entries") {
@@ -102,5 +105,65 @@ class FileSessionManagerTest : FunSpec({
 
         val loaded = manager.load(session.id)
         loaded.entries[0].metadata shouldBe mapOf("src" to "cli")
+    }
+
+    test("create() with parentSessionId preserves it on the returned session") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.parentSessionId shouldBe "parent-1"
+    }
+
+    test("save() and load() round-trip preserves parentSessionId") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        val loaded = manager.load(session.id)
+        loaded.parentSessionId shouldBe "parent-1"
+    }
+
+    test("load() returns null parentSessionId when no sidecar file exists") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.load(session.id).parentSessionId shouldBe null
+    }
+
+    test("list() includes parentSessionId for sessions that have one") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.list().first { it.id == session.id }.parentSessionId shouldBe "parent-1"
+    }
+
+    test("list() returns null parentSessionId for sessions without one") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.list().first { it.id == session.id }.parentSessionId shouldBe null
+    }
+
+    test("load() returns null parentSessionId when sidecar file is corrupted, instead of throwing") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        sessionsDir.resolve("${session.id}.meta.json").writeText("{ not valid json ")
+
+        manager.load(session.id).parentSessionId shouldBe null
+    }
+
+    test("list() returns null parentSessionId for a session with a corrupted sidecar, without throwing") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        sessionsDir.resolve("${session.id}.meta.json").writeText("not json at all")
+
+        val metas = manager.list()
+        metas shouldHaveSize 1
+        metas.first { it.id == session.id }.parentSessionId shouldBe null
     }
 })

@@ -99,4 +99,21 @@ class ContextCompactorTest : FunSpec({
         compactor.compact(s, config, keepRecentCount = 2)
         coVerify(exactly = 0) { provider.complete(any()) }
     }
+
+    test("compact() preserves parentSessionId on the compacted session") {
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(5, 3))
+
+        val s = AgentSession(id = "s-compact-child", parentSessionId = "parent-1")
+        listOf(
+            EntryRole.USER to "a",
+            EntryRole.ASSISTANT to "b",
+            EntryRole.USER to "c",
+            EntryRole.ASSISTANT to "d",
+            EntryRole.USER to "e"
+        ).forEach { (role, content) -> s.append(role, content) }
+
+        val result = compactor.compact(s, config, keepRecentCount = 2)
+
+        result.parentSessionId shouldBe "parent-1"
+    }
 })
