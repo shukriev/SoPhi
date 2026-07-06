@@ -2,6 +2,8 @@ package dev.sophi.web.config
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContainAll
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 
 class AgentConfigurationTest : FunSpec({
@@ -44,5 +46,22 @@ class AgentConfigurationTest : FunSpec({
     test("buildProviderFromProperties matches provider type case-insensitively") {
         val props = ProviderProperties(type = "Claude", model = "claude-opus-4-8", apiKey = "sk-ant-test")
         buildProviderFromProperties(props).name shouldBe "claude"
+    }
+
+    test("toolRegistry() registers grep, glob, edit_file, bash, and fetch_url") {
+        val config = AgentConfiguration(ProviderProperties(type = "claude", apiKey = "sk-ant-test"))
+        config.toolRegistry().names() shouldContainAll listOf("grep", "glob", "edit_file", "bash", "fetch_url")
+    }
+
+    test("toolRegistry() does not register web_search when BRAVE_SEARCH_API_KEY is unset") {
+        // Relies on BRAVE_SEARCH_API_KEY not being set to a real key in the test environment,
+        // matching the existing ANTHROPIC_API_KEY fallback test's approach above.
+        val config = AgentConfiguration(ProviderProperties(type = "claude", apiKey = "sk-ant-test"))
+        config.toolRegistry().names() shouldNotContain "web_search"
+    }
+
+    test("confirmationPolicy() defaults to DENY_DESTRUCTIVE") {
+        val config = AgentConfiguration(ProviderProperties(type = "claude", apiKey = "sk-ant-test"))
+        config.confirmationPolicy().confirm("bash", "{}") shouldBe false
     }
 })
