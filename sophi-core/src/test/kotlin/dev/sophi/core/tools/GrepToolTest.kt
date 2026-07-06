@@ -68,9 +68,9 @@ class GrepToolTest : FunSpec({
         // Regression test: root's parent is literally named "build"
         // The old code checked absolute path components, so all files would be filtered out.
         // The fixed code checks relative path components only.
-        val buildParent = createTempDirectory("build")
-        val projectRoot = buildParent.resolve("project")
-        projectRoot.createDirectory()
+        val tempParent = createTempDirectory("sophi-grep-ancestor-test")
+        val buildParent = tempParent.resolve("build").also { it.createDirectory() }
+        val projectRoot = buildParent.resolve("project").also { it.createDirectory() }
 
         val toolWithBuildAncestor = GrepTool(projectRoot)
         projectRoot.resolve("a.txt").writeText("target content\n")
@@ -79,6 +79,5 @@ class GrepToolTest : FunSpec({
 
         // Should find the file even though the absolute path contains "build" ancestor
         result shouldContain "a.txt"
-        (result.contains("No matches found")) shouldBe false
     }
 })
