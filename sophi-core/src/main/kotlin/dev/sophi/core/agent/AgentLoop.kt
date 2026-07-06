@@ -10,6 +10,8 @@ import dev.sophi.core.prompt.PromptBuilder
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -20,7 +22,8 @@ class AgentLoop(
     private val provider: LLMProvider,
     private val registry: ToolRegistry,
     private val sessionManager: SessionManager,
-    private val compactor: ContextCompactor? = null
+    private val compactor: ContextCompactor? = null,
+    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL
 ) {
     suspend fun turn(
         session: AgentSession,
@@ -62,16 +65,27 @@ class AgentLoop(
                     }
                     messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = response.calls))
 
+                    val allowedCalls = response.calls.map { call ->
+                        val tool = registry.getOrNull(call.name)
+                        val allowed = tool == null || tool.riskLevel == RiskLevel.SAFE ||
+                            confirmationPolicy.confirm(call.name, call.argumentsJson)
+                        call to allowed
+                    }
+
                     val toolResults = coroutineScope {
-                        response.calls.map { call ->
+                        allowedCalls.map { (call, allowed) ->
                             async {
                                 onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
-                                val result = registry.getOrNull(call.name)
-                                    ?.let { tool ->
-                                        runCatching { tool.execute(call.argumentsJson) }
-                                            .getOrElse { e -> "Error: ${e.message}" }
-                                    }
-                                    ?: "Error: Tool '${call.name}' not found"
+                                val result = if (!allowed) {
+                                    "Error: Tool '${call.name}' execution denied by confirmation policy"
+                                } else {
+                                    registry.getOrNull(call.name)
+                                        ?.let { tool ->
+                                            runCatching { tool.execute(call.argumentsJson) }
+                                                .getOrElse { e -> "Error: ${e.message}" }
+                                        }
+                                        ?: "Error: Tool '${call.name}' not found"
+                                }
                                 onEvent(TurnEvent.ToolCallFinished(call.name, result))
                                 Message(
                                     role = MessageRole.TOOL,
