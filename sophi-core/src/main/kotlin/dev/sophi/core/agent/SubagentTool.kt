@@ -2,6 +2,7 @@ package dev.sophi.core.agent
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.serialization.Serializable
@@ -25,7 +26,8 @@ class SubagentTool(
     private val parentSessionId: String,
     private val parentConfig: AgentConfig,
     private val depth: Int = 0,
-    private val maxDelegationDepth: Int = 3
+    private val maxDelegationDepth: Int = 3,
+    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL
 ) : Tool {
 
     override val name = DELEGATE_TOOL_NAME
@@ -61,12 +63,13 @@ class SubagentTool(
                     parentSessionId = parentSessionId,
                     parentConfig = parentConfig,
                     depth = depth + 1,
-                    maxDelegationDepth = maxDelegationDepth
+                    maxDelegationDepth = maxDelegationDepth,
+                    confirmationPolicy = confirmationPolicy
                 )
             )
         }
 
-        val nestedLoop = AgentLoop(provider, scopedRegistry, sessionManager)
+        val nestedLoop = AgentLoop(provider, scopedRegistry, sessionManager, confirmationPolicy = confirmationPolicy)
         val subSession = sessionManager.create(
             title = "subagent:${definition.name}",
             parentSessionId = parentSessionId

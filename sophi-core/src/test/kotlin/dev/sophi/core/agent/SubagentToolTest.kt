@@ -6,6 +6,8 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
@@ -267,5 +269,51 @@ class SubagentToolTest : FunSpec({
         // The depth-1 attempt never created its own subagent session because it was refused
         // before reaching the session/loop setup — only the depth-0 session exists.
         sessionManager.list() shouldHaveSize 1
+    }
+
+    test("execute() threads confirmationPolicy into the nested AgentLoop, denying a DESTRUCTIVE tool") {
+        var executed = false
+        val destructiveTool = object : Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override val riskLevel = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String {
+                executed = true
+                return "should not run"
+            }
+        }
+        val destructiveDef = AgentDefinition(
+            name = "operator",
+            description = "Can run destructive tools",
+            systemPrompt = "You take action.",
+            allowedTools = listOf("danger")
+        )
+        val provider = mockk<LLMProvider>()
+        var callCount = 0
+        coEvery { provider.complete(any()) } answers {
+            callCount++
+            if (callCount == 1)
+                LLMResponse.ToolUse(
+                    calls = listOf(ToolCall("c1", "danger", "{}")),
+                    usage = TokenUsage(1, 0)
+                )
+            else
+                LLMResponse.Text("acknowledged", TokenUsage(1, 1))
+        }
+        val fullRegistry = ToolRegistry().register(destructiveTool)
+        val tool = SubagentTool(
+            definitions = listOf(destructiveDef),
+            provider = provider,
+            fullRegistry = fullRegistry,
+            sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
+            parentSessionId = "parent-1",
+            parentConfig = AgentConfig(model = "parent-model"),
+            confirmationPolicy = ConfirmationPolicy { _, _ -> false }
+        )
+
+        runBlocking { tool.execute("""{"subagent_type":"operator","prompt":"do it"}""") }
+
+        executed shouldBe false
     }
 })
