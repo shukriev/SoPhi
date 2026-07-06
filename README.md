@@ -128,7 +128,7 @@ one-off tasks — same category as a REPL.
 
 ## 🌐 Use case 2: Agent-over-HTTP (`sophi-web`)
 
-Run Sophi as a Spring Boot service so a frontend, another service, or a
+Run SoPhi as a Spring Boot service so a frontend, another service, or a
 mobile app can talk to it over REST/SSE.
 
 ```bash
@@ -158,7 +158,7 @@ needs the agent behind a network boundary rather than in-process.
 
 ---
 
-## 🛠️ Use case 3: Embedding Sophi in your own JVM app (`sophi-sdk`)
+## 🛠️ Use case 3: Embedding SoPhi in your own JVM app (`sophi-sdk`)
 
 Use the `RuntimeBuilder` DSL to wire up a runtime with your own tools and
 plugins, no CLI or HTTP layer required.
