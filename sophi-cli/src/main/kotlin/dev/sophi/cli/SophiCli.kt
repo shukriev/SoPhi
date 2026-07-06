@@ -5,15 +5,22 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.mordant.rendering.TextColors
 import com.github.ajalt.mordant.terminal.Terminal
+import dev.sophi.ai.providers.BraveSearchProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.tools.BashTool
+import dev.sophi.core.tools.EditTool
+import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.FileReadTool
 import dev.sophi.core.tools.FileWriteTool
+import dev.sophi.core.tools.GlobTool
+import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.WebSearchTool
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createDirectories
 import java.nio.file.Path
@@ -52,12 +59,18 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--system",
         help = "System prompt injected into every turn"
     )
+    private val braveApiKeyOption: String? by option(
+        "--brave-api-key",
+        help = "Brave Search API key for the web_search tool (falls back to BRAVE_SEARCH_API_KEY; omit to disable web_search)"
+    )
 
     override fun run() = runBlocking {
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
         val config = AgentConfig(model = model, systemPrompt = systemPrompt)
+        val mordantTerminal = Terminal()
+        val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal)
 
         val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
         val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
@@ -65,6 +78,15 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val registry = ToolRegistry()
             .register(FileReadTool())
             .register(FileWriteTool())
+            .register(GrepTool())
+            .register(GlobTool())
+            .register(EditTool())
+            .register(BashTool())
+            .register(FetchUrlTool())
+        val braveApiKey = braveApiKeyOption ?: System.getenv("BRAVE_SEARCH_API_KEY")
+        if (braveApiKey != null) {
+            registry.register(WebSearchTool(BraveSearchProvider(braveApiKey)))
+        }
         if (agentDefinitions.isNotEmpty()) {
             registry.register(
                 SubagentTool(
@@ -73,14 +95,19 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                     fullRegistry = registry,
                     sessionManager = sessionManager,
                     parentSessionId = session.id,
-                    parentConfig = config
+                    parentConfig = config,
+                    confirmationPolicy = confirmationPolicy
                 )
             )
         }
 
-        val loop = AgentLoop(provider, registry, sessionManager)
+        val loop = AgentLoop(
+            provider,
+            registry,
+            sessionManager,
+            confirmationPolicy = confirmationPolicy
+        )
         val compactor = ContextCompactor(provider)
-        val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
