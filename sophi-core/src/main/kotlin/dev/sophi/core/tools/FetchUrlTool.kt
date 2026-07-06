@@ -41,6 +41,9 @@ class FetchUrlTool(
         val address = runCatching { InetAddress.getByName(host) }.getOrElse {
             return@withContext "Error: could not resolve host: $host"
         }
+        // Known residual risk: this check happens once per host resolution; HttpClient re-resolves DNS
+        // independently at connect time, so a DNS-rebinding attack could theoretically bypass this guard.
+        // Accepted as low-risk for a dev-tool agent; revisit if exposed to less-trusted callers.
         if (address.isLoopbackAddress || address.isAnyLocalAddress ||
             address.isLinkLocalAddress || address.isSiteLocalAddress
         ) {
