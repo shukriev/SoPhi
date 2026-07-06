@@ -1,29 +1,42 @@
-# Sophi
+<div align="center">
 
-A Kotlin-native agent harness for the JVM.
+# ✨ SoPhi
 
-**Stack:** Kotlin 2.4 · Spring Boot 4.0 · Spring AI 2.0
+### The Kotlin-native agent harness for the JVM
 
-> Architecture: [doc/Architecture.md](doc/Architecture.md)
+**Bring your own LLM. Ship an agent in three lines, not three weeks.**
 
-Sophi is a set of small, composable Maven modules that together give you an
-LLM agent loop (tool calling, session persistence, context compaction) plus
-three ways to run it: a terminal app, a REST/SSE server, and an embeddable
-SDK. Pick the module that matches your use case — they all sit on the same
-core.
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Spring AI](https://img.shields.io/badge/Spring%20AI-2.0-6DB33F)](https://spring.io/projects/spring-ai)
 
-## Modules
+[Architecture deep-dive →](doc/Architecture.md)
+
+</div>
+
+---
+
+SoPhi is a set of small, composable Maven modules built around one
+battle-tested core: an agent loop with tool calling, branchable session
+persistence, and automatic context compaction. Wrap it in a **terminal
+app**, a **REST/SSE server**, or **embed it directly** in your own JVM
+app — same core, three ways to run it.
+
+## 🧩 Modules
 
 | Module | What it gives you |
 |--------|--------------------|
-| `sophi-ai` | Provider abstraction (`LLMProvider`) + Spring AI-backed `ClaudeProvider` / `OpenAICompatProvider` |
-| `sophi-core` | The agent loop, session tree (JSONL, branch/checkout), tool dispatch, context compaction |
-| `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
-| `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
-| `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
-| `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
-| `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
-| `sophi-infra` | Ready-made plugins: `BudgetTracker`, `PermissionGatePlugin`, `MetricsPlugin` |
+| ⚡ `sophi-ai` | Provider abstraction (`LLMProvider`) + Spring AI-backed `ClaudeProvider` / `OpenAICompatProvider` |
+| 🧠 `sophi-core` | The agent loop, session tree (JSONL, branch/checkout), tool dispatch, context compaction |
+| 📚 `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
+| 🔌 `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
+| 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
+| 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
+| 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
+| 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `PermissionGatePlugin`, `MetricsPlugin` |
+
+They all sit on the same core, so switching between them later is a
+one-line change, not a rewrite.
 
 ## Build
 
