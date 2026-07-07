@@ -9,6 +9,9 @@ import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
+import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.config.McpConfigLoader
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
 class RuntimeBuilder {
@@ -21,14 +24,20 @@ class RuntimeBuilder {
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
     private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE
+    private var mcpConfigPath: Path? = null
+    private var mcpClientManager: McpClientManager = McpClientManager()
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
+    fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
+    fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
 
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
         val registry = ToolRegistry().also { r -> tools.forEach { r.register(it) } }
+        val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers } ?: emptyList()
+        runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
             model = model,
@@ -37,6 +46,6 @@ class RuntimeBuilder {
         )
         val loop = AgentLoop(p, registry, sm, confirmationPolicy = confirmationPolicy)
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
-        return SophiRuntime(loop, sm, pluginRegistry, agentConfig)
+        return SophiRuntime(loop, sm, pluginRegistry, agentConfig, mcpClientManager)
     }
 }

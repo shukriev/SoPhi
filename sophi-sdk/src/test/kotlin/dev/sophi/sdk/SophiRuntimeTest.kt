@@ -19,6 +19,7 @@ import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
+import dev.sophi.mcp.McpClientManager
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -28,6 +29,7 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
+import io.mockk.verify
 import kotlin.io.path.createTempDirectory
 
 class SophiRuntimeTest : FunSpec({
@@ -124,5 +126,22 @@ class SophiRuntimeTest : FunSpec({
 
         capturedRequests[1].messages.last().content shouldBe
             "Error: Tool 'danger' execution denied by confirmation policy"
+    }
+
+    test("RuntimeBuilder.mcpConfig registers tools returned by McpClientManager.connect and build() closes it via SophiRuntime.close()") {
+        val provider = mockk<LLMProvider>()
+        val mcpManager = mockk<McpClientManager>()
+        coEvery { mcpManager.connect(emptyList()) } returns emptyList()
+        every { mcpManager.close() } just runs
+
+        val rt = RuntimeBuilder()
+            .also { it.provider = provider }
+            .also { it.sessionsDir = createTempDirectory("sophi-sdk-test") }
+            .mcpClientManager(mcpManager)
+            .build()
+
+        rt.close()
+
+        verify { mcpManager.close() }
     }
 })

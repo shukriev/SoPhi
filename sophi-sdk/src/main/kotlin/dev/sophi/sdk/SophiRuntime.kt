@@ -7,13 +7,19 @@ import dev.sophi.core.session.SessionManager
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
+import dev.sophi.mcp.McpClientManager
 
 class SophiRuntime internal constructor(
     internal val agentLoop: AgentLoop,
     internal val sessionManager: SessionManager,
     internal val pluginRegistry: PluginRegistry,
-    internal val config: AgentConfig
+    internal val config: AgentConfig,
+    private val mcpClientManager: McpClientManager? = null
 ) {
+    fun close() {
+        mcpClientManager?.close()
+    }
+
     suspend fun newSession(title: String? = null): String =
         sessionManager.create(title).also { sessionManager.save(it) }.id
 
