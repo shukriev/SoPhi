@@ -33,6 +33,10 @@
             <version>${serialization.version}</version>
         </dependency>
         <dependency>
+            <groupId>io.modelcontextprotocol</groupId>
+            <artifactId>kotlin-sdk-jvm</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.kotest</groupId>
             <artifactId>kotest-runner-junit5</artifactId>
             <scope>test</scope>

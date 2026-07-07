@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!--
+        StdioMcpConnectorTest launches dev.sophi.mcp.TestMcpServerMainKt as a subprocess using
+        this module's own test classpath. That classpath transitively includes logback-classic
+        (via sophi-core to sophi-ai to Spring Boot starter logging). Logback's default
+        ConsoleAppender target is System.out, which is also the MCP stdio transport's JSON-RPC
+        channel for that subprocess: any log line written there corrupts the framing the SDK's
+        ReadBuffer expects (it recovers by skipping unparsable lines, but the corruption is real).
+        Route console logging to System.err instead so stdout stays reserved for JSON-RPC.
+    -->
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -- %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="STDERR" />
+    </root>
+</configuration>
