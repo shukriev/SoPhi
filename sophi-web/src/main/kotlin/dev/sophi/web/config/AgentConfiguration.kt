@@ -1,13 +1,21 @@
 package dev.sophi.web.config
 
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.providers.BraveSearchProvider
 import dev.sophi.ai.providers.buildClaudeProvider
 import dev.sophi.ai.providers.buildOpenAiCompatProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.BashTool
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.EditTool
+import dev.sophi.core.tools.FetchUrlTool
+import dev.sophi.core.tools.GlobTool
+import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.WebSearchTool
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -40,7 +48,22 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
     fun llmProvider(): LLMProvider = buildProviderFromProperties(providerProperties)
 
     @Bean
-    fun toolRegistry(): ToolRegistry = ToolRegistry()
+    fun toolRegistry(): ToolRegistry {
+        val registry = ToolRegistry()
+            .register(GrepTool())
+            .register(GlobTool())
+            .register(EditTool())
+            .register(BashTool())
+            .register(FetchUrlTool())
+        val braveApiKey = System.getenv("BRAVE_SEARCH_API_KEY")
+        if (braveApiKey != null) {
+            registry.register(WebSearchTool(BraveSearchProvider(braveApiKey)))
+        }
+        return registry
+    }
+
+    @Bean
+    fun confirmationPolicy(): ConfirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE
 
     @Bean
     fun sessionManager(): SessionManager =
@@ -50,6 +73,10 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
     fun agentConfig(): AgentConfig = AgentConfig(model = providerProperties.model)
 
     @Bean
-    fun agentLoop(llmProvider: LLMProvider, toolRegistry: ToolRegistry, sessionManager: SessionManager): AgentLoop =
-        AgentLoop(llmProvider, toolRegistry, sessionManager)
+    fun agentLoop(
+        llmProvider: LLMProvider,
+        toolRegistry: ToolRegistry,
+        sessionManager: SessionManager,
+        confirmationPolicy: ConfirmationPolicy
+    ): AgentLoop = AgentLoop(llmProvider, toolRegistry, sessionManager, confirmationPolicy = confirmationPolicy)
 }

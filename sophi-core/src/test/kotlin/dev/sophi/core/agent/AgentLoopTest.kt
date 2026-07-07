@@ -318,4 +318,136 @@ class AgentLoopTest : FunSpec({
             TurnEvent.Token("recovered")
         )
     }
+
+    // ── Confirmation policy ──────────────────────────────────────────────────
+
+    test("turn() does not consult confirmationPolicy for a SAFE tool call") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "safe-tool"
+            override val description = "Safe"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "ok"
+        })
+        val policy = dev.sophi.core.tools.ConfirmationPolicy { _, _ ->
+            throw AssertionError("should not be called for a SAFE tool")
+        }
+        val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(
+                calls = listOf(dev.sophi.ai.api.ToolCall("c1", "safe-tool", "{}")),
+                usage = TokenUsage(1, 0)
+            ),
+            LLMResponse.Text("done", TokenUsage(1, 1))
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithPolicy.turn(session, "go", config)
+
+        result.branch()[1].content shouldBe "done"
+    }
+
+    test("turn() denies a DESTRUCTIVE tool call when the policy returns false, without executing it") {
+        val session = AgentSession(id = "s1")
+        var executed = false
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "Risky"
+            override val parametersJson = "{}"
+            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String {
+                executed = true
+                return "should not run"
+            }
+        })
+        val loopWithPolicy = AgentLoop(
+            provider, toolRegistry, sessionManager,
+            confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { _, _ -> false }
+        )
+        val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        coEvery { provider.complete(any()) } answers {
+            capturedRequests.add(firstArg())
+            if (capturedRequests.size == 1)
+                LLMResponse.ToolUse(
+                    calls = listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}")),
+                    usage = TokenUsage(1, 0)
+                )
+            else
+                LLMResponse.Text("acknowledged", TokenUsage(1, 1))
+        }
+        every { sessionManager.save(any()) } just Runs
+
+        loopWithPolicy.turn(session, "go", config)
+
+        executed shouldBe false
+        capturedRequests[1].messages.last().content shouldBe
+            "Error: Tool 'danger' execution denied by confirmation policy"
+    }
+
+    test("turn() executes a DESTRUCTIVE tool call when the policy returns true") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "Risky"
+            override val parametersJson = "{}"
+            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "did the risky thing"
+        })
+        val loopWithPolicy = AgentLoop(
+            provider, toolRegistry, sessionManager,
+            confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { _, _ -> true }
+        )
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(
+                calls = listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}")),
+                usage = TokenUsage(1, 0)
+            ),
+            LLMResponse.Text("done", TokenUsage(1, 1))
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithPolicy.turn(session, "go", config)
+
+        result.branch()[1].content shouldBe "done"
+    }
+
+    test("turn() resolves all confirmations before executing any tool in the batch") {
+        val session = AgentSession(id = "s1")
+        val log = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "d1"
+            override val description = "Risky 1"
+            override val parametersJson = "{}"
+            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { log.add("exec:d1"); return "1" }
+        })
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "d2"
+            override val description = "Risky 2"
+            override val parametersJson = "{}"
+            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { log.add("exec:d2"); return "2" }
+        })
+        val policy = dev.sophi.core.tools.ConfirmationPolicy { toolName, _ -> log.add("confirm:$toolName"); true }
+        val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(
+                calls = listOf(
+                    dev.sophi.ai.api.ToolCall("c1", "d1", "{}"),
+                    dev.sophi.ai.api.ToolCall("c2", "d2", "{}")
+                ),
+                usage = TokenUsage(1, 0)
+            ),
+            LLMResponse.Text("done", TokenUsage(1, 1))
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        loopWithPolicy.turn(session, "go", config)
+
+        log.take(2) shouldBe listOf("confirm:d1", "confirm:d2")
+    }
 })

@@ -15,7 +15,7 @@ class SophiRuntime internal constructor(
     internal val config: AgentConfig
 ) {
     suspend fun newSession(title: String? = null): String =
-        sessionManager.create(title).id
+        sessionManager.create(title).also { sessionManager.save(it) }.id
 
     suspend fun turn(sessionId: String, input: String): String {
         val session = sessionManager.load(sessionId)
