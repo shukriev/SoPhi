@@ -13,7 +13,9 @@ import io.modelcontextprotocol.kotlin.sdk.types.Implementation
  * Note: the real SDK's [StreamableHttpClientTransport] constructor (0.14.0) matches the brief
  * exactly (`client`/`url` parameters), unlike [StdioMcpConnector]'s transport. There's no OS
  * subprocess for HTTP, so [SdkMcpSession] is constructed with its `process` parameter left at its
- * default (`null`).
+ * default (`null`). The [HttpClient] we create here is passed to [SdkMcpSession] so it gets closed
+ * alongside the SDK [Client] — see the `httpClient` param doc on [SdkMcpSession] for why that's
+ * necessary rather than automatic.
  */
 class StreamableHttpMcpConnector : McpConnector {
     override suspend fun connect(config: McpServerConfig): McpSession {
@@ -22,6 +24,6 @@ class StreamableHttpMcpConnector : McpConnector {
         val transport = StreamableHttpClientTransport(client = httpClient, url = url)
         val client = Client(clientInfo = Implementation(name = "sophi", version = "1.0.0"))
         client.connect(transport)
-        return SdkMcpSession(client)
+        return SdkMcpSession(client, httpClient = httpClient)
     }
 }

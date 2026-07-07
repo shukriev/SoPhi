@@ -1,5 +1,6 @@
 package dev.sophi.mcp
 
+import io.ktor.client.HttpClient
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequestParams
@@ -18,8 +19,18 @@ import kotlinx.serialization.json.jsonObject
  * subprocess spawned by [StdioMcpConnector]). Optional so that future non-process transports
  * (e.g. an HTTP-based connector) can construct a session without one. When present, [close]
  * force-destroys it as a backstop in case the server ignores stdin EOF and never exits on its own.
+ * @param httpClient the Ktor [HttpClient] backing this session's transport, if any (e.g. one
+ * created by [StreamableHttpMcpConnector]). Optional for the same reason as [process]. Required
+ * because [Client.close] only closes the SDK's transport (cancels its SSE job/scope) and never
+ * closes an externally-provided [HttpClient] — verified against the 0.14.0 SDK sources
+ * (`StreamableHttpClientTransport.closeResources()`), which does not touch `client`. Without this,
+ * every HTTP session close would leak the CIO engine's connection pool and worker threads.
  */
-class SdkMcpSession(private val client: Client, private val process: Process? = null) : McpSession {
+class SdkMcpSession(
+    private val client: Client,
+    private val process: Process? = null,
+    private val httpClient: HttpClient? = null
+) : McpSession {
 
     override suspend fun listTools(): List<RemoteToolInfo> =
         client.listTools().tools.map { tool ->
@@ -41,7 +52,11 @@ class SdkMcpSession(private val client: Client, private val process: Process? = 
         try {
             client.close()
         } finally {
-            process?.destroyForcibly()
+            try {
+                process?.destroyForcibly()
+            } finally {
+                httpClient?.close()
+            }
         }
     }
 }

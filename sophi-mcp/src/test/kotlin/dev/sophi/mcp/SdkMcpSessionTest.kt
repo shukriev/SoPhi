@@ -2,8 +2,11 @@ package dev.sophi.mcp
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.ktor.client.HttpClient
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 
@@ -72,5 +75,40 @@ class SdkMcpSessionTest : FunSpec({
         runBlocking {
             session.close()
         }
+    }
+
+    // The real SDK's StreamableHttpClientTransport.closeResources() only cancels its own SSE
+    // job/scope and never calls the underlying HttpClient's close() (verified against the
+    // 0.14.0 SDK sources) — so SdkMcpSession must close an externally-provided HttpClient itself,
+    // or every HTTP session close leaks the CIO engine's connection pool and worker threads.
+    test("close closes the http client when one was supplied") {
+        val mockClient = mockk<io.modelcontextprotocol.kotlin.sdk.client.Client>()
+        coEvery { mockClient.close() } returns Unit
+        val mockHttpClient = mockk<HttpClient>()
+        every { mockHttpClient.close() } returns Unit
+
+        val session = SdkMcpSession(mockClient, process = null, httpClient = mockHttpClient)
+        runBlocking {
+            session.close()
+        }
+
+        verify { mockHttpClient.close() }
+    }
+
+    test("close closes the http client even if client.close() throws") {
+        val mockClient = mockk<io.modelcontextprotocol.kotlin.sdk.client.Client>()
+        coEvery { mockClient.close() } throws IllegalStateException("simulated client close failure")
+        val mockHttpClient = mockk<HttpClient>()
+        every { mockHttpClient.close() } returns Unit
+
+        val session = SdkMcpSession(mockClient, process = null, httpClient = mockHttpClient)
+        val result = runCatching {
+            runBlocking {
+                session.close()
+            }
+        }
+
+        result.isFailure shouldBe true
+        verify { mockHttpClient.close() }
     }
 })
