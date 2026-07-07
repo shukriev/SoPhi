@@ -38,7 +38,10 @@ class SdkMcpSession(private val client: Client, private val process: Process? = 
     }
 
     override suspend fun close() {
-        client.close()
-        process?.destroyForcibly()
+        try {
+            client.close()
+        } finally {
+            process?.destroyForcibly()
+        }
     }
 }
