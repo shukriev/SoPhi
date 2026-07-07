@@ -36,6 +36,42 @@
             <groupId>io.modelcontextprotocol</groupId>
             <artifactId>kotlin-sdk-jvm</artifactId>
         </dependency>
+        <!--
+            The MCP SDK's client module depends on `ktor-client-core-jvm` but does not bundle a
+            concrete HTTP client engine (discovered at runtime: `StreamableHttpMcpConnector`
+            failed with "Failed to find HTTP client engine implementation" until this was added).
+            CIO is a pure-Kotlin engine (no extra native/OS deps) and matches the server-side CIO
+            engine used by the test fixture, so it is used here too, at the same 3.4.3 version.
+            This is main-scoped (not test-scoped): real callers of StreamableHttpMcpConnector need
+            an engine on the classpath too.
+        -->
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-client-cio-jvm</artifactId>
+            <version>3.4.3</version>
+        </dependency>
+        <!--
+            NOTE: the bare `io.ktor:ktor-server-cio`/`ktor-server-core` artifacts (no "-jvm"
+            suffix) are Kotlin-Multiplatform metadata-only jars with zero real .class files
+            (same trap as the bare `kotlin-sdk` artifact discovered in Task 3) — verified by
+            downloading and inspecting the jar contents. The `kotlin-sdk-server-jvm` dependency
+            above already pulls in `ktor-server-core-jvm:3.4.3` transitively (compile scope);
+            `ktor-server-cio-jvm` (the CIO engine) is not transitively provided and must be added
+            explicitly, at the same 3.4.3 version, to avoid binary incompatibility with the
+            client-side Ktor artifacts.
+        -->
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-server-cio-jvm</artifactId>
+            <version>3.4.3</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.ktor</groupId>
+            <artifactId>ktor-server-core-jvm</artifactId>
+            <version>3.4.3</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.kotest</groupId>
             <artifactId>kotest-runner-junit5</artifactId>
