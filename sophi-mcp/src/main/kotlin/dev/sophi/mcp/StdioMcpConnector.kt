@@ -22,12 +22,33 @@ class StdioMcpConnector : McpConnector {
         processBuilder.environment().putAll(config.env)
         val process = processBuilder.start()
 
-        val transport = StdioClientTransport(
-            input = process.inputStream.asSource().buffered(),
-            output = process.outputStream.asSink().buffered()
-        )
-        val client = Client(clientInfo = Implementation(name = "sophi", version = "1.0.0"))
-        client.connect(transport)
-        return SdkMcpSession(client)
+        val client = connectOrDestroy(process) {
+            val transport = StdioClientTransport(
+                input = process.inputStream.asSource().buffered(),
+                output = process.outputStream.asSink().buffered()
+            )
+            val client = Client(clientInfo = Implementation(name = "sophi", version = "1.0.0"))
+            client.connect(transport)
+            client
+        }
+        return SdkMcpSession(client, process)
     }
+
+    /**
+     * Runs [connectBlock] (spawns the transport and performs the MCP handshake) against an
+     * already-started [process]. If [connectBlock] throws for any reason (server crashes, hangs
+     * mid-handshake, or never speaks the protocol), the already-started subprocess must not be
+     * leaked: it is force-killed before the failure is propagated.
+     *
+     * Pulled out as its own function (rather than inlined into [connect]) so the "destroy the
+     * process on failure" behavior can be exercised directly in tests with a synthetic failure,
+     * independent of the real SDK's handshake timing.
+     */
+    internal suspend fun <T> connectOrDestroy(process: Process, connectBlock: suspend () -> T): T =
+        try {
+            connectBlock()
+        } catch (error: Throwable) {
+            process.destroyForcibly()
+            throw error
+        }
 }
