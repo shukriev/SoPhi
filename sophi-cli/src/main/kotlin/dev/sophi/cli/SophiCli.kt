@@ -21,8 +21,11 @@ import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
+import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.config.McpConfigLoader
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createDirectories
+import kotlin.io.path.exists
 import java.nio.file.Path
 
 class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness") {
@@ -63,6 +66,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--brave-api-key",
         help = "Brave Search API key for the web_search tool (falls back to BRAVE_SEARCH_API_KEY; omit to disable web_search)"
     )
+    private val mcpConfigPathStr: String by option(
+        "--mcp-config",
+        help = "Path to an MCP server config file (default: .sophi/mcp.json in the working directory)"
+    ).default(".sophi/mcp.json")
 
     override fun run() = runBlocking {
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
@@ -86,6 +93,12 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val braveApiKey = braveApiKeyOption ?: System.getenv("BRAVE_SEARCH_API_KEY")
         if (braveApiKey != null) {
             registry.register(WebSearchTool(BraveSearchProvider(braveApiKey)))
+        }
+        val mcpClientManager = McpClientManager()
+        val mcpConfigPath = Path.of(mcpConfigPathStr)
+        if (mcpConfigPath.exists()) {
+            val mcpConfig = McpConfigLoader().load(mcpConfigPath)
+            mcpClientManager.connect(mcpConfig.servers).forEach { registry.register(it) }
         }
         if (agentDefinitions.isNotEmpty()) {
             registry.register(
@@ -133,6 +146,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             engine.run(session)
         } finally {
             sophiTerminal.close()
+            mcpClientManager.close()
         }
         mordantTerminal.println(TextColors.cyan("\nSession ${session.id} ended."))
     }
