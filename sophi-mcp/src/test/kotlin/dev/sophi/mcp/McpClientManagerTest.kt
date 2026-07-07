@@ -75,4 +75,64 @@ class McpClientManagerTest : FunSpec({
 
         coVerify { session.close() }
     }
+
+    test("connect skips a server whose listTools() throws and still registers the rest, but keeps its session open") {
+        val brokenSession = mockk<McpSession>()
+        coEvery { brokenSession.listTools() } throws RuntimeException("discovery boom")
+        coJustRun { brokenSession.close() }
+        val workingSession = mockk<McpSession>()
+        coEvery { workingSession.listTools() } returns listOf(RemoteToolInfo("ping", "pings", "{}"))
+        coJustRun { workingSession.close() }
+
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(match { it.name == "broken" }) } returns brokenSession
+        coEvery { connector.connect(match { it.name == "ok" }) } returns workingSession
+        val manager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+
+        val tools = runBlocking {
+            manager.connect(
+                listOf(
+                    McpServerConfig(name = "broken", transport = McpTransport.STDIO, command = listOf("x")),
+                    McpServerConfig(name = "ok", transport = McpTransport.STDIO, command = listOf("y"))
+                )
+            )
+        }
+
+        tools.map { it.name } shouldBe listOf("ok__ping")
+
+        // The broken session connected successfully — even though tool discovery on it failed,
+        // it's still a real open session and must be closed alongside the rest.
+        manager.close()
+        coVerify { brokenSession.close() }
+        coVerify { workingSession.close() }
+    }
+
+    test("close attempts every session even if an earlier session's close() throws") {
+        val firstSession = mockk<McpSession>()
+        coEvery { firstSession.listTools() } returns emptyList()
+        coEvery { firstSession.close() } throws RuntimeException("close boom")
+        val secondSession = mockk<McpSession>()
+        coEvery { secondSession.listTools() } returns emptyList()
+        coJustRun { secondSession.close() }
+
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(match { it.name == "first" }) } returns firstSession
+        coEvery { connector.connect(match { it.name == "second" }) } returns secondSession
+        val manager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+
+        runBlocking {
+            manager.connect(
+                listOf(
+                    McpServerConfig(name = "first", transport = McpTransport.STDIO, command = listOf("x")),
+                    McpServerConfig(name = "second", transport = McpTransport.STDIO, command = listOf("y"))
+                )
+            )
+        }
+
+        // Should not throw, and must still attempt to close the second session.
+        manager.close()
+
+        coVerify { firstSession.close() }
+        coVerify { secondSession.close() }
+    }
 })

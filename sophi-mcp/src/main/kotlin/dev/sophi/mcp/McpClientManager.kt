@@ -19,22 +19,29 @@ class McpClientManager(
                 McpTransport.STDIO -> stdioConnector
                 McpTransport.HTTP -> httpConnector
             }
-            val session = try {
-                connector.connect(config)
+            try {
+                val session = connector.connect(config)
+                openSessions.add(session)
+                val safeTools = config.safeTools.toSet()
+                session.listTools().forEach { remoteTool ->
+                    tools.add(McpTool(session, config.name, remoteTool, safeTools))
+                }
             } catch (e: Exception) {
-                System.err.println("Warning: MCP server '${config.name}' failed to connect: ${e.message}")
-                continue
-            }
-            openSessions.add(session)
-            val safeTools = config.safeTools.toSet()
-            session.listTools().forEach { remoteTool ->
-                tools.add(McpTool(session, config.name, remoteTool, safeTools))
+                System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: ${e.message}")
             }
         }
         return tools
     }
 
     override fun close() {
-        runBlocking { openSessions.forEach { it.close() } }
+        runBlocking {
+            openSessions.forEach { session ->
+                try {
+                    session.close()
+                } catch (e: Exception) {
+                    System.err.println("Warning: failed to close an MCP session: ${e.message}")
+                }
+            }
+        }
     }
 }

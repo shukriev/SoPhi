@@ -54,11 +54,21 @@
             NOTE: the bare `io.ktor:ktor-server-cio`/`ktor-server-core` artifacts (no "-jvm"
             suffix) are Kotlin-Multiplatform metadata-only jars with zero real .class files
             (same trap as the bare `kotlin-sdk` artifact discovered in Task 3) — verified by
-            downloading and inspecting the jar contents. The `kotlin-sdk-server-jvm` dependency
-            above already pulls in `ktor-server-core-jvm:3.4.3` transitively (compile scope);
-            `ktor-server-cio-jvm` (the CIO engine) is not transitively provided and must be added
-            explicitly, at the same 3.4.3 version, to avoid binary incompatibility with the
-            client-side Ktor artifacts.
+            downloading and inspecting the jar contents.
+
+            `kotlin-sdk-jvm` (declared above) transitively drags in `kotlin-sdk-server-jvm`,
+            which in turn pulls `ktor-server-core-jvm:3.4.3` transitively (confirmed via
+            `mvn dependency:tree -pl sophi-mcp`). It's declared explicitly here anyway, pinned to
+            test scope, for two reasons: (1) clarity — the test fixtures (TestMcpHttpServer) use
+            it directly, so it should show up as a first-class dependency rather than an implicit
+            transitive one; (2) safety — without the explicit test-scoped declaration, the
+            transitive resolution is ambiguous about scope (conflicting `compile`/`runtime` scopes
+            reach it via different paths through the SDK's dependency tree), so pinning it
+            explicitly avoids it leaking onto the main compile classpath.
+
+            `ktor-server-cio-jvm` (the CIO engine) is NOT transitively provided by the SDK at all
+            and must be added explicitly, at the same 3.4.3 version, to avoid binary incompatibility
+            with the client-side Ktor artifacts.
         -->
         <dependency>
             <groupId>io.ktor</groupId>
