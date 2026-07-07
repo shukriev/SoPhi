@@ -16,10 +16,14 @@ import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
+import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.config.McpConfigLoader
+import kotlinx.coroutines.runBlocking
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import java.nio.file.Path
+import kotlin.io.path.exists
 
 internal fun buildProviderFromProperties(props: ProviderProperties): LLMProvider = when (props.type.lowercase()) {
     "claude" -> {
@@ -48,7 +52,7 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
     fun llmProvider(): LLMProvider = buildProviderFromProperties(providerProperties)
 
     @Bean
-    fun toolRegistry(): ToolRegistry {
+    fun toolRegistry(mcpClientManager: McpClientManager): ToolRegistry {
         val registry = ToolRegistry()
             .register(GrepTool())
             .register(GlobTool())
@@ -59,11 +63,19 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         if (braveApiKey != null) {
             registry.register(WebSearchTool(BraveSearchProvider(braveApiKey)))
         }
+        val mcpConfigPath = Path.of(System.getProperty("user.dir"), ".sophi", "mcp.json")
+        if (mcpConfigPath.exists()) {
+            val mcpConfig = McpConfigLoader().load(mcpConfigPath)
+            runBlocking { mcpClientManager.connect(mcpConfig.servers) }.forEach { registry.register(it) }
+        }
         return registry
     }
 
     @Bean
     fun confirmationPolicy(): ConfirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE
+
+    @Bean(destroyMethod = "close")
+    fun mcpClientManager(): McpClientManager = McpClientManager()
 
     @Bean
     fun sessionManager(): SessionManager =
