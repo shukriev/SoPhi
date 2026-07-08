@@ -6,8 +6,11 @@ import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -24,6 +27,15 @@ import kotlinx.serialization.json.JsonObject
  *
  * DESTRUCTIVE tools are never executed when called via this server: [Tool.execute] is not invoked
  * for them at all, and the caller instead receives an error [CallToolResult] denying the call.
+ *
+ * Each exposed tool's [Tool.parametersJson] (a JSON Schema string) is parsed into the SDK's
+ * [ToolSchema] and passed as `addTool`'s `inputSchema` parameter (confirmed via the 0.14.0 sources
+ * under `kotlin-sdk-server-jvm-0.14.0-sources.jar!/.../server/Server.kt`'s
+ * `addTool(name, description, inputSchema = ToolSchema(), ...)` overload, and
+ * `kotlin-sdk-core-jvm-0.14.0-sources.jar!/.../types/tools.kt`'s `ToolSchema` data class), so that
+ * external MCP clients receive real argument descriptions instead of the overload's empty default.
+ * [McpJson] (the SDK's own pre-configured `ignoreUnknownKeys = true` instance) is used for parsing
+ * since [ToolSchema] declares its `type` property outside the primary constructor.
  */
 fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
     require(exposedNames.isNotEmpty()) { "--expose-tools must name at least one tool" }
@@ -38,7 +50,8 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
 
     exposedNames.forEach { name ->
         val tool = toolsByName.getValue(name)
-        server.addTool(name = tool.name, description = tool.description) { request ->
+        val inputSchema = McpJson.decodeFromString<ToolSchema>(tool.parametersJson)
+        server.addTool(name = tool.name, description = tool.description, inputSchema = inputSchema) { request ->
             if (tool.riskLevel == RiskLevel.DESTRUCTIVE) {
                 CallToolResult(
                     isError = true,
