@@ -60,7 +60,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-core` | Agent loop, session (JSONL tree), tools, compaction | skeleton |
 | `sophi-skills` | Lazy-loaded Markdown skill packages | skeleton |
 | `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | skeleton |
-| `sophi-mcp` | MCP client: connects to external MCP servers over stdio/Streamable HTTP, adapts their tools into dev.sophi.core.tools.Tool | skeleton |
+| `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | skeleton |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | skeleton |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | skeleton |
 | `sophi-sdk` | Embeddable library for Spring `@Service` beans | skeleton |
@@ -279,4 +279,4 @@ class SkillLoader {
 | `sophi-web` | M4 | complete | [article-10](articles/article-10.md) |
 | `sophi-sdk` + `sophi-infra` | M4 | complete | [article-11](articles/article-11.md) |
 | `sophi-core` subagent delegation | M5 | complete | [article-13](articles/article-13.md) |
-| `sophi-mcp` (client) | post-M5 | complete | — |
+| `sophi-mcp` (client + server) | post-M5 | complete | — |
