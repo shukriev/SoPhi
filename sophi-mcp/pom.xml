@@ -11,7 +11,7 @@
     </parent>
 
     <artifactId>sophi-mcp</artifactId>
-    <name>Sophi — MCP Client</name>
+    <name>Sophi — MCP</name>
 
     <dependencies>
         <dependency>
