@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!--
+        `sophi mcp-serve` (see McpServeCommand.kt) uses System.out as the MCP stdio transport's
+        JSON-RPC channel. sophi-cli's runtime classpath transitively includes logback-classic (via
+        sophi-core to sophi-ai to Spring Boot starter logging), and without this configuration
+        logback's default ConsoleAppender would also target System.out, corrupting the JSON-RPC
+        stream with any incidental log line. Route console logging to System.err instead so stdout
+        stays reserved for the protocol. This applies to every sophi-cli invocation, not just
+        mcp-serve, but sophi-cli's own interactive chat-session output goes through Mordant's
+        Terminal/println directly rather than SLF4J/logback, so this only redirects incidental
+        library log noise and does not change any user-visible chat-session behavior.
+    -->
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -- %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="STDERR" />
+    </root>
+</configuration>
