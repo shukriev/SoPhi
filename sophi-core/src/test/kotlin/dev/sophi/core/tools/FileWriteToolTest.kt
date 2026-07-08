@@ -61,4 +61,8 @@ class FileWriteToolTest : FunSpec({
     test("name is write_file") {
         tool.name shouldBe "write_file"
     }
+
+    test("riskLevel is DESTRUCTIVE") {
+        tool.riskLevel shouldBe RiskLevel.DESTRUCTIVE
+    }
 })
