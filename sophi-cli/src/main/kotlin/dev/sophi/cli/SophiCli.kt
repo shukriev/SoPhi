@@ -19,6 +19,7 @@ import dev.sophi.core.tools.FileReadTool
 import dev.sophi.core.tools.FileWriteTool
 import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
+import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.mcp.McpClientManager
@@ -72,6 +73,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
     ).default(".sophi/mcp.json")
 
     override fun run() = runBlocking {
+        if (currentContext.invokedSubcommand != null) return@runBlocking
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
@@ -83,17 +85,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
 
         val registry = ToolRegistry()
-            .register(FileReadTool())
-            .register(FileWriteTool())
-            .register(GrepTool())
-            .register(GlobTool())
-            .register(EditTool())
-            .register(BashTool())
-            .register(FetchUrlTool())
-        val braveApiKey = braveApiKeyOption ?: System.getenv("BRAVE_SEARCH_API_KEY")
-        if (braveApiKey != null) {
-            registry.register(WebSearchTool(BraveSearchProvider(braveApiKey)))
-        }
+        buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
         val mcpClientManager = McpClientManager()
         val mcpConfigPath = Path.of(mcpConfigPathStr)
         if (mcpConfigPath.exists()) {
@@ -157,4 +149,15 @@ private class LegacyReadLineInputSource : InputSource {
     override suspend fun awaitEsc() {
         kotlinx.coroutines.delay(Long.MAX_VALUE)
     }
+}
+
+internal fun buildBuiltinTools(braveApiKeyOption: String?): List<Tool> {
+    val tools = mutableListOf<Tool>(
+        FileReadTool(), FileWriteTool(), GrepTool(), GlobTool(), EditTool(), BashTool(), FetchUrlTool()
+    )
+    val braveApiKey = braveApiKeyOption ?: System.getenv("BRAVE_SEARCH_API_KEY")
+    if (braveApiKey != null) {
+        tools.add(WebSearchTool(BraveSearchProvider(braveApiKey)))
+    }
+    return tools
 }
