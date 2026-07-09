@@ -10,8 +10,16 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
+import dev.sophi.extensions.PluginRegistry
+import dev.sophi.learning.JsonlLog
+import dev.sophi.learning.LearningConfig
+import dev.sophi.learning.LearningPlugin
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.every
@@ -64,6 +72,28 @@ class TurnControllerTest : FunSpec({
             ResponseRenderer.renderToolCall("ping", "{}", "pong"),
             ResponseRenderer.renderText("done")
         )
+    }
+
+    test("runTurn() dispatches AFTER_TURN via onTurnSettled so a registry-backed plugin records it") {
+        val home = tempdir().toPath()
+        val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"), model = "test-model")
+        val registry = PluginRegistry().register(learning)
+        every { provider.stream(any()) } returns flowOf("Hello")
+        val input = ScriptedInputSource(emptyList())
+        val rendered = mutableListOf<String>()
+        val controller = TurnController(
+            loop, config, input, LiveRegion(StringBuilder()) { 80 },
+            onTurnSettled = { error ->
+                if (error != null) registry.dispatch(HookPoint.ON_ERROR, HookContext("s1", error = error))
+                else registry.dispatch(HookPoint.AFTER_TURN, HookContext("s1"))
+            }
+        ) { rendered.add(it) }
+
+        controller.runTurn(AgentSession(id = "s1"), "hi")
+
+        val line = JsonlLog(home.resolve("session-outcomes.jsonl")).readAll().single()
+        line shouldContain "\"outcome\":\"open\""
+        line shouldContain "\"turns\":1"
     }
 
     test("runTurn() cancels the stream and returns the original session when ESC arrives mid-turn") {

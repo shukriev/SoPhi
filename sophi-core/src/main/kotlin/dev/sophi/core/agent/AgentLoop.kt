@@ -17,6 +17,16 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
+import kotlinx.serialization.encodeToString
+
+@kotlinx.serialization.Serializable
+private data class ToolCallRecord(val id: String, val name: String, val argumentsJson: String)
+
+private data class PendingEntry(
+    val role: EntryRole, val content: String, val metadata: Map<String, String>
+)
+
+private val entryJson = kotlinx.serialization.json.Json
 
 class AgentLoop(
     private val provider: LLMProvider,
@@ -35,6 +45,7 @@ class AgentLoop(
         messages.add(Message(MessageRole.USER, userInput))
 
         var toolRound = 0
+        val pendingRounds = mutableListOf<PendingEntry>()
 
         while (true) {
             val request = CompletionRequest(
@@ -50,6 +61,7 @@ class AgentLoop(
                 is LLMResponse.Text -> {
                     onEvent(TurnEvent.Token(response.content))
                     session.append(EntryRole.USER, userInput)
+                    pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
                     session.append(EntryRole.ASSISTANT, response.content)
                     sessionManager.save(session)
 
@@ -64,6 +76,14 @@ class AgentLoop(
                         throw IllegalStateException("Max tool rounds (${config.maxToolRounds}) exceeded")
                     }
                     messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = response.calls))
+                    pendingRounds.add(PendingEntry(
+                        EntryRole.ASSISTANT, "",
+                        mapOf(
+                            "replay" to "false",
+                            "toolCalls" to entryJson.encodeToString(
+                                response.calls.map { ToolCallRecord(it.id, it.name, it.argumentsJson) })
+                        )
+                    ))
 
                     val allowedCalls = response.calls.map { call ->
                         val tool = registry.getOrNull(call.name)
@@ -76,17 +96,20 @@ class AgentLoop(
                         allowedCalls.map { (call, allowed) ->
                             async {
                                 onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
+                                val start = System.currentTimeMillis()
+                                var failed = false
                                 val result = if (!allowed) {
+                                    failed = true
                                     "Error: Tool '${call.name}' execution denied by confirmation policy"
                                 } else {
                                     registry.getOrNull(call.name)
                                         ?.let { tool ->
                                             runCatching { tool.execute(call.argumentsJson) }
-                                                .getOrElse { e -> "Error: ${e.message}" }
+                                                .getOrElse { e -> failed = true; "Error: ${e.message}" }
                                         }
-                                        ?: "Error: Tool '${call.name}' not found"
+                                        ?: run { failed = true; "Error: Tool '${call.name}' not found" }
                                 }
-                                onEvent(TurnEvent.ToolCallFinished(call.name, result))
+                                onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
                                 Message(
                                     role = MessageRole.TOOL,
                                     content = result,
@@ -97,6 +120,12 @@ class AgentLoop(
                         }.awaitAll()
                     }
                     messages.addAll(toolResults)
+                    toolResults.forEach { m ->
+                        pendingRounds.add(PendingEntry(
+                            EntryRole.TOOL_RESULT, m.content,
+                            mapOf("replay" to "false", "toolCallId" to (m.toolCallId ?: ""), "toolName" to (m.toolName ?: ""))
+                        ))
+                    }
                     toolRound++
                 }
                 is LLMResponse.Error -> {

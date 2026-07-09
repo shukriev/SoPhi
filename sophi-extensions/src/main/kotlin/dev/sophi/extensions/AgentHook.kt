@@ -12,7 +12,11 @@ data class HookContext(
     val sessionId: String,
     val userInput: String? = null,
     val toolName: String? = null,
-    val error: Throwable? = null
+    val error: Throwable? = null,
+    val argumentsJson: String? = null,
+    val toolResult: String? = null,
+    val success: Boolean? = null,
+    val durationMillis: Long? = null
 )
 
 interface AgentHook {

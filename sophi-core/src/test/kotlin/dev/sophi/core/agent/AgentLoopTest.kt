@@ -132,8 +132,9 @@ class AgentLoopTest : FunSpec({
 
         val result = loopWithTool.turn(session, "What is 6 times 7?", config)
 
-        result.branch() shouldHaveSize 2
-        result.branch()[1].content shouldBe "The answer is 42"
+        // USER, ASSISTANT (tool-call round, replay=false), TOOL_RESULT (replay=false), final ASSISTANT
+        result.branch() shouldHaveSize 4
+        result.branch().last().content shouldBe "The answer is 42"
         coVerify(exactly = 2) { provider.complete(any()) }
     }
 
@@ -314,7 +315,7 @@ class AgentLoopTest : FunSpec({
 
         events shouldBe listOf(
             TurnEvent.ToolCallStarted("broken", "{}"),
-            TurnEvent.ToolCallFinished("broken", "Error: disk full"),
+            TurnEvent.ToolCallFinished("broken", "Error: disk full", isError = true),
             TurnEvent.Token("recovered")
         )
     }
@@ -345,7 +346,7 @@ class AgentLoopTest : FunSpec({
 
         val result = loopWithPolicy.turn(session, "go", config)
 
-        result.branch()[1].content shouldBe "done"
+        result.branch().last().content shouldBe "done"
     }
 
     test("turn() denies a DESTRUCTIVE tool call when the policy returns false, without executing it") {
@@ -411,7 +412,7 @@ class AgentLoopTest : FunSpec({
 
         val result = loopWithPolicy.turn(session, "go", config)
 
-        result.branch()[1].content shouldBe "done"
+        result.branch().last().content shouldBe "done"
     }
 
     test("turn() resolves all confirmations before executing any tool in the batch") {

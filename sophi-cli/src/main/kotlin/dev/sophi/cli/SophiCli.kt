@@ -22,6 +22,13 @@ import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
+import dev.sophi.extensions.PluginRegistry
+import dev.sophi.extensions.turnEventBridge
+import dev.sophi.learning.LearningConfig
+import dev.sophi.learning.LearningPlugin
+import dev.sophi.learning.ToolReliabilitySection
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
 import kotlinx.coroutines.runBlocking
@@ -77,7 +84,19 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
-        val config = AgentConfig(model = model, systemPrompt = systemPrompt)
+
+        // Learning: capture tool outcomes and inject a reliability section into the system prompt.
+        val learningConfig = LearningConfig()
+        val learningPlugin = LearningPlugin(learningConfig, model = model)
+        val pluginRegistry = PluginRegistry().register(learningPlugin)
+        val bridge = pluginRegistry.turnEventBridge(session.id)
+        val reliabilitySection =
+            ToolReliabilitySection(learningPlugin.toolStats, learningConfig).render(learningConfig.scope)
+        val effectiveSystemPrompt =
+            listOfNotNull(systemPrompt, reliabilitySection).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+
+        val config = AgentConfig(model = model, systemPrompt = effectiveSystemPrompt)
+        runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
         val mordantTerminal = Terminal()
         val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal)
 
@@ -131,12 +150,28 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
-        val turnController = TurnController(loop, config, inputSource, liveRegion) { mordantTerminal.println(it) }
+        val turnController = TurnController(
+            loop, config, inputSource, liveRegion, onEvent = bridge,
+            onTurnSettled = { error ->
+                // Learning must never break a turn: dispatch is best-effort.
+                runCatching {
+                    if (error != null) {
+                        pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(session.id, error = error))
+                    } else {
+                        pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(session.id))
+                    }
+                }
+            }
+        ) {
+            mordantTerminal.println(it)
+        }
         val engine = TuiEngine(turnController, slashHandler, inputSource)
 
         try {
             engine.run(session)
         } finally {
+            // TuiEngine.run returns on both exit paths (exit/quit and EOF); record the outcome once.
+            runCatching { learningPlugin.recordSessionEnd(session.id) }
             sophiTerminal.close()
             mcpClientManager.close()
         }

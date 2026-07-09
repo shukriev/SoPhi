@@ -5,6 +5,10 @@ import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
+import dev.sophi.extensions.PluginRegistry
+import dev.sophi.extensions.turnEventBridge
 import dev.sophi.web.api.ChatRequest
 import dev.sophi.web.api.ChatResponse
 import dev.sophi.web.api.SessionDto
@@ -30,7 +34,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 class AgentController(
     private val sessionManager: SessionManager,
     private val agentLoop: AgentLoop,
-    private val config: AgentConfig
+    private val config: AgentConfig,
+    private val pluginRegistry: PluginRegistry = PluginRegistry()
 ) {
     // Concurrent turns on one session would each load-then-save, losing the
     // slower writer's entries; serialize load+turn+save per session id.
@@ -41,6 +46,7 @@ class AgentController(
     @PostMapping("/sessions")
     fun createSession(@RequestParam(required = false) title: String?): SessionDto {
         val session = sessionManager.create(title)
+        runCatching { sessionManager.saveConfigSnapshot(session.id, config.model, config.systemPrompt) }
         return SessionDto(session.id, session.entries.size, System.currentTimeMillis())
     }
 
@@ -58,7 +64,14 @@ class AgentController(
         } catch (e: Exception) {
             return ResponseEntity.notFound().build()
         }
-        val updated = agentLoop.turn(session, req.input, config)
+        val updated = try {
+            agentLoop.turn(session, req.input, config, pluginRegistry.turnEventBridge(id))
+        } catch (e: Exception) {
+            // Learning must never break responses: dispatch is best-effort, error still propagates.
+            runCatching { pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(id, error = e)) }
+            throw e
+        }
+        runCatching { pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(id)) }
         val reply = updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
         ResponseEntity.ok(ChatResponse(updated.id, reply))
     }
@@ -73,12 +86,16 @@ class AgentController(
             try {
                 lockFor(id).withLock {
                     val session = sessionManager.load(id)
+                    val bridge = pluginRegistry.turnEventBridge(id)
                     agentLoop.streamTurn(session, input, config) { event ->
+                        bridge(event)
                         if (event is TurnEvent.Token) emitter.send(SseEmitter.event().data(event.text).build())
                     }
                 }
+                runCatching { pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(id)) }
                 emitter.complete()
             } catch (e: Exception) {
+                runCatching { pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(id, error = e)) }
                 emitter.completeWithError(e)
             }
         }

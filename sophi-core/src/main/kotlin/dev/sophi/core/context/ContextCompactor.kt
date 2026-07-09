@@ -19,10 +19,14 @@ class ContextCompactor(private val provider: LLMProvider) {
         keepRecentCount: Int = 4
     ): AgentSession {
         val entries = session.branch()
-        if (entries.size <= keepRecentCount) return session
+        // replay=false entries (e.g. persisted tool rounds) are inert for prompting; keep them in
+        // the DAG but exclude them from both the summary input and the keep/compact split so the
+        // summary never leaks raw tool output and keepRecentCount counts real conversation entries.
+        val replayable = entries.filter { it.metadata["replay"] != "false" }
+        if (replayable.size <= keepRecentCount) return session
 
-        val toCompact = entries.dropLast(keepRecentCount)
-        val toKeep = entries.takeLast(keepRecentCount)
+        val toCompact = replayable.dropLast(keepRecentCount)
+        val toKeep = replayable.takeLast(keepRecentCount)
 
         val summaryPrompt = toCompact.joinToString("\n") { entry ->
             "${entry.role.name}: ${entry.content}"
