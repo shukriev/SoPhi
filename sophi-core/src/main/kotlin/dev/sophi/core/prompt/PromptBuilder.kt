@@ -6,7 +6,9 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 
 object PromptBuilder {
-    fun build(entries: List<SessionEntry>): List<Message> = entries.map { entry ->
+    fun build(entries: List<SessionEntry>): List<Message> = entries
+        .filter { it.metadata["replay"] != "false" }
+        .map { entry ->
         when (entry.role) {
             EntryRole.SYSTEM -> Message(MessageRole.SYSTEM, entry.content)
             EntryRole.USER -> Message(MessageRole.USER, entry.content)

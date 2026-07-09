@@ -1,6 +1,7 @@
 package dev.sophi.core.prompt
 
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 import io.kotest.core.spec.style.FunSpec
@@ -71,5 +72,16 @@ class PromptBuilderTest : FunSpec({
     test("ASSISTANT toolCalls field is null for text-only assistant entries") {
         val msgs = PromptBuilder.build(listOf(entry(EntryRole.ASSISTANT, "response")))
         msgs[0].toolCalls shouldBe null
+    }
+
+    test("entries marked replay=false are excluded from prompt messages") {
+        val session = AgentSession(id = "p1")
+        session.append(EntryRole.USER, "hi")
+        session.append(EntryRole.ASSISTANT, "", mapOf("replay" to "false", "toolCalls" to "[]"))
+        session.append(EntryRole.TOOL_RESULT, "raw", mapOf("replay" to "false", "toolCallId" to "c", "toolName" to "t"))
+        session.append(EntryRole.ASSISTANT, "answer")
+
+        val messages = PromptBuilder.build(session.branch())
+        messages.map { it.content } shouldBe listOf("hi", "answer")
     }
 })
