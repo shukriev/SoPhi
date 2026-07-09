@@ -16,6 +16,10 @@ import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
+import dev.sophi.extensions.PluginRegistry
+import dev.sophi.learning.LearningConfig
+import dev.sophi.learning.LearningPlugin
+import dev.sophi.learning.ToolReliabilitySection
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
 import kotlinx.coroutines.runBlocking
@@ -82,7 +86,21 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         FileSessionManager(Path.of(System.getProperty("user.home"), ".sophi", "sessions"))
 
     @Bean
-    fun agentConfig(): AgentConfig = AgentConfig(model = providerProperties.model)
+    fun learningConfig(): LearningConfig = LearningConfig()
+
+    @Bean
+    fun learningPlugin(learningConfig: LearningConfig): LearningPlugin =
+        LearningPlugin(learningConfig, model = providerProperties.model)
+
+    @Bean
+    fun pluginRegistry(learningPlugin: LearningPlugin): PluginRegistry =
+        PluginRegistry().register(learningPlugin)
+
+    @Bean
+    fun agentConfig(learningPlugin: LearningPlugin, learningConfig: LearningConfig): AgentConfig {
+        val section = ToolReliabilitySection(learningPlugin.toolStats, learningConfig).render(learningConfig.scope)
+        return AgentConfig(model = providerProperties.model, systemPrompt = section)
+    }
 
     @Bean
     fun agentLoop(

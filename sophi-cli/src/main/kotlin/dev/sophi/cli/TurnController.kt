@@ -13,6 +13,7 @@ class TurnController(
     private val config: AgentConfig,
     private val input: InputSource,
     private val liveRegion: LiveRegion,
+    private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val output: (String) -> Unit
 ) {
     suspend fun runTurn(session: AgentSession, userInput: String): AgentSession = coroutineScope {
@@ -23,6 +24,7 @@ class TurnController(
         val turnDeferred = async {
             try {
                 loop.streamTurn(session, userInput, config) { event ->
+                    onEvent(event)
                     when (event) {
                         is TurnEvent.Token -> {
                             buffer.append(event.text)

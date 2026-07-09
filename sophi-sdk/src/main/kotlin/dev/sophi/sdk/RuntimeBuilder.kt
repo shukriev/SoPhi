@@ -9,6 +9,9 @@ import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
+import dev.sophi.learning.LearningConfig
+import dev.sophi.learning.LearningPlugin
+import dev.sophi.learning.ToolReliabilitySection
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
 import kotlinx.coroutines.runBlocking
@@ -26,12 +29,14 @@ class RuntimeBuilder {
     private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE
     private var mcpConfigPath: Path? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
+    private var learningConfig: LearningConfig? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
     fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
+    fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
 
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
@@ -46,6 +51,21 @@ class RuntimeBuilder {
         )
         val loop = AgentLoop(p, registry, sm, confirmationPolicy = confirmationPolicy)
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
-        return SophiRuntime(loop, sm, pluginRegistry, agentConfig, mcpClientManager)
+
+        val learningPlugin = learningConfig?.let { cfg ->
+            LearningPlugin(cfg, model = agentConfig.model).also { plugin ->
+                pluginRegistry.register(plugin)
+            }
+        }
+        val effectiveConfig = learningPlugin?.let { plugin ->
+            val section = ToolReliabilitySection(plugin.toolStats, learningConfig!!).render(learningConfig!!.scope)
+            if (section != null)
+                agentConfig.copy(
+                    systemPrompt = listOfNotNull(agentConfig.systemPrompt, section).joinToString("\n\n")
+                )
+            else agentConfig
+        } ?: agentConfig
+
+        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin)
     }
 }

@@ -28,6 +28,10 @@
         </dependency>
         <dependency>
             <groupId>dev.sophi</groupId>
+            <artifactId>sophi-learning</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.sophi</groupId>
             <artifactId>sophi-skills</artifactId>
         </dependency>
         <dependency>
