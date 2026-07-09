@@ -100,6 +100,40 @@ class ContextCompactorTest : FunSpec({
         coVerify(exactly = 0) { provider.complete(any()) }
     }
 
+    test("compact() preserves entries on other branches") {
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(5, 3))
+
+        val s = AgentSession(id = "s-branches")
+        val a = s.append(EntryRole.USER, "a")
+        val side = s.append(EntryRole.ASSISTANT, "side-answer")
+        s.checkout(a.id)
+        s.append(EntryRole.ASSISTANT, "main-1")
+        s.append(EntryRole.USER, "main-2")
+        s.append(EntryRole.ASSISTANT, "main-3")
+
+        val result = compactor.compact(s, config, keepRecentCount = 2)
+
+        result.branch().map { it.content } shouldBe
+            listOf("Previous conversation summary:\nsummary", "main-2", "main-3")
+        result.checkout(side.id)
+        result.branch().map { it.content } shouldBe listOf("a", "side-answer")
+    }
+
+    test("compact() keeps the compacted prefix in the entry list, off the active branch") {
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(5, 3))
+
+        val s = session(
+            EntryRole.USER to "old-1",
+            EntryRole.ASSISTANT to "old-2",
+            EntryRole.USER to "recent-1",
+            EntryRole.ASSISTANT to "recent-2"
+        )
+        val result = compactor.compact(s, config, keepRecentCount = 2)
+
+        result.entries.map { it.content }.containsAll(listOf("old-1", "old-2")) shouldBe true
+        result.branch().map { it.content }.contains("old-1") shouldBe false
+    }
+
     test("compact() preserves parentSessionId on the compacted session") {
         coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(5, 3))
 

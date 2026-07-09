@@ -8,6 +8,8 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionEntry
+import java.util.UUID
 
 class ContextCompactor(private val provider: LLMProvider) {
 
@@ -40,15 +42,27 @@ class ContextCompactor(private val provider: LLMProvider) {
             else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
         }
 
-        val compacted = AgentSession(id = session.id, title = session.title, parentSessionId = session.parentSessionId)
-        compacted.append(
+        // Replace only the compacted prefix of the active branch: the summary becomes a new
+        // root and the first kept entry is re-parented onto it. Entries on other branches
+        // (and the compacted prefix itself) stay in the DAG untouched.
+        val summaryEntry = SessionEntry(
+            id = UUID.randomUUID().toString(),
+            parentId = null,
             role = EntryRole.SYSTEM,
             content = "Previous conversation summary:\n$summary",
+            timestamp = System.currentTimeMillis(),
             metadata = mapOf("_compacted" to "true")
         )
-        toKeep.forEach { entry ->
-            compacted.append(entry.role, entry.content, entry.metadata)
+        val firstKeptId = toKeep.first().id
+        val rewritten = session.entries.map { entry ->
+            if (entry.id == firstKeptId) entry.copy(parentId = summaryEntry.id) else entry
         }
-        return compacted
+        return AgentSession(
+            id = session.id,
+            title = session.title,
+            parentSessionId = session.parentSessionId,
+            initialEntries = listOf(summaryEntry) + rewritten,
+            initialTipId = session.tip?.id
+        )
     }
 }
