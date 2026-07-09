@@ -16,6 +16,8 @@ import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import org.springframework.http.HttpStatus
 
 class AgentControllerTest : FunSpec({
@@ -76,6 +78,30 @@ class AgentControllerTest : FunSpec({
         every { sessionManager.load("bad") } throws IllegalArgumentException("not found")
         val response = controller.turn("bad", ChatRequest("hi"))
         response.statusCode shouldBe HttpStatus.NOT_FOUND
+    }
+
+    test("concurrent turns on the same session are serialized, not interleaved") {
+        every { sessionManager.load("s1") } answers { AgentSession("s1") }
+        var active = 0
+        var maxActive = 0
+        coEvery { agentLoop.turn(any(), any(), config, any()) } coAnswers {
+            active++
+            maxActive = maxOf(maxActive, active)
+            kotlinx.coroutines.delay(20)
+            active--
+            AgentSession(
+                "s1", initialEntries = listOf(
+                    SessionEntry("e1", null, EntryRole.ASSISTANT, "ok", 0L)
+                )
+            )
+        }
+
+        coroutineScope {
+            launch { controller.turn("s1", ChatRequest("a")) }
+            launch { controller.turn("s1", ChatRequest("b")) }
+        }
+
+        maxActive shouldBe 1
     }
 
     test("streamTurn returns non-null SseEmitter for valid session") {

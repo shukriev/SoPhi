@@ -11,6 +11,9 @@ import dev.sophi.web.api.SessionDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -29,6 +32,12 @@ class AgentController(
     private val agentLoop: AgentLoop,
     private val config: AgentConfig
 ) {
+    // Concurrent turns on one session would each load-then-save, losing the
+    // slower writer's entries; serialize load+turn+save per session id.
+    private val sessionLocks = ConcurrentHashMap<String, Mutex>()
+
+    private fun lockFor(id: String): Mutex = sessionLocks.computeIfAbsent(id) { Mutex() }
+
     @PostMapping("/sessions")
     fun createSession(@RequestParam(required = false) title: String?): SessionDto {
         val session = sessionManager.create(title)
@@ -43,7 +52,7 @@ class AgentController(
     suspend fun turn(
         @PathVariable id: String,
         @RequestBody req: ChatRequest
-    ): ResponseEntity<ChatResponse> {
+    ): ResponseEntity<ChatResponse> = lockFor(id).withLock {
         val session = try {
             sessionManager.load(id)
         } catch (e: Exception) {
@@ -51,7 +60,7 @@ class AgentController(
         }
         val updated = agentLoop.turn(session, req.input, config)
         val reply = updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
-        return ResponseEntity.ok(ChatResponse(updated.id, reply))
+        ResponseEntity.ok(ChatResponse(updated.id, reply))
     }
 
     @GetMapping("/sessions/{id}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
@@ -60,16 +69,13 @@ class AgentController(
         @RequestParam input: String
     ): SseEmitter {
         val emitter = SseEmitter(30_000L)
-        val session = try {
-            sessionManager.load(id)
-        } catch (e: Exception) {
-            emitter.completeWithError(e)
-            return emitter
-        }
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                agentLoop.streamTurn(session, input, config) { event ->
-                    if (event is TurnEvent.Token) emitter.send(SseEmitter.event().data(event.text).build())
+                lockFor(id).withLock {
+                    val session = sessionManager.load(id)
+                    agentLoop.streamTurn(session, input, config) { event ->
+                        if (event is TurnEvent.Token) emitter.send(SseEmitter.event().data(event.text).build())
+                    }
                 }
                 emitter.complete()
             } catch (e: Exception) {
