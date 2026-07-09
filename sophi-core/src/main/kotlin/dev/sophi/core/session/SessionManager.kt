@@ -5,4 +5,5 @@ interface SessionManager {
     fun save(session: AgentSession)
     fun load(sessionId: String): AgentSession
     fun list(): List<SessionMeta>
+    fun saveConfigSnapshot(sessionId: String, model: String, systemPrompt: String?) {}
 }

@@ -188,4 +188,14 @@ class FileSessionManagerTest : FunSpec({
         metas shouldHaveSize 1
         metas.first { it.id == session.id }.parentSessionId shouldBe null
     }
+
+    test("saveConfigSnapshot writes sidecar fields that survive a later save()") {
+        val manager = FileSessionManager(sessionsDir)
+        val session = manager.create()
+        manager.saveConfigSnapshot(session.id, "claude-x", "be nice")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.readConfigSnapshot(session.id) shouldBe ("claude-x" to "be nice")
+    }
 })

@@ -18,7 +18,11 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 @Serializable
-private data class SessionSidecar(val parentSessionId: String? = null)
+private data class SessionSidecar(
+    val parentSessionId: String? = null,
+    val model: String? = null,
+    val systemPrompt: String? = null
+)
 
 class FileSessionManager(private val sessionsDir: Path) : SessionManager {
 
@@ -47,8 +51,7 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         atomicWrite(file, session.entries.joinToString("\n") { json.encodeToString(it) })
 
         if (session.parentSessionId != null) {
-            val sidecar = sessionsDir.resolve("${session.id}.meta.json")
-            atomicWrite(sidecar, json.encodeToString(SessionSidecar(session.parentSessionId)))
+            writeSidecar(session.id, readSidecar(session.id).copy(parentSessionId = session.parentSessionId))
         }
     }
 
@@ -75,7 +78,7 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         val entries = file.readLines()
             .filter { it.isNotBlank() }
             .map { json.decodeFromString<SessionEntry>(it) }
-        return AgentSession(id = sessionId, parentSessionId = readParentSessionId(sessionId), initialEntries = entries)
+        return AgentSession(id = sessionId, parentSessionId = readSidecar(sessionId).parentSessionId, initialEntries = entries)
     }
 
     override fun list(): List<SessionMeta> {
@@ -88,16 +91,29 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
                     id = id,
                     entryCount = lines.size,
                     lastModifiedMillis = file.getLastModifiedTime().toMillis(),
-                    parentSessionId = readParentSessionId(id)
+                    parentSessionId = readSidecar(id).parentSessionId
                 )
             }
             .sortedBy { it.id }
     }
 
-    private fun readParentSessionId(sessionId: String): String? {
+    private fun readSidecar(sessionId: String): SessionSidecar {
         val sidecar = sessionsDir.resolve("$sessionId.meta.json")
-        if (!sidecar.exists()) return null
-        return runCatching { json.decodeFromString<SessionSidecar>(sidecar.readText()).parentSessionId }
-            .getOrNull()
+        if (!sidecar.exists()) return SessionSidecar()
+        return runCatching { json.decodeFromString<SessionSidecar>(sidecar.readText()) }
+            .getOrDefault(SessionSidecar())
     }
+
+    private fun writeSidecar(sessionId: String, sidecar: SessionSidecar) {
+        if (sidecar == SessionSidecar()) return
+        atomicWrite(sessionsDir.resolve("$sessionId.meta.json"), json.encodeToString(sidecar))
+    }
+
+    override fun saveConfigSnapshot(sessionId: String, model: String, systemPrompt: String?) {
+        validateId(sessionId)
+        writeSidecar(sessionId, readSidecar(sessionId).copy(model = model, systemPrompt = systemPrompt))
+    }
+
+    fun readConfigSnapshot(sessionId: String): Pair<String?, String?> =
+        readSidecar(sessionId).let { it.model to it.systemPrompt }
 }
