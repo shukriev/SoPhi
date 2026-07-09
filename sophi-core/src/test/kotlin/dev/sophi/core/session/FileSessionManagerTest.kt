@@ -198,4 +198,9 @@ class FileSessionManagerTest : FunSpec({
 
         manager.readConfigSnapshot(session.id) shouldBe ("claude-x" to "be nice")
     }
+
+    test("config snapshot methods reject session ids that could escape the sessions directory") {
+        shouldThrow<IllegalArgumentException> { manager.readConfigSnapshot("../evil") }
+        shouldThrow<IllegalArgumentException> { manager.saveConfigSnapshot("../evil", "m", null) }
+    }
 })

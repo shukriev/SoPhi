@@ -114,6 +114,8 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         writeSidecar(sessionId, readSidecar(sessionId).copy(model = model, systemPrompt = systemPrompt))
     }
 
-    fun readConfigSnapshot(sessionId: String): Pair<String?, String?> =
-        readSidecar(sessionId).let { it.model to it.systemPrompt }
+    fun readConfigSnapshot(sessionId: String): Pair<String?, String?> {
+        validateId(sessionId)
+        return readSidecar(sessionId).let { it.model to it.systemPrompt }
+    }
 }
