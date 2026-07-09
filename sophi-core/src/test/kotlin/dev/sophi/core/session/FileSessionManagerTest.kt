@@ -145,6 +145,17 @@ class FileSessionManagerTest : FunSpec({
         manager.list().first { it.id == session.id }.parentSessionId shouldBe null
     }
 
+    test("load() rejects session ids that could escape the sessions directory") {
+        shouldThrow<IllegalArgumentException> { manager.load("../evil") }
+        shouldThrow<IllegalArgumentException> { manager.load("a/b") }
+        shouldThrow<IllegalArgumentException> { manager.load("a\\b") }
+        shouldThrow<IllegalArgumentException> { manager.load("") }
+    }
+
+    test("save() rejects session ids that could escape the sessions directory") {
+        shouldThrow<IllegalArgumentException> { manager.save(AgentSession(id = "../evil")) }
+    }
+
     test("load() returns null parentSessionId when sidecar file is corrupted, instead of throwing") {
         val session = manager.create(parentSessionId = "parent-1")
         session.append(EntryRole.USER, "hi")
