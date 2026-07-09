@@ -4,7 +4,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
@@ -19,7 +22,17 @@ private data class SessionSidecar(val parentSessionId: String? = null)
 
 class FileSessionManager(private val sessionsDir: Path) : SessionManager {
 
+    private companion object {
+        // Generated ids are UUIDs; anything with path separators or dots could
+        // resolve outside sessionsDir when the id arrives from an HTTP path.
+        val SESSION_ID_PATTERN = Regex("^[A-Za-z0-9_-]{1,128}$")
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
+
+    private fun validateId(sessionId: String) {
+        require(SESSION_ID_PATTERN.matches(sessionId)) { "Invalid session id: $sessionId" }
+    }
 
     init {
         sessionsDir.createDirectories()
@@ -29,16 +42,34 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         AgentSession(id = UUID.randomUUID().toString(), title = title, parentSessionId = parentSessionId)
 
     override fun save(session: AgentSession) {
+        validateId(session.id)
         val file = sessionsDir.resolve("${session.id}.jsonl")
-        file.writeText(session.entries.joinToString("\n") { json.encodeToString(it) })
+        atomicWrite(file, session.entries.joinToString("\n") { json.encodeToString(it) })
 
         if (session.parentSessionId != null) {
             val sidecar = sessionsDir.resolve("${session.id}.meta.json")
-            sidecar.writeText(json.encodeToString(SessionSidecar(session.parentSessionId)))
+            atomicWrite(sidecar, json.encodeToString(SessionSidecar(session.parentSessionId)))
+        }
+    }
+
+    // Write-in-place would corrupt the file if the process dies mid-write;
+    // stage to a temp file in the same directory and atomically rename over.
+    private fun atomicWrite(target: Path, content: String) {
+        val tmp = Files.createTempFile(sessionsDir, ".${target.fileName}", ".tmp")
+        try {
+            tmp.writeText(content)
+            try {
+                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (e: AtomicMoveNotSupportedException) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            Files.deleteIfExists(tmp)
         }
     }
 
     override fun load(sessionId: String): AgentSession {
+        validateId(sessionId)
         val file = sessionsDir.resolve("$sessionId.jsonl")
         require(file.exists()) { "Session not found: $sessionId" }
         val entries = file.readLines()

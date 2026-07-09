@@ -7,6 +7,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.writeText
 
 class FileSessionManagerTest : FunSpec({
@@ -143,6 +144,27 @@ class FileSessionManagerTest : FunSpec({
         manager.save(session)
 
         manager.list().first { it.id == session.id }.parentSessionId shouldBe null
+    }
+
+    test("save() leaves only the session files behind, no temp staging files") {
+        val session = manager.create(parentSessionId = "parent-1")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+        manager.save(session)
+
+        val names = sessionsDir.listDirectoryEntries().map { it.fileName.toString() }.sorted()
+        names shouldBe listOf("${session.id}.jsonl", "${session.id}.meta.json")
+    }
+
+    test("load() rejects session ids that could escape the sessions directory") {
+        shouldThrow<IllegalArgumentException> { manager.load("../evil") }
+        shouldThrow<IllegalArgumentException> { manager.load("a/b") }
+        shouldThrow<IllegalArgumentException> { manager.load("a\\b") }
+        shouldThrow<IllegalArgumentException> { manager.load("") }
+    }
+
+    test("save() rejects session ids that could escape the sessions directory") {
+        shouldThrow<IllegalArgumentException> { manager.save(AgentSession(id = "../evil")) }
     }
 
     test("load() returns null parentSessionId when sidecar file is corrupted, instead of throwing") {
