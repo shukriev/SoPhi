@@ -1,0 +1,51 @@
+package dev.sophi.learning
+
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.runBlocking
+
+class LearningPluginTest : FunSpec({
+    fun plugin(home: java.nio.file.Path) =
+        LearningPlugin(LearningConfig(home = home, scope = "/proj"), model = "m1")
+    fun hook(p: LearningPlugin, point: HookPoint) = p.hooks().single { it.point == point }
+
+    test("AFTER_TOOL hook appends a ToolEvent line") {
+        val home = tempdir().toPath()
+        val p = plugin(home)
+        runBlocking {
+            hook(p, HookPoint.AFTER_TOOL).invoke(HookContext(
+                "s1", toolName = "grep", toolResult = "Error: boom",
+                success = false, durationMillis = 5))
+        }
+        val line = JsonlLog(home.resolve("tool-events.jsonl")).readAll().single()
+        line shouldContain "\"tool\":\"grep\""
+        line shouldContain "\"success\":false"
+    }
+
+    test("AFTER_TURN upserts an open outcome; recordSessionEnd finalizes it") {
+        val home = tempdir().toPath()
+        val p = plugin(home)
+        runBlocking {
+            hook(p, HookPoint.AFTER_TURN).invoke(HookContext("s1"))
+            hook(p, HookPoint.AFTER_TURN).invoke(HookContext("s1"))
+        }
+        p.recordSessionEnd("s1")
+        val lines = JsonlLog(home.resolve("session-outcomes.jsonl")).readAll()
+        lines.size shouldBe 3
+        lines.last() shouldContain "\"outcome\":\"completed\""
+        lines.last() shouldContain "\"turns\":2"
+    }
+
+    test("store failures never propagate") {
+        // home pointing at a *file* makes createDirectories fail
+        val bad = tempdir().toPath().resolve("f").also { java.nio.file.Files.writeString(it, "x") }
+        val p = LearningPlugin(LearningConfig(home = bad.resolve("sub"), scope = "/p"))
+        runBlocking {
+            hook(p, HookPoint.AFTER_TOOL).invoke(HookContext("s1", toolName = "t", success = true))
+        } // must not throw
+    }
+})
