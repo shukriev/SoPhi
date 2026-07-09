@@ -5,6 +5,8 @@ import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.web.api.ChatRequest
@@ -62,7 +64,14 @@ class AgentController(
         } catch (e: Exception) {
             return ResponseEntity.notFound().build()
         }
-        val updated = agentLoop.turn(session, req.input, config, pluginRegistry.turnEventBridge(id))
+        val updated = try {
+            agentLoop.turn(session, req.input, config, pluginRegistry.turnEventBridge(id))
+        } catch (e: Exception) {
+            // Learning must never break responses: dispatch is best-effort, error still propagates.
+            runCatching { pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(id, error = e)) }
+            throw e
+        }
+        runCatching { pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(id)) }
         val reply = updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
         ResponseEntity.ok(ChatResponse(updated.id, reply))
     }
@@ -83,8 +92,10 @@ class AgentController(
                         if (event is TurnEvent.Token) emitter.send(SseEmitter.event().data(event.text).build())
                     }
                 }
+                runCatching { pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(id)) }
                 emitter.complete()
             } catch (e: Exception) {
+                runCatching { pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(id, error = e)) }
                 emitter.completeWithError(e)
             }
         }

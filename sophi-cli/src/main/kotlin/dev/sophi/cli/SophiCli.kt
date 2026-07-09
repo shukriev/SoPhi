@@ -22,6 +22,8 @@ import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningConfig
@@ -148,7 +150,19 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
-        val turnController = TurnController(loop, config, inputSource, liveRegion, onEvent = bridge) {
+        val turnController = TurnController(
+            loop, config, inputSource, liveRegion, onEvent = bridge,
+            onTurnSettled = { error ->
+                // Learning must never break a turn: dispatch is best-effort.
+                runCatching {
+                    if (error != null) {
+                        pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(session.id, error = error))
+                    } else {
+                        pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(session.id))
+                    }
+                }
+            }
+        ) {
             mordantTerminal.println(it)
         }
         val engine = TuiEngine(turnController, slashHandler, inputSource)

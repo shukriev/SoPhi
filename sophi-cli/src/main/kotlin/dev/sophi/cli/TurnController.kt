@@ -14,6 +14,9 @@ class TurnController(
     private val input: InputSource,
     private val liveRegion: LiveRegion,
     private val onEvent: suspend (TurnEvent) -> Unit = {},
+    // Fired once per turn after it settles so learning can upsert an outcome; error carries the
+    // failure on the error path, null on success/interrupt. Kept best-effort by the caller.
+    private val onTurnSettled: suspend (error: Throwable?) -> Unit = {},
     private val output: (String) -> Unit
 ) {
     suspend fun runTurn(session: AgentSession, userInput: String): AgentSession = coroutineScope {
@@ -54,9 +57,11 @@ class TurnController(
                 liveRegion.clear()
                 if (error != null) {
                     output(ResponseRenderer.renderText(buffer.toString()) + " [error: ${error.message}]")
+                    onTurnSettled(error)
                     session
                 } else {
                     output(ResponseRenderer.renderText(buffer.toString()))
+                    onTurnSettled(null)
                     result
                 }
             }
@@ -64,6 +69,7 @@ class TurnController(
                 turnDeferred.cancel()
                 liveRegion.clear()
                 output(ResponseRenderer.renderText(buffer.toString()) + " [interrupted]")
+                onTurnSettled(null)
                 session
             }
         }

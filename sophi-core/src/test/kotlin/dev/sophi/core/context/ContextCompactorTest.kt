@@ -13,6 +13,8 @@ import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
+import dev.sophi.ai.api.CompletionRequest
 
 class ContextCompactorTest : FunSpec({
     val provider = mockk<LLMProvider>()
@@ -132,6 +134,29 @@ class ContextCompactorTest : FunSpec({
 
         result.entries.map { it.content }.containsAll(listOf("old-1", "old-2")) shouldBe true
         result.branch().map { it.content }.contains("old-1") shouldBe false
+    }
+
+    test("compact() excludes replay=false tool entries from the summary but keeps them in entries") {
+        val requestSlot = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(requestSlot)) } returns
+            LLMResponse.Text("summary", TokenUsage(5, 3))
+
+        val s = AgentSession(id = "s-replay")
+        s.append(EntryRole.USER, "please run the tool")
+        s.append(EntryRole.ASSISTANT, "", mapOf("replay" to "false", "toolCalls" to "[grep]"))
+        s.append(EntryRole.TOOL_RESULT, "SECRET_TOOL_OUTPUT_XYZ", mapOf("replay" to "false"))
+        s.append(EntryRole.ASSISTANT, "here is the answer")
+        s.append(EntryRole.USER, "recent-1")
+        s.append(EntryRole.ASSISTANT, "recent-2")
+
+        val result = compactor.compact(s, config, keepRecentCount = 2)
+
+        // Summary prompt sent to the provider must not contain the raw tool-result text.
+        val summaryPrompt = requestSlot.captured.messages.joinToString("\n") { it.content }
+        summaryPrompt.contains("SECRET_TOOL_OUTPUT_XYZ") shouldBe false
+
+        // The compacted session still contains the replay=false tool entries.
+        result.entries.any { it.content == "SECRET_TOOL_OUTPUT_XYZ" } shouldBe true
     }
 
     test("compact() preserves parentSessionId on the compacted session") {

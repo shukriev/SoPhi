@@ -32,8 +32,21 @@ class TurnEventBridgeTest : FunSpec({
         before.argumentsJson shouldBe """{"pattern":"x"}"""
 
         val after = plugin.contexts.getValue(HookPoint.AFTER_TOOL).single()
+        after.toolName shouldBe "grep"
         after.toolResult shouldBe "Error: boom"
         after.success shouldBe false
         after.durationMillis shouldBe 42L
+    }
+
+    test("bridge marks AFTER_TOOL success true for a non-error ToolCallFinished") {
+        val plugin = RecordingPlugin()
+        val bridge = PluginRegistry().register(plugin).turnEventBridge("sess-2")
+
+        bridge(TurnEvent.ToolCallFinished("read", "file contents", isError = false, durationMillis = 7))
+
+        val after = plugin.contexts.getValue(HookPoint.AFTER_TOOL).single()
+        after.toolName shouldBe "read"
+        after.success shouldBe true
+        after.durationMillis shouldBe 7L
     }
 })

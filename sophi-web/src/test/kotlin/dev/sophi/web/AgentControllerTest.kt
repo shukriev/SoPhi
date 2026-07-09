@@ -7,11 +7,17 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.session.SessionMeta
+import dev.sophi.extensions.PluginRegistry
+import dev.sophi.learning.JsonlLog
+import dev.sophi.learning.LearningConfig
+import dev.sophi.learning.LearningPlugin
 import dev.sophi.web.api.ChatRequest
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.every
@@ -72,6 +78,28 @@ class AgentControllerTest : FunSpec({
         val response = controller.turn("s1", ChatRequest("hi"))
         response.statusCode shouldBe HttpStatus.OK
         response.body?.reply shouldBe "hello!"
+    }
+
+    test("successful turn dispatches AFTER_TURN so learning writes an open outcome") {
+        val home = tempdir().toPath()
+        val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"), model = "test-model")
+        val registry = PluginRegistry().register(learning)
+        val learningController = AgentController(sessionManager, agentLoop, config, registry)
+
+        val session = AgentSession("s-learn")
+        val updated = AgentSession(
+            "s-learn", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        every { sessionManager.load("s-learn") } returns session
+        coEvery { agentLoop.turn(session, "hi", config, any()) } returns updated
+
+        learningController.turn("s-learn", ChatRequest("hi"))
+
+        val line = JsonlLog(home.resolve("session-outcomes.jsonl")).readAll().single()
+        line shouldContain "\"outcome\":\"open\""
+        line shouldContain "\"turns\":1"
     }
 
     test("turn returns 404 when session not found") {

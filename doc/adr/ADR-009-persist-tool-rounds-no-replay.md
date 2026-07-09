@@ -17,6 +17,8 @@ A related gap surfaced by Phase 4: sessions record neither the model nor the sys
 
 `AgentLoop` appends tool rounds to the session: one ASSISTANT entry per round carrying the serialized calls in `metadata["toolCalls"]`, and one TOOL_RESULT entry per result (with `toolCallId`/`toolName` metadata, which `SessionEntry` and `PromptBuilder` already support). All of these entries are marked `metadata["replay"] = "false"`, and `PromptBuilder.build()` filters such entries out.
 
+In tool-round session entries, `toolCallId`/`toolName` metadata use the empty string to mean "absent"; consumers (Phases 2/4) must treat `""` as absent.
+
 Additionally, `FileSessionManager`'s existing `<id>.meta.json` sidecar gains optional `model` and `systemPrompt` fields, written at session creation.
 
 ## Reasons

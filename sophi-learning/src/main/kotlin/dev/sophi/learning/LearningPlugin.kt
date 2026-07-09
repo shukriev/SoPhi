@@ -6,6 +6,7 @@ import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.SophiPlugin
 import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 class LearningPlugin(
     private val config: LearningConfig,
@@ -18,14 +19,20 @@ class LearningPlugin(
     private val outcomes = JsonlLog(config.home.resolve("session-outcomes.jsonl"))
     val toolStats = ToolStatsStore(toolEvents, config.recentWindow)
 
-    private data class Acc(var turns: Int = 0, var toolCalls: Int = 0, var toolErrors: Int = 0, var errored: Boolean = false)
+    private class Acc {
+        // Mutated from concurrent async tool dispatches; atomics prevent lost updates.
+        val turns = AtomicInteger(0)
+        val toolCalls = AtomicInteger(0)
+        val toolErrors = AtomicInteger(0)
+        @Volatile var errored: Boolean = false
+    }
     private val accs = ConcurrentHashMap<String, Acc>()
 
     override fun hooks(): List<AgentHook> = listOf(
         hook(HookPoint.AFTER_TOOL) { ctx: HookContext ->
             val acc = accs.getOrPut(ctx.sessionId) { Acc() }
-            acc.toolCalls++
-            if (ctx.success == false) acc.toolErrors++
+            acc.toolCalls.incrementAndGet()
+            if (ctx.success == false) acc.toolErrors.incrementAndGet()
             append(toolEvents, json.encodeToString(ToolEvent.serializer(), ToolEvent(
                 ts = System.currentTimeMillis(), scope = config.scope, sessionId = ctx.sessionId,
                 tool = ctx.toolName ?: "unknown", success = ctx.success != false,
@@ -35,7 +42,7 @@ class LearningPlugin(
         },
         hook(HookPoint.AFTER_TURN) { ctx: HookContext ->
             val acc = accs.getOrPut(ctx.sessionId) { Acc() }
-            acc.turns++
+            acc.turns.incrementAndGet()
             writeOutcome(ctx.sessionId, "open", acc)
         },
         hook(HookPoint.ON_ERROR) { ctx: HookContext -> accs.getOrPut(ctx.sessionId) { Acc() }.errored = true }
@@ -49,8 +56,8 @@ class LearningPlugin(
     private fun writeOutcome(sessionId: String, outcome: String, acc: Acc) {
         append(outcomes, json.encodeToString(SessionOutcome.serializer(), SessionOutcome(
             ts = System.currentTimeMillis(), scope = config.scope, sessionId = sessionId,
-            outcome = outcome, turns = acc.turns, toolCalls = acc.toolCalls,
-            toolErrors = acc.toolErrors, model = model
+            outcome = outcome, turns = acc.turns.get(), toolCalls = acc.toolCalls.get(),
+            toolErrors = acc.toolErrors.get(), model = model
         )))
     }
 
