@@ -76,17 +76,20 @@ class AgentLoop(
                         allowedCalls.map { (call, allowed) ->
                             async {
                                 onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
+                                val start = System.currentTimeMillis()
+                                var failed = false
                                 val result = if (!allowed) {
+                                    failed = true
                                     "Error: Tool '${call.name}' execution denied by confirmation policy"
                                 } else {
                                     registry.getOrNull(call.name)
                                         ?.let { tool ->
                                             runCatching { tool.execute(call.argumentsJson) }
-                                                .getOrElse { e -> "Error: ${e.message}" }
+                                                .getOrElse { e -> failed = true; "Error: ${e.message}" }
                                         }
-                                        ?: "Error: Tool '${call.name}' not found"
+                                        ?: run { failed = true; "Error: Tool '${call.name}' not found" }
                                 }
-                                onEvent(TurnEvent.ToolCallFinished(call.name, result))
+                                onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
                                 Message(
                                     role = MessageRole.TOOL,
                                     content = result,

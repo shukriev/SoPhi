@@ -314,7 +314,7 @@ class AgentLoopTest : FunSpec({
 
         events shouldBe listOf(
             TurnEvent.ToolCallStarted("broken", "{}"),
-            TurnEvent.ToolCallFinished("broken", "Error: disk full"),
+            TurnEvent.ToolCallFinished("broken", "Error: disk full", isError = true),
             TurnEvent.Token("recovered")
         )
     }
