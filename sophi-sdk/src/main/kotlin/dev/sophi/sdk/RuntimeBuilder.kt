@@ -11,7 +11,6 @@ import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
-import dev.sophi.learning.ToolReliabilitySection
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
 import kotlinx.coroutines.runBlocking
@@ -53,12 +52,12 @@ class RuntimeBuilder {
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
 
         val learningPlugin = learningConfig?.let { cfg ->
-            LearningPlugin(cfg, model = agentConfig.model).also { plugin ->
+            LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p, sessionManager = sm).also { plugin ->
                 pluginRegistry.register(plugin)
             }
         }
         val effectiveConfig = learningPlugin?.let { plugin ->
-            val section = ToolReliabilitySection(plugin.toolStats, learningConfig!!).render(learningConfig!!.scope)
+            val section = plugin.promptSections(learningConfig!!.scope)
             if (section != null)
                 agentConfig.copy(
                     systemPrompt = listOfNotNull(agentConfig.systemPrompt, section).joinToString("\n\n")

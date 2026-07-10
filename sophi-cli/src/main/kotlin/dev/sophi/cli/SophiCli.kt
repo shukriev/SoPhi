@@ -28,7 +28,6 @@ import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
-import dev.sophi.learning.ToolReliabilitySection
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
 import kotlinx.coroutines.runBlocking
@@ -85,15 +84,14 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
 
-        // Learning: capture tool outcomes and inject a reliability section into the system prompt.
-        val learningConfig = LearningConfig()
-        val learningPlugin = LearningPlugin(learningConfig, model = model)
+        // Learning: capture tool outcomes and inject reliability + lessons sections into the system prompt.
+        val learningConfig = LearningConfig(sessionModel = model)
+        val learningPlugin = LearningPlugin(learningConfig, model = model, provider = provider, sessionManager = sessionManager)
         val pluginRegistry = PluginRegistry().register(learningPlugin)
         val bridge = pluginRegistry.turnEventBridge(session.id)
-        val reliabilitySection =
-            ToolReliabilitySection(learningPlugin.toolStats, learningConfig).render(learningConfig.scope)
         val effectiveSystemPrompt =
-            listOfNotNull(systemPrompt, reliabilitySection).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+            listOfNotNull(systemPrompt, learningPlugin.promptSections(learningConfig.scope))
+                .takeIf { it.isNotEmpty() }?.joinToString("\n\n")
 
         val config = AgentConfig(model = model, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }

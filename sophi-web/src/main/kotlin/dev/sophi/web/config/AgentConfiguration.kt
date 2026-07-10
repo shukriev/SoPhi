@@ -19,7 +19,6 @@ import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
-import dev.sophi.learning.ToolReliabilitySection
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
 import kotlinx.coroutines.runBlocking
@@ -86,11 +85,15 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         FileSessionManager(Path.of(System.getProperty("user.home"), ".sophi", "sessions"))
 
     @Bean
-    fun learningConfig(): LearningConfig = LearningConfig()
+    fun learningConfig(): LearningConfig = LearningConfig(sessionModel = providerProperties.model)
 
     @Bean
-    fun learningPlugin(learningConfig: LearningConfig): LearningPlugin =
-        LearningPlugin(learningConfig, model = providerProperties.model)
+    fun learningPlugin(
+        learningConfig: LearningConfig,
+        llmProvider: LLMProvider,
+        sessionManager: SessionManager
+    ): LearningPlugin =
+        LearningPlugin(learningConfig, model = providerProperties.model, provider = llmProvider, sessionManager = sessionManager)
 
     @Bean
     fun pluginRegistry(learningPlugin: LearningPlugin): PluginRegistry =
@@ -98,7 +101,9 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
 
     @Bean
     fun agentConfig(learningPlugin: LearningPlugin, learningConfig: LearningConfig): AgentConfig {
-        val section = ToolReliabilitySection(learningPlugin.toolStats, learningConfig).render(learningConfig.scope)
+        // Note: promptSections is evaluated once at bean creation (startup). The web surface never calls recordSessionEnd,
+        // so session-end distillation does not run on web (runs on CLI only). Lessons distilled after startup won't appear until restart.
+        val section = learningPlugin.promptSections(learningConfig.scope)
         return AgentConfig(model = providerProperties.model, systemPrompt = section)
     }
 

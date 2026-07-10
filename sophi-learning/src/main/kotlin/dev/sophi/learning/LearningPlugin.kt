@@ -10,7 +10,9 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class LearningPlugin(
     private val config: LearningConfig,
-    private val model: String? = null
+    private val model: String? = null,
+    private val provider: dev.sophi.ai.api.LLMProvider? = null,
+    private val sessionManager: dev.sophi.core.session.SessionManager? = null
 ) : SophiPlugin {
     override val name = "learning"
 
@@ -18,6 +20,10 @@ class LearningPlugin(
     private val toolEvents = JsonlLog(config.home.resolve("tool-events.jsonl"))
     private val outcomes = JsonlLog(config.home.resolve("session-outcomes.jsonl"))
     val toolStats = ToolStatsStore(toolEvents, config.recentWindow)
+    val lessonStore = LessonStore(JsonlLog(config.home.resolve("lessons.jsonl")), config.maxActiveLessons)
+    private val evaluator = provider?.let { SessionEvaluator(it, lessonStore, outcomes, config) }
+    private val lessonsSection = LessonsSection(RecencyUsageRecall(lessonStore, config.maxRecalledLessons), lessonStore, config)
+    private val reliabilitySection = ToolReliabilitySection(toolStats, config)
 
     private class Acc {
         // Mutated from concurrent async tool dispatches; atomics prevent lost updates.
@@ -48,9 +54,25 @@ class LearningPlugin(
         hook(HookPoint.ON_ERROR) { ctx: HookContext -> accs.getOrPut(ctx.sessionId) { Acc() }.errored = true }
     )
 
-    fun recordSessionEnd(sessionId: String) {
+    suspend fun recordSessionEnd(sessionId: String) {
         val acc = accs.remove(sessionId) ?: Acc()
-        writeOutcome(sessionId, if (acc.errored) "error" else "completed", acc)
+        val mechanical = SessionOutcome(
+            ts = System.currentTimeMillis(), scope = config.scope, sessionId = sessionId,
+            outcome = if (acc.errored) "error" else "completed",
+            turns = acc.turns.get(), toolCalls = acc.toolCalls.get(), toolErrors = acc.toolErrors.get(),
+            model = model
+        )
+        runCatching { outcomes.append(json.encodeToString(SessionOutcome.serializer(), mechanical)) }
+        val sm = sessionManager ?: return
+        val eval = evaluator ?: return
+        runCatching { eval.evaluate(sessionId, sm.load(sessionId).entries, mechanical) }
+    }
+
+    fun promptSections(scope: String): String? {
+        val parts = listOfNotNull(
+            runCatching { reliabilitySection.render(scope) }.getOrNull(),
+            runCatching { lessonsSection.render(scope) }.getOrNull())
+        return if (parts.isEmpty()) null else parts.joinToString("\n\n")
     }
 
     private fun writeOutcome(sessionId: String, outcome: String, acc: Acc) {

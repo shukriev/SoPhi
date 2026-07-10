@@ -6,6 +6,8 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.mockk.coEvery
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 
 class LearningPluginTest : FunSpec({
@@ -32,8 +34,8 @@ class LearningPluginTest : FunSpec({
         runBlocking {
             hook(p, HookPoint.AFTER_TURN).invoke(HookContext("s1"))
             hook(p, HookPoint.AFTER_TURN).invoke(HookContext("s1"))
+            p.recordSessionEnd("s1")
         }
-        p.recordSessionEnd("s1")
         val lines = JsonlLog(home.resolve("session-outcomes.jsonl")).readAll()
         lines.size shouldBe 3
         lines.last() shouldContain "\"outcome\":\"completed\""
@@ -47,5 +49,20 @@ class LearningPluginTest : FunSpec({
         runBlocking {
             hook(p, HookPoint.AFTER_TOOL).invoke(HookContext("s1", toolName = "t", success = true))
         } // must not throw
+    }
+
+    test("recordSessionEnd triggers evaluator which stores a lesson") {
+        val home = tempdir().toPath()
+        val provider = mockk<dev.sophi.ai.api.LLMProvider>()
+        coEvery { provider.complete(any()) } returns dev.sophi.ai.api.LLMResponse.Text(
+            """{"judgment":"success","reason":"ok","lessons":[
+               {"text":"lesson!","kind":"approach","global":false,"supersedes":null}]}""",
+            dev.sophi.ai.api.TokenUsage(1, 1))
+        val sm = dev.sophi.core.session.FileSessionManager(tempdir().toPath())
+        val session = sm.create().also { sm.save(it) }
+        val p = LearningPlugin(LearningConfig(home = home, scope = "/p", sessionModel = "m"),
+            model = "m", provider = provider, sessionManager = sm)
+        runBlocking { p.recordSessionEnd(session.id) }
+        p.lessonStore.active("/p").single().text shouldBe "lesson!"
     }
 })
