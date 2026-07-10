@@ -21,6 +21,7 @@ class LearningPlugin(
     private val outcomes = JsonlLog(config.home.resolve("session-outcomes.jsonl"))
     val toolStats = ToolStatsStore(toolEvents, config.recentWindow)
     val lessonStore = LessonStore(JsonlLog(config.home.resolve("lessons.jsonl")), config.maxActiveLessons)
+    val preferenceStore = PreferenceStore(JsonlLog(config.home.resolve("preferences.jsonl")))
     private val evaluator = provider?.let { SessionEvaluator(it, lessonStore, outcomes, config) }
     private val lessonsSection = LessonsSection(RecencyUsageRecall(lessonStore, config.maxRecalledLessons), lessonStore, config)
     private val reliabilitySection = ToolReliabilitySection(toolStats, config)
@@ -66,6 +67,21 @@ class LearningPlugin(
         val sm = sessionManager ?: return
         val eval = evaluator ?: return
         runCatching { eval.evaluate(sessionId, sm.load(sessionId).entries, mechanical) }
+    }
+
+    fun recordExplicitFeedback(sessionId: String, entryIndex: Int, polarity: String, reason: String?) {
+        preferenceStore.add(PreferenceRecord(
+            id = "pref_" + java.util.UUID.randomUUID(), ts = System.currentTimeMillis(),
+            scope = config.scope, sessionId = sessionId, entryIndex = entryIndex,
+            polarity = polarity, source = "explicit", reason = reason, weight = 1.0))
+        if (polarity == "positive") {
+            preferenceStore.forSession(sessionId)
+                .filter { it.polarity == "negative" && it.pairedWith == null &&
+                          it.entryIndex < entryIndex &&
+                          entryIndex - it.entryIndex <= config.retryWindow * 4 }
+                .maxByOrNull { it.entryIndex }
+                ?.let { preferenceStore.link(sessionId, it.entryIndex, entryIndex) }
+        }
     }
 
     fun promptSections(scope: String): String? {
