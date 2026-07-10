@@ -3,12 +3,15 @@ package dev.sophi.cli
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.AgentSession
+import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
+import dev.sophi.learning.LearningPlugin
 
 class SlashHandler(
     private val sessionManager: SessionManager,
     private val compactor: ContextCompactor?,
     private val config: AgentConfig,
+    private val learning: LearningPlugin? = null,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -54,8 +57,25 @@ class SlashHandler(
                     compacted
                 }
             }
+            "good", "bad" -> {
+                if (learning == null) { output("Learning is not enabled."); session }
+                else {
+                    val target = session.entries.indexOfLast {
+                        it.role == EntryRole.ASSISTANT && it.metadata["replay"] != "false"
+                    }
+                    if (target < 0) output("Nothing to rate yet.")
+                    else {
+                        learning.recordExplicitFeedback(
+                            session.id, target,
+                            if (cmd == "good") "positive" else "negative",
+                            arg?.takeIf { it.isNotBlank() })
+                        output("Noted.")
+                    }
+                    session
+                }
+            }
             else -> {
-                output("Unknown command: /$cmd  Available: /list /branch /checkout /compact")
+                output("Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad")
                 session
             }
         }
