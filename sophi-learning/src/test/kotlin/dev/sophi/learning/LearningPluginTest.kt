@@ -66,14 +66,16 @@ class LearningPluginTest : FunSpec({
         p.lessonStore.active("/p").single().text shouldBe "lesson!"
     }
 
-    test("explicit bad then good within retryWindow links the pair mechanically") {
+    test("explicit bad then good within retryWindow links the pair mechanically by record id") {
         val home = tempdir().toPath()
         val p = LearningPlugin(LearningConfig(home = home, scope = "/p"))
         p.recordExplicitFeedback("s1", entryIndex = 2, polarity = "negative", reason = "wrong style")
         p.recordExplicitFeedback("s1", entryIndex = 5, polarity = "positive", reason = null)
         val records = p.preferenceStore.forSession("s1").associateBy { it.entryIndex }
-        records.getValue(2).pairedWith shouldBe 5
-        records.getValue(5).pairedWith shouldBe 2
+        val negative = records.getValue(2)
+        val positive = records.getValue(5)
+        negative.pairedWith shouldBe positive.id
+        positive.pairedWith shouldBe negative.id
     }
 
     test("good far outside retryWindow does not link") {

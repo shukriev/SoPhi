@@ -22,12 +22,10 @@ class PreferenceStore(private val log: JsonlLog) {
         fold()[id]?.let { append(it.copy(status = "deleted", ts = System.currentTimeMillis())) }
     }
 
-    fun link(sessionId: String, negativeEntryIndex: Int, positiveEntryIndex: Int) {
-        val session = forSession(sessionId)
-        session.find { it.entryIndex == negativeEntryIndex && it.polarity == "negative" }
-            ?.let { append(it.copy(pairedWith = positiveEntryIndex)) }
-        session.find { it.entryIndex == positiveEntryIndex && it.polarity == "positive" }
-            ?.let { append(it.copy(pairedWith = negativeEntryIndex)) }
+    fun link(negativeId: String, positiveId: String) {
+        val all = fold()
+        all[negativeId]?.let { append(it.copy(pairedWith = positiveId)) }
+        all[positiveId]?.let { append(it.copy(pairedWith = negativeId)) }
     }
 
     private fun append(r: PreferenceRecord) =

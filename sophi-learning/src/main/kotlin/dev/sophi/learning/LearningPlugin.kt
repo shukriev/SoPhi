@@ -71,17 +71,18 @@ class LearningPlugin(
 
     fun recordExplicitFeedback(sessionId: String, entryIndex: Int, polarity: String, reason: String?) {
         runCatching {
-            preferenceStore.add(PreferenceRecord(
+            val record = PreferenceRecord(
                 id = "pref_" + java.util.UUID.randomUUID(), ts = System.currentTimeMillis(),
                 scope = config.scope, sessionId = sessionId, entryIndex = entryIndex,
-                polarity = polarity, source = "explicit", reason = reason, weight = 1.0))
+                polarity = polarity, source = "explicit", reason = reason, weight = 1.0)
+            preferenceStore.add(record)
             if (polarity == "positive") {
                 preferenceStore.forSession(sessionId)
                     .filter { it.polarity == "negative" && it.pairedWith == null &&
                               it.entryIndex < entryIndex &&
                               entryIndex - it.entryIndex <= config.retryWindow * 4 }
                     .maxByOrNull { it.entryIndex }
-                    ?.let { preferenceStore.link(sessionId, it.entryIndex, entryIndex) }
+                    ?.let { preferenceStore.link(it.id, record.id) }
             }
         }
     }

@@ -19,18 +19,25 @@ class TrajectoryRendererTest : FunSpec({
             entry(EntryRole.TOOL_RESULT, "x".repeat(500), mapOf("replay" to "false", "toolName" to "bash")),
             entry(EntryRole.ASSISTANT, "fixed")
         ), budgetTokens = 8000)
-        text shouldContain "USER: fix the build"
-        text shouldContain "[tool call] bash"
-        text shouldContain "ASSISTANT: fixed"
+        text shouldContain "[#0] USER: fix the build"
+        text shouldContain "[#1] [tool call] bash"
+        text shouldContain "[#2] [tool result bash]:"
+        text shouldContain "[#3] ASSISTANT: fixed"
         text shouldNotContain "x".repeat(400)   // tool result truncated to 300 chars
     }
 
     test("over budget: head and tail kept, middle elided") {
         val entries = (1..200).map { entry(EntryRole.USER, "message number $it padded ${"y".repeat(80)}") }
         val text = TrajectoryRenderer.render(entries, budgetTokens = 500)
-        text shouldContain "message number 1 "
+        text shouldContain "[#0] USER: message number 1 "
         text shouldContain "message number 200"
         text shouldContain "entries elided"
         text.length shouldBeLessThan 500 * 4 + 500
+    }
+
+    test("elision marker line has no index prefix") {
+        val entries = (1..200).map { entry(EntryRole.USER, "message number $it padded ${"y".repeat(80)}") }
+        val text = TrajectoryRenderer.render(entries, budgetTokens = 500)
+        text shouldContain "\n[... "
     }
 })

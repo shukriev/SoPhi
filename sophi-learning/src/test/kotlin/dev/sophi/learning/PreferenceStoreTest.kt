@@ -17,12 +17,19 @@ class PreferenceStoreTest : FunSpec({
         s.active("/p") shouldBe emptyList()
     }
 
-    test("link sets pairedWith on both records") {
+    test("link sets pairedWith to the partner's id on both records") {
         val s = store()
         s.add(rec("pref_a", 2, "negative")); s.add(rec("pref_b", 5, "positive"))
-        s.link("s1", negativeEntryIndex = 2, positiveEntryIndex = 5)
+        s.link("pref_a", "pref_b")
         val bySess = s.forSession("s1").associateBy { it.id }
-        bySess.getValue("pref_a").pairedWith shouldBe 5
-        bySess.getValue("pref_b").pairedWith shouldBe 2
+        bySess.getValue("pref_a").pairedWith shouldBe "pref_b"
+        bySess.getValue("pref_b").pairedWith shouldBe "pref_a"
+    }
+
+    test("link no-ops silently when one side is missing") {
+        val s = store()
+        s.add(rec("pref_a", 2, "negative"))
+        s.link("pref_a", "pref_missing")
+        s.forSession("s1").single().pairedWith shouldBe "pref_missing"
     }
 })

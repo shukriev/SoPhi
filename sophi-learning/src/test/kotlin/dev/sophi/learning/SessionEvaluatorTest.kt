@@ -88,7 +88,7 @@ class SessionEvaluatorTest : FunSpec({
         record.evidence shouldBe "no, the OTHER file"
     }
 
-    test("retryOf on an implicit item links the pair") {
+    test("retryOf on an implicit item links the pair by record id") {
         val (eval, _, _, prefs) = fixtureWithPrefs(LLMResponse.Text(
             """{"judgment":"success","reason":"ok","lessons":[],
                 "feedback":[
@@ -96,6 +96,25 @@ class SessionEvaluatorTest : FunSpec({
                   {"entryIndex":6,"polarity":"positive","signal":"user_satisfied","evidence":"perfect, thanks","retryOf":2}
                 ]}""", TokenUsage(1, 1)))
         runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
-        prefs.forSession("s1").single { it.entryIndex == 2 }.pairedWith shouldBe 6
+        val byEntry = prefs.forSession("s1").associateBy { it.entryIndex }
+        val negative = byEntry.getValue(2)
+        val positive = byEntry.getValue(6)
+        negative.pairedWith shouldBe positive.id
+        positive.pairedWith shouldBe negative.id
+    }
+
+    test("retryOf links correctly even when the positive item appears before its negative in the array") {
+        val (eval, _, _, prefs) = fixtureWithPrefs(LLMResponse.Text(
+            """{"judgment":"success","reason":"ok","lessons":[],
+                "feedback":[
+                  {"entryIndex":6,"polarity":"positive","signal":"user_satisfied","evidence":"perfect, thanks","retryOf":2},
+                  {"entryIndex":2,"polarity":"negative","signal":"user_corrected","evidence":"wrong","retryOf":null}
+                ]}""", TokenUsage(1, 1)))
+        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        val byEntry = prefs.forSession("s1").associateBy { it.entryIndex }
+        val negative = byEntry.getValue(2)
+        val positive = byEntry.getValue(6)
+        negative.pairedWith shouldBe positive.id
+        positive.pairedWith shouldBe negative.id
     }
 })

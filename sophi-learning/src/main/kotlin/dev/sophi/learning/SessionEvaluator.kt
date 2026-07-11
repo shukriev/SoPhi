@@ -54,14 +54,30 @@ class SessionEvaluator(
                 ))
             }
             if (config.implicitFeedback && preferences != null) {
-                verdict.feedback.filter { it.evidence.isNotBlank() }.forEach { fb ->
+                val filtered = verdict.feedback.filter { it.evidence.isNotBlank() }
+                // Pass 1: add every record first, tracking the id assigned to each entryIndex in
+                // this batch — this makes the second pass below independent of array order.
+                val idByEntryIndex = mutableMapOf<Int, String>()
+                filtered.forEach { fb ->
+                    val id = "pref_" + UUID.randomUUID()
                     preferences.add(PreferenceRecord(
-                        id = "pref_" + UUID.randomUUID(), ts = System.currentTimeMillis(),
+                        id = id, ts = System.currentTimeMillis(),
                         scope = config.scope, sessionId = sessionId, entryIndex = fb.entryIndex,
                         polarity = fb.polarity, source = "implicit", signal = fb.signal,
                         evidence = fb.evidence, weight = config.implicitWeight))
-                    fb.retryOf?.let { rejected ->
-                        if (fb.polarity == "positive") preferences.link(sessionId, rejected, fb.entryIndex)
+                    idByEntryIndex[fb.entryIndex] = id
+                }
+                // Pass 2: link positive-with-retryOf items to their negative partner by id.
+                filtered.forEach { fb ->
+                    if (fb.polarity == "positive") {
+                        fb.retryOf?.let { rejectedEntryIndex ->
+                            val positiveId = idByEntryIndex.getValue(fb.entryIndex)
+                            val negativeId = idByEntryIndex[rejectedEntryIndex]
+                                ?: preferences.forSession(sessionId)
+                                    .lastOrNull { it.entryIndex == rejectedEntryIndex && it.polarity == "negative" }
+                                    ?.id
+                            if (negativeId != null) preferences.link(negativeId, positiveId)
+                        }
                     }
                 }
             }
@@ -94,7 +110,9 @@ An explicit record with a reason justifies a preference lesson on its own.
 Implicit records justify one only when >= ${config.corroborationThreshold} records show the same pattern.
 Also, if this session's transcript shows the user correcting or rephrasing after an assistant reply,
 report it in "feedback" with the entryIndex, a signal, and a VERBATIM quote as evidence.
-Use "retryOf" when a later reply is a retry of an earlier rejected one.""")
+Use "retryOf" when a later reply is a retry of an earlier rejected one.
+Each trajectory line below is prefixed with a "[#N]" marker; N is the entryIndex value to cite
+in "entryIndex" and "retryOf" — do not invent indices.""")
             }
             appendLine("\n## Mechanical facts")
             appendLine("turns=${mechanical.turns} toolCalls=${mechanical.toolCalls} " +

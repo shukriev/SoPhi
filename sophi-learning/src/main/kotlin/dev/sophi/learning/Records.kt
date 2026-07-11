@@ -40,6 +40,6 @@ data class PreferenceRecord(
     val signal: String? = null,     // implicit: user_corrected|user_rephrased|user_frustrated|user_satisfied
     val evidence: String? = null,   // implicit: verbatim user quote (required)
     val weight: Double = 1.0,
-    val pairedWith: Int? = null,    // entryIndex of the retry-chain partner
+    val pairedWith: String? = null, // id of the retry-chain partner record
     val status: String = "active"   // active | deleted
 )
