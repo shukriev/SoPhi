@@ -37,3 +37,9 @@ object ChatMessages {
         }
     }
 }
+
+internal fun JsonElement.redactedWith(redact: (String) -> String): JsonElement = when (this) {
+    is JsonPrimitive -> if (isString) JsonPrimitive(redact(content)) else this
+    is JsonArray -> JsonArray(map { it.redactedWith(redact) })
+    is JsonObject -> JsonObject(mapValues { (_, v) -> v.redactedWith(redact) })
+}

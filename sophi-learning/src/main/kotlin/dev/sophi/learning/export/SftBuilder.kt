@@ -23,13 +23,7 @@ class SftBuilder(private val redact: (String) -> String) {
     }
 
     private fun line(messages: JsonArray): String {
-        val redacted = redactJson(messages)
+        val redacted = messages.redactedWith(redact)
         return buildJsonObject { put("messages", redacted) }.toString()
-    }
-
-    private fun redactJson(element: JsonElement): JsonElement = when (element) {
-        is JsonPrimitive -> if (element.isString) JsonPrimitive(redact(element.content)) else element
-        is JsonArray -> JsonArray(element.map { redactJson(it) })
-        is JsonObject -> JsonObject(element.mapValues { (_, v) -> redactJson(v) })
     }
 }
