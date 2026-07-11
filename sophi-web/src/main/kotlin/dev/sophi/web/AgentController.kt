@@ -9,8 +9,10 @@ import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
+import dev.sophi.learning.LearningPlugin
 import dev.sophi.web.api.ChatRequest
 import dev.sophi.web.api.ChatResponse
+import dev.sophi.web.api.FeedbackRequest
 import dev.sophi.web.api.SessionDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +37,8 @@ class AgentController(
     private val sessionManager: SessionManager,
     private val agentLoop: AgentLoop,
     private val config: AgentConfig,
-    private val pluginRegistry: PluginRegistry = PluginRegistry()
+    private val pluginRegistry: PluginRegistry = PluginRegistry(),
+    private val learningPlugin: LearningPlugin? = null
 ) {
     // Concurrent turns on one session would each load-then-save, losing the
     // slower writer's entries; serialize load+turn+save per session id.
@@ -74,6 +77,26 @@ class AgentController(
         runCatching { pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(id)) }
         val reply = updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
         ResponseEntity.ok(ChatResponse(updated.id, reply))
+    }
+
+    @PostMapping("/sessions/{id}/feedback")
+    fun feedback(@PathVariable id: String, @RequestBody req: FeedbackRequest): ResponseEntity<Map<String, String>> {
+        if (req.polarity !in setOf("positive", "negative"))
+            return ResponseEntity.badRequest().body(mapOf("error" to "polarity must be positive|negative"))
+        val plugin = learningPlugin
+            ?: return ResponseEntity.status(503).body(mapOf("error" to "learning disabled"))
+        val session = try {
+            sessionManager.load(id)
+        } catch (e: Exception) {
+            return ResponseEntity.notFound().build()
+        }
+        val target = req.entryIndex ?: session.entries.indexOfLast {
+            it.role == EntryRole.ASSISTANT && it.metadata["replay"] != "false"
+        }
+        if (target !in session.entries.indices)
+            return ResponseEntity.badRequest().body(mapOf("error" to "no entry to rate"))
+        plugin.recordExplicitFeedback(id, target, req.polarity, req.reason)
+        return ResponseEntity.ok(mapOf("status" to "ok"))
     }
 
     @GetMapping("/sessions/{id}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])

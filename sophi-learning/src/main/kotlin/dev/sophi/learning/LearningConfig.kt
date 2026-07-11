@@ -14,5 +14,9 @@ data class LearningConfig(
     val evaluatorInputBudget: Int = 8_000,
     val maxActiveLessons: Int = 50,
     val maxRecalledLessons: Int = 10,
-    val lessonTokenBudget: Int = 600
+    val lessonTokenBudget: Int = 600,
+    val implicitFeedback: Boolean = true,
+    val implicitWeight: Double = 0.5,
+    val corroborationThreshold: Int = 2,
+    val retryWindow: Int = 4
 )

@@ -133,9 +133,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val sophiTerminal = SophiTerminal.create()
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
-        mordantTerminal.println("Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact\n")
+        mordantTerminal.println("Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad\n")
 
-        val slashHandler = SlashHandler(sessionManager, compactor, config) { mordantTerminal.println(it) }
+        val slashHandler = SlashHandler(sessionManager, compactor, config, learningPlugin) { mordantTerminal.println(it) }
         val inputSource: InputSource =
             if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {

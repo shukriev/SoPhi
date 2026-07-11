@@ -5,14 +5,15 @@ import dev.sophi.core.session.SessionEntry
 
 object TrajectoryRenderer {
     fun render(entries: List<SessionEntry>, budgetTokens: Int): String {
-        val lines = entries.map { e ->
+        val lines = entries.mapIndexed { i, e ->
+            val prefix = "[#$i] "
             when {
                 e.metadata.containsKey("toolCalls") ->
-                    "[tool call] " + toolNames(e.metadata.getValue("toolCalls")) + " " +
+                    prefix + "[tool call] " + toolNames(e.metadata.getValue("toolCalls")) + " " +
                         e.metadata.getValue("toolCalls").take(300)
                 e.role == EntryRole.TOOL_RESULT ->
-                    "[tool result ${e.metadata["toolName"] ?: ""}]: ${e.content.take(300)}"
-                else -> "${e.role}: ${e.content}"
+                    prefix + "[tool result ${e.metadata["toolName"] ?: ""}]: ${e.content.take(300)}"
+                else -> "$prefix${e.role}: ${e.content}"
             }
         }
         val budgetChars = budgetTokens * 4

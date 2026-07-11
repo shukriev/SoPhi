@@ -9,6 +9,12 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+
+private data class EvalFixture(
+    val eval: SessionEvaluator, val lessons: LessonStore,
+    val outcomes: JsonlLog, val prefs: PreferenceStore
+)
 
 class SessionEvaluatorTest : FunSpec({
     val verdict = """{"judgment":"failure","reason":"tests never ran",
@@ -22,6 +28,16 @@ class SessionEvaluatorTest : FunSpec({
         coEvery { provider.complete(any()) } returnsMany responses.toList()
         val config = LearningConfig(home = home, scope = "/p", sessionModel = "test-model")
         return Triple(SessionEvaluator(provider, lessons, outcomes, config), lessons, outcomes)
+    }
+    fun fixtureWithPrefs(vararg responses: LLMResponse): EvalFixture {
+        val home = tempdir().toPath()
+        val lessons = LessonStore(JsonlLog(home.resolve("lessons.jsonl")))
+        val outcomes = JsonlLog(home.resolve("session-outcomes.jsonl"))
+        val prefs = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returnsMany responses.toList()
+        val config = LearningConfig(home = home, scope = "/p", sessionModel = "test-model")
+        return EvalFixture(SessionEvaluator(provider, lessons, outcomes, config, prefs), lessons, outcomes, prefs)
     }
     val mechanical = SessionOutcome(1L, "/p", "s1", "completed", turns = 2)
 
@@ -56,5 +72,49 @@ class SessionEvaluatorTest : FunSpec({
         lessons.add(Lesson("les_old", 1L, "/p", "s0", "wrong", "environment"))
         kotlinx.coroutines.runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
         lessons.active("/p").single().text shouldBe "corrected"
+    }
+
+    test("implicit feedback with evidence becomes a weighted record; without evidence is dropped") {
+        val (eval, _, _, prefs) = fixtureWithPrefs(LLMResponse.Text(
+            """{"judgment":"success","reason":"ok","lessons":[],
+                "feedback":[
+                  {"entryIndex":3,"polarity":"negative","signal":"user_corrected","evidence":"no, the OTHER file","retryOf":null},
+                  {"entryIndex":5,"polarity":"negative","signal":"user_frustrated","evidence":"","retryOf":null}
+                ]}""", TokenUsage(1, 1)))
+        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        val record = prefs.forSession("s1").single()
+        record.source shouldBe "implicit"
+        record.weight shouldBe 0.5
+        record.evidence shouldBe "no, the OTHER file"
+    }
+
+    test("retryOf on an implicit item links the pair by record id") {
+        val (eval, _, _, prefs) = fixtureWithPrefs(LLMResponse.Text(
+            """{"judgment":"success","reason":"ok","lessons":[],
+                "feedback":[
+                  {"entryIndex":2,"polarity":"negative","signal":"user_corrected","evidence":"wrong","retryOf":null},
+                  {"entryIndex":6,"polarity":"positive","signal":"user_satisfied","evidence":"perfect, thanks","retryOf":2}
+                ]}""", TokenUsage(1, 1)))
+        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        val byEntry = prefs.forSession("s1").associateBy { it.entryIndex }
+        val negative = byEntry.getValue(2)
+        val positive = byEntry.getValue(6)
+        negative.pairedWith shouldBe positive.id
+        positive.pairedWith shouldBe negative.id
+    }
+
+    test("retryOf links correctly even when the positive item appears before its negative in the array") {
+        val (eval, _, _, prefs) = fixtureWithPrefs(LLMResponse.Text(
+            """{"judgment":"success","reason":"ok","lessons":[],
+                "feedback":[
+                  {"entryIndex":6,"polarity":"positive","signal":"user_satisfied","evidence":"perfect, thanks","retryOf":2},
+                  {"entryIndex":2,"polarity":"negative","signal":"user_corrected","evidence":"wrong","retryOf":null}
+                ]}""", TokenUsage(1, 1)))
+        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        val byEntry = prefs.forSession("s1").associateBy { it.entryIndex }
+        val negative = byEntry.getValue(2)
+        val positive = byEntry.getValue(6)
+        negative.pairedWith shouldBe positive.id
+        positive.pairedWith shouldBe negative.id
     }
 })
