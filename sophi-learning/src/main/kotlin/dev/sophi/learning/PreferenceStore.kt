@@ -15,6 +15,10 @@ class PreferenceStore(private val log: JsonlLog) {
     fun active(scope: String): List<PreferenceRecord> =
         fold().values.filter { it.scope == scope && it.status == "active" }.sortedBy { it.ts }
 
+    /** Scope-agnostic, non-tombstoned records across all scopes, sorted by ts. Used by the export pipeline. */
+    fun activeAll(): List<PreferenceRecord> =
+        fold().values.filter { it.status == "active" }.sortedBy { it.ts }
+
     fun forSession(sessionId: String): List<PreferenceRecord> =
         fold().values.filter { it.sessionId == sessionId && it.status == "active" }.sortedBy { it.ts }
 
