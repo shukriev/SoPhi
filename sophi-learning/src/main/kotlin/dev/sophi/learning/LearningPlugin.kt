@@ -22,7 +22,7 @@ class LearningPlugin(
     val toolStats = ToolStatsStore(toolEvents, config.recentWindow)
     val lessonStore = LessonStore(JsonlLog(config.home.resolve("lessons.jsonl")), config.maxActiveLessons)
     val preferenceStore = PreferenceStore(JsonlLog(config.home.resolve("preferences.jsonl")))
-    private val evaluator = provider?.let { SessionEvaluator(it, lessonStore, outcomes, config) }
+    private val evaluator = provider?.let { SessionEvaluator(it, lessonStore, outcomes, config, preferenceStore) }
     private val lessonsSection = LessonsSection(RecencyUsageRecall(lessonStore, config.maxRecalledLessons), lessonStore, config)
     private val reliabilitySection = ToolReliabilitySection(toolStats, config)
 
