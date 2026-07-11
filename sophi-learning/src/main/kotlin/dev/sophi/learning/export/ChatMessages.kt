@@ -9,7 +9,7 @@ object ChatMessages {
         systemPrompt?.let { add(buildJsonObject { put("role", "system"); put("content", it) }) }
         entries.forEach { e ->
             when {
-                e.metadata.containsKey("toolCalls") -> add(buildJsonObject {
+                e.role == EntryRole.ASSISTANT && e.metadata.containsKey("toolCalls") -> add(buildJsonObject {
                     put("role", "assistant"); put("content", "")
                     put("tool_calls", buildJsonArray {
                         Json.parseToJsonElement(e.metadata.getValue("toolCalls")).jsonArray.forEach { call ->
