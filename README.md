@@ -30,6 +30,8 @@ app — same core, three ways to run it.
 | 🧠 `sophi-core` | The agent loop, session tree (JSONL, branch/checkout), tool dispatch, context compaction |
 | 📚 `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
 | 🔌 `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
+| 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
+| 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
@@ -92,6 +94,8 @@ In-session slash commands:
 /branch     print the active branch (entry ids + roles)
 /checkout <entry-id>   jump to a different point in the session tree
 /compact    summarize older turns to shrink context
+/good       rate the last reply as good (feeds the learning system)
+/bad [reason]   rate the last reply as bad, optionally saying why
 exit / quit  end the session
 ```
 
@@ -142,6 +146,7 @@ POST /api/sessions?title=...          create a session -> {id, entryCount, lastM
 GET  /api/sessions                    list sessions
 POST /api/sessions/{id}/turn          { "input": "..." } -> { sessionId, reply }
 GET  /api/sessions/{id}/stream?input=...   Server-Sent Events, one event per token
+POST /api/sessions/{id}/feedback      { "polarity": "positive|negative", "reason"?, "entryIndex"? } -> rate a reply
 ```
 
 Example:
@@ -241,6 +246,46 @@ Steps to deploy...
 Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 `PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery
 (`PluginRegistry().discover()`).
+
+---
+
+## 🎓 Cross-cutting: learning
+
+SoPhi observes its own sessions and gets better at your project over time.
+All three surfaces (CLI, web, SDK) wire this in automatically; everything
+lives in plain JSONL files under `~/.sophi/learning/`, and learning is
+strictly best-effort — it can never fail or slow down a turn.
+
+The loop, end to end:
+
+1. **Capture** — tool calls and session outcomes are recorded via lifecycle
+   hooks; tools with a bad recent track record earn a reliability warning in
+   the system prompt.
+2. **Distill** — one LLM self-evaluation at session end judges the outcome
+   (success / partial / failure) and distills deduplicated, reusable
+   *lessons* that are recalled into future sessions' system prompts.
+3. **Align** — rate replies with `/good` and `/bad [reason]` (or the web
+   feedback endpoint); the evaluator also detects implicit signals like
+   corrections, each backed by a verbatim quote. Preferences steer future
+   behavior through the same lesson pipeline.
+4. **Export** — `sophi export` turns the labeled history into fine-tuning
+   datasets: chat-format `sft.jsonl` from success-judged sessions, TRL
+   `dpo.jsonl` pairs from bad→good retries, plus a provenance
+   `manifest.json`. Redaction of secrets/PII is on by default; output is
+   deterministic and deduplicated.
+
+Everything the agent has learned is inspectable and revocable:
+
+```bash
+sophi lessons list [--all]     # what it believes about this project
+sophi lessons archive <id>     # retract a lesson
+sophi feedback list            # your ratings + detected signals
+sophi feedback delete <id>     # revoke feedback
+sophi export --out ./dataset   # build SFT/DPO training files
+```
+
+Training itself is out of scope by design — the datasets are the durable
+asset, and they work with TRL, axolotl, unsloth, or llama-factory as-is.
 
 ---
 
