@@ -1,7 +1,7 @@
 # ADR-010: One session-end LLM self-evaluation; prompt-based lesson dedup; no vector database
 
 **Date:** 2026-07-09
-**Status:** Accepted (implementation pending — spec: `docs/superpowers/specs/2026-07-09-learning-phase2-lesson-distillation-design.md`)
+**Status:** Implemented (merged 2026-07-10, PR #3)
 
 ## Context
 

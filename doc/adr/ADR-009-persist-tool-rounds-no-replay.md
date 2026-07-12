@@ -1,7 +1,7 @@
 # ADR-009: Persist tool rounds in sessions, excluded from prompt replay
 
 **Date:** 2026-07-09
-**Status:** Accepted (implementation pending — spec: `docs/superpowers/specs/2026-07-09-learning-phase1-outcome-capture-design.md`)
+**Status:** Implemented (merged 2026-07-10, Phase 1)
 
 ## Context
 

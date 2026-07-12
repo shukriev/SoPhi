@@ -1,7 +1,7 @@
 # ADR-008: Learning lives in a separate `sophi-learning` module observing via activated tool hook points
 
 **Date:** 2026-07-09
-**Status:** Accepted (implementation pending — specs in `docs/superpowers/specs/2026-07-09-learning-phase*.md`)
+**Status:** Implemented (all four phases merged 2026-07-12)
 
 ## Context
 
