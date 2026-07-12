@@ -41,6 +41,18 @@ class ExportCommand : CliktCommand(name = "export", help = "Export sessions as f
         .default("${System.getProperty("user.home")}/.sophi/sessions")
 
     override fun run() {
+        if (minJudgment !in setOf("success", "partial")) {
+            echo("Error: --min-judgment must be success|partial (got '$minJudgment')")
+            return
+        }
+        val splitValue = split?.let {
+            val parsed = it.toDoubleOrNull()
+            if (parsed == null || parsed <= 0.0 || parsed > 1.0) {
+                echo("Error: --split must be a number in (0.0, 1.0] (got '$it')")
+                return
+            }
+            parsed
+        }
         if (noRedact && !force) {
             echo("Really export without redaction? [y/N] ", trailingNewline = false)
             if (readlnOrNull()?.trim()?.lowercase() != "y") { echo("Aborted."); return }
@@ -51,7 +63,7 @@ class ExportCommand : CliktCommand(name = "export", help = "Export sessions as f
                 outDir = Path.of(out), scope = scope,
                 since = since?.let { LocalDate.parse(it).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() },
                 minJudgment = minJudgment, perTurn = perTurn,
-                split = split?.toDouble(), redact = !noRedact, force = force
+                split = splitValue, redact = !noRedact, force = force
             )
         ) { echo(it) }.run()
     }

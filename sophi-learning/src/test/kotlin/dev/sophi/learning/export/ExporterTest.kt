@@ -202,4 +202,68 @@ class ExporterTest : FunSpec({
         // After dedup, both should remain (different UUIDs in content).
         result.sftExamples shouldBe 2
     }
+
+    test("export rejects an unrecognized minJudgment instead of silently admitting everything") {
+        val home = tempdir().toPath()
+        val sessionsDir = tempdir().toPath()
+        val outDir = tempdir().toPath().resolve("export-out")
+
+        val inputs = ExportInputs(home, sessionsDir)
+        val exporter = Exporter(inputs)
+
+        shouldThrow<IllegalArgumentException> {
+            exporter.export(ExportOptions(outDir = outDir, minJudgment = "succes"))
+        }
+    }
+
+    test("since filters the DPO stream and unpairedNegatives stays consistent with the same filter") {
+        val home = tempdir().toPath()
+        val sessionsDir = tempdir().toPath()
+        val outDir = tempdir().toPath().resolve("export-out")
+
+        val prefs = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
+        val sessionManager = FileSessionManager(sessionsDir)
+
+        // sOld: linked DPO pair with an old negative ts -> excluded once `since` is applied.
+        val sOld = AgentSession(id = "sOld")
+        sOld.append(EntryRole.USER, "old commit msg")
+        sOld.append(EntryRole.ASSISTANT, "Updated stuff old.")     // entryIndex 1 = rejected
+        sOld.append(EntryRole.USER, "no, please fix")
+        sOld.append(EntryRole.ASSISTANT, "feat(core): old fix")   // entryIndex 3 = chosen
+        sessionManager.save(sOld)
+        prefs.add(PreferenceRecord("pref_n_old", 100L, "/p", "sOld", 1, "negative", "explicit", reason = "r"))
+        prefs.add(PreferenceRecord("pref_p_old", 100L, "/p", "sOld", 3, "positive", "explicit"))
+        prefs.link("pref_n_old", "pref_p_old")
+
+        // sNew: linked DPO pair with a recent negative ts -> kept once `since` is applied.
+        val sNew = AgentSession(id = "sNew")
+        sNew.append(EntryRole.USER, "new commit msg")
+        sNew.append(EntryRole.ASSISTANT, "Updated stuff new.")     // entryIndex 1 = rejected
+        sNew.append(EntryRole.USER, "no, please fix")
+        sNew.append(EntryRole.ASSISTANT, "feat(core): new fix")   // entryIndex 3 = chosen
+        sessionManager.save(sNew)
+        prefs.add(PreferenceRecord("pref_n_new", 5000L, "/p", "sNew", 1, "negative", "explicit", reason = "r"))
+        prefs.add(PreferenceRecord("pref_p_new", 5000L, "/p", "sNew", 3, "positive", "explicit"))
+        prefs.link("pref_n_new", "pref_p_new")
+
+        // Unpaired negatives at both an old and a recent ts, no session files needed
+        // (unpairedNegatives is computed purely from preference records).
+        prefs.add(PreferenceRecord("pref_unpaired_old", 50L, "/p", "sUnpairedOld", 1, "negative", "explicit", reason = "r"))
+        prefs.add(PreferenceRecord("pref_unpaired_new", 6000L, "/p", "sUnpairedNew", 1, "negative", "explicit", reason = "r"))
+
+        val inputs = ExportInputs(home, sessionsDir)
+        val exporter = Exporter(inputs)
+        val result = exporter.export(ExportOptions(outDir = outDir, since = 1000L))
+
+        result.dpoPairs shouldBe 1
+        Files.readAllLines(outDir.resolve("dpo.jsonl")).filter { it.isNotBlank() }.size shouldBe 1
+
+        val manifest = Json.parseToJsonElement(
+            Files.readAllLines(outDir.resolve("manifest.json")).joinToString("")
+        ).jsonObject
+        val counts = manifest.getValue("counts").jsonObject
+        counts.getValue("dpoPairs").jsonPrimitive.int shouldBe 1
+        // Only the recent unpaired negative survives the since filter.
+        counts.getValue("unpairedNegatives").jsonPrimitive.int shouldBe 1
+    }
 })

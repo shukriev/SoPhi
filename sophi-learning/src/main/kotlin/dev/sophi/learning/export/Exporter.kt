@@ -28,7 +28,14 @@ data class ExportResult(val sftExamples: Int, val dpoPairs: Int, val manifestPat
  */
 class Exporter(private val inputs: ExportInputs, private val userPatternsFile: Path? = null) {
 
+    /**
+     * SFT eligibility applies the judgment/negative/subagent filters (plus scope+since).
+     * The DPO stream applies scope+since only, by design: DPO pairs come precisely
+     * from sessions with an explicit negative preference, so [ExportOptions.minJudgment]
+     * does not apply to it.
+     */
     fun export(o: ExportOptions): ExportResult {
+        require(o.minJudgment in setOf("success", "partial")) { "minJudgment must be success|partial" }
         val manifestPath = o.outDir.resolve("manifest.json")
         check(o.force || !Files.exists(manifestPath)) { "Output exists; use --force to overwrite" }
         Files.createDirectories(o.outDir)
@@ -43,13 +50,14 @@ class Exporter(private val inputs: ExportInputs, private val userPatternsFile: P
             .filter { o.scope == null || it.scope == o.scope }
             .filter { o.since == null || it.ts >= o.since }
         val negatives = inputs.negativeSessions()
+        val subagentIds = inputs.subagentSessionIds()
 
         var legacy = 0; var dups = 0
         val seen = mutableSetOf<String>()
         val sftLines = mutableListOf<Pair<String, String>>()   // sessionId to line
         val eligible = outcomes.filter { out ->
             rank(out.judgment) >= rank(o.minJudgment) &&
-                out.sessionId !in negatives && !inputs.isSubagent(out.sessionId)
+                out.sessionId !in negatives && out.sessionId !in subagentIds
         }
         eligible.forEach { out ->
             val session = inputs.loadSession(out.sessionId) ?: return@forEach
@@ -70,6 +78,7 @@ class Exporter(private val inputs: ExportInputs, private val userPatternsFile: P
         var unpairable = 0
         val dpoLines = inputs.dpoLinks()
             .filter { (neg, _) -> o.scope == null || neg.scope == o.scope }
+            .filter { (neg, _) -> o.since == null || neg.ts >= o.since }
             .mapNotNull { (neg, pos) ->
                 val session = inputs.loadSession(neg.sessionId) ?: return@mapNotNull null
                 val (_, systemPrompt) = inputs.configSnapshot(neg.sessionId)
@@ -81,6 +90,8 @@ class Exporter(private val inputs: ExportInputs, private val userPatternsFile: P
                     ?: run { unpairable++; null }
             }
         val unpairedNegatives = inputs.activePreferences()
+            .filter { o.scope == null || it.scope == o.scope }
+            .filter { o.since == null || it.ts >= o.since }
             .count { it.polarity == "negative" && it.pairedWith == null }
 
         writeSplit(o, o.outDir, "sft", sftLines)

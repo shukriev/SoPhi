@@ -48,6 +48,14 @@ class ExportInputs(learningHome: Path, sessionsDir: Path) {
     fun configSnapshot(sessionId: String): Pair<String?, String?> =
         sessionManager.readConfigSnapshot(sessionId)
 
+    /** One pass over [FileSessionManager.list] to collect all subagent session ids. */
+    fun subagentSessionIds(): Set<String> =
+        sessionManager.list().filter { it.parentSessionId != null }.map { it.id }.toSet()
+
+    @Deprecated(
+        "O(n) list() scan per call; use subagentSessionIds() once and check membership instead",
+        ReplaceWith("subagentSessionIds().contains(sessionId)")
+    )
     fun isSubagent(sessionId: String): Boolean =
-        sessionManager.list().find { it.id == sessionId }?.parentSessionId != null
+        subagentSessionIds().contains(sessionId)
 }

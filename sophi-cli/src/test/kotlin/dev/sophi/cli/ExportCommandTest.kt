@@ -4,8 +4,6 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.learning.JsonlLog
-import dev.sophi.learning.PreferenceRecord
-import dev.sophi.learning.PreferenceStore
 import dev.sophi.learning.SessionOutcome
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
