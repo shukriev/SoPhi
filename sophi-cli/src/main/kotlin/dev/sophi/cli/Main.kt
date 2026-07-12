@@ -6,6 +6,7 @@ fun main(args: Array<String>) = SophiCli()
     .subcommands(
         McpServeCommand(),
         LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand()),
-        FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand())
+        FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand()),
+        ExportCommand()
     )
     .main(args)
