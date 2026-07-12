@@ -1,7 +1,7 @@
 # ADR-011: Explicit + weighted implicit feedback, steering through the lesson pipeline
 
 **Date:** 2026-07-09
-**Status:** Accepted (implementation pending — spec: `docs/superpowers/specs/2026-07-09-learning-phase3-preference-feedback-design.md`)
+**Status:** Implemented (merged 2026-07-12, PR #4; amendments below)
 
 ## Context
 
@@ -24,3 +24,11 @@ Phase 3 aligns the agent with its user: preferences about style, format, and how
 4. **Recording retry links now is nearly free; reconstructing them later is guesswork.** The (rejected, chosen) relationship is obvious at capture time — an explicit bad→good within a few turns, or an evaluator-observed retry — and is exactly the DPO raw material. Phase 3 stores only the link; all example construction stays in Phase 4.
 
 5. **Deletion must actually delete.** Tombstoned feedback is excluded from distillation prompts and export; archived preference lessons are shown to the evaluator as "do not re-emit." Alignment data the user cannot revoke would be a trust failure.
+
+## Amendments (2026-07-12, from implementation review)
+
+1. **Retry links pair by record id, not entry index.** `pairedWith` holds the partner *record's id* and linking is `PreferenceStore.link(negativeId, positiveId)` — a deliberate deviation from the original design's `pairedWith: entryIndex`. Two records can legitimately share an entry index (an explicit and an implicit record on the same reply), which would make an index-based partner reference ambiguous exactly where Phase 4 needs it to be exact. Records remain *anchored* to content by `sessionId + entryIndex` as decided above; only the pair reference changed.
+
+2. **Evaluator-cited indices are grounded, not trusted.** The trajectory rendered into the session-end evaluation prompt prefixes every entry with its absolute `[#N]` index, and the prompt instructs the model to cite those markers as `entryIndex`/`retryOf`. Without the markers the model had no way to know real indices, so every implicit anchor was fabricated — silently corrupting the `sessionId + entryIndex` join this ADR relies on.
+
+3. **Evaluator retry linking is order-independent.** Feedback records from a verdict are all stored first, then linked in a second pass (resolving `retryOf` within the batch, falling back to the session's stored records), so pairing does not depend on the order the LLM happens to emit array items.
