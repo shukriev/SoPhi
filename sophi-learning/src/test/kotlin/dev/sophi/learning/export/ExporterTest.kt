@@ -113,7 +113,8 @@ class ExporterTest : FunSpec({
         counts.getValue("sessionsEligible").jsonPrimitive.int shouldBe 2
         counts.getValue("duplicatesDropped").jsonPrimitive.int shouldBe 1
         counts.getValue("unpairableLinks").jsonPrimitive.int shouldBe 1
-        (counts.getValue("unpairedNegatives").jsonPrimitive.int >= 1) shouldBe true
+        counts.getValue("legacySessions").jsonPrimitive.int shouldBe 2
+        counts.getValue("unpairedNegatives").jsonPrimitive.int shouldBe 1
 
         val redaction = manifest.getValue("redaction").jsonObject
         redaction.getValue("enabled").jsonPrimitive.boolean shouldBe true
@@ -157,5 +158,48 @@ class ExporterTest : FunSpec({
             Files.readAllLines(outDir.resolve("manifest.json")).joinToString("")
         ).jsonObject
         manifest.getValue("counts").jsonObject.getValue("sessionsEligible").jsonPrimitive.int shouldBe 2
+    }
+
+    test("legacy sessions without config snapshot are counted, non-legacy sessions with config snapshot are not") {
+        val home = tempdir().toPath()
+        val sessionsDir = tempdir().toPath()
+        val outDir = tempdir().toPath().resolve("export-out")
+
+        val outcomes = JsonlLog(home.resolve("session-outcomes.jsonl"))
+        val sessionManager = FileSessionManager(sessionsDir)
+        fun outcome(sessionId: String) =
+            outcomes.append(json.encodeToString(SessionOutcome.serializer(),
+                SessionOutcome(1L, "/p", sessionId, "completed", judgment = "success")))
+
+        // Legacy session: no tool rounds, no config snapshot.
+        val legacy = AgentSession(id = "sLegacy")
+        legacy.append(EntryRole.USER, "hello")
+        legacy.append(EntryRole.ASSISTANT, "hi there")
+        sessionManager.save(legacy)
+        outcome("sLegacy")
+
+        // Non-legacy session: no tool rounds but has config snapshot.
+        val nonLegacy = AgentSession(id = "sNonLegacy")
+        nonLegacy.append(EntryRole.USER, "hello")
+        nonLegacy.append(EntryRole.ASSISTANT, "hi there")
+        sessionManager.save(nonLegacy)
+        sessionManager.saveConfigSnapshot("sNonLegacy", "claude-3-sonnet", "You are a helpful assistant.")
+        outcome("sNonLegacy")
+
+        val inputs = ExportInputs(home, sessionsDir)
+        val exporter = Exporter(inputs)
+        val result = exporter.export(ExportOptions(outDir = outDir))
+
+        val manifest = Json.parseToJsonElement(
+            Files.readAllLines(outDir.resolve("manifest.json")).joinToString("")
+        ).jsonObject
+        val counts = manifest.getValue("counts").jsonObject
+
+        // Legacy session (sLegacy) should increment legacySessions count.
+        counts.getValue("legacySessions").jsonPrimitive.int shouldBe 1
+        // Both sessions should be eligible and contribute to SFT examples (before dedup).
+        counts.getValue("sessionsEligible").jsonPrimitive.int shouldBe 2
+        // After dedup, both should remain (different UUIDs in content).
+        result.sftExamples shouldBe 2
     }
 })
