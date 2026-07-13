@@ -12,6 +12,7 @@ data class LearningConfig(
     val evaluatorModel: String? = null,
     val sessionModel: String? = null,
     val evaluatorInputBudget: Int = 8_000,
+    val evaluatorMaxTokens: Int = 1024,
     val maxActiveLessons: Int = 50,
     val maxRecalledLessons: Int = 10,
     val lessonTokenBudget: Int = 600,

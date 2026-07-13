@@ -1,5 +1,6 @@
 package dev.sophi.learning
 
+import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
@@ -9,6 +10,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 
 private data class EvalFixture(
@@ -101,6 +103,23 @@ class SessionEvaluatorTest : FunSpec({
         val positive = byEntry.getValue(6)
         negative.pairedWith shouldBe positive.id
         positive.pairedWith shouldBe negative.id
+    }
+
+    test("evaluator max tokens comes from LearningConfig, not a hardcoded value") {
+        val home = tempdir().toPath()
+        val lessons = LessonStore(JsonlLog(home.resolve("lessons.jsonl")))
+        val outcomes = JsonlLog(home.resolve("session-outcomes.jsonl"))
+        val provider = mockk<LLMProvider>()
+        val requestSlot = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(requestSlot)) } returns
+            LLMResponse.Text(verdict, TokenUsage(1, 1))
+        val config = LearningConfig(
+            home = home, scope = "/p", sessionModel = "test-model", evaluatorMaxTokens = 4096)
+        val eval = SessionEvaluator(provider, lessons, outcomes, config)
+
+        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+
+        requestSlot.captured.maxTokens shouldBe 4096
     }
 
     test("retryOf links correctly even when the positive item appears before its negative in the array") {
