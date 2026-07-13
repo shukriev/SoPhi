@@ -3,6 +3,8 @@ package dev.sophi.cli
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.int
+import com.github.ajalt.clikt.parameters.types.long
 import com.github.ajalt.mordant.rendering.TextColors
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.ai.providers.BraveSearchProvider
@@ -57,6 +59,19 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--api-key",
         help = "API key (falls back to ANTHROPIC_API_KEY for --provider claude; omit for no-auth local servers)"
     )
+    private val llmTimeoutSeconds: Long by option(
+        "--llm-timeout-seconds",
+        help = "Client-side request timeout for --provider openai-compat. Raise this for local " +
+            "reasoning models, which can spend well over a minute on hidden chain-of-thought " +
+            "before producing any output."
+    ).long().default(60)
+    private val llmMaxRetries: Int by option(
+        "--llm-max-retries",
+        help = "Retries for --provider openai-compat on request failure. Each retry is subject " +
+            "to the full --llm-timeout-seconds, so worst-case latency before an error surfaces " +
+            "is timeout * (retries + 1) — lower this (e.g. to 0) for a slow model that's " +
+            "consistently near the timeout, rather than silently waiting that multiple."
+    ).int().default(2)
     private val sessionsDirStr: String by option(
         "--sessions-dir",
         help = "Directory for session JSONL files"
@@ -80,7 +95,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
-        val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+        val provider = buildProvider(providerType, apiKeyOption, baseUrl, model, llmTimeoutSeconds, llmMaxRetries)
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
 

@@ -28,4 +28,18 @@ class ProviderFactoryTest : FunSpec({
         val provider = buildProvider("Claude", "sk-ant-test", null, "claude-opus-4-8")
         provider.name shouldBe "claude"
     }
+
+    test("buildProvider threads a custom requestTimeoutSeconds into the openai-compat provider") {
+        val provider = buildProvider(
+            "openai-compat", null, "http://localhost:11434/v1", "qwen2.5:7b",
+            requestTimeoutSeconds = 300)
+        provider.name shouldBe "openai-compat"
+    }
+
+    test("buildProvider threads a custom maxRetries into the openai-compat provider") {
+        val provider = buildProvider(
+            "openai-compat", null, "http://localhost:11434/v1", "qwen2.5:7b",
+            maxRetries = 0)
+        provider.name shouldBe "openai-compat"
+    }
 })
