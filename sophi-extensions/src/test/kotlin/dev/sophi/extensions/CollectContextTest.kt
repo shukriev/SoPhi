@@ -2,7 +2,9 @@ package dev.sophi.extensions
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private class FakePlugin(
     override val name: String,
@@ -45,5 +47,24 @@ class CollectContextTest : FunSpec({
     test("HookContext carries assistantReply, defaulting null") {
         HookContext("s1").assistantReply shouldBe null
         HookContext("s1", assistantReply = "done").assistantReply shouldBe "done"
+    }
+
+    test("external cancellation stops the chain instead of continuing to the next contributor") {
+        var secondRan = false
+        val registry = PluginRegistry()
+            .register(FakePlugin("slow") { _, _ -> delay(60_000); "late" })
+            .register(FakePlugin("second") { _, _ ->
+                secondRan = true
+                "second"
+            })
+
+        coroutineScope {
+            val job = launch { registry.collectContext("s1", "hi") }
+            delay(50)
+            job.cancel()
+            job.join()
+        }
+
+        secondRan shouldBe false
     }
 })

@@ -1,6 +1,7 @@
 package dev.sophi.extensions
 
 import java.util.ServiceLoader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -43,8 +44,12 @@ class PluginRegistry(
         userInput: String,
         timeoutMillis: Long = 2_000
     ): List<String> = _plugins.filterIsInstance<ContextContributor>().mapNotNull { contributor ->
-        runCatching {
+        try {
             withTimeoutOrNull(timeoutMillis) { contributor.contribute(sessionId, userInput) }
-        }.getOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
     }
 }
