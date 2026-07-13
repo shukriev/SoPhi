@@ -1,6 +1,9 @@
 <div align="center">
 
-# ✨ SoPhi
+<h1>
+  <img src="doc/images/logo.png" width="40" valign="middle" alt="SoPhi logo"/>
+  SoPhi
+</h1>
 
 ### The Kotlin-native agent harness for the JVM
 
