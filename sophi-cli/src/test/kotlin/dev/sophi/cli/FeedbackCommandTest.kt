@@ -52,4 +52,22 @@ class FeedbackCommandTest : FunSpec({
         FeedbackDelete(home, "no-such-id") { out.appendLine(it) }.run()
         out.toString() shouldContain "No active feedback record"
     }
+
+    test("list shows paired->id for a linked record") {
+        val home = tempdir().toPath()
+        val scope = System.getProperty("user.dir")
+        val store = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
+        store.add(PreferenceRecord(
+            id = "pref_neg", ts = 1L, scope = scope, sessionId = "sess_1",
+            entryIndex = 0, polarity = "negative", source = "explicit", reason = "bad"))
+        store.add(PreferenceRecord(
+            id = "pref_pos", ts = 2L, scope = scope, sessionId = "sess_1",
+            entryIndex = 3, polarity = "positive", source = "explicit"))
+        store.link("pref_neg", "pref_pos")
+
+        val out = StringBuilder()
+        FeedbackList(home) { out.appendLine(it) }.run()
+        out.toString() shouldContain "paired->pref_pos"
+        out.toString() shouldContain "paired->pref_neg"
+    }
 })

@@ -40,4 +40,12 @@ class PreferenceStoreTest : FunSpec({
         s.link("pref_a", "pref_missing")
         s.forSession("s1").single().pairedWith shouldBe "pref_missing"
     }
+
+    test("forSession excludes a tombstoned record, same as active") {
+        val s = store()
+        s.add(rec("pref_1", 2, "negative"))
+        s.add(rec("pref_2", 5, "positive"))
+        s.delete("pref_1")
+        s.forSession("s1").map { it.id } shouldBe listOf("pref_2")
+    }
 })

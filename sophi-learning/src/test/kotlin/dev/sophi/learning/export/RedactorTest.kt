@@ -37,4 +37,13 @@ class RedactorTest : FunSpec({
         r.redact("code SECRET-1234 here") shouldNotContain "SECRET-1234"
         r.hitsByType.getValue("custom") shouldBe 1
     }
+
+    test("an invalid regex line in the user patterns file is silently skipped, not fatal") {
+        val f = tempdir().toPath().resolve("redaction.txt")
+        // "[" is an unterminated character class -- a PatternSyntaxException at compile time.
+        java.nio.file.Files.writeString(f, "[\nSECRET-\\d{4}\n")
+        val r = Redactor(f)
+        r.redact("code SECRET-1234 here") shouldNotContain "SECRET-1234"
+        r.hitsByType.getValue("custom") shouldBe 1
+    }
 })
