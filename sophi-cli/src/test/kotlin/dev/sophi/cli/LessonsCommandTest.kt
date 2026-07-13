@@ -22,4 +22,21 @@ class LessonsCommandTest : FunSpec({
         LessonsArchive(home, "les_1") {}.run()
         store.active(System.getProperty("user.dir")) shouldBe emptyList<Lesson>()
     }
+
+    test("list honors an explicit --scope instead of always using the working directory") {
+        val home = tempdir().toPath()
+        val store = LessonStore(JsonlLog(home.resolve("lessons.jsonl")))
+        store.add(Lesson("les_other", 1L, "/some/other/project", "s", "other-project lesson", "approach"))
+
+        val out = StringBuilder()
+        LessonsList(home, scope = "/some/other/project") { out.appendLine(it) }.run()
+        out.toString() shouldContain "les_other"
+    }
+
+    test("archive reports when the given id doesn't match any active lesson") {
+        val home = tempdir().toPath()
+        val out = StringBuilder()
+        LessonsArchive(home, "no-such-id") { out.appendLine(it) }.run()
+        out.toString() shouldContain "No active lesson"
+    }
 })

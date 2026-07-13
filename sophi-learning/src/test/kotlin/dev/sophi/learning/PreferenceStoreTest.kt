@@ -17,6 +17,14 @@ class PreferenceStoreTest : FunSpec({
         s.active("/p") shouldBe emptyList()
     }
 
+    test("delete reports whether a matching active record actually existed") {
+        val s = store()
+        s.add(rec("pref_1", 2, "negative"))
+        s.delete("pref_1") shouldBe true
+        s.delete("pref_1") shouldBe false   // already deleted, second call finds no active record
+        s.delete("no-such-id") shouldBe false
+    }
+
     test("link sets pairedWith to the partner's id on both records") {
         val s = store()
         s.add(rec("pref_a", 2, "negative")); s.add(rec("pref_b", 5, "positive"))

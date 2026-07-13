@@ -26,8 +26,12 @@ class LessonStore(private val log: JsonlLog, private val maxActivePerScope: Int 
         }
     }
 
-    fun archive(id: String) {
-        fold()[id]?.let { append(it.copy(status = "archived", ts = System.currentTimeMillis())) }
+    /** @return true if [id] matched an active lesson that was archived; false if it was unknown or already archived. */
+    fun archive(id: String): Boolean {
+        val current = fold()[id] ?: return false
+        if (current.status != "active") return false
+        append(current.copy(status = "archived", ts = System.currentTimeMillis()))
+        return true
     }
 
     fun bumpUse(lessons: List<Lesson>) {

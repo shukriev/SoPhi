@@ -17,6 +17,14 @@ class LessonStoreTest : FunSpec({
         s.archived("/p").single().id shouldBe "les_1"
     }
 
+    test("archive reports whether a matching lesson actually existed") {
+        val s = store()
+        s.add(lesson("les_1"))
+        s.archive("les_1") shouldBe true
+        s.archive("les_1") shouldBe false   // already archived, second call finds no active record
+        s.archive("no-such-id") shouldBe false
+    }
+
     test("bumpUse increments useCount via appended record") {
         val s = store()
         s.add(lesson("les_1"))

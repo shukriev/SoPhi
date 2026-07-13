@@ -22,8 +22,12 @@ class PreferenceStore(private val log: JsonlLog) {
     fun forSession(sessionId: String): List<PreferenceRecord> =
         fold().values.filter { it.sessionId == sessionId && it.status == "active" }.sortedBy { it.ts }
 
-    fun delete(id: String) {
-        fold()[id]?.let { append(it.copy(status = "deleted", ts = System.currentTimeMillis())) }
+    /** @return true if [id] matched an active record that was deleted; false if it was unknown or already deleted. */
+    fun delete(id: String): Boolean {
+        val current = fold()[id] ?: return false
+        if (current.status != "active") return false
+        append(current.copy(status = "deleted", ts = System.currentTimeMillis()))
+        return true
     }
 
     fun link(negativeId: String, positiveId: String) {

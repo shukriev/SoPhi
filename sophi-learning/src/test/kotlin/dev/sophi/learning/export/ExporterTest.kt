@@ -11,6 +11,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldEndWith
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
@@ -101,6 +102,8 @@ class ExporterTest : FunSpec({
 
         Files.readAllLines(sftFile).filter { it.isNotBlank() }.size shouldBe 1
         Files.readAllLines(dpoFile).filter { it.isNotBlank() }.size shouldBe 1
+        Files.readString(sftFile) shouldEndWith "\n"
+        Files.readString(dpoFile) shouldEndWith "\n"
         result.sftExamples shouldBe 1
         result.dpoPairs shouldBe 1
         result.manifestPath shouldBe manifestFile
