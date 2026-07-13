@@ -4,9 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M4 — sophi-web + sophi-sdk + sophi-infra |
-| Modules complete | sophi-ai, sophi-core (session), sophi-core (loop + tools), sophi-cli (print mode), sophi-cli (full TUI), sophi-skills, sophi-extensions, sophi-web, sophi-sdk, sophi-infra |
-| Last updated | 2026-07-01 |
+| Current milestone | M6 — learning system (phases 1–4) complete |
+| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra |
+| Last updated | 2026-07-12 |
 
 ---
 
@@ -52,19 +52,24 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │                       sophi-infra                            │
 │  Auth  ·  Budget tracker  ·  Observability  ·  Permissions   │
 └──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│              sophi-learning  (observes via hooks)            │
+│  tool stats · lesson distillation · feedback · export        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 | Module | Purpose | Status |
 |--------|---------|--------|
-| `sophi-ai` | Spring AI thin wrapper — provider abstraction only | skeleton |
-| `sophi-core` | Agent loop, session (JSONL tree), tools, compaction | skeleton |
-| `sophi-skills` | Lazy-loaded Markdown skill packages | skeleton |
-| `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | skeleton |
-| `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | skeleton |
-| `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | skeleton |
-| `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | skeleton |
-| `sophi-sdk` | Embeddable library for Spring `@Service` beans | skeleton |
-| `sophi-infra` | Auth, budget, observability, permission gates | skeleton |
+| `sophi-ai` | Spring AI thin wrapper — provider abstraction only | complete |
+| `sophi-core` | Agent loop, session (JSONL tree), tools, compaction, subagents | complete |
+| `sophi-skills` | Lazy-loaded Markdown skill packages | complete |
+| `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | complete |
+| `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
+| `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
+| `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
+| `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
+| `sophi-sdk` | Embeddable library for Spring `@Service` beans | complete |
+| `sophi-infra` | Auth, budget, observability, permission gates | complete |
 
 **Dependency direction rules (never violate):**
 - `sophi-core` never imports from `sophi-web`, `sophi-cli`, `sophi-sdk`, or `sophi-infra`
@@ -98,7 +103,7 @@ AgentLoop.turn(session, userInput, config)
     └─ throw IllegalStateException("Max tool rounds exceeded")
 ```
 
-Session entries persisted: only USER + ASSISTANT (text). Tool call/result exchanges are ephemeral within a turn.
+Session entries persisted: USER + ASSISTANT (text), plus — since ADR-009 — the tool rounds themselves: one ASSISTANT entry per round carrying serialized calls in `metadata["toolCalls"]` and one TOOL_RESULT entry per result, all tagged `metadata["replay"]="false"`. `PromptBuilder` and `ContextCompactor` filter `replay=false` entries out, so prompts are byte-identical to the pre-ADR-009 behavior; the entries exist for the learning system (evaluation trajectories, dataset export), never for re-prompting.
 
 ---
 
@@ -208,7 +213,11 @@ data class HookContext(
     val sessionId: String,
     val userInput: String? = null,
     val toolName: String? = null,
-    val error: Throwable? = null
+    val error: Throwable? = null,
+    val argumentsJson: String? = null,   // BEFORE_TOOL
+    val toolResult: String? = null,      // AFTER_TOOL
+    val success: Boolean? = null,        // AFTER_TOOL
+    val durationMillis: Long? = null     // AFTER_TOOL
 )
 
 interface AgentHook {
@@ -225,6 +234,45 @@ interface SophiPlugin {
 
 Plugins are discovered via JVM `ServiceLoader` (`PluginRegistry.discover()`) or registered
 programmatically (`PluginRegistry.register(plugin)`).
+
+`BEFORE_TOOL`/`AFTER_TOOL` are fired by bridging the agent loop's live `TurnEvent` stream:
+each surface passes `pluginRegistry.turnEventBridge(sessionId)` as the loop's event callback,
+so the loop itself never knows plugins exist. `AFTER_TURN`/`ON_ERROR` are dispatched by the
+surface (CLI/web/SDK) when a turn settles — always best-effort (`runCatching`), never on the
+user's critical path.
+
+### LearningPlugin + LessonRecall (`dev.sophi.learning`)
+
+The learning system is a `SophiPlugin` plus JSONL fold-stores under `~/.sophi/learning/`
+(append-only, last record per id wins, deletion = tombstone). It observes tool events and
+session outcomes, runs one LLM self-evaluation at session end (judgment + deduplicated
+lessons + implicit feedback, strict JSON with one repair retry, silent no-op on failure),
+and injects what it learned back via a single entry point:
+
+```kotlin
+class LearningPlugin(
+    config: LearningConfig,
+    model: String? = null,
+    provider: LLMProvider? = null,          // enables the session-end evaluator
+    sessionManager: SessionManager? = null
+) : SophiPlugin {
+    val toolStats: ToolStatsStore
+    val lessonStore: LessonStore
+    val preferenceStore: PreferenceStore
+    suspend fun recordSessionEnd(sessionId: String)
+    fun recordExplicitFeedback(sessionId: String, entryIndex: Int, polarity: String, reason: String?)
+    fun promptSections(scope: String): String?   // reliability warnings + recalled lessons
+}
+
+interface LessonRecall {                          // ranking is swappable; `query` is the
+    fun recall(scope: String, budgetTokens: Int,  // hook for future embedding-based recall
+               query: String? = null): List<Lesson>
+}
+```
+
+Offline, `sophi export` (package `dev.sophi.learning.export`, zero provider imports per
+ADR-012) turns the captured history into `sft.jsonl` / `dpo.jsonl` / `manifest.json` —
+redacted by default, deduplicated, deterministically split by session-id hash.
 
 ### Skill + SkillLoader (`dev.sophi.skills`)
 
@@ -261,6 +309,11 @@ class SkillLoader {
 | [ADR-005](adr/ADR-005-jsonl-tree-sessions.md) | Session storage format | Append-only JSONL with parentId tree |
 | [ADR-006](adr/ADR-006-tool-interface.md) | Tool interface design | suspend execute returning String |
 | [ADR-007](adr/ADR-007-subagent-delegation.md) | Subagent delegation | Tool-based nested AgentLoop — no core-loop changes |
+| [ADR-008](adr/ADR-008-learning-module-observing-via-hooks.md) | Learning system placement | Separate module observing via hooks — no core-loop changes |
+| [ADR-009](adr/ADR-009-persist-tool-rounds-no-replay.md) | Trajectory persistence | Tool rounds as `replay=false` session entries — prompts byte-identical |
+| [ADR-010](adr/ADR-010-session-end-self-evaluation-no-vector-store.md) | Lesson distillation | One session-end LLM self-eval; prompt-based dedup — vector store rejected |
+| [ADR-011](adr/ADR-011-preference-capture-through-lesson-pipeline.md) | Preference feedback | Explicit + weighted implicit capture; steering through the lesson pipeline |
+| [ADR-012](adr/ADR-012-offline-trajectory-export.md) | Fine-tuning support | Offline `sophi export` to SFT/DPO datasets — training out of scope |
 
 ---
 
@@ -280,3 +333,7 @@ class SkillLoader {
 | `sophi-sdk` + `sophi-infra` | M4 | complete | [article-11](articles/article-11.md) |
 | `sophi-core` subagent delegation | M5 | complete | [article-13](articles/article-13.md) |
 | `sophi-mcp` (client + server) | post-M5 | complete | — |
+| `sophi-learning` phase 1 — outcome capture | M6 | complete | [article-14](articles/article-14.md) |
+| `sophi-learning` phase 2 — lesson distillation | M6 | complete | [article-15](articles/article-15.md) |
+| `sophi-learning` phase 3 — preference feedback | M6 | complete | [article-16](articles/article-16.md) |
+| `sophi-learning` phase 4 — trajectory export | M6 | complete | [article-17](articles/article-17.md) |
