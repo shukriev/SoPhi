@@ -1,6 +1,7 @@
 package dev.sophi.extensions
 
 import java.util.ServiceLoader
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Registry for [SophiPlugin] instances discovered via [ServiceLoader] or registered manually.
@@ -30,5 +31,20 @@ class PluginRegistry(
 
     suspend fun dispatch(point: HookPoint, context: HookContext) {
         hooksFor(point).forEach { it.invoke(context) }
+    }
+
+    /**
+     * Collects per-turn context from every plugin that implements [ContextContributor],
+     * in registration order. Each contributor runs under its own timeout and try/catch:
+     * a slow or failing contributor yields nothing and never breaks the turn.
+     */
+    suspend fun collectContext(
+        sessionId: String,
+        userInput: String,
+        timeoutMillis: Long = 2_000
+    ): List<String> = _plugins.filterIsInstance<ContextContributor>().mapNotNull { contributor ->
+        runCatching {
+            withTimeoutOrNull(timeoutMillis) { contributor.contribute(sessionId, userInput) }
+        }.getOrNull()
     }
 }

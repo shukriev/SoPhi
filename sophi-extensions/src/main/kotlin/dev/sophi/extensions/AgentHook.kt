@@ -16,7 +16,8 @@ data class HookContext(
     val argumentsJson: String? = null,
     val toolResult: String? = null,
     val success: Boolean? = null,
-    val durationMillis: Long? = null
+    val durationMillis: Long? = null,
+    val assistantReply: String? = null
 )
 
 interface AgentHook {
@@ -28,4 +29,13 @@ interface SophiPlugin {
     val name: String
     val version: String get() = "1.0.0"
     fun hooks(): List<AgentHook>
+}
+
+/**
+ * Optional capability: a [SophiPlugin] additionally implementing this may return a block
+ * of text to inject into the current turn's context. Failures and timeouts are swallowed
+ * by [PluginRegistry.collectContext] — contribution is always best-effort.
+ */
+interface ContextContributor {
+    suspend fun contribute(sessionId: String, userInput: String): String?
 }
