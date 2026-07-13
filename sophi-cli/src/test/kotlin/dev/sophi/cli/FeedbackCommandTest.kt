@@ -33,4 +33,41 @@ class FeedbackCommandTest : FunSpec({
         FeedbackDelete(home, "pref_1") {}.run()
         store.active(scope) shouldBe emptyList<PreferenceRecord>()
     }
+
+    test("list honors an explicit --scope instead of always using the working directory") {
+        val home = tempdir().toPath()
+        val store = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
+        store.add(PreferenceRecord(
+            id = "pref_other", ts = 1L, scope = "/some/other/project", sessionId = "sess_1",
+            entryIndex = 0, polarity = "positive", source = "explicit", reason = "elsewhere"))
+
+        val out = StringBuilder()
+        FeedbackList(home, scope = "/some/other/project") { out.appendLine(it) }.run()
+        out.toString() shouldContain "pref_other"
+    }
+
+    test("delete reports when the given id doesn't match any active feedback record") {
+        val home = tempdir().toPath()
+        val out = StringBuilder()
+        FeedbackDelete(home, "no-such-id") { out.appendLine(it) }.run()
+        out.toString() shouldContain "No active feedback record"
+    }
+
+    test("list shows paired->id for a linked record") {
+        val home = tempdir().toPath()
+        val scope = System.getProperty("user.dir")
+        val store = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
+        store.add(PreferenceRecord(
+            id = "pref_neg", ts = 1L, scope = scope, sessionId = "sess_1",
+            entryIndex = 0, polarity = "negative", source = "explicit", reason = "bad"))
+        store.add(PreferenceRecord(
+            id = "pref_pos", ts = 2L, scope = scope, sessionId = "sess_1",
+            entryIndex = 3, polarity = "positive", source = "explicit"))
+        store.link("pref_neg", "pref_pos")
+
+        val out = StringBuilder()
+        FeedbackList(home) { out.appendLine(it) }.run()
+        out.toString() shouldContain "paired->pref_pos"
+        out.toString() shouldContain "paired->pref_neg"
+    }
 })

@@ -95,6 +95,26 @@ class FeedbackEndpointTest : FunSpec({
         response.statusCode shouldBe HttpStatus.SERVICE_UNAVAILABLE
     }
 
+    test("invalid polarity is checked before the session lookup: 400, not 404, for an unknown session") {
+        val home = tempdir().toPath()
+        val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"), model = "test-model")
+        val controller = AgentController(sessionManager, agentLoop, config, learningPlugin = learning)
+        every { sessionManager.load("does-not-exist") } throws IllegalArgumentException("not found")
+
+        val response = controller.feedback("does-not-exist", FeedbackRequest(polarity = "meh"))
+
+        response.statusCode shouldBe HttpStatus.BAD_REQUEST
+    }
+
+    test("learning-disabled is checked before the session lookup: 503, not 404, for an unknown session") {
+        val controller = AgentController(sessionManager, agentLoop, config, learningPlugin = null)
+        every { sessionManager.load("does-not-exist") } throws IllegalArgumentException("not found")
+
+        val response = controller.feedback("does-not-exist", FeedbackRequest(polarity = "positive"))
+
+        response.statusCode shouldBe HttpStatus.SERVICE_UNAVAILABLE
+    }
+
     test("feedback returns 400 when there is no entry to rate") {
         val home = tempdir().toPath()
         val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"), model = "test-model")

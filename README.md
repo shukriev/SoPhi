@@ -277,10 +277,10 @@ The loop, end to end:
 Everything the agent has learned is inspectable and revocable:
 
 ```bash
-sophi lessons list [--all]     # what it believes about this project
-sophi lessons archive <id>     # retract a lesson
-sophi feedback list            # your ratings + detected signals
-sophi feedback delete <id>     # revoke feedback
+sophi lessons list [--all] [--scope <dir>]   # what it believes about this project
+sophi lessons archive <id>                   # retract a lesson
+sophi feedback list [--scope <dir>]          # your ratings + detected signals
+sophi feedback delete <id>                   # revoke feedback
 sophi export --out ./dataset   # build SFT/DPO training files
 ```
 

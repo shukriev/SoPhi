@@ -32,4 +32,14 @@ class ToolStatsStoreTest : FunSpec({
         val l = log(ev("grep", true)); l.append("{not json")
         ToolStatsStore(l, ttlMillis = 0).stats("/p").getValue("grep").attempts shouldBe 1
     }
+
+    test("a stats call within the TTL window is served from cache, not rebuilt from the log") {
+        val l = log(ev("grep", true))
+        val store = ToolStatsStore(l, ttlMillis = 60_000)
+        store.stats("/p").getValue("grep").attempts shouldBe 1
+
+        // Append directly to the underlying log, bypassing the store — a rebuild would see this.
+        l.append(Json.encodeToString(ToolEvent.serializer(), ev("grep", true)))
+        store.stats("/p").getValue("grep").attempts shouldBe 1   // still the cached value
+    }
 })

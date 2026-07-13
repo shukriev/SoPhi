@@ -31,15 +31,19 @@ class ExportInputs(learningHome: Path, sessionsDir: Path) {
     fun negativeSessions(): Set<String> =
         activePreferences().filter { it.polarity == "negative" }.map { it.sessionId }.toSet()
 
+    /**
+     * Resolves each linked (negative, positive) pair by record id alone — not by grouping
+     * records under one sessionId first. A partner that's been tombstoned since linking (or,
+     * in principle, recorded under a different session) is silently absent from [byId] and the
+     * pair is dropped rather than mismatched.
+     */
     fun dpoLinks(): List<Pair<PreferenceRecord, PreferenceRecord>> {
-        val bySession = activePreferences().groupBy { it.sessionId }
-        return bySession.values.flatMap { records ->
-            records.filter { it.polarity == "negative" && it.pairedWith != null }
-                .mapNotNull { neg ->
-                    records.find { it.polarity == "positive" && it.id == neg.pairedWith }
-                        ?.let { pos -> neg to pos }
-                }
-        }
+        val active = activePreferences()
+        val byId = active.associateBy { it.id }
+        return active.filter { it.polarity == "negative" && it.pairedWith != null }
+            .mapNotNull { neg ->
+                byId[neg.pairedWith]?.takeIf { it.polarity == "positive" }?.let { pos -> neg to pos }
+            }
     }
 
     fun loadSession(sessionId: String): AgentSession? =

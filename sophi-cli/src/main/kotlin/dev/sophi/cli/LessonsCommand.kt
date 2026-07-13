@@ -12,9 +12,12 @@ import java.nio.file.Path
 private fun store(home: Path) = LessonStore(JsonlLog(home.resolve("lessons.jsonl")))
 private val defaultHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning")
 
-class LessonsList(private val home: Path, private val echo: (String) -> Unit) {
+class LessonsList(
+    private val home: Path,
+    private val scope: String = System.getProperty("user.dir"),
+    private val echo: (String) -> Unit
+) {
     fun run(all: Boolean = false) {
-        val scope = System.getProperty("user.dir")
         val lessons = if (all) store(home).activeIncludingGlobal(scope) else store(home).active(scope)
         if (lessons.isEmpty()) { echo("No lessons."); return }
         lessons.forEach { echo("${it.id}  [${it.kind}] use=${it.useCount}  ${it.text}") }
@@ -22,7 +25,9 @@ class LessonsList(private val home: Path, private val echo: (String) -> Unit) {
 }
 
 class LessonsArchive(private val home: Path, private val id: String, private val echo: (String) -> Unit) {
-    fun run() { store(home).archive(id); echo("Archived $id") }
+    fun run() {
+        if (store(home).archive(id)) echo("Archived $id") else echo("No active lesson found with id $id")
+    }
 }
 
 class LessonsCommand : CliktCommand(name = "lessons", help = "Inspect and manage learned lessons") {
@@ -31,7 +36,8 @@ class LessonsCommand : CliktCommand(name = "lessons", help = "Inspect and manage
 
 class LessonsListCommand : CliktCommand(name = "list") {
     private val all by option("--all", help = "Include global lessons").flag()
-    override fun run() = LessonsList(defaultHome) { echo(it) }.run(all)
+    private val scope by option("--scope", help = "Project scope to list (default: current working directory)")
+    override fun run() = LessonsList(defaultHome, scope ?: System.getProperty("user.dir")) { echo(it) }.run(all)
 }
 
 class LessonsArchiveCommand : CliktCommand(name = "archive") {

@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.options.option
 import dev.sophi.learning.JsonlLog
 import dev.sophi.learning.PreferenceStore
 import java.nio.file.Path
@@ -9,9 +10,13 @@ import java.nio.file.Path
 private fun prefStore(home: Path) = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
 private val feedbackHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning")
 
-class FeedbackList(private val home: Path, private val echo: (String) -> Unit) {
+class FeedbackList(
+    private val home: Path,
+    private val scope: String = System.getProperty("user.dir"),
+    private val echo: (String) -> Unit
+) {
     fun run() {
-        val records = prefStore(home).active(System.getProperty("user.dir"))
+        val records = prefStore(home).active(scope)
         if (records.isEmpty()) { echo("No feedback records."); return }
         records.forEach {
             echo("${it.id}  ${it.polarity} (${it.source}, w=${it.weight})" +
@@ -22,7 +27,9 @@ class FeedbackList(private val home: Path, private val echo: (String) -> Unit) {
 }
 
 class FeedbackDelete(private val home: Path, private val id: String, private val echo: (String) -> Unit) {
-    fun run() { prefStore(home).delete(id); echo("Deleted $id") }
+    fun run() {
+        if (prefStore(home).delete(id)) echo("Deleted $id") else echo("No active feedback record found with id $id")
+    }
 }
 
 class FeedbackCommand : CliktCommand(name = "feedback", help = "Inspect and manage feedback records") {
@@ -30,7 +37,8 @@ class FeedbackCommand : CliktCommand(name = "feedback", help = "Inspect and mana
 }
 
 class FeedbackListCommand : CliktCommand(name = "list") {
-    override fun run() = FeedbackList(feedbackHome) { echo(it) }.run()
+    private val scope by option("--scope", help = "Project scope to list (default: current working directory)")
+    override fun run() = FeedbackList(feedbackHome, scope ?: System.getProperty("user.dir")) { echo(it) }.run()
 }
 
 class FeedbackDeleteCommand : CliktCommand(name = "delete") {

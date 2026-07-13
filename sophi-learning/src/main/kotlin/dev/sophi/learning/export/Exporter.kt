@@ -128,15 +128,19 @@ class Exporter(private val inputs: ExportInputs, private val userPatternsFile: P
 
     private fun writeSplit(o: ExportOptions, dir: Path, base: String, lines: List<Pair<String, String>>) {
         if (o.split == null) {
-            Files.writeString(dir.resolve("$base.jsonl"), lines.joinToString("\n") { it.second })
+            Files.writeString(dir.resolve("$base.jsonl"), jsonlText(lines))
             return
         }
         val (train, eval) = lines.partition { (sid, _) ->
             Math.floorMod(sid.hashCode(), 100) < (o.split * 100).toInt()
         }
-        Files.writeString(dir.resolve("$base.jsonl"), train.joinToString("\n") { it.second })
-        Files.writeString(dir.resolve("$base.eval.jsonl"), eval.joinToString("\n") { it.second })
+        Files.writeString(dir.resolve("$base.jsonl"), jsonlText(train))
+        Files.writeString(dir.resolve("$base.eval.jsonl"), jsonlText(eval))
     }
+
+    // Trailing newline: standard JSONL convention, expected by most readers/tools.
+    private fun jsonlText(lines: List<Pair<String, String>>): String =
+        if (lines.isEmpty()) "" else lines.joinToString("\n") { it.second } + "\n"
 
     private fun sha256(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }

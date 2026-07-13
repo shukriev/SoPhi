@@ -35,4 +35,15 @@ class DpoBuilderTest : FunSpec({
     test("rejected index pointing at a non-assistant entry is unpairable") {
         DpoBuilder { it }.build(entries, null, 0, 3).shouldBeNull()
     }
+
+    test("an assistant entry carrying a tool call at the boundary is unpairable, not a plain reply") {
+        val withToolCallAtChosen = entries.dropLast(1) + e(EntryRole.ASSISTANT, "",
+            mapOf("toolCalls" to """[{"id":"c1","name":"bash","argumentsJson":"{}"}]"""))
+        DpoBuilder { it }.build(withToolCallAtChosen, null, rejectedIndex = 1, chosenIndex = 3).shouldBeNull()
+    }
+
+    test("an out-of-bounds index is unpairable rather than throwing") {
+        DpoBuilder { it }.build(entries, null, rejectedIndex = 1, chosenIndex = 99).shouldBeNull()
+        DpoBuilder { it }.build(entries, null, rejectedIndex = -1, chosenIndex = 3).shouldBeNull()
+    }
 })

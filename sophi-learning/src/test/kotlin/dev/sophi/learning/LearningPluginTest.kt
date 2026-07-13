@@ -85,4 +85,38 @@ class LearningPluginTest : FunSpec({
         p.recordExplicitFeedback("s1", 40, "positive", null)
         p.preferenceStore.forSession("s1").forEach { it.pairedWith shouldBe null }
     }
+
+    test("good exactly at the retryWindow boundary still links") {
+        val home = tempdir().toPath()
+        val p = LearningPlugin(LearningConfig(home = home, scope = "/p", retryWindow = 4))
+        p.recordExplicitFeedback("s1", 0, "negative", "r")
+        p.recordExplicitFeedback("s1", 16, "positive", null)   // distance == retryWindow * 4, exactly
+        val records = p.preferenceStore.forSession("s1").associateBy { it.entryIndex }
+        records.getValue(0).pairedWith shouldBe records.getValue(16).id
+    }
+
+    test("good one past the retryWindow boundary does not link") {
+        val home = tempdir().toPath()
+        val p = LearningPlugin(LearningConfig(home = home, scope = "/p", retryWindow = 4))
+        p.recordExplicitFeedback("s1", 0, "negative", "r")
+        p.recordExplicitFeedback("s1", 17, "positive", null)   // distance == retryWindow * 4 + 1
+        p.preferenceStore.forSession("s1").forEach { it.pairedWith shouldBe null }
+    }
+
+    test("with multiple unpaired negatives in range, the most recent one is linked") {
+        val home = tempdir().toPath()
+        val p = LearningPlugin(LearningConfig(home = home, scope = "/p", retryWindow = 4))
+        p.recordExplicitFeedback("s1", 0, "negative", "first try")
+        p.recordExplicitFeedback("s1", 5, "negative", "second try")
+        p.recordExplicitFeedback("s1", 10, "positive", null)
+        val records = p.preferenceStore.forSession("s1").associateBy { it.entryIndex }
+        records.getValue(10).pairedWith shouldBe records.getValue(5).id   // most recent, not the first
+        records.getValue(0).pairedWith shouldBe null                     // left unpaired
+    }
+
+    test("recordExplicitFeedback never throws even when the store's directory can't be created") {
+        val bad = tempdir().toPath().resolve("f").also { java.nio.file.Files.writeString(it, "x") }
+        val p = LearningPlugin(LearningConfig(home = bad.resolve("sub"), scope = "/p"))
+        p.recordExplicitFeedback("s1", 0, "positive", null)   // must not throw
+    }
 })
