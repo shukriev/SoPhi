@@ -44,6 +44,7 @@ class UserProfileTest : FunSpec({
         val a = p.all().getValue("home.city")
         a.value shouldBe "Plovdiv"; a.confidence shouldBe (0.8 plusOrMinus 1e-9)
         a.evidenceMemoryIds shouldBe emptyList<String>()
+        a.evidenceCount shouldBe 0
         p.delete("home.city") shouldBe true
         p.all().containsKey("home.city") shouldBe false
         p.confirm("nope") shouldBe false

@@ -36,7 +36,7 @@ class UserProfile(private val store: PalaceStore) {
     fun confirm(path: String): Boolean = mutate(path) { it.copy(confidence = 1.0) }
 
     fun correct(path: String, value: String): Boolean = mutate(path) {
-        it.copy(value = value, confidence = 0.8, evidenceMemoryIds = emptyList())
+        it.copy(value = value, confidence = 0.8, evidenceCount = 0, evidenceMemoryIds = emptyList())
     }
 
     fun delete(path: String): Boolean = mutate(path) { it.copy(deleted = true) }
