@@ -35,7 +35,7 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import java.nio.file.Path
 
-class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness") {
+class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness", invokeWithoutSubcommand = true) {
 
     private val sessionId: String? by option(
         "--session", "-s",
