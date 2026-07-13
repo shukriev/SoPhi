@@ -134,7 +134,7 @@ in "entryIndex" and "retryOf" — do not invent indices.""")
             provider.complete(CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
                 model = config.evaluatorModel ?: config.sessionModel ?: return null,
-                maxTokens = 1024, temperature = 0.0))
+                maxTokens = config.evaluatorMaxTokens, temperature = 0.0))
         }.getOrNull()) {
             is LLMResponse.Text -> r.content
             else -> null
