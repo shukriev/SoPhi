@@ -46,4 +46,19 @@ class ExportInputsTest : FunSpec({
         inputs.configSnapshot("sA") shouldBe ("gpt-x" to "be nice")
         inputs.isSubagent("sA") shouldBe true
     }
+
+    test("dpoLinks resolves a pair by id alone, not by grouping records under one session") {
+        // Regression: dpoLinks() must not assume a linked pair shares one sessionId — resolving
+        // strictly by id means the code's correctness doesn't rest on that invariant holding.
+        val home = tempdir().toPath()
+        val prefs = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
+        prefs.add(PreferenceRecord("pref_neg", 1L, "/p", "sessionX", 2, "negative", "explicit"))
+        prefs.add(PreferenceRecord("pref_pos", 2L, "/p", "sessionY", 5, "positive", "explicit"))
+        prefs.link("pref_neg", "pref_pos")
+
+        val inputs = ExportInputs(home, tempdir().toPath())
+        val (neg, pos) = inputs.dpoLinks().single()
+        neg.id shouldBe "pref_neg"
+        pos.id shouldBe "pref_pos"
+    }
 })

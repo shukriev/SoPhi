@@ -11,7 +11,9 @@ class LessonsSection(
         store.bumpUse(recalled)
         return buildString {
             appendLine("## Lessons from previous sessions (this project)")
-            recalled.forEach { appendLine("- ${it.text}") }
+            // Truncated defensively: lesson text is distilled by an LLM from session content,
+            // so one oversized or malformed entry must not be able to dominate the injected prompt.
+            recalled.forEach { appendLine("- ${it.text.take(300)}") }
         }.trimEnd()
     }
 }
