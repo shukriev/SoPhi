@@ -52,6 +52,18 @@ class ForgetEngine(
         return ForgetResult(listOf(id), relinked.size, affectedPaths)
     }
 
+    /** Non-mutating preview of what forget(ById(id)) would remove and affect. */
+    fun preview(id: String): ForgetResult {
+        val all = store.memories()
+        if (id !in all) return ForgetResult(emptyList(), 0, emptyList())
+        val edges = store.edges()
+        val incoming = edges.filter { it.toId == id }
+        val outgoing = edges.filter { it.fromId == id }
+        val affectedPaths = profile.all().values
+            .filter { id in it.evidenceMemoryIds }.map { it.path }
+        return ForgetResult(listOf(id), incoming.size * outgoing.size, affectedPaths)
+    }
+
     /** Consolidation purge: physically drop soft-deleted memories older than [cutoffMs]. */
     fun purgeSoftDeleted(cutoffMs: Long, nowMs: Long): Int {
         val victims = store.memories().values.filter { it.softDeletedAt != null && it.softDeletedAt!! < cutoffMs }

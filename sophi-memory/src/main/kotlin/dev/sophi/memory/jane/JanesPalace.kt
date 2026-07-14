@@ -61,6 +61,9 @@ class JanesPalace(
     override suspend fun forget(request: ForgetRequest): ForgetResult =
         forgetEngine.forget(request, System.currentTimeMillis())
 
+    /** Non-mutating preview of what forgetting [id] would remove and affect (spec §5). */
+    fun previewForget(id: String): ForgetResult = forgetEngine.preview(id)
+
     override suspend fun search(query: String, k: Int): List<MemoryView> {
         val provider = embeddingProvider ?: return emptyList()
         val vector = provider.embed(listOf(query)).first()

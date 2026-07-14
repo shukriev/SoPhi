@@ -55,6 +55,31 @@ class ForgetEngineTest : FunSpec({
         }
     }
 
+    test("preview shows what forget would remove/affect without mutating, then real forget matches") {
+        val r = Rig()
+        r.add("mem_a"); r.add("mem_b", "the secret rendezvous location"); r.add("mem_c")
+        r.store.upsertEdge(CausalEdge("mem_a", "mem_b", "story"))
+        r.store.upsertEdge(CausalEdge("mem_b", "mem_c", "story"))
+        r.profile.observeEvidence("secret.place", "rendezvous", "mem_b", 1L)
+
+        val preview = r.engine.preview("mem_b")
+        preview.removedIds shouldBe listOf("mem_b")
+        preview.relinkedEdges shouldBe 1
+        preview.affectedProfilePaths shouldBe listOf("secret.place")
+
+        // Non-mutating: store is untouched after the preview.
+        r.store.memories().keys shouldBe setOf("mem_a", "mem_b", "mem_c")
+        r.profile.all().containsKey("secret.place") shouldBe true
+
+        val result = r.engine.forget(ForgetRequest.ById("mem_b"), 10L)
+        result.removedIds shouldBe preview.removedIds
+        result.relinkedEdges shouldBe preview.relinkedEdges
+        result.affectedProfilePaths shouldBe preview.affectedProfilePaths
+
+        // preview of unknown id returns empty result
+        r.engine.preview("mem_zz").removedIds shouldBe emptyList()
+    }
+
     test("forget of unknown id returns empty result") {
         val r = Rig()
         r.add("mem_a")

@@ -85,9 +85,19 @@ class MemoryProfile : CliktCommand(
         when (action) {
             null -> p.profileView().ifEmpty { return echo("(empty profile)") }
                 .forEach { echo("${it.path} = ${it.value} (%.2f)".format(it.confidence)) }
-            "confirm" -> echo(if (p.updateProfile(ProfileAction.Confirm(path!!))) "Confirmed." else "No such attribute.")
-            "correct" -> echo(if (p.updateProfile(ProfileAction.Correct(path!!, value!!))) "Corrected." else "No such attribute.")
-            "delete" -> echo(if (p.updateProfile(ProfileAction.Delete(path!!))) "Deleted." else "No such attribute.")
+            "confirm" -> {
+                val p2 = path ?: return echo("Usage: sophi memory profile confirm <path>")
+                echo(if (p.updateProfile(ProfileAction.Confirm(p2))) "Confirmed." else "No such attribute.")
+            }
+            "correct" -> {
+                val p2 = path ?: return echo("Usage: sophi memory profile correct <path> <value>")
+                val v2 = value ?: return echo("Usage: sophi memory profile correct <path> <value>")
+                echo(if (p.updateProfile(ProfileAction.Correct(p2, v2))) "Corrected." else "No such attribute.")
+            }
+            "delete" -> {
+                val p2 = path ?: return echo("Usage: sophi memory profile delete <path>")
+                echo(if (p.updateProfile(ProfileAction.Delete(p2))) "Deleted." else "No such attribute.")
+            }
             else -> echo("Unknown action: $action (use confirm|correct|delete)")
         }
     }
@@ -118,6 +128,11 @@ class MemoryForget : CliktCommand(name = "forget", help = "Hard-delete a memory 
         val victim = p.browse(BrowseFilter(includeHidden = true)).firstOrNull { it.id == targetId }
             ?: return@runBlocking echo("Not found: $targetId")
         echo("Will permanently delete: ${renderView(victim)}")
+        val preview = p.previewForget(targetId)
+        if (preview.affectedProfilePaths.isNotEmpty())
+            echo("Also reduces profile attributes: ${preview.affectedProfilePaths.joinToString()}")
+        if (preview.relinkedEdges > 0)
+            echo("Re-links ${preview.relinkedEdges} causal edge(s) around the gap.")
         if (!yes && !confirm("Proceed?")) return@runBlocking echo("Aborted.")
         val result = p.forget(ForgetRequest.ById(targetId))
         echo("Deleted ${result.removedIds.size} memor${if (result.removedIds.size == 1) "y" else "ies"}; " +
