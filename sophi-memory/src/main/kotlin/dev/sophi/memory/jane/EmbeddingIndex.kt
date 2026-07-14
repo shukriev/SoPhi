@@ -14,10 +14,14 @@ data class Scored(val id: String, val score: Double)
 
 /**
  * In-memory brute-force cosine index. ~20k vectors ≈ milliseconds per query (spec §5);
- * deliberately no ANN library. Thread-confined to the palace's own dispatcher.
+ * deliberately no ANN library. Safe for the palace's actual concurrency: fire-and-forget
+ * encode writes (via MemoryWriter, on Dispatchers.IO) race the next turn's recall reads.
+ * Iteration is weakly consistent — an entry put mid-iteration may or may not be seen,
+ * which is acceptable staleness for recall (a memory encoded milliseconds ago missing
+ * from one recall is fine).
  */
 class EmbeddingIndex(initial: Map<String, FloatArray> = emptyMap()) {
-    private val vectors = HashMap<String, FloatArray>(initial)
+    private val vectors = java.util.concurrent.ConcurrentHashMap<String, FloatArray>(initial)
 
     fun put(id: String, vector: FloatArray) { vectors[id] = vector }
     fun remove(id: String) { vectors.remove(id) }

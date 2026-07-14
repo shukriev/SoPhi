@@ -64,6 +64,11 @@ class JanesPalace(
     /** Non-mutating preview of what forgetting [id] would remove and affect (spec §5). */
     fun previewForget(id: String): ForgetResult = forgetEngine.preview(id)
 
+    /**
+     * Unlike [recall], search applies no sensitivity floor: it backs user-facing
+     * store inspection (`forget --about`), where the user is querying their own
+     * memories directly — the privacy guard protects the model-facing path only.
+     */
     override suspend fun search(query: String, k: Int): List<MemoryView> {
         val provider = embeddingProvider ?: return emptyList()
         val vector = provider.embed(listOf(query)).first()
