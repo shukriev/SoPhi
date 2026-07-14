@@ -76,6 +76,10 @@ class ScenarioBenchmarkTest : FunSpec({
             .rendered shouldContain "Emma"
 
         // Day 40: forget the diagnosis — provably unretrievable everywhere (spec §12).
+        // Refresh last-recall.txt with the sensitive memory's text so the completeness
+        // audit below genuinely guards the forget-time last-recall scrub (Task 9 fix).
+        palace.recall(RecallQuery("s4", "hypertension", 40 * DAY))!!
+            .rendered shouldContain "hypertension"
         val victimId = palace.browse(BrowseFilter()).single { it.text.contains("hypertension") }.id
         palace.forget(ForgetRequest.ById(victimId))
         palace.recall(RecallQuery("s4", "hypertension", 40 * DAY)) shouldBe null
