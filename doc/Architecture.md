@@ -71,6 +71,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | complete |
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
+| `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn | complete |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
 | `sophi-sdk` | Embeddable library for Spring `@Service` beans | complete |
