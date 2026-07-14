@@ -120,7 +120,7 @@ class PalaceWalker(
         val prof = profile.view(0.7)
         if (prof.isNotEmpty()) {
             appendLine("  <user_profile confidence_floor=\"0.7\">")
-            prof.forEach { appendLine("    ${it.path} = ${it.value} (%.2f)".format(it.confidence)) }
+            prof.forEach { appendLine("    %s = %s (%.2f)".format(it.path, it.value, it.confidence)) }
             appendLine("  </user_profile>")
         }
         appendLine("  <memories>")

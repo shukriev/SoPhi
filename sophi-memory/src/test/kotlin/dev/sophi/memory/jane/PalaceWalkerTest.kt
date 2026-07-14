@@ -121,4 +121,13 @@ class PalaceWalkerTest : FunSpec({
         val block = r.walk("salary raise at work")!!
         block.rendered shouldContain "20% raise"
     }
+
+    test("profile value containing % renders without crashing") {
+        val r = Rig()
+        r.profile.observeEvidence("work.schedule", "works 50% remote", "mem_x", 0L)
+        r.profile.confirm("work.schedule")
+        r.add("mem_1", "remote work schedule discussion with manager", Room.EPISODES)
+        val block = r.walk("remote work schedule")!!
+        block.rendered shouldContain "works 50% remote"
+    }
 })
