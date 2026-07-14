@@ -40,23 +40,29 @@ class Consolidator(
             val actives = store.memories().values.filter { it.active && it.room == room }
                 .sortedBy { it.createdAt }
             val absorbed = mutableSetOf<String>()
-            for (i in actives.indices) for (j in i + 1 until actives.size) {
-                val a = actives[i]; val b = actives[j]
-                if (a.id in absorbed || b.id in absorbed) continue
-                val va = index.get(a.id) ?: continue; val vb = index.get(b.id) ?: continue
-                if (cosine(va, vb) >= config.mergeThreshold) {
-                    store.upsertMemory(a.copy(
-                        salience = min(1.0, maxOf(a.salience, b.salience) + 0.05),
-                        reinforcedAt = nowMs))
-                    store.upsertMemory(b.copy(softDeletedAt = nowMs))
-                    // Absorbed memory's edges move to the survivor.
-                    store.edges().filter { it.fromId == b.id || it.toId == b.id }.forEach { e ->
-                        store.upsertEdge(e.copy(removed = true))
-                        store.upsertEdge(e.copy(
-                            fromId = if (e.fromId == b.id) a.id else e.fromId,
-                            toId = if (e.toId == b.id) a.id else e.toId, removed = false))
+            for (i in actives.indices) {
+                val a = actives[i]
+                if (a.id in absorbed) continue
+                var survivorSalience = a.salience
+                for (j in i + 1 until actives.size) {
+                    val b = actives[j]
+                    if (b.id in absorbed) continue
+                    val va = index.get(a.id) ?: continue; val vb = index.get(b.id) ?: continue
+                    if (cosine(va, vb) >= config.mergeThreshold) {
+                        survivorSalience = min(1.0, maxOf(survivorSalience, b.salience) + 0.05)
+                        store.upsertMemory(a.copy(
+                            salience = survivorSalience,
+                            reinforcedAt = nowMs))
+                        store.upsertMemory(b.copy(softDeletedAt = nowMs))
+                        // Absorbed memory's edges move to the survivor.
+                        store.edges().filter { it.fromId == b.id || it.toId == b.id }.forEach { e ->
+                            store.upsertEdge(e.copy(removed = true))
+                            store.upsertEdge(e.copy(
+                                fromId = if (e.fromId == b.id) a.id else e.fromId,
+                                toId = if (e.toId == b.id) a.id else e.toId, removed = false))
+                        }
+                        absorbed += b.id; count++
                     }
-                    absorbed += b.id; count++
                 }
             }
         }

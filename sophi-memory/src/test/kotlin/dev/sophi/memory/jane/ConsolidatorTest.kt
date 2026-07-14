@@ -6,6 +6,7 @@ import dev.sophi.ai.api.TokenUsage
 import dev.sophi.memory.FakeEmbeddingProvider
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -42,6 +43,18 @@ class ConsolidatorTest : FunSpec({
         survivors.size shouldBe 1
         (survivors.single().salience > 0.6) shouldBe true
         survivors.single().reinforcedAt shouldBe 1_000L
+    }
+
+    test("merge: 3-way chain accumulates salience bumps on the running survivor, not the stale snapshot") {
+        val r = Rig()
+        r.add("mem_a", "dentist appointment thursday fourteen", at = 0L, salience = 0.5)
+        r.add("mem_b", "dentist appointment thursday fourteen", at = 100L, salience = 0.5)
+        r.add("mem_c", "dentist appointment thursday fourteen", at = 200L, salience = 0.5)
+        val report = r.consolidator.run(nowMs = 1_000L)
+        report.merged shouldBe 2
+        val survivors = r.store.memories().values.filter { it.active }
+        survivors.size shouldBe 1
+        survivors.single().salience shouldBe (0.6 plusOrMinus 1e-9)
     }
 
     test("strengthen: memories recalled twice today get their decay clock reset") {
