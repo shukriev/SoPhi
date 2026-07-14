@@ -130,8 +130,8 @@ class PalaceWalker(
             val stale = ageMs > config.halfLifeMs.getValue(m.room) / 2
             val verify = stale || m.provenance == Provenance.THIRD_PARTY
             val marker = if (verify) ", VERIFY" else ""
-            appendLine("    [${m.room.name.lowercase()}, sal %.2f, %s$marker] ${m.text}"
-                .format(m.salience, age(ageMs)))
+            appendLine("    [${m.room.name.lowercase()}, sal %.2f, %s$marker] %s"
+                .format(m.salience, age(ageMs), m.text))
         }
         threadLines.forEach { appendLine("    $it") }
         appendLine("  </memories>")

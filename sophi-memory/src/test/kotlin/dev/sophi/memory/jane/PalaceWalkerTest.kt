@@ -114,4 +114,11 @@ class PalaceWalkerTest : FunSpec({
         (block.memoryIds.size <= r.config.injectionCap) shouldBe true
         r.store.readLastRecall()!! shouldContain "grocery"
     }
+
+    test("memory text containing % renders without crashing") {
+        val r = Rig()
+        r.add("mem_1", "user got a 20% raise at work salary increase", Room.EPISODES)
+        val block = r.walk("salary raise at work")!!
+        block.rendered shouldContain "20% raise"
+    }
 })
