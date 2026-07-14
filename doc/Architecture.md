@@ -4,9 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M6 — learning system (phases 1–4) complete |
-| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra |
-| Last updated | 2026-07-12 |
+| Current milestone | M7 — Jane's Theory memory (palace v1) complete |
+| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory |
+| Last updated | 2026-07-14 |
 
 ---
 
@@ -55,6 +55,11 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 ┌──────────────────────────────────────────────────────────────┐
 │              sophi-learning  (observes via hooks)            │
 │  tool stats · lesson distillation · feedback · export        │
+└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│        sophi-memory  (Jane's Theory — declarative memory)    │
+│  MemoryTechnique SPI · JanesPalace (rooms, salience, decay,  │
+│  narrative graph, profile) · recall via ContextContributor   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -105,6 +110,33 @@ AgentLoop.turn(session, userInput, config)
 
 Session entries persisted: USER + ASSISTANT (text), plus — since ADR-009 — the tool rounds themselves: one ASSISTANT entry per round carrying serialized calls in `metadata["toolCalls"]` and one TOOL_RESULT entry per result, all tagged `metadata["replay"]="false"`. `PromptBuilder` and `ContextCompactor` filter `replay=false` entries out, so prompts are byte-identical to the pre-ADR-009 behavior; the entries exist for the learning system (evaluation trajectories, dataset export), never for re-prompting.
 
+### Memory turn lifecycle (when `--memory` is enabled)
+
+`sophi-memory`'s `MemoryPlugin` is the harness's first `ContextContributor` (ADR-013):
+
+```
+User input
+    │
+    ├─ PluginRegistry.collectContext(sessionId, input)      ← BEFORE the turn, ≤2s budget
+    │       MemoryPlugin.contribute → JanesPalace.recall:
+    │       embed query → route 2–3 rooms (descriptor cosine) →
+    │       score β₁·semantic + β₂·decayed-priority + β₃·profile-resonance →
+    │       expand neighbors + causal threads → privacy guard →
+    │       <memory_context> block appended to THIS turn's system prompt
+    ▼
+TurnController.runTurn(...)                                  ← unchanged loop
+    │
+    └─ AFTER_TURN hook (fire-and-forget coroutine):
+            MemoryPlugin → JanesPalace.observe:
+            one cheap LLM verdict (significance, room, emph/aff, links, corrections)
+            + system-side novelty/repetition → α ≥ 0.35 → write memory + embedding + edges
+```
+
+Recall adds one embedding call to the turn path and no LLM call; encoding adds one async
+LLM call after the turn. Every memory path is best-effort — a failure degrades to a
+memory-less turn, never a broken one. Consolidation (merge/strengthen/compress/prune)
+runs at session end when >24h since the last run, and via `sophi memory consolidate`.
+
 ---
 
 ## Key Interfaces
@@ -148,6 +180,19 @@ sealed class LLMResponse {
     data class Text(val content: String, val usage: TokenUsage, val stopReason: String? = null) : LLMResponse()
     data class ToolUse(val calls: List<ToolCall>, val usage: TokenUsage) : LLMResponse()
     data class Error(val message: String, val cause: Throwable? = null) : LLMResponse()
+}
+```
+
+### EmbeddingProvider (`dev.sophi.ai.api`)
+
+The boundary `sophi-memory` calls through for text embeddings — a plain-HTTP OpenAI-compat
+`/v1/embeddings` implementation ships in `sophi-ai`'s providers package, wired by `sophi-cli`
+behind `--embedding-model`/`--embedding-base-url`/`--embedding-dimensions`.
+
+```kotlin
+interface EmbeddingProvider {
+    val dimensions: Int
+    suspend fun embed(texts: List<String>): List<FloatArray>
 }
 ```
 
@@ -241,6 +286,27 @@ so the loop itself never knows plugins exist. `AFTER_TURN`/`ON_ERROR` are dispat
 surface (CLI/web/SDK) when a turn settles — always best-effort (`runCatching`), never on the
 user's critical path.
 
+### ContextContributor + PluginRegistry.collectContext (`dev.sophi.extensions`)
+
+The per-turn counterpart to the fire-and-forget hooks above (ADR-013): a plugin that also
+implements `ContextContributor` can inject text into *this* turn's prompt, not just observe
+after the fact. `collectContext` runs every contributor under its own timeout, swallows
+failures and timeouts (contribution is always best-effort) but rethrows `CancellationException`
+so it never absorbs the caller's own cancellation.
+
+```kotlin
+interface ContextContributor {
+    suspend fun contribute(sessionId: String, userInput: String): String?
+}
+
+// PluginRegistry
+suspend fun collectContext(
+    sessionId: String,
+    userInput: String,
+    timeoutMillis: Long = 2_000
+): List<String>
+```
+
 ### LearningPlugin + LessonRecall (`dev.sophi.learning`)
 
 The learning system is a `SophiPlugin` plus JSONL fold-stores under `~/.sophi/learning/`
@@ -273,6 +339,36 @@ interface LessonRecall {                          // ranking is swappable; `quer
 Offline, `sophi export` (package `dev.sophi.learning.export`, zero provider imports per
 ADR-012) turns the captured history into `sft.jsonl` / `dpo.jsonl` / `manifest.json` —
 redacted by default, deduplicated, deterministically split by session-id hash.
+
+### MemoryTechnique (`dev.sophi.memory`)
+
+Technique-agnostic declarative-memory SPI (ADR-013). `JanesPalace` is the first and only
+implementation: five typed rooms, salience computed at encoding, decay-weighted retrieval,
+causal narrative links, a confidence-weighted user profile, and true deletion. `MemoryPlugin`
+adapts it to the harness — `contribute()` (`ContextContributor`) calls `recall`, the
+`AFTER_TURN` hook fire-and-forgets `observe`. Storage is user-global under `~/.sophi/memory/`.
+
+```kotlin
+interface MemoryTechnique {
+    suspend fun recall(query: RecallQuery): MemoryBlock?
+    suspend fun observe(turn: TurnObservation)
+    suspend fun consolidate(nowMs: Long): ConsolidationReport
+    suspend fun forget(request: ForgetRequest): ForgetResult
+    suspend fun search(query: String, k: Int): List<MemoryView>
+    fun browse(filter: BrowseFilter): List<MemoryView>
+    fun profileView(): List<ProfileAttributeView>
+    fun updateProfile(action: ProfileAction): Boolean
+    fun explainLastRecall(): String?
+}
+```
+
+`ForgetEngine` (behind `JanesPalace.forget`) performs the compacting rewrite: re-links the
+causal chain around the removed memory, reduces profile evidence, and deletes
+`last-recall.txt` so a forgotten memory cannot resurface through the explain path.
+`ForgetEngine.preview(id)` / `JanesPalace.previewForget(id)` compute the same impact
+non-destructively, so `sophi memory forget` can show the blast radius before committing.
+`ForgetEngine.purgeSoftDeleted(cutoffMs, nowMs)` is the consolidation-time sweep that
+physically drops soft-deleted memories once they clear the retention cutoff.
 
 ### Skill + SkillLoader (`dev.sophi.skills`)
 
@@ -314,6 +410,7 @@ class SkillLoader {
 | [ADR-010](adr/ADR-010-session-end-self-evaluation-no-vector-store.md) | Lesson distillation | One session-end LLM self-eval; prompt-based dedup — vector store rejected |
 | [ADR-011](adr/ADR-011-preference-capture-through-lesson-pipeline.md) | Preference feedback | Explicit + weighted implicit capture; steering through the lesson pipeline |
 | [ADR-012](adr/ADR-012-offline-trajectory-export.md) | Fine-tuning support | Offline `sophi export` to SFT/DPO datasets — training out of scope |
+| [ADR-013](adr/ADR-013-memory-as-plugin-context-contributor.md) | Declarative memory placement | Separate sophi-memory module; per-turn context via new ContextContributor SPI |
 
 ---
 
@@ -337,3 +434,4 @@ class SkillLoader {
 | `sophi-learning` phase 2 — lesson distillation | M6 | complete | [article-15](articles/article-15.md) |
 | `sophi-learning` phase 3 — preference feedback | M6 | complete | [article-16](articles/article-16.md) |
 | `sophi-learning` phase 4 — trajectory export | M6 | complete | [article-17](articles/article-17.md) |
+| `sophi-memory` — Jane's Theory memory palace | M7 | complete | [article-18](articles/article-18.md) |
