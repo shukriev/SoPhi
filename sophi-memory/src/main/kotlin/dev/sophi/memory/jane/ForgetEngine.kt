@@ -45,6 +45,7 @@ class ForgetEngine(
         store.rewriteAll(keptMemories, untouched + relinked, store.attributes().values,
             keptEmbeddings, store.embeddingModel(), keptRecalls)
         index.remove(id)
+        store.deleteLastRecall()
         store.appendAudit(buildJsonObject {
             put("ts", JsonPrimitive(nowMs)); put("event", JsonPrimitive("forget")); put("count", JsonPrimitive(1))
         }.toString())
@@ -52,9 +53,9 @@ class ForgetEngine(
     }
 
     /** Consolidation purge: physically drop soft-deleted memories older than [cutoffMs]. */
-    fun purgeSoftDeleted(cutoffMs: Long): Int {
+    fun purgeSoftDeleted(cutoffMs: Long, nowMs: Long): Int {
         val victims = store.memories().values.filter { it.softDeletedAt != null && it.softDeletedAt!! < cutoffMs }
-        victims.forEach { forgetOne(it.id, cutoffMs) }
+        victims.forEach { forgetOne(it.id, nowMs) }
         return victims.size
     }
 }

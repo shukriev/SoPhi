@@ -59,6 +59,15 @@ class PalaceStore(private val home: Path) {
     fun readLastRecall(): String? =
         home.resolve("last-recall.txt").takeIf { Files.exists(it) }?.let { Files.readString(it) }
 
+    /**
+     * Deletes the whole last-recall explain file rather than filtering it line-by-line: it is
+     * transient explain-state, and any attempt to selectively scrub a forgotten id/text out of
+     * it would risk missing a rendering variant and leaking the "deleted" memory anyway.
+     */
+    fun deleteLastRecall() {
+        Files.deleteIfExists(home.resolve("last-recall.txt"))
+    }
+
     fun lastConsolidationMs(): Long? =
         home.resolve("consolidation.marker").takeIf { Files.exists(it) }
             ?.let { Files.readString(it).trim().toLongOrNull() }

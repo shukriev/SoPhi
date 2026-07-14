@@ -29,6 +29,7 @@ class ForgetEngineTest : FunSpec({
         r.store.upsertEdge(CausalEdge("mem_a", "mem_b", "story"))
         r.store.upsertEdge(CausalEdge("mem_b", "mem_c", "story"))
         r.store.logRecall(RecallRecord(5L, "mem_b", "s1"))
+        r.store.writeLastRecall("recalled [mem_b] the secret rendezvous location")
         r.profile.observeEvidence("secret.place", "rendezvous", "mem_b", 1L)
 
         val result = r.engine.forget(ForgetRequest.ById("mem_b"), 10L)
@@ -75,7 +76,7 @@ class ForgetEngineTest : FunSpec({
         val a = r.add("mem_a"); val b = r.add("mem_b")
         r.store.upsertMemory(a.copy(softDeletedAt = 100L))
         r.store.upsertMemory(b.copy(softDeletedAt = 900L))
-        r.engine.purgeSoftDeleted(cutoffMs = 500L) shouldBe 1     // only mem_a is old enough
+        r.engine.purgeSoftDeleted(cutoffMs = 500L, nowMs = 1_000L) shouldBe 1     // only mem_a is old enough
         r.store.memories().keys shouldBe setOf("mem_b")
     }
 })
