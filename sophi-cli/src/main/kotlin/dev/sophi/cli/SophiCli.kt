@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
@@ -92,25 +93,73 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--mcp-config",
         help = "Path to an MCP server config file (default: .sophi/mcp.json in the working directory)"
     ).default(".sophi/mcp.json")
+    private val memoryEnabled: Boolean by option(
+        "--memory",
+        help = "Enable Jane's Theory long-term memory (experimental). Requires --embedding-model " +
+            "and an OpenAI-compatible embeddings endpoint (Ollama works: nomic-embed-text)."
+    ).flag(default = false)
+    private val embeddingModel: String? by option(
+        "--embedding-model",
+        help = "Embedding model name for --memory, e.g. nomic-embed-text (Ollama) or text-embedding-3-small"
+    )
+    private val embeddingBaseUrl: String? by option(
+        "--embedding-base-url",
+        help = "Embeddings endpoint base URL (defaults to --base-url; e.g. http://localhost:11434/v1)"
+    )
+    private val embeddingDimensions: Int by option(
+        "--embedding-dimensions",
+        help = "Embedding vector dimensions (768 for nomic-embed-text, 1536 for text-embedding-3-small)"
+    ).int().default(1536)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model, llmTimeoutSeconds, llmMaxRetries)
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
+        val mordantTerminal = Terminal()
 
         // Learning: capture tool outcomes and inject reliability + lessons sections into the system prompt.
         val learningConfig = LearningConfig(sessionModel = model)
         val learningPlugin = LearningPlugin(learningConfig, model = model, provider = provider, sessionManager = sessionManager)
         val pluginRegistry = PluginRegistry().register(learningPlugin)
+
+        // Memory (Jane's Theory): per-turn recall via ContextContributor, async encoding on AFTER_TURN.
+        val memoryPlugin: dev.sophi.memory.MemoryPlugin? = if (memoryEnabled) {
+            val embBase = embeddingBaseUrl ?: baseUrl
+            val embModel = embeddingModel
+            if (embBase == null || embModel == null) {
+                mordantTerminal.println(TextColors.yellow(
+                    "memory: disabled — --memory needs --embedding-model and --embedding-base-url (or --base-url)"))
+                null
+            } else {
+                val embProvider = dev.sophi.ai.providers.buildOpenAiCompatEmbeddingProvider(
+                    embBase, apiKeyOption, embModel, embeddingDimensions)
+                // Spec §6: memory must never fail silently (cognitive-prosthetic honesty).
+                // Probe the endpoint once; if unreachable, disable memory with ONE visible warning.
+                if (runCatching { embProvider.embed(listOf("ping")) }.isFailure) {
+                    mordantTerminal.println(TextColors.yellow(
+                        "memory: disabled — embeddings endpoint unreachable at $embBase ($embModel)"))
+                    null
+                } else {
+                    val palace = dev.sophi.memory.jane.JanesPalace(
+                        dev.sophi.memory.jane.JanesPalaceConfig(sessionModel = model),
+                        provider, embProvider, embModel)
+                    dev.sophi.memory.MemoryPlugin(palace)
+                }
+            }
+        } else null
+        memoryPlugin?.let { pluginRegistry.register(it) }
+
         val bridge = pluginRegistry.turnEventBridge(session.id)
         val effectiveSystemPrompt =
-            listOfNotNull(systemPrompt, learningPlugin.promptSections(learningConfig.scope))
-                .takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+            listOfNotNull(
+                systemPrompt,
+                learningPlugin.promptSections(learningConfig.scope),
+                if (memoryPlugin != null) dev.sophi.memory.MemoryPromptSection.TEXT else null
+            ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
 
         val config = AgentConfig(model = model, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
-        val mordantTerminal = Terminal()
         val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal)
 
         val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
@@ -165,13 +214,17 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
         val turnController = TurnController(
             loop, config, inputSource, liveRegion, onEvent = bridge,
-            onTurnSettled = { error ->
-                // Learning must never break a turn: dispatch is best-effort.
+            contextProvider = { sess, input ->
+                pluginRegistry.collectContext(sess.id, input).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+            },
+            onTurnSettled = { userInput, assistantReply, error ->
+                // Learning/memory must never break a turn: dispatch is best-effort.
                 runCatching {
                     if (error != null) {
                         pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(session.id, error = error))
                     } else {
-                        pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(session.id))
+                        pluginRegistry.dispatch(HookPoint.AFTER_TURN,
+                            HookContext(session.id, userInput = userInput, assistantReply = assistantReply))
                     }
                 }
             }
@@ -185,6 +238,16 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         } finally {
             // TuiEngine.run returns on both exit paths (exit/quit and EOF); record the outcome once.
             runCatching { learningPlugin.recordSessionEnd(session.id) }
+            runCatching {
+                memoryPlugin?.let { mp ->
+                    mp.consolidateIfDue()?.let { report ->
+                        if (report.total > 0) mordantTerminal.println(
+                            "memory: consolidated (merged=${report.merged} strengthened=${report.strengthened} " +
+                            "compressed=${report.compressed} pruned=${report.pruned} purged=${report.purged})")
+                    }
+                    mp.close()
+                }
+            }
             sophiTerminal.close()
             mcpClientManager.close()
         }

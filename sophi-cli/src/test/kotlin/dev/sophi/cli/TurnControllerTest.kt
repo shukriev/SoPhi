@@ -83,9 +83,9 @@ class TurnControllerTest : FunSpec({
         val rendered = mutableListOf<String>()
         val controller = TurnController(
             loop, config, input, LiveRegion(StringBuilder()) { 80 },
-            onTurnSettled = { error ->
+            onTurnSettled = { userInput, assistantReply, error ->
                 if (error != null) registry.dispatch(HookPoint.ON_ERROR, HookContext("s1", error = error))
-                else registry.dispatch(HookPoint.AFTER_TURN, HookContext("s1"))
+                else registry.dispatch(HookPoint.AFTER_TURN, HookContext("s1", userInput = userInput, assistantReply = assistantReply))
             }
         ) { rendered.add(it) }
 

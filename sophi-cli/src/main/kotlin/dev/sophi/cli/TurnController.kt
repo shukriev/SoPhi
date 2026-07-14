@@ -14,9 +14,13 @@ class TurnController(
     private val input: InputSource,
     private val liveRegion: LiveRegion,
     private val onEvent: suspend (TurnEvent) -> Unit = {},
-    // Fired once per turn after it settles so learning can upsert an outcome; error carries the
-    // failure on the error path, null on success/interrupt. Kept best-effort by the caller.
-    private val onTurnSettled: suspend (error: Throwable?) -> Unit = {},
+    // Per-turn context injection (memory etc.): non-null result is appended to the system
+    // prompt for THIS turn only. Failures are swallowed — context must never break a turn.
+    private val contextProvider: suspend (AgentSession, String) -> String? = { _, _ -> null },
+    // Fired once per turn after it settles, now carrying both sides of the exchange so
+    // AFTER_TURN hooks (learning outcome, memory encoding) can see the full turn.
+    private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit =
+        { _, _, _ -> },
     private val output: (String) -> Unit
 ) {
     suspend fun runTurn(session: AgentSession, userInput: String): AgentSession = coroutineScope {
@@ -24,9 +28,13 @@ class TurnController(
         val pendingArgs = mutableMapOf<String, String>()
         liveRegion.update("Sophi is thinking…")
 
+        val extraContext = runCatching { contextProvider(session, userInput) }.getOrNull()
+        val turnConfig = if (extraContext.isNullOrBlank()) config
+            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extraContext).joinToString("\n\n"))
+
         val turnDeferred = async {
             try {
-                loop.streamTurn(session, userInput, config) { event ->
+                loop.streamTurn(session, userInput, turnConfig) { event ->
                     onEvent(event)
                     when (event) {
                         is TurnEvent.Token -> {
@@ -57,11 +65,11 @@ class TurnController(
                 liveRegion.clear()
                 if (error != null) {
                     output(ResponseRenderer.renderText(buffer.toString()) + " [error: ${error.message}]")
-                    onTurnSettled(error)
+                    onTurnSettled(userInput, buffer.toString(), error)
                     session
                 } else {
                     output(ResponseRenderer.renderText(buffer.toString()))
-                    onTurnSettled(null)
+                    onTurnSettled(userInput, buffer.toString(), null)
                     result
                 }
             }
@@ -69,7 +77,7 @@ class TurnController(
                 turnDeferred.cancel()
                 liveRegion.clear()
                 output(ResponseRenderer.renderText(buffer.toString()) + " [interrupted]")
-                onTurnSettled(null)
+                onTurnSettled(userInput, buffer.toString(), null)
                 session
             }
         }
