@@ -34,6 +34,7 @@ app — same core, three ways to run it.
 | 📚 `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
 | 🔌 `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
 | 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
+| 🏛️ `sophi-memory` | Long-term memory (Jane's Theory): a memory-palace store behind a technique-agnostic `MemoryTechnique` SPI |
 | 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
@@ -78,6 +79,10 @@ sophi --system "<prompt>"     # system prompt for every turn
 sophi --provider <name>       # 'claude' (default) or 'openai-compat' (Ollama, vLLM, ...)
 sophi --base-url <url>        # required for --provider openai-compat
 sophi --api-key <key>         # optional; falls back to ANTHROPIC_API_KEY for claude
+sophi --memory                # enable long-term memory (see "Cross-cutting: memory")
+sophi --embedding-model <m>   # embedding model for --memory, e.g. nomic-embed-text
+sophi --embedding-base-url <url>   # embeddings endpoint (defaults to --base-url)
+sophi --embedding-dimensions <n>   # vector size (768 nomic-embed-text, 1536 OpenAI; default 1536)
 ```
 
 Examples with local models:
@@ -289,6 +294,59 @@ sophi export --out ./dataset   # build SFT/DPO training files
 
 Training itself is out of scope by design — the datasets are the durable
 asset, and they work with TRL, axolotl, unsloth, or llama-factory as-is.
+
+---
+
+## 🏛️ Cross-cutting: memory (Jane's Theory)
+
+Where learning remembers *how to behave*, memory remembers *your world*:
+who's in it, what happened, and how it connects — across sessions. It's
+organized as a memory palace: the leverage is at **encoding time**, not
+retrieval time. Opt-in and experimental:
+
+```bash
+# Ollama example — any OpenAI-compatible embeddings endpoint works
+sophi --provider openai-compat --base-url http://localhost:11434/v1 --model qwen2.5:7b \
+      --memory --embedding-model nomic-embed-text --embedding-dimensions 768
+```
+
+How it works, per turn:
+
+1. **Encode (async, after the turn)** — one cheap LLM verdict decides what
+   deserves remembering, how strongly (emotional weight is the largest
+   factor), in which of five rooms (entities, tasks, episodes, knowledge,
+   narrative), and connected to what causal story. Most turns store nothing.
+2. **Recall (before the turn, no LLM call)** — the query is embedded, routed
+   to the most relevant rooms, scored by semantic match × decayed importance
+   × your profile, then expanded along causal threads — the agent gets the
+   story, not just the fact. Stale or third-party memories are injected with
+   a `VERIFY` marker so the agent checks instead of asserting.
+3. **Forget (a feature, not a failure)** — each room has its own decay
+   half-life (episodes fade in days, life narratives last a year), and a
+   consolidation "sleep" cycle merges duplicates and prunes what faded.
+
+Sensitive topics (health, finances, relationships) are tier-guarded: never
+volunteered, only surfaced when you raise the topic, and every access is
+audited. Everything lives in plain JSONL under `~/.sophi/memory/`
+(user-global — your life isn't per-project), and like learning it is strictly
+best-effort: memory can never fail or slow down a turn.
+
+Everything remembered is inspectable and truly deletable:
+
+```bash
+sophi memory list [--room tasks]    # browse what it remembers, by room
+sophi memory show <id>              # one memory in full
+sophi memory threads                # causal story lines
+sophi memory profile                # what it believes about you (confirm/correct/delete)
+sophi memory why                    # why did it bring that up?
+sophi memory forget <id>            # hard delete — shows impact first, provably gone
+sophi memory consolidate            # run the sleep cycle now
+sophi memory reset                  # wipe everything
+```
+
+"Provably gone" is literal: deletion is a compacting rewrite of every store
+file, the causal chain is re-linked around the gap, and the regression suite
+greps every file on disk to assert zero traces.
 
 ---
 
