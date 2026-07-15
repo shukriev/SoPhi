@@ -32,6 +32,10 @@
         </dependency>
         <dependency>
             <groupId>dev.sophi</groupId>
+            <artifactId>sophi-memory</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.sophi</groupId>
             <artifactId>sophi-mcp</artifactId>
         </dependency>
         <dependency>
