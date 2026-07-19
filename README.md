@@ -361,3 +361,29 @@ greps every file on disk to assert zero traces.
 All three share the same `sophi-core` agent loop and session format, so
 switching between them later doesn't change how sessions or tools work —
 start small, grow into the rest.
+
+---
+
+## 🤝 Contributing
+
+SoPhi is open to contributions from researchers, developers, and ecosystem builders. We welcome:
+
+- 🧪 **Research & experimentation** — new memory techniques, learning approaches, LLM providers
+- ✨ **Features & improvements** — new tools, plugins, and deployment modes
+- 🐛 **Bug fixes** — correctness issues, performance improvements
+- 📚 **Documentation** — guides, examples, architecture clarifications
+
+**To get started:**
+
+1. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for workflow and expectations
+2. Check [`GOVERNANCE.md`](GOVERNANCE.md) to understand decision-making and stability commitments
+3. Follow our [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — we're committed to a welcoming community
+
+**Quick checklist before you submit a PR:**
+
+- [ ] Tests pass (`mvn test`)
+- [ ] Changelog entry added to `CHANGELOG.md` under `[Unreleased]`
+- [ ] Clear commit messages (imperative mood, reference issues)
+- [ ] No debug logging or console noise
+
+**Questions?** Open an [issue](https://github.com/shukriev/SoPhi/issues) or [discussion](https://github.com/shukriev/SoPhi/discussions).

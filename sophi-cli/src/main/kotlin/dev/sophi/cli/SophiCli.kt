@@ -136,9 +136,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                     embBase, apiKeyOption, embModel, embeddingDimensions)
                 // Spec §6: memory must never fail silently (cognitive-prosthetic honesty).
                 // Probe the endpoint once; if unreachable, disable memory with ONE visible warning.
-                if (runCatching { embProvider.embed(listOf("ping")) }.isFailure) {
+                val probeResult = runCatching { embProvider.embed(listOf("ping")) }
+                if (probeResult.isFailure) {
+                    val error = probeResult.exceptionOrNull()?.message ?: "unknown error"
                     mordantTerminal.println(TextColors.yellow(
-                        "memory: disabled — embeddings endpoint unreachable at $embBase ($embModel)"))
+                        "memory: disabled — embeddings endpoint unreachable at $embBase ($embModel): $error"))
                     null
                 } else {
                     val palace = dev.sophi.memory.jane.JanesPalace(
