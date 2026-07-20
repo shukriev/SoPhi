@@ -66,6 +66,24 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
         }
     }
 
+    suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
+        val toggleLower = toggleKey.lowercaseChar().code
+        val toggleUpper = toggleKey.uppercaseChar().code
+        val previousAttributes = jlineTerminal.enterRawMode()
+        try {
+            val nonBlockingReader = jlineTerminal.reader()
+            while (currentCoroutineContext().isActive) {
+                val ch = withContext(Dispatchers.IO) { nonBlockingReader.read(100) }
+                when (ch) {
+                    27 -> return
+                    toggleLower, toggleUpper -> onToggle()
+                }
+            }
+        } finally {
+            jlineTerminal.attributes = previousAttributes
+        }
+    }
+
     fun close() = jlineTerminal.close()
 
     companion object {

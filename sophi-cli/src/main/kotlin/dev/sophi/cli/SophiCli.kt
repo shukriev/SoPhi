@@ -110,6 +110,14 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--embedding-dimensions",
         help = "Embedding vector dimensions (768 for nomic-embed-text, 1536 for text-embedding-3-small)"
     ).int().default(1536)
+    private val tokenViewKey: String by option(
+        "--token-view-key",
+        help = "Keyboard shortcut to toggle token visibility during streaming (default: T)"
+    ).default("T")
+    private val autoExitTokenView: Boolean by option(
+        "--auto-exit-token-view",
+        help = "Automatically exit token view when LLM finishes (default: true)"
+    ).flag(default = true)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
@@ -214,8 +222,14 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
+        if (tokenViewKey.length != 1) {
+            mordantTerminal.println(TextColors.yellow(
+                "token view: --token-view-key must be a single character, got \"$tokenViewKey\" — using default 'T'"))
+        }
         val turnController = TurnController(
             loop, config, inputSource, liveRegion, onEvent = bridge,
+            tokenViewKey = tokenViewKey.singleOrNull() ?: 'T',
+            autoExitTokenView = autoExitTokenView,
             contextProvider = { sess, input ->
                 pluginRegistry.collectContext(sess.id, input).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
             },
@@ -260,6 +274,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 private class LegacyReadLineInputSource : InputSource {
     override suspend fun readLine(): String? = kotlin.io.readLine()
     override suspend fun awaitEsc() {
+        kotlinx.coroutines.delay(Long.MAX_VALUE)
+    }
+    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
         kotlinx.coroutines.delay(Long.MAX_VALUE)
     }
 }

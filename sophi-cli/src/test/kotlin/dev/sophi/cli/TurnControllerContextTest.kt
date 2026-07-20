@@ -20,6 +20,9 @@ import kotlinx.coroutines.flow.flow
 private class NoopInput : InputSource {
     override suspend fun readLine(): String? = null
     override suspend fun awaitEsc() { kotlinx.coroutines.delay(Long.MAX_VALUE) }
+    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
+        kotlinx.coroutines.delay(Long.MAX_VALUE)
+    }
 }
 
 class TurnControllerContextTest : FunSpec({

@@ -10,3 +10,4 @@ target/
 
 docs/superpowers/
 doc/articles/
+.worktrees/
