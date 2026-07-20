@@ -110,6 +110,14 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--embedding-dimensions",
         help = "Embedding vector dimensions (768 for nomic-embed-text, 1536 for text-embedding-3-small)"
     ).int().default(1536)
+    private val tokenViewKey: String by option(
+        "--token-view-key",
+        help = "Keyboard shortcut to toggle token visibility during streaming (default: T)"
+    ).default("T")
+    private val autoExitTokenView: Boolean by option(
+        "--auto-exit-token-view",
+        help = "Automatically exit token view when LLM finishes (default: true)"
+    ).flag(default = true)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
