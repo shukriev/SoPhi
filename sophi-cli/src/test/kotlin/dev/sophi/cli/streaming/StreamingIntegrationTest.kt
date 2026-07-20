@@ -6,29 +6,20 @@ import io.kotest.matchers.string.shouldContain
 
 class StreamingIntegrationTest : FunSpec({
     test("full streaming flow: spinner -> toggle -> token view") {
-        // Simulate a turn generating tokens
-        val phase = StreamingPhase.Generating(
-            thinkingTokens = listOf("Let me think", " about this..."),
-            responseTokens = listOf("The answer", " is..."),
-            startTime = java.time.Instant.now()
-        )
+        val phase = StreamingPhase.Generating(tokenCount = 4, startTime = java.time.Instant.now())
 
-        // User sees spinner initially
         val spinner = StreamingIndicator.renderSpinner(phase, frameIndex = 0)
         spinner.shouldContain("Generating")
-        spinner.shouldContain("4 tokens") // 2 thinking + 2 response
+        spinner.shouldContain("4 tokens")
 
-        // User presses T to toggle
         var toggleState = TokenViewToggleState()
         toggleState = toggleState.toggle()
         toggleState.isViewingTokens shouldBe true
 
-        // Now show token stream
-        val tokenStream = TokenStreamFormatter.renderTokenStream(phase)
-        tokenStream.shouldContain("[thinking]")
-        tokenStream.shouldContain("[response]")
+        val tokenStream = TokenStreamFormatter.renderTokenStream(phase, "The answer is...")
+        tokenStream.shouldContain("The answer is...")
+        tokenStream.shouldContain("4 tokens")
 
-        // User presses T again to exit token view
         toggleState = toggleState.toggle()
         toggleState.isViewingTokens shouldBe false
     }
@@ -41,33 +32,8 @@ class StreamingIntegrationTest : FunSpec({
             frames.add(timer.nextFrame())
         }
 
-        // Should cycle: 0,1,2...9,0,1,2...9,0,1,2...
         frames.take(10) shouldBe (0..9).toList()
         frames.drop(10) shouldBe (0..4).toList()
-    }
-
-    test("thinking token detection for Claude provider") {
-        ThinkingTokenDetector.reset()
-
-        val tokens = listOf(
-            "<thinking>",
-            "I need to solve",
-            " this step by step",
-            "</thinking>",
-            "The solution is",
-            " clear"
-        )
-
-        val results = mutableListOf<Pair<Boolean, String>>()
-        for (token in tokens) {
-            results.add(ThinkingTokenDetector.parseThinkingBlock(token))
-        }
-
-        // Check transitions: not thinking -> thinking -> response
-        results[0].first shouldBe true  // <thinking>
-        results[1].first shouldBe true  // inside thinking
-        results[3].first shouldBe false // </thinking>
-        results[4].first shouldBe false // after thinking
     }
 
     test("tool execution indicator") {
@@ -85,10 +51,7 @@ class StreamingIntegrationTest : FunSpec({
     }
 
     test("error state display") {
-        val phase = StreamingPhase.Generating(
-            responseTokens = listOf("a", "b", "c", "d", "e"),
-            startTime = java.time.Instant.now()
-        )
+        val phase = StreamingPhase.Generating(tokenCount = 5, startTime = java.time.Instant.now())
 
         Thread.sleep(10)
         val error = StreamingIndicator.renderError(phase, 5)

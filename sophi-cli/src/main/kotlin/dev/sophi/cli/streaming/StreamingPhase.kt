@@ -4,12 +4,9 @@ import java.time.Instant
 
 sealed class StreamingPhase(open val startTime: Instant = Instant.now()) {
     data class Generating(
-        val thinkingTokens: List<String> = emptyList(),
-        val responseTokens: List<String> = emptyList(),
+        val tokenCount: Int = 0,
         override val startTime: Instant = Instant.now()
-    ) : StreamingPhase(startTime) {
-        val tokenCount: Int get() = thinkingTokens.size + responseTokens.size
-    }
+    ) : StreamingPhase(startTime)
 
     data class ExecutingTool(
         val toolName: String,

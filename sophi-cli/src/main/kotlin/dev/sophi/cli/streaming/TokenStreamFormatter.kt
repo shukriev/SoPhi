@@ -1,39 +1,21 @@
 package dev.sophi.cli.streaming
 
+import java.util.Locale
+
 object TokenStreamFormatter {
-    fun formatToken(token: String, isThinking: Boolean = false): String {
-        return if (isThinking) {
-            "[thinking] $token"
-        } else {
-            "[response] $token"
-        }
-    }
-
     fun formatTokenCount(phase: StreamingPhase): String {
+        val elapsed = String.format(Locale.ROOT, "%.1f", phase.elapsedSeconds())
         return when (phase) {
-            is StreamingPhase.Generating -> {
-                val total = phase.tokenCount
-                val elapsed = String.format("%.1f", phase.elapsedSeconds())
-                "($total tokens, ${elapsed}s)"
-            }
-            is StreamingPhase.ExecutingTool -> {
-                val elapsed = String.format("%.1f", phase.elapsedSeconds())
-                "(${elapsed}s)"
-            }
+            is StreamingPhase.Generating -> "(${phase.tokenCount} tokens, ${elapsed}s)"
+            is StreamingPhase.ExecutingTool -> "(${elapsed}s)"
         }
     }
 
-    fun renderTokenStream(phase: StreamingPhase): String {
+    /** Renders the raw text streamed so far alongside a live token/latency footer. */
+    fun renderTokenStream(phase: StreamingPhase, text: String): String {
         return when (phase) {
-            is StreamingPhase.Generating -> {
-                val thinkingLines = phase.thinkingTokens.map { "[thinking] $it" }
-                val responseLines = phase.responseTokens.map { "[response] $it" }
-                val combined = (thinkingLines + responseLines).joinToString("")
-                "$combined\n${formatTokenCount(phase)}"
-            }
-            is StreamingPhase.ExecutingTool -> {
-                "🔧 Calling ${phase.toolName}... ${formatTokenCount(phase)}"
-            }
+            is StreamingPhase.Generating -> "$text\n${formatTokenCount(phase)}"
+            is StreamingPhase.ExecutingTool -> "🔧 Calling ${phase.toolName}... ${formatTokenCount(phase)}"
         }
     }
 }

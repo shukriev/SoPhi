@@ -1,6 +1,7 @@
 package dev.sophi.cli.streaming
 
-class AnimationTimer(private val frameCount: Int = 10) {
+class AnimationTimer(frameCount: Int = 10) {
+    private val frameCount = frameCount.coerceAtLeast(1)
     private var currentFrame = 0
 
     fun nextFrame(): Int {

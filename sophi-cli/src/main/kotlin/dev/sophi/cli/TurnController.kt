@@ -1,12 +1,21 @@
 package dev.sophi.cli
 
+import dev.sophi.cli.streaming.AnimationTimer
+import dev.sophi.cli.streaming.StreamingIndicator
+import dev.sophi.cli.streaming.StreamingPhase
+import dev.sophi.cli.streaming.TokenStreamFormatter
+import dev.sophi.cli.streaming.TokenViewToggleState
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.AgentSession
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import java.time.Instant
 
 class TurnController(
     private val loop: AgentLoop,
@@ -21,16 +30,45 @@ class TurnController(
     // AFTER_TURN hooks (learning outcome, memory encoding) can see the full turn.
     private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit =
         { _, _, _ -> },
+    // Keyboard shortcut that toggles the live region between the spinner+stats view and the
+    // raw token stream. Default view is the spinner; press again to switch back.
+    private val tokenViewKey: Char = 'T',
+    // When a tool call finishes and generation resumes, reset token view back to the spinner
+    // rather than carrying the toggle across the tool-call boundary.
+    private val autoExitTokenView: Boolean = true,
     private val output: (String) -> Unit
 ) {
     suspend fun runTurn(session: AgentSession, userInput: String): AgentSession = coroutineScope {
         val buffer = StringBuilder()
         val pendingArgs = mutableMapOf<String, String>()
-        liveRegion.update("Sophi is thinking…")
+        var tokenCount = 0
+        var currentPhase: StreamingPhase? = StreamingPhase.Generating()
+        var tokenViewState = TokenViewToggleState()
+        val animationTimer = AnimationTimer()
+
+        fun render() {
+            val phase = currentPhase ?: return
+            val display = if (tokenViewState.isViewingTokens && phase is StreamingPhase.Generating) {
+                TokenStreamFormatter.renderTokenStream(phase, buffer.toString())
+            } else {
+                StreamingIndicator.renderSpinner(phase, animationTimer.nextFrame())
+            }
+            liveRegion.update(display)
+        }
+        render()
 
         val extraContext = runCatching { contextProvider(session, userInput) }.getOrNull()
         val turnConfig = if (extraContext.isNullOrBlank()) config
             else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extraContext).joinToString("\n\n"))
+
+        // Sole writer to liveRegion while a phase is active: ticks on a fixed cadence instead of
+        // once per token, so a fast token stream doesn't repaint the terminal hundreds of times.
+        val animationJob = launch {
+            while (isActive) {
+                delay(100)
+                render()
+            }
+        }
 
         val turnDeferred = async {
             try {
@@ -39,17 +77,21 @@ class TurnController(
                     when (event) {
                         is TurnEvent.Token -> {
                             buffer.append(event.text)
-                            liveRegion.update(buffer.toString())
+                            tokenCount++
+                            val startTime = (currentPhase as? StreamingPhase.Generating)?.startTime ?: Instant.now()
+                            currentPhase = StreamingPhase.Generating(tokenCount = tokenCount, startTime = startTime)
                         }
                         is TurnEvent.ToolCallStarted -> {
                             pendingArgs[event.name] = event.argsJson
-                            liveRegion.update("⚙ Running ${event.name}…")
+                            currentPhase = StreamingPhase.ExecutingTool(event.name)
                         }
                         is TurnEvent.ToolCallFinished -> {
                             liveRegion.clear()
                             val args = pendingArgs.remove(event.name) ?: ""
                             output(ResponseRenderer.renderToolCall(event.name, args, event.result))
-                            liveRegion.update(buffer.toString())
+                            if (autoExitTokenView) tokenViewState = TokenViewToggleState()
+                            currentPhase = StreamingPhase.Generating(tokenCount = tokenCount)
+                            render()
                         }
                     }
                 } to null
@@ -57,11 +99,17 @@ class TurnController(
                 session to e
             }
         }
-        val escDeferred = async { input.awaitEsc() }
+        val controlKeysDeferred = async {
+            input.awaitControlKeys(tokenViewKey) {
+                tokenViewState = tokenViewState.toggle()
+                render()
+            }
+        }
 
         select<AgentSession> {
             turnDeferred.onAwait { (result, error) ->
-                escDeferred.cancel()
+                animationJob.cancel()
+                controlKeysDeferred.cancel()
                 liveRegion.clear()
                 if (error != null) {
                     output(ResponseRenderer.renderText(buffer.toString()) + " [error: ${error.message}]")
@@ -73,7 +121,8 @@ class TurnController(
                     result
                 }
             }
-            escDeferred.onAwait {
+            controlKeysDeferred.onAwait {
+                animationJob.cancel()
                 turnDeferred.cancel()
                 liveRegion.clear()
                 output(ResponseRenderer.renderText(buffer.toString()) + " [interrupted]")

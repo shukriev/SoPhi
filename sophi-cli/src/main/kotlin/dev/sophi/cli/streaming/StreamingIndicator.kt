@@ -1,5 +1,7 @@
 package dev.sophi.cli.streaming
 
+import java.util.Locale
+
 object StreamingIndicator {
     private val animationFrames = listOf(
         "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"
@@ -8,23 +10,18 @@ object StreamingIndicator {
     fun getAnimationFrames(): List<String> = animationFrames
 
     fun renderSpinner(phase: StreamingPhase, frameIndex: Int = 0): String {
+        val frame = animationFrames[frameIndex % animationFrames.size]
+        val elapsed = String.format(Locale.ROOT, "%.1f", phase.elapsedSeconds())
         return when (phase) {
-            is StreamingPhase.Generating -> {
-                val frame = animationFrames[frameIndex % animationFrames.size]
-                val elapsed = String.format("%.1f", phase.elapsedSeconds())
-                val totalTokens = phase.tokenCount
-                "$frame Generating... ($totalTokens tokens, ${elapsed}s)"
-            }
-            is StreamingPhase.ExecutingTool -> {
-                val frame = animationFrames[frameIndex % animationFrames.size]
-                val elapsed = String.format("%.1f", phase.elapsedSeconds())
+            is StreamingPhase.Generating ->
+                "$frame Generating... (${phase.tokenCount} tokens, ${elapsed}s)"
+            is StreamingPhase.ExecutingTool ->
                 "🔧 Calling ${phase.toolName}... (${elapsed}s)"
-            }
         }
     }
 
     fun renderError(phase: StreamingPhase, tokenCount: Int): String {
-        val elapsed = String.format("%.1f", phase.elapsedSeconds())
+        val elapsed = String.format(Locale.ROOT, "%.1f", phase.elapsedSeconds())
         return "❌ Generation failed ($tokenCount tokens received, ${elapsed}s)"
     }
 }
