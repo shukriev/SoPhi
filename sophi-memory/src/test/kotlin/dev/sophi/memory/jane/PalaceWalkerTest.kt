@@ -85,6 +85,25 @@ class PalaceWalkerTest : FunSpec({
         indirect.rendered shouldNotContain "hypertension"
     }
 
+    test("RESTRICTED requires a higher direct-hit bar than SENSITIVE, and never rides along expansion") {
+        val r = Rig()
+        r.add("mem_r", "user disclosed extramarital affair with coworker in strict confidence",
+            sensitivity = Sensitivity.RESTRICTED)
+        r.add("mem_n", "user bought running shoes for marathon training")
+        r.store.upsertEdge(CausalEdge("mem_r", "mem_n", "personal"))
+        // High-similarity re-raise clears restrictedFloor (0.55) → direct hit, audited.
+        val direct = r.walk("coworker affair confidence")!!
+        direct.rendered shouldContain "affair"
+        (r.store.recallsSince(0L).isNotEmpty()) shouldBe true
+        // Moderate similarity clears sensitiveFloor (0.35) — enough for a SENSITIVE memory,
+        // not enough for RESTRICTED's stricter floor — so the memory must not surface.
+        val moderate = r.walk("what did I say about the affair in confidence")
+        (moderate == null || !moderate.rendered.contains("affair")) shouldBe true
+        // Query hitting only the linked neighbor → RESTRICTED memory must not ride along the edge.
+        val indirect = r.walk("running shoes marathon training")!!
+        indirect.rendered shouldNotContain "affair"
+    }
+
     test("narrative expansion renders the causal thread for a direct hit") {
         val r = Rig()
         r.add("mem_1", "user changed jobs to new company", Room.EPISODES)
