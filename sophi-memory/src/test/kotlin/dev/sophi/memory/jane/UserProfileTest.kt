@@ -50,6 +50,23 @@ class UserProfileTest : FunSpec({
         p.confirm("nope") shouldBe false
     }
 
+    test("startConfidence lets explicit asks start above the merely-mentioned default") {
+        val p = profile()
+        p.observeEvidence("hobby", "mountain biking", "mem_1", 1L, startConfidence = 0.8)
+        p.all().getValue("hobby").confidence shouldBe (0.8 plusOrMinus 1e-9)
+    }
+
+    test("sameFact loose match: a restated superstring reinforces instead of contradicting") {
+        val p = profile()
+        p.observeEvidence("hobby", "mountain biking", "mem_1", 1L)                     // 0.5
+        // Recall's own rendering echoing the fact back with extra wording must corroborate, not contradict.
+        p.observeEvidence("hobby", "Mountain biking (confidence level 80%)", "mem_2", 2L)
+        val a = p.all().getValue("hobby")
+        a.confidence shouldBe (0.65 plusOrMinus 1e-9)   // +0.15, not the -0.25 contradiction path
+        a.value shouldBe "mountain biking"              // original value kept, not overwritten
+        a.evidenceCount shouldBe 2
+    }
+
     test("reduceEvidence removes a memory's trace; sole-evidence attribute dies") {
         val p = profile()
         p.observeEvidence("pet.name", "Rex", "mem_1", 1L)

@@ -116,6 +116,16 @@ class PalaceWalkerTest : FunSpec({
         block.rendered shouldContain "->"
     }
 
+    test("profile-only recall: an empty palace still surfaces a confirmed profile attribute") {
+        val r = Rig()
+        r.profile.observeEvidence("diet.preference", "vegetarian", "mem_x", 0L)
+        r.profile.confirm("diet.preference")
+        val block = r.walk("what should I cook for dinner tonight")!!
+        block.rendered shouldContain "user_profile"
+        block.rendered shouldContain "diet.preference"
+        block.memoryIds shouldBe emptyList()
+    }
+
     test("profile view appears above memories; resonance boosts profile-linked memories") {
         val r = Rig()
         r.profile.observeEvidence("family.daughter.name", "emma school", "mem_x", 0L)
