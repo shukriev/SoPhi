@@ -25,9 +25,10 @@ class PalaceWalker(
     suspend fun walk(query: RecallQuery, queryVector: FloatArray, rooms: List<Room>): MemoryBlock? {
         val all = store.memories()
         val candidates = all.values.filter { it.active && it.room in rooms }
-        if (candidates.isEmpty()) return null
+        val prof = profile.view(0.7)
+        if (candidates.isEmpty() && prof.isEmpty()) return null
 
-        val profVecs = profileVectorsFor(profile.view(0.7))
+        val profVecs = profileVectorsFor(prof)
         fun resonance(id: String): Double {
             val v = index.get(id) ?: return 0.0
             return profVecs.maxOfOrNull { cosine(v, it) }?.coerceAtLeast(0.0) ?: 0.0
@@ -46,7 +47,14 @@ class PalaceWalker(
                 config.beta3 * resonance(m.id)
             Hit(m, score, direct = true, semantic = sem)
         }.sortedByDescending { it.score }.take(config.directK)
-        if (direct.isEmpty()) return null
+        // Profile-only recall: preferences and other stable traits may never accumulate a matching
+        // room memory of their own, but the profile alone is still worth surfacing.
+        if (direct.isEmpty()) {
+            if (prof.isEmpty()) return null
+            val rendered = render(emptyList(), emptyList(), query.nowMs)
+            store.writeLastRecall(explain(query, emptyList()))
+            return MemoryBlock(rendered, emptyList())
+        }
 
         // 2. Neighborhood expansion — sensitive tiers never ride along (spec §6 step 5).
         val hits = LinkedHashMap<String, Hit>()

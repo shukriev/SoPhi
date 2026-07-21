@@ -44,6 +44,7 @@ class OpenAICompatProvider(
             .maxTokens(maxTokens)
             .temperature(temperature)
             .toolCallbacks(tools.map { SophiToolCallback(it) })
+            .reasoningEffort(reasoningEffort)
             .build()
         return Prompt(springMessages, options)
     }

@@ -12,5 +12,7 @@ data class CompletionRequest(
     val maxTokens: Int = 4096,
     val temperature: Double = 0.7,
     val systemPrompt: String? = null,
-    val tools: List<ToolDefinition> = emptyList()
+    val tools: List<ToolDefinition> = emptyList(),
+    /** OpenAI-compat only: "none"/"low"/"medium"/"high". Ignored by other providers. */
+    val reasoningEffort: String? = null
 )
