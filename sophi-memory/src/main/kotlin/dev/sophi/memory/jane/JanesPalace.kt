@@ -24,14 +24,15 @@ class JanesPalace(
     private val config: JanesPalaceConfig,
     llmProvider: LLMProvider?,
     private val embeddingProvider: EmbeddingProvider?,
-    embeddingModelName: String = "unknown"
+    embeddingModelName: String = "unknown",
+    onWarning: (String) -> Unit = {}
 ) : MemoryTechnique {
     private val store = PalaceStore(config.home)
     private val index = EmbeddingIndex(store.embeddings())
     private val profile = UserProfile(store)
     private val router = embeddingProvider?.let { RoomRouter(it) }
     private val walker = embeddingProvider?.let { PalaceWalker(store, index, profile, it, config) }
-    private val encoder = llmProvider?.let { SignificanceEncoder(it, config) }
+    private val encoder = llmProvider?.let { SignificanceEncoder(it, config, onWarning) }
     private val writer = embeddingProvider?.let {
         MemoryWriter(store, index, profile, it, embeddingModelName, config)
     }

@@ -143,8 +143,15 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 val embProvider = dev.sophi.ai.providers.buildOpenAiCompatEmbeddingProvider(
                     embBase, apiKeyOption, embModel, embeddingDimensions)
                 // Spec §6: memory must never fail silently (cognitive-prosthetic honesty).
-                // Probe the endpoint once; if unreachable, disable memory with ONE visible warning.
-                val probeResult = runCatching { embProvider.embed(listOf("ping")) }
+                // Probe the endpoint, with one retry — local servers (e.g. Ollama) can take
+                // longer than the request timeout to cold-swap a model into memory the first
+                // time, which would otherwise disable memory for the whole session over a
+                // one-off delay rather than a real outage.
+                var probeResult = runCatching { embProvider.embed(listOf("ping")) }
+                if (probeResult.isFailure) {
+                    kotlinx.coroutines.delay(3000)
+                    probeResult = runCatching { embProvider.embed(listOf("ping")) }
+                }
                 if (probeResult.isFailure) {
                     val error = probeResult.exceptionOrNull()?.message ?: "unknown error"
                     mordantTerminal.println(TextColors.yellow(
@@ -153,7 +160,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 } else {
                     val palace = dev.sophi.memory.jane.JanesPalace(
                         dev.sophi.memory.jane.JanesPalaceConfig(sessionModel = model),
-                        provider, embProvider, embModel)
+                        provider, embProvider, embModel,
+                        onWarning = { msg -> mordantTerminal.println(TextColors.yellow(msg)) })
                     dev.sophi.memory.MemoryPlugin(palace)
                 }
             }

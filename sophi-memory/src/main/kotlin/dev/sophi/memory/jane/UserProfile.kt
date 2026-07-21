@@ -14,11 +14,11 @@ class UserProfile(private val store: PalaceStore) {
     fun view(floor: Double = 0.7): List<ProfileAttribute> =
         all().values.filter { it.confidence >= floor }.sortedBy { it.path }
 
-    fun observeEvidence(path: String, value: String, memoryId: String, nowMs: Long) {
+    fun observeEvidence(path: String, value: String, memoryId: String, nowMs: Long, startConfidence: Double = 0.5) {
         val existing = all()[path]
         val updated = when {
-            existing == null -> ProfileAttribute(path, value, 0.5, 1, listOf(memoryId), nowMs)
-            existing.value.equals(value, ignoreCase = true) -> existing.copy(
+            existing == null -> ProfileAttribute(path, value, startConfidence, 1, listOf(memoryId), nowMs)
+            sameFact(existing.value, value) -> existing.copy(
                 confidence = min(1.0, existing.confidence + 0.15),
                 evidenceCount = existing.evidenceCount + 1,
                 evidenceMemoryIds = existing.evidenceMemoryIds + memoryId,
@@ -31,6 +31,17 @@ class UserProfile(private val store: PalaceStore) {
             }
         }
         store.upsertAttribute(updated)
+    }
+
+    /**
+     * Loose match, not exact equality: the encoder often echoes a stored fact back with
+     * extra wording (e.g. the assistant restating "mountain biking" as "Mountain biking
+     * (confidence level 80%)" when asked what it knows) — recall's own output re-entering
+     * observation as if it were fresh, contradicting evidence must not erode confidence.
+     */
+    private fun sameFact(a: String, b: String): Boolean {
+        val na = a.trim().lowercase(); val nb = b.trim().lowercase()
+        return na == nb || na.contains(nb) || nb.contains(na)
     }
 
     fun confirm(path: String): Boolean = mutate(path) { it.copy(confidence = 1.0) }

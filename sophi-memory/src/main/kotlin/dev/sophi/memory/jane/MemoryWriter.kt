@@ -90,7 +90,10 @@ class MemoryWriter(
 
         verdict.profile.forEach { pe ->
             val evidenceId = stored.lastOrNull()?.id ?: "turn_${turn.sessionId}_${turn.nowMs}"
-            profile.observeEvidence(pe.path, pe.value, evidenceId, turn.nowMs)
+            // An explicit "remember this" starts above the recall floor (spec §6's 0.7) immediately;
+            // a merely-mentioned fact still needs corroboration before it's asserted back confidently.
+            val startConfidence = if (pe.explicit) 0.8 else 0.5
+            profile.observeEvidence(pe.path, pe.value, evidenceId, turn.nowMs, startConfidence)
         }
         return stored
     }

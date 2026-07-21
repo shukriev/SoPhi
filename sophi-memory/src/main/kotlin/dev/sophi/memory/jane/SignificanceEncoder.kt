@@ -23,7 +23,7 @@ internal data class VerdictMemory(
 )
 
 @Serializable
-internal data class VerdictProfile(val path: String, val value: String)
+internal data class VerdictProfile(val path: String, val value: String, val explicit: Boolean = false)
 
 @Serializable
 internal data class EncoderVerdict(
@@ -36,15 +36,30 @@ internal data class EncoderVerdict(
  * LLM can (significance, room, emph/aff, sensitivity, links, corrections, profile evidence).
  * Novelty/repetition/recency are computed by MemoryWriter, not asked of the model.
  */
-class SignificanceEncoder(private val provider: LLMProvider, private val config: JanesPalaceConfig) {
+class SignificanceEncoder(
+    private val provider: LLMProvider,
+    private val config: JanesPalaceConfig,
+    private val onWarning: (String) -> Unit = {}
+) {
     private val json = Json { ignoreUnknownKeys = true }
 
     internal suspend fun encode(turn: TurnObservation, recent: List<Memory>): EncoderVerdict? {
-        var text = completeText(buildPrompt(turn, recent)) ?: return null
+        var text = completeText(buildPrompt(turn, recent))
+        if (text == null) {
+            onWarning("memory: encoder call failed — this turn was not evaluated for memory")
+            return null
+        }
         parse(text)?.let { return it }
         text = completeText("Respond with ONLY the JSON object, no prose.\n\n" + buildPrompt(turn, recent))
-            ?: return null
-        return parse(text)
+        if (text == null) {
+            onWarning("memory: encoder call failed on retry — this turn was not evaluated for memory")
+            return null
+        }
+        return parse(text) ?: run {
+            onWarning("memory: encoder returned output that didn't match the expected schema " +
+                "(truncated, malformed JSON, or a wrong field type) — this turn was not evaluated for memory")
+            null
+        }
     }
 
     internal fun buildPrompt(turn: TurnObservation, recent: List<Memory>): String = buildString {
@@ -54,11 +69,13 @@ class SignificanceEncoder(private val provider: LLMProvider, private val config:
         appendLine(""" "emph":0.0,"aff":0.0,"sensitivity":"PUBLIC|PERSONAL|SENSITIVE|RESTRICTED",""")
         appendLine(""" "provenance":"USER_DIRECT|USER_ARTIFACT|THIRD_PARTY|SYSTEM_INFERRED",""")
         appendLine(""" "causedBy":["<existing memory id>"],"thread":"short thread label or null","supersedes":"<id or null>"}],""")
-        appendLine(""" "profile":[{"path":"dotted.trait.path","value":"..."}]}""")
+        appendLine(""" "profile":[{"path":"dotted.trait.path","value":"...","explicit":false}]}""")
         appendLine()
         appendLine("Rules:")
         appendLine("- Emit [] for trivial exchanges (small talk, generic Q&A). Most turns store NOTHING.")
         appendLine("- emph: did the user stress it or say to remember it (0..1)? aff: emotional weight (0..1).")
+        appendLine("- profile.explicit: true ONLY if the user directly asked you to remember/note this fact")
+        appendLine("  (e.g. \"remember that I...\", \"please note...\"), not merely mentioned it in passing.")
         appendLine("- Rooms: ENTITIES people/orgs/pets/places; TASKS errands/appointments/deadlines;")
         appendLine("  EPISODES events/decisions reported; KNOWLEDGE durable facts of the user's world;")
         appendLine("  NARRATIVE only for explicit cause-effect story beats.")
@@ -77,6 +94,10 @@ class SignificanceEncoder(private val provider: LLMProvider, private val config:
     }
 
     internal fun parse(text: String): EncoderVerdict? {
+        val trimmed = text.trim()
+        // The prompt tells the model to "Emit [] for trivial exchanges" — models sometimes take that
+        // literally instead of wrapping it as {"memories":[],"profile":[]}. Both mean the same thing.
+        if (trimmed.isEmpty() || trimmed == "[]") return EncoderVerdict()
         val start = text.indexOf('{'); val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) return null
         return runCatching {
@@ -89,7 +110,10 @@ class SignificanceEncoder(private val provider: LLMProvider, private val config:
             provider.complete(CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
                 model = config.encoderModel ?: config.sessionModel ?: return null,
-                maxTokens = config.encoderMaxTokens, temperature = 0.0))
+                maxTokens = config.encoderMaxTokens, temperature = 0.0,
+                // This is structured extraction, not a task that benefits from chain-of-thought;
+                // reasoning models otherwise burn the whole token budget "thinking" and never emit JSON.
+                reasoningEffort = "none"))
         }.getOrNull()) {
             is LLMResponse.Text -> r.content
             else -> null
