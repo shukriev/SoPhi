@@ -143,15 +143,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 val embProvider = dev.sophi.ai.providers.buildOpenAiCompatEmbeddingProvider(
                     embBase, apiKeyOption, embModel, embeddingDimensions)
                 // Spec §6: memory must never fail silently (cognitive-prosthetic honesty).
-                // Probe the endpoint, with one retry — local servers (e.g. Ollama) can take
-                // longer than the request timeout to cold-swap a model into memory the first
-                // time, which would otherwise disable memory for the whole session over a
-                // one-off delay rather than a real outage.
-                var probeResult = runCatching { embProvider.embed(listOf("ping")) }
-                if (probeResult.isFailure) {
-                    kotlinx.coroutines.delay(3000)
-                    probeResult = runCatching { embProvider.embed(listOf("ping")) }
-                }
+                val probeResult = dev.sophi.ai.api.probeEmbeddingProvider(embProvider)
                 if (probeResult.isFailure) {
                     val error = probeResult.exceptionOrNull()?.message ?: "unknown error"
                     mordantTerminal.println(TextColors.yellow(

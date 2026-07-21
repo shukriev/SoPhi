@@ -71,6 +71,19 @@ class MemoryWriterTest : FunSpec({
         store.attributes().getValue("home.city").value shouldBe "Plovdiv"
     }
 
+    test("explicit profile evidence starts at 0.8 confidence; merely-mentioned starts at 0.5") {
+        val (store, _, writer) = rig()
+        writer.write(turn, EncoderVerdict(
+            memories = listOf(vm("User asked to remember their commute time", emph = 0.9)),
+            profile = listOf(VerdictProfile("commute.time", "45 minutes", explicit = true))))
+        store.attributes().getValue("commute.time").confidence shouldBe 0.8
+
+        writer.write(turn.copy(nowMs = 2_000L), EncoderVerdict(
+            memories = listOf(vm("User mentioned working from the office", emph = 0.9)),
+            profile = listOf(VerdictProfile("work.location", "office", explicit = false))))
+        store.attributes().getValue("work.location").confidence shouldBe 0.5
+    }
+
     test("unknown room or causedBy id degrades gracefully (skip memory / skip link)") {
         val (store, _, writer) = rig()
         writer.write(turn, EncoderVerdict(listOf(vm("x", room = "GARAGE", emph = 0.9)))) shouldBe emptyList()

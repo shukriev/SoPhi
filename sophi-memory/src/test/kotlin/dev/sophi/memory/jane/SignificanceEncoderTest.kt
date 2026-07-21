@@ -57,4 +57,49 @@ class SignificanceEncoderTest : FunSpec({
         prompt shouldContain "[mem_9]"
         prompt shouldContain "credentials"
     }
+
+    test("requests reasoningEffort=none — structured extraction, not chain-of-thought") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+        SignificanceEncoder(provider, cfg).encode(turn, emptyList())
+        captured.captured.reasoningEffort shouldBe "none"
+    }
+
+    test("parses a bare [] the same as an empty {memories:[],profile:[]} verdict") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("[]", TokenUsage(1, 1))
+        val verdict = SignificanceEncoder(provider, cfg).encode(turn, emptyList())!!
+        verdict.memories shouldBe emptyList()
+        verdict.profile shouldBe emptyList()
+    }
+
+    test("warns when the provider errors on the first call") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } throws RuntimeException("down")
+        val warnings = mutableListOf<String>()
+        SignificanceEncoder(provider, cfg, onWarning = { warnings.add(it) }).encode(turn, emptyList())
+        warnings.single() shouldContain "encoder call failed"
+    }
+
+    test("warns when the retry attempt also errors") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns
+            LLMResponse.Text("prose, no json here", TokenUsage(1, 1)) andThenThrows
+            RuntimeException("still down")
+        val warnings = mutableListOf<String>()
+        SignificanceEncoder(provider, cfg, onWarning = { warnings.add(it) }).encode(turn, emptyList())
+        warnings.single() shouldContain "encoder call failed on retry"
+    }
+
+    test("warns when both attempts return output that doesn't match the expected schema") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("prose, no json here", TokenUsage(1, 1)),
+            LLMResponse.Text("still prose, no json here", TokenUsage(1, 1)))
+        val warnings = mutableListOf<String>()
+        SignificanceEncoder(provider, cfg, onWarning = { warnings.add(it) }).encode(turn, emptyList())
+        warnings.single() shouldContain "didn't match the expected schema"
+    }
 })
