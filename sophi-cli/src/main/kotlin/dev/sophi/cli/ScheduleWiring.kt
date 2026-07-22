@@ -18,7 +18,8 @@ internal fun buildScheduleEngine(
     scheduleDir: Path,
     sessionsDir: Path,
     agentsDir: Path,
-    braveApiKeyOption: String?
+    braveApiKeyOption: String?,
+    taskTimeoutSeconds: Long = 300
 ): ScheduleEngine {
     val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
     val registry = dev.sophi.core.tools.ToolRegistry()
@@ -40,7 +41,8 @@ internal fun buildScheduleEngine(
         sessionManager = sessionManager,
         notifier = notifier,
         model = model,
-        agentDefinitions = agentDefinitions
+        agentDefinitions = agentDefinitions,
+        taskTimeoutMs = taskTimeoutSeconds * 1000
     )
 }
 

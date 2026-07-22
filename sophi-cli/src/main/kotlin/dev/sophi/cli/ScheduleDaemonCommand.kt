@@ -24,11 +24,18 @@ class ScheduleDaemonCommand : CliktCommand(
         .default("${System.getProperty("user.home")}/.sophi/agents")
     private val braveApiKeyOption: String? by option("--brave-api-key")
     private val intervalSeconds: Long by option("--interval-seconds").long().default(60)
+    private val taskTimeoutSeconds: Long by option(
+        "--task-timeout-seconds",
+        help = "Hard cap on one task's run. Especially important here: without it, one stuck " +
+            "task's turn blocks tickOnce() from ever returning, freezing every future tick of " +
+            "this daemon, not just the stuck task. Raise this for slow local models."
+    ).long().default(300)
 
     override fun run() = runBlocking {
         val engine = buildScheduleEngine(
             model, providerType, apiKeyOption, baseUrl,
-            Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption
+            Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
+            taskTimeoutSeconds
         )
         while (true) {
             runCatching { engine.tickOnce() }

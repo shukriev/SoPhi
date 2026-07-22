@@ -18,6 +18,7 @@ import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlin.io.path.createTempDirectory
@@ -27,7 +28,8 @@ class ScheduleEngineTest : FunSpec({
     fun engine(
         provider: LLMProvider,
         notifier: Notifier = NoopNotifier,
-        maxConcurrentTasks: Int = 4
+        maxConcurrentTasks: Int = 4,
+        taskTimeoutMs: Long = 300_000
     ): Triple<ScheduleEngine, TaskStore, RunLog> {
         val home = tempdir().toPath()
         val taskStore = TaskStore(home.resolve("tasks.json"))
@@ -35,7 +37,7 @@ class ScheduleEngineTest : FunSpec({
         val engine = ScheduleEngine(
             taskStore, runLog, provider, ToolRegistry(),
             FileSessionManager(createTempDirectory("schedule-engine-test")),
-            notifier, model = "m", maxConcurrentTasks = maxConcurrentTasks
+            notifier, model = "m", maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs
         )
         return Triple(engine, taskStore, runLog)
     }
@@ -127,5 +129,37 @@ class ScheduleEngineTest : FunSpec({
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
         kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
         notified shouldBe listOf(task.id)
+    }
+
+    test("a run exceeding taskTimeoutMs is recorded as Failed with a clear timeout message, not hung forever") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } coAnswers {
+            kotlinx.coroutines.delay(500)
+            LLMResponse.Text("too late", TokenUsage(1, 1))
+        }
+        val (engine, taskStore, _) = engine(provider, taskTimeoutMs = 50)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+        (record?.outcome is RunOutcome.Failed) shouldBe true
+        (record?.outcome as RunOutcome.Failed).error shouldContain "timed out"
+    }
+
+    test("one task timing out does not abort concurrently-running tasks in the same tick") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } coAnswers {
+            val req = firstArg<CompletionRequest>()
+            if (req.messages.first().content == "slow") {
+                kotlinx.coroutines.delay(500)
+                LLMResponse.Text("too late", TokenUsage(1, 1))
+            } else {
+                LLMResponse.Text("fast", TokenUsage(1, 1))
+            }
+        }
+        val (engine, taskStore, runLog) = engine(provider, taskTimeoutMs = 50)
+        val slow = taskStore.add(ScheduledTask(name = "slow", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "slow"))
+        val fast = taskStore.add(ScheduledTask(name = "fast", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "fast"))
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+        (runLog.forTask(slow.id).single().outcome is RunOutcome.Failed) shouldBe true
+        runLog.forTask(fast.id).single().outcome shouldBe RunOutcome.Succeeded
     }
 })
