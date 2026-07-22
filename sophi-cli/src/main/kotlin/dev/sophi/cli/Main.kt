@@ -8,6 +8,8 @@ fun main(args: Array<String>) = SophiCli()
         MemoryCommand(),
         LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand()),
         FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand()),
-        ExportCommand()
+        ExportCommand(),
+        ScheduleCommand().subcommands(ScheduleRunDueCommand(), ScheduleDaemonCommand()),
+        GoalCommand().subcommands(GoalRunCommand())
     )
     .main(args)

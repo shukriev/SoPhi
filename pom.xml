@@ -110,6 +110,11 @@
             </dependency>
             <dependency>
                 <groupId>dev.sophi</groupId>
+                <artifactId>sophi-schedule</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.sophi</groupId>
                 <artifactId>sophi-infra</artifactId>
                 <version>${project.version}</version>
             </dependency>
