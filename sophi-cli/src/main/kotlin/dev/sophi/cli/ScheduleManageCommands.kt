@@ -55,26 +55,31 @@ class ScheduleLog(
 }
 
 class ScheduleListCommand : CliktCommand(name = "list") {
-    override fun run() = ScheduleList(defaultScheduleDir()) { echo(it) }.run()
+    private val scheduleDirStr: String by option("--schedule-dir").default(defaultScheduleDir().toString())
+    override fun run() = ScheduleList(Path.of(scheduleDirStr)) { echo(it) }.run()
 }
 
 class ScheduleLogCommand : CliktCommand(name = "log") {
+    private val scheduleDirStr: String by option("--schedule-dir").default(defaultScheduleDir().toString())
     private val taskId: String? by option("--task-id")
     private val tail: Int by option("--tail").int().default(20)
-    override fun run() = ScheduleLog(defaultScheduleDir(), taskId, tail) { echo(it) }.run()
+    override fun run() = ScheduleLog(Path.of(scheduleDirStr), taskId, tail) { echo(it) }.run()
 }
 
 class SchedulePauseCommand : CliktCommand(name = "pause") {
+    private val scheduleDirStr: String by option("--schedule-dir").default(defaultScheduleDir().toString())
     private val id by argument()
-    override fun run() = SchedulePause(defaultScheduleDir(), id) { echo(it) }.run()
+    override fun run() = SchedulePause(Path.of(scheduleDirStr), id) { echo(it) }.run()
 }
 
 class ScheduleResumeCommand : CliktCommand(name = "resume") {
+    private val scheduleDirStr: String by option("--schedule-dir").default(defaultScheduleDir().toString())
     private val id by argument()
-    override fun run() = ScheduleResume(defaultScheduleDir(), id) { echo(it) }.run()
+    override fun run() = ScheduleResume(Path.of(scheduleDirStr), id) { echo(it) }.run()
 }
 
 class ScheduleRemoveCommand : CliktCommand(name = "remove") {
+    private val scheduleDirStr: String by option("--schedule-dir").default(defaultScheduleDir().toString())
     private val id by argument()
-    override fun run() = ScheduleRemove(defaultScheduleDir(), id) { echo(it) }.run()
+    override fun run() = ScheduleRemove(Path.of(scheduleDirStr), id) { echo(it) }.run()
 }

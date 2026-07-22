@@ -1,5 +1,6 @@
 package dev.sophi.cli
 
+import com.github.ajalt.clikt.testing.test
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
@@ -73,5 +74,27 @@ class ScheduleManageCommandsTest : FunSpec({
         ScheduleLog(home, taskId = "t1", tail = 10) { out.appendLine(it) }.run()
         out.toString() shouldContain "did stuff"
         (out.toString().contains("other")) shouldBe false
+    }
+
+    test("--schedule-dir on the list/log/pause/resume/remove commands points at a non-default directory") {
+        val home = tempdir().toPath()
+        val store = TaskStore(home.resolve("tasks.json"))
+        val task = store.add(ScheduledTask(name = "custom-dir-task", trigger = Trigger.Interval(60), mode = TaskMode.Recurring, prompt = "p"))
+        RunLog(home.resolve("runs.jsonl")).append(RunRecord(task.id, 1L, 2L, RunOutcome.Succeeded, "custom dir run"))
+
+        val listResult = ScheduleListCommand().test("--schedule-dir \"$home\"")
+        listResult.output shouldContain "custom-dir-task"
+
+        val logResult = ScheduleLogCommand().test("--schedule-dir \"$home\"")
+        logResult.output shouldContain "custom dir run"
+
+        SchedulePauseCommand().test("--schedule-dir \"$home\" ${task.id}")
+        store.get(task.id)!!.enabled shouldBe false
+
+        ScheduleResumeCommand().test("--schedule-dir \"$home\" ${task.id}")
+        store.get(task.id)!!.enabled shouldBe true
+
+        ScheduleRemoveCommand().test("--schedule-dir \"$home\" ${task.id}")
+        store.list() shouldBe emptyList()
     }
 })
