@@ -5,8 +5,8 @@
 | Field | Value |
 |-------|-------|
 | Current milestone | M7 — Jane's Theory memory (palace v1) complete |
-| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory |
-| Last updated | 2026-07-14 |
+| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory, sophi-schedule |
+| Last updated | 2026-07-22 |
 
 ---
 
@@ -61,6 +61,11 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │  MemoryTechnique SPI · JanesPalace (rooms, salience, decay,  │
 │  narrative graph, profile) · recall via ContextContributor   │
 └──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│     sophi-schedule  (recurring & goal-based task scheduler)  │
+│  ScheduleEngine (tickOnce/runNow) · GoalRunner · TaskStore /  │
+│  RunLog · Notifier · manage_scheduled_task Tool               │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 | Module | Purpose | Status |
@@ -72,6 +77,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
 | `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn | complete |
+| `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `GoalRunner` (LLM-judged/shell-checked stop conditions), `TaskStore`/`RunLog`, `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven | complete |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
 | `sophi-sdk` | Embeddable library for Spring `@Service` beans | complete |
@@ -412,6 +418,7 @@ class SkillLoader {
 | [ADR-011](adr/ADR-011-preference-capture-through-lesson-pipeline.md) | Preference feedback | Explicit + weighted implicit capture; steering through the lesson pipeline |
 | [ADR-012](adr/ADR-012-offline-trajectory-export.md) | Fine-tuning support | Offline `sophi export` to SFT/DPO datasets — training out of scope |
 | [ADR-013](adr/ADR-013-memory-as-plugin-context-contributor.md) | Declarative memory placement | Separate sophi-memory module; per-turn context via new ContextContributor SPI |
+| [ADR-014](adr/ADR-014-scheduled-goal-tasks.md) | Scheduled & goal-based tasks | Trigger×Mode unification; local-only for v1; per-task destructive allowlist; OS-scheduler-first tick model |
 
 ---
 
@@ -436,3 +443,4 @@ class SkillLoader {
 | `sophi-learning` phase 3 — preference feedback | M6 | complete | [article-16](articles/article-16.md) |
 | `sophi-learning` phase 4 — trajectory export | M6 | complete | [article-17](articles/article-17.md) |
 | `sophi-memory` — Jane's Theory memory palace | M7 | complete | [article-18](articles/article-18.md) |
+| `sophi-schedule` — scheduled & goal-based tasks | post-M7 | complete | [article-19](articles/article-19.md) |
