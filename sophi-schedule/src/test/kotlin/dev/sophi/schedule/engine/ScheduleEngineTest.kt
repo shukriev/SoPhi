@@ -144,6 +144,26 @@ class ScheduleEngineTest : FunSpec({
         (record?.outcome as RunOutcome.Failed).error shouldContain "timed out"
     }
 
+    test("maxTokens is configurable and threaded into every task's AgentConfig") {
+        val provider = mockk<LLMProvider>()
+        var capturedMaxTokens: Int? = null
+        coEvery { provider.complete(any()) } answers {
+            capturedMaxTokens = firstArg<CompletionRequest>().maxTokens
+            LLMResponse.Text("x", TokenUsage(1, 1))
+        }
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-maxtokens-test")),
+            NoopNotifier, model = "m", maxTokens = 8192
+        )
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+        capturedMaxTokens shouldBe 8192
+    }
+
     test("one task timing out does not abort concurrently-running tasks in the same tick") {
         val provider = mockk<LLMProvider>()
         coEvery { provider.complete(any()) } coAnswers {

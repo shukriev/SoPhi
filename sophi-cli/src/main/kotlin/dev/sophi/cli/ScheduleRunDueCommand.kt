@@ -3,6 +3,7 @@ package dev.sophi.cli
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -28,12 +29,18 @@ class ScheduleRunDueCommand : CliktCommand(
             "There's no one watching an unattended run to Ctrl-C a hang, so it fails as " +
             "RunOutcome.Failed instead of blocking forever. Raise this for slow local models."
     ).long().default(300)
+    private val maxTokens: Int by option(
+        "--max-tokens",
+        help = "Max completion tokens per turn. Raise this for local reasoning models — hidden " +
+            "chain-of-thought counts against this budget, so a low value can exhaust it before " +
+            "the model ever emits an answer or tool call."
+    ).int().default(4096)
 
     override fun run() = runBlocking {
         val engine = buildScheduleEngine(
             model, providerType, apiKeyOption, baseUrl,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
-            taskTimeoutSeconds
+            taskTimeoutSeconds, maxTokens
         )
         engine.tickOnce()
     }

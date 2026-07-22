@@ -36,7 +36,13 @@ class ScheduleEngine(
      * An unattended run has no one there to notice a hang and Ctrl-C it, so a stuck
      * LLM call must fail the run instead of blocking its semaphore slot forever.
      */
-    private val taskTimeoutMs: Long = 300_000
+    private val taskTimeoutMs: Long = 300_000,
+    /**
+     * Max completion tokens per turn. Reasoning models' hidden chain-of-thought counts
+     * against this budget — too low and the model can hit finish_reason=length before
+     * ever emitting an answer or tool call.
+     */
+    private val maxTokens: Int = 4096
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
         val due = taskStore.list().filter { it.enabled && it.nextRunAtMs != null && it.nextRunAtMs <= nowMs }
@@ -62,7 +68,7 @@ class ScheduleEngine(
                     ?: fullRegistry
                 val confirmationPolicy = AllowlistConfirmationPolicy(task.destructiveToolAllowlist)
                 val loop = AgentLoop(provider, scopedRegistry, sessionManager, confirmationPolicy = confirmationPolicy)
-                val config = AgentConfig(model = model)
+                val config = AgentConfig(model = model, maxTokens = maxTokens)
 
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {

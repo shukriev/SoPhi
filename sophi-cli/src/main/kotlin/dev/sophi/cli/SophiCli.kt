@@ -54,6 +54,12 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--provider",
         help = "LLM provider: 'claude' (default) or 'openai-compat' (Ollama, vLLM, or any OpenAI-compatible server)"
     ).default("claude")
+    private val maxTokens: Int by option(
+        "--max-tokens",
+        help = "Max completion tokens per turn. Raise this for local reasoning models — hidden " +
+            "chain-of-thought counts against this budget, so a low value can exhaust it before " +
+            "the model ever emits an answer or tool call (finish_reason=length, no visible output)."
+    ).int().default(4096)
     private val baseUrl: String? by option(
         "--base-url",
         help = "Base URL for --provider openai-compat, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:8000/v1 (vLLM)"
@@ -174,7 +180,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 if (memoryPlugin != null) dev.sophi.memory.MemoryPromptSection.TEXT else null
             ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
 
-        val config = AgentConfig(model = model, systemPrompt = effectiveSystemPrompt)
+        val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
         val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal)
 
