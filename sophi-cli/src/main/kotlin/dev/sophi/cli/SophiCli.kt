@@ -33,6 +33,8 @@ import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
+import dev.sophi.schedule.store.TaskStore
+import dev.sophi.schedule.tools.ScheduleTaskTool
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
@@ -81,6 +83,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--agents-dir",
         help = "Directory of subagent definition Markdown files"
     ).default("${System.getProperty("user.home")}/.sophi/agents")
+    private val scheduleDirStr: String by option(
+        "--schedule-dir",
+        help = "Directory for scheduled/goal task definitions and run history"
+    ).default("${System.getProperty("user.home")}/.sophi/schedule")
     private val systemPrompt: String? by option(
         "--system",
         help = "System prompt injected into every turn"
@@ -177,6 +183,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
         val registry = ToolRegistry()
         buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
+        registry.register(ScheduleTaskTool(TaskStore(Path.of(scheduleDirStr).resolve("tasks.json"))))
         val mcpClientManager = McpClientManager()
         val mcpConfigPath = Path.of(mcpConfigPathStr)
         if (mcpConfigPath.exists()) {
