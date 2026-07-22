@@ -9,7 +9,11 @@ fun main(args: Array<String>) = SophiCli()
         LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand()),
         FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand()),
         ExportCommand(),
-        ScheduleCommand().subcommands(ScheduleRunDueCommand(), ScheduleDaemonCommand()),
+        ScheduleCommand().subcommands(
+            ScheduleRunDueCommand(), ScheduleDaemonCommand(),
+            ScheduleListCommand(), ScheduleLogCommand(),
+            SchedulePauseCommand(), ScheduleResumeCommand(), ScheduleRemoveCommand()
+        ),
         GoalCommand().subcommands(GoalRunCommand())
     )
     .main(args)
