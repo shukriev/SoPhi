@@ -21,6 +21,8 @@ import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
+import dev.sophi.schedule.store.TaskStore
+import dev.sophi.schedule.tools.ScheduleTaskTool
 import kotlinx.coroutines.runBlocking
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -62,6 +64,8 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
             .register(EditTool())
             .register(BashTool())
             .register(FetchUrlTool())
+            .register(ScheduleTaskTool(TaskStore(
+                Path.of(System.getProperty("user.home"), ".sophi", "schedule", "tasks.json"))))
         val braveApiKey = System.getenv("BRAVE_SEARCH_API_KEY")
         if (braveApiKey != null) {
             registry.register(WebSearchTool(BraveSearchProvider(braveApiKey)))
