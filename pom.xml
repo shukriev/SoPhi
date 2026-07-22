@@ -18,6 +18,7 @@
         <module>sophi-learning</module>
         <module>sophi-memory</module>
         <module>sophi-mcp</module>
+        <module>sophi-schedule</module>
         <module>sophi-cli</module>
         <module>sophi-web</module>
         <module>sophi-sdk</module>
