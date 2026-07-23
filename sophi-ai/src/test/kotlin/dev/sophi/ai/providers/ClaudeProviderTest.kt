@@ -164,7 +164,7 @@ class ClaudeProviderTest : FunSpec({
         instructions[0].shouldBeInstanceOf<UserMessage>()
     }
 
-    test("stream() emits non-empty text chunks from Flux") {
+    test("stream() emits StreamEvent.Content for non-empty text chunks from Flux") {
         val chunk1 = mockk<ChatResponse> {
             every { result } returns mockk {
                 every { output } returns mockk<AssistantMessage> {
@@ -192,8 +192,8 @@ class ClaudeProviderTest : FunSpec({
         every { mockChatModel.stream(any<Prompt>()) } returns Flux.just(chunk1, emptyChunk, chunk2)
 
         val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
-        val chunks = provider.stream(req).toList()
-        chunks shouldBe listOf("hello", " world")
+        val events = provider.stream(req).toList()
+        events shouldBe listOf(StreamEvent.Content("hello"), StreamEvent.Content(" world"))
     }
 
     test("complete() maps request.tools into AnthropicChatOptions.toolCallbacks") {
