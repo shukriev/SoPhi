@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
@@ -40,7 +41,7 @@ class TurnControllerContextTest : FunSpec({
     test("contextProvider output is appended to the turn's system prompt; base config untouched") {
         val provider = mockk<LLMProvider>()
         val captured = slot<dev.sophi.ai.api.CompletionRequest>()
-        every { provider.stream(capture(captured)) } returns flow { emit("ok") }
+        every { provider.stream(capture(captured)) } returns flow { emit(StreamEvent.Content("ok")) }
         val sm = FileSessionManager(tempdir().toPath())
         val session = sm.create()
         val tc = rig(provider, { _, input -> "<memory_context>$input</memory_context>" })
@@ -52,7 +53,7 @@ class TurnControllerContextTest : FunSpec({
     test("null and throwing contextProviders leave the prompt unchanged") {
         val provider = mockk<LLMProvider>()
         val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
-        every { provider.stream(capture(captured)) } returns flow { emit("ok") }
+        every { provider.stream(capture(captured)) } returns flow { emit(StreamEvent.Content("ok")) }
         val sm = FileSessionManager(tempdir().toPath())
         rig(provider, { _, _ -> null }).runTurn(sm.create(), "a")
         rig(provider, { _, _ -> error("kaput") }).runTurn(sm.create(), "b")
@@ -62,7 +63,7 @@ class TurnControllerContextTest : FunSpec({
 
     test("onTurnSettled receives the user input and the assistant reply") {
         val provider = mockk<LLMProvider>()
-        every { provider.stream(any()) } returns flow { emit("the "); emit("reply") }
+        every { provider.stream(any()) } returns flow { emit(StreamEvent.Content("the ")); emit(StreamEvent.Content("reply")) }
         var settled: Triple<String, String, Throwable?>? = null
         val sm = FileSessionManager(tempdir().toPath())
         val tc = rig(provider, { _, _ -> null }, { u, r, e -> settled = Triple(u, r, e) })

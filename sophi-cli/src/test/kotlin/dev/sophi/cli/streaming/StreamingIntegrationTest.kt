@@ -16,7 +16,7 @@ class StreamingIntegrationTest : FunSpec({
         toggleState = toggleState.toggle()
         toggleState.isViewingTokens shouldBe true
 
-        val tokenStream = TokenStreamFormatter.renderTokenStream(phase, "The answer is...")
+        val tokenStream = TokenStreamFormatter.renderTokenStream(phase, reasoningText = "", contentText = "The answer is...")
         tokenStream.shouldContain("The answer is...")
         tokenStream.shouldContain("4 tokens")
 

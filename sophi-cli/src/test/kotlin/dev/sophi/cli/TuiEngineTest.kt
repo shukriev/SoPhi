@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.api.StreamEvent
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.AgentSession
@@ -25,7 +26,7 @@ class TuiEngineTest : FunSpec({
     beforeTest {
         clearMocks(provider, sessionManager)
         slashOutput.clear()
-        every { provider.stream(any()) } returns flowOf("response")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("response"))
     }
 
     fun buildEngine(lines: List<String>): TuiEngine {

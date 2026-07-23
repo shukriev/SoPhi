@@ -1,8 +1,7 @@
 package dev.sophi.cli
 
 import dev.sophi.ai.api.LLMProvider
-import dev.sophi.ai.api.LLMResponse
-import dev.sophi.ai.api.TokenUsage
+import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
@@ -21,11 +20,9 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.clearMocks
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 
@@ -38,7 +35,7 @@ class TurnControllerTest : FunSpec({
     beforeTest { clearMocks(provider, sessionManager) }
 
     test("runTurn() streams tokens and renders the final response to output") {
-        every { provider.stream(any()) } returns flowOf("Hello", " ", "World")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Hello"), StreamEvent.Content(" "), StreamEvent.Content("World"))
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
         val controller = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
@@ -57,11 +54,15 @@ class TurnControllerTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "pong"
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
-        every { provider.stream(any()) } returns emptyFlow()
-        coEvery { provider.complete(any()) } returnsMany listOf(
-            LLMResponse.ToolUse(calls = listOf(ToolCall("c1", "ping", "{}")), usage = TokenUsage(1, 0)),
-            LLMResponse.Text("done", TokenUsage(1, 1))
-        )
+        var round = 0
+        every { provider.stream(any()) } answers {
+            round++
+            if (round == 1) {
+                flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "ping", "{}"))))
+            } else {
+                flowOf(StreamEvent.Content("done"))
+            }
+        }
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
         val controller = TurnController(loopWithTool, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
@@ -78,7 +79,7 @@ class TurnControllerTest : FunSpec({
         val home = tempdir().toPath()
         val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"), model = "test-model")
         val registry = PluginRegistry().register(learning)
-        every { provider.stream(any()) } returns flowOf("Hello")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Hello"))
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
         val controller = TurnController(
@@ -99,7 +100,7 @@ class TurnControllerTest : FunSpec({
     test("runTurn() cancels the stream and returns the original session when ESC arrives mid-turn") {
         val input = ScriptedInputSource(emptyList())
         every { provider.stream(any()) } returns flow {
-            emit("partial")
+            emit(StreamEvent.Content("partial"))
             input.signalEsc()
             delay(Long.MAX_VALUE)
         }
@@ -115,7 +116,6 @@ class TurnControllerTest : FunSpec({
 
     test("runTurn() surfaces a provider error as an output line instead of throwing") {
         every { provider.stream(any()) } returns flow { throw RuntimeException("stream error") }
-        coEvery { provider.complete(any()) } returns LLMResponse.Error("boom")
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
         val controller = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
@@ -124,6 +124,6 @@ class TurnControllerTest : FunSpec({
         val result = controller.runTurn(session, "hi")
 
         result shouldBe session
-        rendered shouldBe listOf(ResponseRenderer.renderText("") + " [error: LLM error: boom]")
+        rendered shouldBe listOf(ResponseRenderer.renderText("") + " [error: stream error]")
     }
 })
