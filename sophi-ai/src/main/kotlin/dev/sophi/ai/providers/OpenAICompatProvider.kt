@@ -20,10 +20,10 @@ import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.prompt.Prompt
@@ -48,34 +48,46 @@ class OpenAICompatProvider(
                 )
         }
 
-    override fun stream(request: CompletionRequest): Flow<StreamEvent> = flow {
+    // iterator.hasNext()/next() below are blocking calls with no cancellation checkpoints, so a
+    // stalled network read would otherwise ignore coroutine cancellation forever. Running them on
+    // a dedicated thread and closing the response from awaitClose (which fires the instant
+    // cancellation is requested, not just once the thread notices) is what actually unblocks it.
+    override fun stream(request: CompletionRequest): Flow<StreamEvent> = callbackFlow {
         val params = request.toCreateParams()
         val merger = ToolCallDeltaMerger()
-        rawClient.chat().completions().createStreaming(params).use { streamResponse ->
-            val iterator = streamResponse.stream().iterator()
-            while (iterator.hasNext()) {
-                val chunk = iterator.next()
-                chunk.choices().forEach { choice ->
-                    val delta = choice.delta()
-                    val content = delta.content().orElse(null)
-                    if (!content.isNullOrEmpty()) emit(StreamEvent.Content(content))
+        val streamResponse = rawClient.chat().completions().createStreaming(params)
+        val worker = Thread({
+            try {
+                val iterator = streamResponse.stream().iterator()
+                while (iterator.hasNext()) {
+                    val chunk = iterator.next()
+                    chunk.choices().forEach { choice ->
+                        val delta = choice.delta()
+                        val content = delta.content().orElse(null)
+                        if (!content.isNullOrEmpty()) trySend(StreamEvent.Content(content))
 
-                    val reasoningText = reasoningFieldNames.firstNotNullOfOrNull { key ->
-                        delta._additionalProperties()[key]?.convert(String::class.java)
-                    }
-                    if (!reasoningText.isNullOrEmpty()) emit(StreamEvent.Reasoning(reasoningText))
+                        val reasoningText = reasoningFieldNames.firstNotNullOfOrNull { key ->
+                            delta._additionalProperties()[key]?.convert(String::class.java)
+                        }
+                        if (!reasoningText.isNullOrEmpty()) trySend(StreamEvent.Reasoning(reasoningText))
 
-                    delta.toolCalls().orElse(null)?.forEach { merger.accumulate(it) }
+                        delta.toolCalls().orElse(null)?.forEach { merger.accumulate(it) }
 
-                    if (choice.finishReason().isPresent) {
-                        val merged = merger.build()
-                        if (merged.isNotEmpty()) emit(StreamEvent.ToolCallsReady(merged))
+                        if (choice.finishReason().isPresent) {
+                            val merged = merger.build()
+                            if (merged.isNotEmpty()) trySend(StreamEvent.ToolCallsReady(merged))
+                        }
                     }
                 }
+                close()
+            } catch (e: Exception) {
+                close(e)
             }
-        }
-    }.flowOn(Dispatchers.IO)
-        .catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }
+        }, "openai-compat-stream")
+        worker.isDaemon = true
+        worker.start()
+        awaitClose { runCatching { streamResponse.close() } }
+    }.catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }
 
     private fun CompletionRequest.toPrompt(): Prompt {
         val springMessages = buildList {

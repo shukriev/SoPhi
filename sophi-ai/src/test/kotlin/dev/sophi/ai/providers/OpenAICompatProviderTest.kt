@@ -22,6 +22,14 @@ import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.openai.OpenAiChatModel
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import java.util.Spliterators
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.stream.StreamSupport
 
 private fun chunk(
     content: String? = null,
@@ -208,5 +216,43 @@ class OpenAICompatProviderTest : FunSpec({
         val events = runBlocking { provider.stream(req).toList() }
 
         events shouldBe listOf(StreamEvent.Content("just an answer"))
+    }
+
+    test("stream() closes the underlying StreamResponse on cancellation, unblocking a stalled read") {
+        // Simulates a stalled network read: hasNext() blocks on stalledGate forever unless
+        // something closes the response, exactly like a real socket read that only unblocks
+        // when the connection is closed out from under it.
+        val blockedOnSecondRead = CountDownLatch(1)
+        val stalledGate = CountDownLatch(1)
+        val blockingIterator = object : Iterator<ChatCompletionChunk> {
+            var index = 0
+            override fun hasNext(): Boolean {
+                if (index == 0) return true
+                blockedOnSecondRead.countDown()
+                stalledGate.await()
+                return false
+            }
+            override fun next(): ChatCompletionChunk {
+                index++
+                return chunk(content = "hello")
+            }
+        }
+        val blockingStream = StreamSupport.stream(Spliterators.spliteratorUnknownSize(blockingIterator, 0), false)
+        val response = mockk<StreamResponse<ChatCompletionChunk>>()
+        every { response.stream() } returns blockingStream
+        every { response.close() } answers { stalledGate.countDown() }
+        every {
+            mockRawClient.chat().completions().createStreaming(any<com.openai.models.chat.completions.ChatCompletionCreateParams>())
+        } returns response
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "qwen3.5:9b")
+
+        runBlocking {
+            val job = launch(Dispatchers.Default) { provider.stream(req).toList() }
+            withTimeout(2000) {
+                while (!blockedOnSecondRead.await(10, TimeUnit.MILLISECONDS)) delay(10)
+            }
+            job.cancel()
+            withTimeout(2000) { job.join() }
+        }
     }
 })
