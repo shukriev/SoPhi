@@ -144,4 +144,21 @@ class AgentControllerTest : FunSpec({
         every { sessionManager.load("bad") } throws IllegalArgumentException("not found")
         controller.streamTurn("bad", "hello").shouldNotBeNull()
     }
+
+    test("sseEventFor maps TurnEvent.Token to an unnamed data event") {
+        val built = sseEventFor(dev.sophi.core.agent.TurnEvent.Token("hello"))!!.build()
+        val text = built.joinToString("") { it.data.toString() }
+        text shouldContain "data:hello"
+    }
+
+    test("sseEventFor maps TurnEvent.ReasoningToken to a 'reasoning'-named event") {
+        val built = sseEventFor(dev.sophi.core.agent.TurnEvent.ReasoningToken("thinking..."))!!.build()
+        val text = built.joinToString("") { it.data.toString() }
+        text shouldContain "event:reasoning"
+        text shouldContain "data:thinking..."
+    }
+
+    test("sseEventFor returns null for tool-call events (not forwarded over SSE today)") {
+        sseEventFor(dev.sophi.core.agent.TurnEvent.ToolCallStarted("t", "{}")) shouldBe null
+    }
 })
