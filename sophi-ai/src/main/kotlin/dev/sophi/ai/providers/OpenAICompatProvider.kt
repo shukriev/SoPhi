@@ -15,6 +15,7 @@ import org.springframework.ai.openai.OpenAiChatOptions
 
 class OpenAICompatProvider(
     private val chatModel: OpenAiChatModel,
+    private val rawClient: com.openai.client.OpenAIClient,
     override val name: String = "openai"
 ) : LLMProvider {
 
