@@ -45,6 +45,17 @@ class TurnControllerTest : FunSpec({
         rendered shouldBe listOf(ResponseRenderer.renderText("Hello World"))
     }
 
+    test("runTurn() keeps reasoning visible in the output after the turn completes") {
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Reasoning("thinking..."), StreamEvent.Content("done"))
+        val input = ScriptedInputSource(emptyList())
+        val rendered = mutableListOf<String>()
+        val controller = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+
+        controller.runTurn(AgentSession(id = "s1"), "hi")
+
+        rendered shouldBe listOf(ResponseRenderer.renderReasoning("thinking..."), ResponseRenderer.renderText("done"))
+    }
+
     test("runTurn() renders a tool-call block, then the final response") {
         val toolRegistry = ToolRegistry()
         toolRegistry.register(object : Tool {

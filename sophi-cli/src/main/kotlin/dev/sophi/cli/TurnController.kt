@@ -118,11 +118,16 @@ class TurnController(
             }
         }
 
+        fun outputReasoningIfAny() {
+            if (reasoningBuffer.isNotEmpty()) output(ResponseRenderer.renderReasoning(reasoningBuffer.toString()))
+        }
+
         select<AgentSession> {
             turnDeferred.onAwait { (result, error) ->
                 animationJob.cancel()
                 controlKeysDeferred.cancel()
                 liveRegion.clear()
+                outputReasoningIfAny()
                 if (error != null) {
                     output(ResponseRenderer.renderText(buffer.toString()) + " [error: ${error.message}]")
                     onTurnSettled(userInput, buffer.toString(), error)
@@ -137,6 +142,7 @@ class TurnController(
                 animationJob.cancel()
                 turnDeferred.cancel()
                 liveRegion.clear()
+                outputReasoningIfAny()
                 output(ResponseRenderer.renderText(buffer.toString()) + " [interrupted]")
                 onTurnSettled(userInput, buffer.toString(), null)
                 session

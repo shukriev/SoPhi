@@ -24,4 +24,6 @@ object ResponseRenderer {
         val resultLine = TextColors.gray("  → ") + firstResultLine
         return listOf(header, argsLine, resultLine).joinToString("\n")
     }
+
+    fun renderReasoning(text: String): String = TextStyles.dim("💭 $text")
 }
