@@ -4,6 +4,7 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
@@ -22,11 +23,14 @@ class SophiRuntime internal constructor(
      * that track session lifecycles can call [LearningPlugin.recordSessionEnd] when a session
      * closes; [SophiRuntime] itself has no per-session end signal, so [close] does not call it.
      */
-    internal val learningPlugin: LearningPlugin? = null
+    internal val learningPlugin: LearningPlugin? = null,
+    private val toolRegistry: ToolRegistry = ToolRegistry()
 ) {
     fun close() {
         mcpClientManager?.close()
     }
+
+    fun toolNames(): List<String> = toolRegistry.names()
 
     suspend fun newSession(title: String? = null): String =
         sessionManager.create(title).also { sessionManager.save(it) }.id.also { id ->

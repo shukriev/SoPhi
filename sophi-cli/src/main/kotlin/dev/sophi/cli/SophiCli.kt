@@ -33,6 +33,8 @@ import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
+import dev.sophi.schedule.store.TaskStore
+import dev.sophi.schedule.tools.ScheduleTaskTool
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
@@ -52,6 +54,12 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--provider",
         help = "LLM provider: 'claude' (default) or 'openai-compat' (Ollama, vLLM, or any OpenAI-compatible server)"
     ).default("claude")
+    private val maxTokens: Int by option(
+        "--max-tokens",
+        help = "Max completion tokens per turn. Raise this for local reasoning models — hidden " +
+            "chain-of-thought counts against this budget, so a low value can exhaust it before " +
+            "the model ever emits an answer or tool call (finish_reason=length, no visible output)."
+    ).int().default(4096)
     private val baseUrl: String? by option(
         "--base-url",
         help = "Base URL for --provider openai-compat, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:8000/v1 (vLLM)"
@@ -81,6 +89,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--agents-dir",
         help = "Directory of subagent definition Markdown files"
     ).default("${System.getProperty("user.home")}/.sophi/agents")
+    private val scheduleDirStr: String by option(
+        "--schedule-dir",
+        help = "Directory for scheduled/goal task definitions and run history"
+    ).default("${System.getProperty("user.home")}/.sophi/schedule")
     private val systemPrompt: String? by option(
         "--system",
         help = "System prompt injected into every turn"
@@ -168,7 +180,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 if (memoryPlugin != null) dev.sophi.memory.MemoryPromptSection.TEXT else null
             ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
 
-        val config = AgentConfig(model = model, systemPrompt = effectiveSystemPrompt)
+        val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
         val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal)
 
@@ -177,6 +189,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
         val registry = ToolRegistry()
         buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
+        registry.register(ScheduleTaskTool(TaskStore(Path.of(scheduleDirStr).resolve("tasks.json"))))
         val mcpClientManager = McpClientManager()
         val mcpConfigPath = Path.of(mcpConfigPathStr)
         if (mcpConfigPath.exists()) {

@@ -13,6 +13,8 @@ import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
+import dev.sophi.schedule.store.TaskStore
+import dev.sophi.schedule.tools.ScheduleTaskTool
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
@@ -29,6 +31,7 @@ class RuntimeBuilder {
     private var mcpConfigPath: Path? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var learningConfig: LearningConfig? = null
+    private var scheduleDir: Path? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -36,10 +39,12 @@ class RuntimeBuilder {
     fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
     fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
+    fun schedule(dir: Path): RuntimeBuilder = apply { scheduleDir = dir }
 
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
         val registry = ToolRegistry().also { r -> tools.forEach { r.register(it) } }
+        scheduleDir?.let { dir -> registry.register(ScheduleTaskTool(TaskStore(dir.resolve("tasks.json")))) }
         val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers } ?: emptyList()
         runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
         val sm = FileSessionManager(sessionsDir)
@@ -65,6 +70,6 @@ class RuntimeBuilder {
             else agentConfig
         } ?: agentConfig
 
-        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin)
+        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry)
     }
 }

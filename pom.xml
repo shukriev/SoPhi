@@ -18,6 +18,7 @@
         <module>sophi-learning</module>
         <module>sophi-memory</module>
         <module>sophi-mcp</module>
+        <module>sophi-schedule</module>
         <module>sophi-cli</module>
         <module>sophi-web</module>
         <module>sophi-sdk</module>
@@ -105,6 +106,11 @@
             <dependency>
                 <groupId>dev.sophi</groupId>
                 <artifactId>sophi-mcp</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.sophi</groupId>
+                <artifactId>sophi-schedule</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
