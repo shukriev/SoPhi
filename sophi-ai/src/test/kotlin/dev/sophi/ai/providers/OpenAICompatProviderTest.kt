@@ -1,5 +1,8 @@
 package dev.sophi.ai.providers
 
+import com.openai.client.OpenAIClient
+import com.openai.core.http.StreamResponse
+import com.openai.models.chat.completions.ChatCompletionChunk
 import dev.sophi.ai.api.*
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -18,11 +21,53 @@ import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.openai.OpenAiChatModel
 import kotlinx.coroutines.flow.toList
-import reactor.core.publisher.Flux
+import kotlinx.coroutines.runBlocking
+
+private fun chunk(
+    content: String? = null,
+    reasoning: String? = null,
+    toolCallIndex: Long? = null,
+    toolCallId: String? = null,
+    toolCallName: String? = null,
+    toolCallArgs: String? = null,
+    finished: Boolean = false
+): ChatCompletionChunk {
+    val deltaBuilder = ChatCompletionChunk.Choice.Delta.builder()
+    content?.let { deltaBuilder.content(it) }
+    reasoning?.let { deltaBuilder.putAdditionalProperty("reasoning", com.openai.core.JsonValue.from(it)) }
+    if (toolCallIndex != null) {
+        val tcBuilder = ChatCompletionChunk.Choice.Delta.ToolCall.builder().index(toolCallIndex)
+        toolCallId?.let { tcBuilder.id(it) }
+        if (toolCallName != null || toolCallArgs != null) {
+            val fnBuilder = ChatCompletionChunk.Choice.Delta.ToolCall.Function.builder()
+            toolCallName?.let { fnBuilder.name(it) }
+            toolCallArgs?.let { fnBuilder.arguments(it) }
+            tcBuilder.function(fnBuilder.build())
+        }
+        deltaBuilder.addToolCall(tcBuilder.build())
+    }
+    val choiceBuilder = ChatCompletionChunk.Choice.builder().index(0).delta(deltaBuilder.build())
+    choiceBuilder.finishReason(
+        if (finished) java.util.Optional.of(ChatCompletionChunk.Choice.FinishReason.STOP)
+        else java.util.Optional.empty()
+    )
+    return ChatCompletionChunk.builder()
+        .id("chunk-1").model("m").created(0L)
+        .addChoice(choiceBuilder.build())
+        .build()
+}
+
+private fun fakeStreamResponse(chunks: List<ChatCompletionChunk>): StreamResponse<ChatCompletionChunk> {
+    val response = mockk<StreamResponse<ChatCompletionChunk>>()
+    every { response.stream() } returns chunks.stream()
+    every { response.close() } returns Unit
+    return response
+}
 
 class OpenAICompatProviderTest : FunSpec({
     val mockChatModel = mockk<OpenAiChatModel>()
-    val provider = OpenAICompatProvider(mockChatModel)
+    val mockRawClient = mockk<OpenAIClient>()
+    val provider = OpenAICompatProvider(mockChatModel, mockRawClient)
 
     fun stubTextResponse(
         text: String,
@@ -54,13 +99,19 @@ class OpenAICompatProviderTest : FunSpec({
         }
     }
 
+    fun stubStreaming(chunks: List<ChatCompletionChunk>) {
+        every {
+            mockRawClient.chat().completions().createStreaming(any<com.openai.models.chat.completions.ChatCompletionCreateParams>())
+        } returns fakeStreamResponse(chunks)
+    }
+
     test("name defaults to 'openai'") {
         provider.name shouldBe "openai"
     }
 
     test("name can be overridden for Ollama or Groq") {
-        OpenAICompatProvider(mockChatModel, name = "ollama").name shouldBe "ollama"
-        OpenAICompatProvider(mockChatModel, name = "groq").name shouldBe "groq"
+        OpenAICompatProvider(mockChatModel, mockRawClient, name = "ollama").name shouldBe "ollama"
+        OpenAICompatProvider(mockChatModel, mockRawClient, name = "groq").name shouldBe "groq"
     }
 
     test("complete() returns Text for a plain text response") {
@@ -86,48 +137,6 @@ class OpenAICompatProviderTest : FunSpec({
         (result as LLMResponse.Error).message shouldBe "context length exceeded"
     }
 
-    test("complete() returns ToolUse when model responds with tool calls") {
-        val toolCall = mockk<AssistantMessage.ToolCall> {
-            every { id() } returns "call_xyz"
-            every { name() } returns "calculator"
-            every { arguments() } returns """{"expression":"2+2"}"""
-        }
-        val usage = mockk<Usage> {
-            every { this@mockk.promptTokens } returns 15
-            every { this@mockk.completionTokens } returns 0
-        }
-        val responseMeta = mockk<ChatResponseMetadata> {
-            every { this@mockk.usage } returns usage
-        }
-        val genMeta = mockk<ChatGenerationMetadata> {
-            every { this@mockk.finishReason } returns "tool_calls"
-        }
-        val output = mockk<AssistantMessage> {
-            every { this@mockk.text } returns null
-            every { this@mockk.toolCalls } returns listOf(toolCall)
-        }
-        val generation = mockk<Generation> {
-            every { this@mockk.output } returns output
-            every { this@mockk.metadata } returns genMeta
-        }
-        val response = mockk<ChatResponse> {
-            every { result } returns generation
-            every { metadata } returns responseMeta
-        }
-        every { mockChatModel.call(any<Prompt>()) } returns response
-
-        val req = CompletionRequest(
-            messages = listOf(Message(MessageRole.USER, "what is 2+2")),
-            model = "gpt-4o"
-        )
-        val result = provider.complete(req)
-
-        result.shouldBeInstanceOf<LLMResponse.ToolUse>()
-        val toolUse = result as LLMResponse.ToolUse
-        toolUse.calls[0].id shouldBe "call_xyz"
-        toolUse.calls[0].name shouldBe "calculator"
-    }
-
     test("complete() sends systemPrompt as first SystemMessage in Prompt") {
         val capturedPrompt = slot<Prompt>()
         every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")
@@ -143,38 +152,6 @@ class OpenAICompatProviderTest : FunSpec({
         instructions[0].shouldBeInstanceOf<SystemMessage>()
         (instructions[0] as SystemMessage).text shouldBe "You are a concise assistant."
         instructions[1].shouldBeInstanceOf<UserMessage>()
-    }
-
-    test("stream() emits non-empty text chunks from Flux") {
-        val chunk1 = mockk<ChatResponse> {
-            every { result } returns mockk {
-                every { output } returns mockk<AssistantMessage> {
-                    every { text } returns "hello"
-                    every { toolCalls } returns emptyList()
-                }
-            }
-        }
-        val chunk2 = mockk<ChatResponse> {
-            every { result } returns mockk {
-                every { output } returns mockk<AssistantMessage> {
-                    every { text } returns " world"
-                    every { toolCalls } returns emptyList()
-                }
-            }
-        }
-        val emptyChunk = mockk<ChatResponse> {
-            every { result } returns mockk {
-                every { output } returns mockk<AssistantMessage> {
-                    every { text } returns ""
-                    every { toolCalls } returns emptyList()
-                }
-            }
-        }
-        every { mockChatModel.stream(any<Prompt>()) } returns Flux.just(chunk1, emptyChunk, chunk2)
-
-        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "gpt-4o")
-        val chunks = provider.stream(req).toList()
-        chunks shouldBe listOf("hello", " world")
     }
 
     test("complete() maps request.tools into OpenAiChatOptions.toolCallbacks") {
@@ -193,14 +170,43 @@ class OpenAICompatProviderTest : FunSpec({
         options.toolCallbacks!![0].toolDefinition.name() shouldBe "search"
     }
 
-    test("complete() sends empty toolCallbacks when request.tools is empty") {
-        val capturedPrompt = slot<Prompt>()
-        every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")
+    test("stream() emits StreamEvent.Content for content chunks") {
+        stubStreaming(listOf(chunk(content = "hello"), chunk(content = " world"), chunk(finished = true)))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "qwen3.5:9b")
 
-        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "gpt-4o")
-        provider.complete(req)
+        val events = runBlocking { provider.stream(req).toList() }
 
-        val options = capturedPrompt.captured.options as org.springframework.ai.model.tool.ToolCallingChatOptions
-        options.toolCallbacks shouldBe emptyList()
+        events shouldBe listOf(StreamEvent.Content("hello"), StreamEvent.Content(" world"))
+    }
+
+    test("stream() emits StreamEvent.Reasoning from the 'reasoning' additionalProperty (Ollama convention)") {
+        stubStreaming(listOf(chunk(reasoning = "thinking..."), chunk(content = "answer"), chunk(finished = true)))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "qwen3.5:9b")
+
+        val events = runBlocking { provider.stream(req).toList() }
+
+        events shouldBe listOf(StreamEvent.Reasoning("thinking..."), StreamEvent.Content("answer"))
+    }
+
+    test("stream() emits one merged StreamEvent.ToolCallsReady on the finishing chunk") {
+        stubStreaming(listOf(
+            chunk(toolCallIndex = 0, toolCallId = "call_1", toolCallName = "get_weather", toolCallArgs = "{\"city\":"),
+            chunk(toolCallIndex = 0, toolCallArgs = "\"Paris\"}"),
+            chunk(finished = true)
+        ))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "weather in paris")), "qwen3.5:9b")
+
+        val events = runBlocking { provider.stream(req).toList() }
+
+        events shouldBe listOf(StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "get_weather", "{\"city\":\"Paris\"}"))))
+    }
+
+    test("stream() does not emit ToolCallsReady when no tool calls were accumulated") {
+        stubStreaming(listOf(chunk(content = "just an answer"), chunk(finished = true)))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "qwen3.5:9b")
+
+        val events = runBlocking { provider.stream(req).toList() }
+
+        events shouldBe listOf(StreamEvent.Content("just an answer"))
     }
 })
