@@ -36,6 +36,24 @@ class TaskStore(private val path: Path) {
         true
     }
 
+    /**
+     * Applies [transform] to the task with [id] and persists the result. If the transform
+     * changes the trigger, nextRunAtMs is recomputed from it (matching add()/setEnabled(true)) —
+     * otherwise it's left untouched.
+     */
+    fun update(id: String, transform: (ScheduledTask) -> ScheduledTask): Boolean = synchronized(lock) {
+        val all = readAll()
+        val idx = all.indexOfFirst { it.id == id }
+        if (idx < 0) return false
+        val original = all[idx]
+        var updated = transform(original)
+        if (updated.trigger != original.trigger) {
+            updated = updated.copy(nextRunAtMs = initialNextRunAt(updated.trigger))
+        }
+        writeAll(all.toMutableList().also { it[idx] = updated })
+        true
+    }
+
     fun remove(id: String): Boolean = synchronized(lock) {
         val all = readAll()
         if (all.none { it.id == id }) return false

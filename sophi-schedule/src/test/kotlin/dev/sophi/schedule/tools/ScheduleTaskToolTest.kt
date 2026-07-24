@@ -1,8 +1,11 @@
 package dev.sophi.schedule.tools
 
+import dev.sophi.schedule.model.RunOutcome
+import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
+import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
@@ -11,15 +14,16 @@ import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
 
 class ScheduleTaskToolTest : FunSpec({
-    fun store() = TaskStore(tempdir().toPath().resolve("tasks.json"))
+    fun store(): TaskStore = TaskStore(tempdir().toPath().resolve("tasks.json"))
+    fun runLog(): RunLog = RunLog(tempdir().toPath().resolve("runs.jsonl"))
 
     test("name is manage_scheduled_task") {
-        ScheduleTaskTool(store()).name shouldContain "manage_scheduled_task"
+        ScheduleTaskTool(store(), runLog()).name shouldContain "manage_scheduled_task"
     }
 
     test("create with trigger_type=interval and mode=recurring persists a task") {
         val s = store()
-        val tool = ScheduleTaskTool(s)
+        val tool = ScheduleTaskTool(s, runLog())
         val result = runBlocking {
             tool.execute("""{"action":"create","name":"monitor","prompt":"check my feed","trigger_type":"interval","every_seconds":3600,"mode":"recurring"}""")
         }
@@ -31,7 +35,7 @@ class ScheduleTaskToolTest : FunSpec({
 
     test("create with mode=goal and stop_condition_type=shell_check persists a Goal task") {
         val s = store()
-        val tool = ScheduleTaskTool(s)
+        val tool = ScheduleTaskTool(s, runLog())
         runBlocking {
             tool.execute("""{"action":"create","name":"g","prompt":"fix it","trigger_type":"manual","mode":"goal","stop_condition_type":"shell_check","shell_command":"./t.sh","max_iterations":3}""")
         }
@@ -41,24 +45,32 @@ class ScheduleTaskToolTest : FunSpec({
     test("create without required fields returns an Error string and does not persist") {
         val s = store()
         val result = runBlocking {
-            ScheduleTaskTool(s).execute("""{"action":"create","trigger_type":"interval","every_seconds":60,"mode":"recurring"}""")
+            ScheduleTaskTool(s, runLog()).execute("""{"action":"create","trigger_type":"interval","every_seconds":60,"mode":"recurring"}""")
         }
         result shouldContain "Error"
         s.list() shouldBe emptyList()
     }
 
-    test("list renders enabled/paused state and mode") {
+    test("list renders enabled/paused state, mode, and the trigger interval") {
         val s = store()
-        s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
-        val result = runBlocking { ScheduleTaskTool(s).execute("""{"action":"list"}""") }
+        s.add(ScheduledTask(name = "t", trigger = Trigger.Interval(900), mode = TaskMode.Recurring, prompt = "p"))
+        val result = runBlocking { ScheduleTaskTool(s, runLog()).execute("""{"action":"list"}""") }
         result shouldContain "enabled"
         result shouldContain "t"
+        result shouldContain "every 900s"
+    }
+
+    test("list shows Manual/Once triggers without a bogus interval") {
+        val s = store()
+        s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        val result = runBlocking { ScheduleTaskTool(s, runLog()).execute("""{"action":"list"}""") }
+        result shouldContain "manual"
     }
 
     test("pause and resume round-trip via task_id") {
         val s = store()
         val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Interval(60), mode = TaskMode.Recurring, prompt = "p"))
-        val tool = ScheduleTaskTool(s)
+        val tool = ScheduleTaskTool(s, runLog())
         runBlocking { tool.execute("""{"action":"pause","task_id":"${task.id}"}""") }
         s.get(task.id)!!.enabled shouldBe false
         runBlocking { tool.execute("""{"action":"resume","task_id":"${task.id}"}""") }
@@ -68,7 +80,7 @@ class ScheduleTaskToolTest : FunSpec({
     test("remove deletes the task; unknown id returns an Error string") {
         val s = store()
         val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
-        val tool = ScheduleTaskTool(s)
+        val tool = ScheduleTaskTool(s, runLog())
         val ok = runBlocking { tool.execute("""{"action":"remove","task_id":"${task.id}"}""") }
         ok shouldContain "Removed"
         val err = runBlocking { tool.execute("""{"action":"remove","task_id":"no-such-id"}""") }
@@ -76,7 +88,81 @@ class ScheduleTaskToolTest : FunSpec({
     }
 
     test("unknown action returns an Error string") {
-        val result = runBlocking { ScheduleTaskTool(store()).execute("""{"action":"bogus"}""") }
+        val result = runBlocking { ScheduleTaskTool(store(), runLog()).execute("""{"action":"bogus"}""") }
         result shouldContain "Error"
+    }
+
+    // ── update ──────────────────────────────────────────────────────────────
+
+    test("update changes the prompt without touching other fields") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Interval(60), mode = TaskMode.Recurring, prompt = "old"))
+        val tool = ScheduleTaskTool(s, runLog())
+        val result = runBlocking { tool.execute("""{"action":"update","task_id":"${task.id}","prompt":"new"}""") }
+        result shouldContain "Updated"
+        val updated = s.get(task.id)!!
+        updated.prompt shouldBe "new"
+        updated.name shouldBe "t"
+    }
+
+    test("update changes the trigger interval and reschedules") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Interval(60), mode = TaskMode.Recurring, prompt = "p"))
+        val tool = ScheduleTaskTool(s, runLog())
+        runBlocking { tool.execute("""{"action":"update","task_id":"${task.id}","trigger_type":"interval","every_seconds":3600}""") }
+        val updated = s.get(task.id)!!
+        (updated.trigger as Trigger.Interval).everySeconds shouldBe 3600
+    }
+
+    test("update changes the destructive tool allowlist") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        val tool = ScheduleTaskTool(s, runLog())
+        runBlocking {
+            tool.execute("""{"action":"update","task_id":"${task.id}","destructive_tool_allowlist":["write_file"]}""")
+        }
+        s.get(task.id)!!.destructiveToolAllowlist shouldBe setOf("write_file")
+    }
+
+    test("update without task_id returns an Error string") {
+        val result = runBlocking { ScheduleTaskTool(store(), runLog()).execute("""{"action":"update","prompt":"x"}""") }
+        result shouldContain "Error"
+    }
+
+    test("update with an unknown task_id returns an Error string") {
+        val result = runBlocking {
+            ScheduleTaskTool(store(), runLog()).execute("""{"action":"update","task_id":"no-such-id","prompt":"x"}""")
+        }
+        result shouldContain "Error"
+    }
+
+    // ── runs ────────────────────────────────────────────────────────────────
+
+    test("runs shows outcome and duration for a task's run history") {
+        val s = store()
+        val log = runLog()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        log.append(RunRecord(task.id, startedAtMs = 1_000L, finishedAtMs = 4_500L, outcome = RunOutcome.Succeeded, summary = "ok"))
+        val tool = ScheduleTaskTool(s, log)
+        val result = runBlocking { tool.execute("""{"action":"runs","task_id":"${task.id}"}""") }
+        result shouldContain "Succeeded"
+        result shouldContain "3.5s"
+    }
+
+    test("runs shows 'No run history.' when a task has never run") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        val result = runBlocking { ScheduleTaskTool(s, runLog()).execute("""{"action":"runs","task_id":"${task.id}"}""") }
+        result shouldContain "No run history"
+    }
+
+    test("runs without task_id shows recent runs across all tasks") {
+        val s = store()
+        val log = runLog()
+        log.append(RunRecord("t1", startedAtMs = 0L, finishedAtMs = 1000L, outcome = RunOutcome.Succeeded, summary = "a"))
+        log.append(RunRecord("t2", startedAtMs = 0L, finishedAtMs = 2000L, outcome = RunOutcome.Succeeded, summary = "b"))
+        val result = runBlocking { ScheduleTaskTool(s, log).execute("""{"action":"runs"}""") }
+        result shouldContain "t1"
+        result shouldContain "t2"
     }
 })

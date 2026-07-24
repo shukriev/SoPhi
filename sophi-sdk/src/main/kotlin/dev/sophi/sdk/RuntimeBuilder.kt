@@ -44,7 +44,12 @@ class RuntimeBuilder {
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
         val registry = ToolRegistry().also { r -> tools.forEach { r.register(it) } }
-        scheduleDir?.let { dir -> registry.register(ScheduleTaskTool(TaskStore(dir.resolve("tasks.json")))) }
+        scheduleDir?.let { dir ->
+            registry.register(ScheduleTaskTool(
+                TaskStore(dir.resolve("tasks.json")),
+                dev.sophi.schedule.store.RunLog(dir.resolve("runs.jsonl"))
+            ))
+        }
         val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers } ?: emptyList()
         runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
         val sm = FileSessionManager(sessionsDir)

@@ -64,8 +64,10 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
             .register(EditTool())
             .register(BashTool())
             .register(FetchUrlTool())
-            .register(ScheduleTaskTool(TaskStore(
-                Path.of(System.getProperty("user.home"), ".sophi", "schedule", "tasks.json"))))
+            .register(ScheduleTaskTool(
+                TaskStore(Path.of(System.getProperty("user.home"), ".sophi", "schedule", "tasks.json")),
+                dev.sophi.schedule.store.RunLog(Path.of(System.getProperty("user.home"), ".sophi", "schedule", "runs.jsonl"))
+            ))
         val braveApiKey = System.getenv("BRAVE_SEARCH_API_KEY")
         if (braveApiKey != null) {
             registry.register(WebSearchTool(BraveSearchProvider(braveApiKey)))

@@ -86,4 +86,35 @@ class TaskStoreTest : FunSpec({
     test("recordRun returns false for an unknown id") {
         store().recordRun("no-such-id", finishedAtMs = 1L) shouldBe false
     }
+
+    test("update() applies the transform and persists it") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        s.update(task.id) { it.copy(name = "renamed", prompt = "new prompt") } shouldBe true
+        val updated = s.get(task.id)!!
+        updated.name shouldBe "renamed"
+        updated.prompt shouldBe "new prompt"
+    }
+
+    test("update() recomputes nextRunAtMs when the transform changes the trigger") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Interval(60), mode = TaskMode.Recurring, prompt = "p"))
+        val before = System.currentTimeMillis()
+        s.update(task.id) { it.copy(trigger = Trigger.Interval(3600)) } shouldBe true
+        val updated = s.get(task.id)!!
+        (updated.trigger as Trigger.Interval).everySeconds shouldBe 3600
+        (updated.nextRunAtMs!! >= before + 3600_000) shouldBe true
+    }
+
+    test("update() leaves nextRunAtMs untouched when the trigger doesn't change") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Interval(60), mode = TaskMode.Recurring, prompt = "p"))
+        val originalNextRun = s.get(task.id)!!.nextRunAtMs
+        s.update(task.id) { it.copy(name = "renamed") } shouldBe true
+        s.get(task.id)!!.nextRunAtMs shouldBe originalNextRun
+    }
+
+    test("update() returns false for an unknown id") {
+        store().update("no-such-id") { it } shouldBe false
+    }
 })

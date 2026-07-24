@@ -193,7 +193,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
         val registry = ToolRegistry()
         buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
-        registry.register(ScheduleTaskTool(TaskStore(Path.of(scheduleDirStr).resolve("tasks.json"))))
+        registry.register(ScheduleTaskTool(
+            TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")),
+            dev.sophi.schedule.store.RunLog(Path.of(scheduleDirStr).resolve("runs.jsonl"))
+        ))
         val mcpClientManager = McpClientManager()
         val mcpConfigPath = Path.of(mcpConfigPathStr)
         if (mcpConfigPath.exists()) {
