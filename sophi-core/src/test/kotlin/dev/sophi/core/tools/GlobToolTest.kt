@@ -74,4 +74,15 @@ class GlobToolTest : FunSpec({
             locked.setPosixFilePermissions(PosixFilePermissions.fromString("rwxr-xr-x"))
         }
     }
+
+    // Regression: "path" is documented as scoping the search into a subdirectory, so patterns
+    // should be written as if already inside it (e.g. "*.txt", not "subdir/*.txt"). The matcher
+    // was being applied to paths relative to the outer root regardless of "path", so a bare
+    // top-level pattern like "*.txt" never matched anything once a subdirectory was scoped in.
+    test("execute() matches patterns relative to the scoped 'path', not the outer root") {
+        root.resolve("transcribe").createDirectory()
+        root.resolve("transcribe/Benni.txt").writeText("x")
+        val result = runBlocking { tool.execute("""{"path":"transcribe","pattern":"*.txt"}""") }
+        result shouldBe "transcribe/Benni.txt"
+    }
 })

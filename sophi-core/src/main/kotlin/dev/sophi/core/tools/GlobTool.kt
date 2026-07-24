@@ -31,10 +31,14 @@ class GlobTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val matcher = root.fileSystem.getPathMatcher("glob:${args.pattern}")
 
         val matches = walkRegularFiles(searchRoot)
-            .map { it.relativeTo(root) }
-            .filter { relative -> DEFAULT_SKIP_DIRS.none { skip -> relative.any { part -> part.toString() == skip } } }
-            .filter { matcher.matches(it) }
-            .map { it.toString() }
+            .filter { file ->
+                val relativeToRoot = file.relativeTo(root)
+                DEFAULT_SKIP_DIRS.none { skip -> relativeToRoot.any { part -> part.toString() == skip } }
+            }
+            // Matched relative to searchRoot (not root) so a bare pattern like "*.txt" behaves as
+            // documented once "path" scopes into a subdirectory, instead of silently never matching.
+            .filter { file -> matcher.matches(file.relativeTo(searchRoot)) }
+            .map { it.relativeTo(root).toString() }
             .sorted()
 
         return if (matches.isEmpty()) "No files found" else matches.take(DEFAULT_MAX_RESULTS).joinToString("\n")
