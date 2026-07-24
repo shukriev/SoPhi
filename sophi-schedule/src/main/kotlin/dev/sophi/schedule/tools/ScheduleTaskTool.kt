@@ -5,10 +5,12 @@ import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.StopCondition
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
+import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.util.Locale
 
 private const val TOOL_NAME = "manage_scheduled_task"
 
@@ -24,19 +26,20 @@ private data class ManageTaskArgs(
     @SerialName("stop_condition_type") val stopConditionType: String? = null,
     @SerialName("shell_command") val shellCommand: String? = null,
     @SerialName("max_iterations") val maxIterations: Int? = null,
-    @SerialName("destructive_tool_allowlist") val destructiveToolAllowlist: List<String> = emptyList(),
+    @SerialName("destructive_tool_allowlist") val destructiveToolAllowlist: List<String>? = null,
     @SerialName("task_id") val taskId: String? = null
 )
 
-class ScheduleTaskTool(private val store: TaskStore) : Tool {
+class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog) : Tool {
     override val name = TOOL_NAME
     override val description =
-        "Create, list, pause, resume, or remove a scheduled or goal-based background task. " +
+        "Create, list, update, pause, resume, or remove a scheduled or goal-based background task, " +
+            "and inspect its run history (outcome + duration of each past run). " +
             "Recurring tasks fire on an interval with no stop condition (e.g. hourly monitoring). " +
             "Goal tasks repeat turns until an LLM-judged or shell-checked condition is met, up to max_iterations."
     override val parametersJson = """
         {"type":"object","properties":{
-          "action":{"type":"string","enum":["create","list","pause","resume","remove"]},
+          "action":{"type":"string","enum":["create","list","update","pause","resume","remove","runs"]},
           "name":{"type":"string"},
           "prompt":{"type":"string","description":"Instruction given to the agent each time this task runs"},
           "trigger_type":{"type":"string","enum":["interval","once","manual"]},
@@ -47,7 +50,7 @@ class ScheduleTaskTool(private val store: TaskStore) : Tool {
           "shell_command":{"type":"string","description":"Required when stop_condition_type=shell_check"},
           "max_iterations":{"type":"integer","description":"Required when mode=goal"},
           "destructive_tool_allowlist":{"type":"array","items":{"type":"string"},"description":"Destructive tool names this task may call unattended, e.g. fetch_url"},
-          "task_id":{"type":"string","description":"Required for pause, resume, remove"}
+          "task_id":{"type":"string","description":"Required for update, pause, resume, remove; optional filter for runs"}
         },"required":["action"]}
     """.trimIndent()
 
@@ -58,10 +61,12 @@ class ScheduleTaskTool(private val store: TaskStore) : Tool {
         return when (args.action) {
             "create" -> create(args)
             "list" -> list()
+            "update" -> update(args)
             "pause" -> setEnabled(args, false)
             "resume" -> setEnabled(args, true)
             "remove" -> remove(args)
-            else -> "Error: unknown action '${args.action}'. Expected create, list, pause, resume, or remove."
+            "runs" -> runs(args)
+            else -> "Error: unknown action '${args.action}'. Expected create, list, update, pause, resume, remove, or runs."
         }
     }
 
@@ -97,17 +102,49 @@ class ScheduleTaskTool(private val store: TaskStore) : Tool {
                 trigger = trigger,
                 mode = mode,
                 prompt = prompt,
-                destructiveToolAllowlist = args.destructiveToolAllowlist.toSet()
+                destructiveToolAllowlist = args.destructiveToolAllowlist?.toSet() ?: emptySet()
             )
         )
         return "Created task ${task.id} (${task.name})"
+    }
+
+    private fun update(args: ManageTaskArgs): String {
+        val id = args.taskId ?: return "Error: 'task_id' is required for action=update"
+        if (store.get(id) == null) return "Error: no task found with id $id"
+
+        val newTrigger: Trigger? = when (args.triggerType) {
+            null -> null
+            "interval" -> args.everySeconds?.let { Trigger.Interval(it) }
+                ?: return "Error: 'every_seconds' is required when trigger_type=interval"
+            "once" -> args.atMs?.let { Trigger.Once(it) }
+                ?: return "Error: 'at_ms' is required when trigger_type=once"
+            "manual" -> Trigger.Manual
+            else -> return "Error: 'trigger_type' must be interval, once, or manual"
+        }
+
+        val updated = store.update(id) { task ->
+            task.copy(
+                name = args.name ?: task.name,
+                prompt = args.prompt ?: task.prompt,
+                trigger = newTrigger ?: task.trigger,
+                destructiveToolAllowlist = args.destructiveToolAllowlist?.toSet() ?: task.destructiveToolAllowlist
+            )
+        }
+        return if (updated) "Updated $id" else "Error: no task found with id $id"
+    }
+
+    private fun renderTrigger(trigger: Trigger): String = when (trigger) {
+        is Trigger.Interval -> "every ${trigger.everySeconds}s"
+        is Trigger.Once -> "once at epoch ${trigger.atMs}ms"
+        is Trigger.Manual -> "manual"
     }
 
     private fun list(): String {
         val tasks = store.list()
         if (tasks.isEmpty()) return "No scheduled tasks."
         return tasks.joinToString("\n") {
-            "${it.id}  ${if (it.enabled) "enabled" else "paused"}  ${it.name}  (${it.mode::class.simpleName})"
+            "${it.id}  ${if (it.enabled) "enabled" else "paused"}  ${it.name}  " +
+                "(${it.mode::class.simpleName}, ${renderTrigger(it.trigger)})"
         }
     }
 
@@ -123,5 +160,15 @@ class ScheduleTaskTool(private val store: TaskStore) : Tool {
     private fun remove(args: ManageTaskArgs): String {
         val id = args.taskId ?: return "Error: 'task_id' is required for action=remove"
         return if (store.remove(id)) "Removed $id" else "Error: no task found with id $id"
+    }
+
+    private fun runs(args: ManageTaskArgs): String {
+        val records = (args.taskId?.let { runLog.forTask(it) } ?: runLog.readAll()).takeLast(20)
+        if (records.isEmpty()) return "No run history."
+        return records.joinToString("\n") { r ->
+            val durationSec = (r.finishedAtMs - r.startedAtMs) / 1000.0
+            "${r.taskId}  ${r.outcome::class.simpleName}  " +
+                String.format(Locale.ROOT, "%.1fs", durationSec) + "  ${r.summary}"
+        }
     }
 }
