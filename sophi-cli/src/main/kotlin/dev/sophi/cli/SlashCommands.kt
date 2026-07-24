@@ -6,12 +6,21 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.learning.LearningPlugin
+import dev.sophi.memory.BrowseFilter
+import dev.sophi.memory.MemoryPlugin
+import dev.sophi.memory.MemoryView
+import dev.sophi.memory.ProfileAction
+import dev.sophi.memory.jane.JanesPalace
+import java.nio.file.Path
 
 class SlashHandler(
     private val sessionManager: SessionManager,
     private val compactor: ContextCompactor?,
     private val config: AgentConfig,
     private val learning: LearningPlugin? = null,
+    private val scheduleDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
+    private val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
+    private val memoryPlugin: MemoryPlugin? = null,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -74,10 +83,129 @@ class SlashHandler(
                     session
                 }
             }
-            else -> {
-                output("Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad")
+            "schedule" -> { handleSchedule(arg); session }
+            "feedback" -> {
+                if (learning == null) output("Learning is not enabled.") else handleFeedback(arg)
                 session
             }
+            "lessons" -> {
+                if (learning == null) output("Learning is not enabled.") else handleLessons(arg)
+                session
+            }
+            "memory" -> {
+                val palace = memoryPlugin?.technique as? JanesPalace
+                if (palace == null) output("Memory is not enabled.") else handleMemory(palace, arg)
+                session
+            }
+            else -> {
+                output(
+                    "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
+                        "/schedule /feedback /lessons /memory"
+                )
+                session
+            }
+        }
+    }
+
+    private fun handleSchedule(arg: String?) {
+        val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
+        val sub = parts[0].lowercase()
+        val subArg = parts.getOrNull(1)?.trim()
+        when (sub) {
+            "list" -> ScheduleList(scheduleDir, output).run()
+            "log" -> ScheduleLog(scheduleDir, subArg, 20, output).run()
+            "pause" -> if (subArg.isNullOrEmpty()) output("Usage: /schedule pause <task-id>")
+                else SchedulePause(scheduleDir, subArg, output).run()
+            "resume" -> if (subArg.isNullOrEmpty()) output("Usage: /schedule resume <task-id>")
+                else ScheduleResume(scheduleDir, subArg, output).run()
+            "remove" -> if (subArg.isNullOrEmpty()) output("Usage: /schedule remove <task-id>")
+                else ScheduleRemove(scheduleDir, subArg, output).run()
+            else -> output("Unknown /schedule subcommand: $sub  Available: list log pause resume remove")
+        }
+    }
+
+    private fun handleFeedback(arg: String?) {
+        val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
+        val sub = parts[0].lowercase()
+        val subArg = parts.getOrNull(1)?.trim()
+        when (sub) {
+            "list" -> FeedbackList(learningHome, subArg ?: System.getProperty("user.dir"), output).run()
+            "delete" -> if (subArg.isNullOrEmpty()) output("Usage: /feedback delete <id>")
+                else FeedbackDelete(learningHome, subArg, output).run()
+            else -> output("Unknown /feedback subcommand: $sub  Available: list delete")
+        }
+    }
+
+    private fun handleLessons(arg: String?) {
+        val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
+        val sub = parts[0].lowercase()
+        val subArg = parts.getOrNull(1)?.trim()
+        when (sub) {
+            "list" -> LessonsList(learningHome, subArg ?: System.getProperty("user.dir"), output).run()
+            "archive" -> if (subArg.isNullOrEmpty()) output("Usage: /lessons archive <id>")
+                else LessonsArchive(learningHome, subArg, output).run()
+            else -> output("Unknown /lessons subcommand: $sub  Available: list archive")
+        }
+    }
+
+    private fun renderMemoryView(v: MemoryView): String {
+        val m = v.metadata
+        return "[${v.id}] (${m["room"]}, sal ${m["salience"]}, pri ${m["priority"]}, ${m["ageDays"]}d, " +
+            "${m["sensitivity"]}, ${m["state"]}) ${v.text}"
+    }
+
+    private fun handleMemory(palace: JanesPalace, arg: String?) {
+        val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
+        val sub = parts[0].lowercase()
+        val subArg = parts.getOrNull(1)?.trim()
+        when (sub) {
+            "list" -> {
+                val views = palace.browse(BrowseFilter(room = subArg))
+                if (views.isEmpty()) output("(no memories)") else views.forEach { output(renderMemoryView(it)) }
+            }
+            "show" -> {
+                if (subArg.isNullOrEmpty()) { output("Usage: /memory show <id>"); return }
+                val v = palace.browse(BrowseFilter(includeHidden = true)).firstOrNull { it.id == subArg }
+                if (v == null) output("Not found: $subArg")
+                else {
+                    output(renderMemoryView(v))
+                    v.metadata.forEach { (k, value) -> output("  $k = $value") }
+                }
+            }
+            "threads" -> {
+                val threads = palace.threads()
+                if (threads.isEmpty()) output("(no threads)")
+                else threads.forEach { (label, texts) -> output("[$label] " + texts.joinToString(" -> ")) }
+            }
+            "profile" -> {
+                val actionParts = subArg?.split(" ", limit = 3)
+                when (actionParts?.getOrNull(0)) {
+                    null -> {
+                        val views = palace.profileView()
+                        if (views.isEmpty()) output("(empty profile)")
+                        else views.forEach { output("${it.path} = ${it.value} (%.2f)".format(it.confidence)) }
+                    }
+                    "confirm" -> {
+                        val p = actionParts.getOrNull(1)
+                        if (p == null) output("Usage: /memory profile confirm <path>")
+                        else output(if (palace.updateProfile(ProfileAction.Confirm(p))) "Confirmed." else "No such attribute.")
+                    }
+                    "correct" -> {
+                        val p = actionParts.getOrNull(1)
+                        val v = actionParts.getOrNull(2)
+                        if (p == null || v == null) output("Usage: /memory profile correct <path> <value>")
+                        else output(if (palace.updateProfile(ProfileAction.Correct(p, v))) "Corrected." else "No such attribute.")
+                    }
+                    "delete" -> {
+                        val p = actionParts.getOrNull(1)
+                        if (p == null) output("Usage: /memory profile delete <path>")
+                        else output(if (palace.updateProfile(ProfileAction.Delete(p))) "Deleted." else "No such attribute.")
+                    }
+                    else -> output("Unknown action: ${actionParts[0]} (use confirm|correct|delete)")
+                }
+            }
+            "why" -> output(palace.explainLastRecall() ?: "(no recall recorded yet)")
+            else -> output("Unknown /memory subcommand: $sub  Available: list show threads profile why")
         }
     }
 }
