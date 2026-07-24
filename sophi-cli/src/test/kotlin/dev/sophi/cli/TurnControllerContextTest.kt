@@ -24,6 +24,7 @@ private class NoopInput : InputSource {
     override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
         kotlinx.coroutines.delay(Long.MAX_VALUE)
     }
+    override suspend fun awaitYesNo(): Boolean = false
 }
 
 class TurnControllerContextTest : FunSpec({

@@ -6,23 +6,18 @@ import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 
 class TerminalConfirmationPolicyTest : FunSpec({
-    test("confirm() returns true when the answer is y") {
-        val policy = TerminalConfirmationPolicy(Terminal()) { "y" }
+    test("confirm() returns true when the answer is yes") {
+        val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(true)))
         runBlocking { policy.confirm("bash", """{"command":"ls"}""") } shouldBe true
     }
 
-    test("confirm() returns true when the answer is Y (case-insensitive)") {
-        val policy = TerminalConfirmationPolicy(Terminal()) { "Y" }
-        runBlocking { policy.confirm("bash", """{"command":"ls"}""") } shouldBe true
-    }
-
-    test("confirm() returns false when the answer is n") {
-        val policy = TerminalConfirmationPolicy(Terminal()) { "n" }
+    test("confirm() returns false when the answer is no") {
+        val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(false)))
         runBlocking { policy.confirm("bash", """{"command":"ls"}""") } shouldBe false
     }
 
-    test("confirm() returns false when there is no input") {
-        val policy = TerminalConfirmationPolicy(Terminal()) { null }
+    test("confirm() returns false when there is no answer queued") {
+        val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList()))
         runBlocking { policy.confirm("bash", """{"command":"ls"}""") } shouldBe false
     }
 })

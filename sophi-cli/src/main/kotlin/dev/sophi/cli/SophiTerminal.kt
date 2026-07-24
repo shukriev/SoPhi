@@ -1,9 +1,11 @@
 package dev.sophi.cli
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicReference
 import org.jline.reader.EOFError
 import org.jline.reader.EndOfFileException
 import org.jline.reader.LineReader
@@ -53,6 +55,21 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
     val isInteractive: Boolean
         get() = jlineTerminal.type != Terminal.TYPE_DUMB && jlineTerminal.type != Terminal.TYPE_DUMB_COLOR
 
+    // Only awaitControlKeys' loop may read raw bytes off the terminal while a turn is active. A
+    // pending confirmation registers here instead of opening its own stdin read, which would
+    // otherwise race that loop for the same keystrokes and could starve forever.
+    private val pendingConfirmation = AtomicReference<CompletableDeferred<Boolean>?>(null)
+
+    suspend fun awaitYesNo(): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        check(pendingConfirmation.compareAndSet(null, deferred)) { "a confirmation is already pending" }
+        try {
+            return deferred.await()
+        } finally {
+            pendingConfirmation.set(null)
+        }
+    }
+
     suspend fun awaitEsc() {
         val previousAttributes = jlineTerminal.enterRawMode()
         try {
@@ -74,6 +91,14 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
             val nonBlockingReader = jlineTerminal.reader()
             while (currentCoroutineContext().isActive) {
                 val ch = withContext(Dispatchers.IO) { nonBlockingReader.read(100) }
+                val confirmation = pendingConfirmation.get()
+                if (confirmation != null) {
+                    when (ch) {
+                        'y'.code, 'Y'.code -> confirmation.complete(true)
+                        'n'.code, 'N'.code, 13, 10, 27 -> confirmation.complete(false)
+                    }
+                    continue
+                }
                 when (ch) {
                     27 -> return
                     toggleLower, toggleUpper -> onToggle()
