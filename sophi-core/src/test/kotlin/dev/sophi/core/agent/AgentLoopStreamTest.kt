@@ -13,8 +13,10 @@ import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.clearMocks
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flow
@@ -148,7 +150,7 @@ class AgentLoopStreamTest : FunSpec({
         finished.result shouldBe "Error: Tool 'delete_file' execution denied by confirmation policy"
     }
 
-    test("streamTurn() throws IllegalStateException when maxToolRounds is exceeded") {
+    test("streamTurn() throws IllegalStateException when maxToolRounds is exceeded and the loop guard always continues") {
         val tool = object : Tool {
             override val name = "loop_tool"
             override val description = ""
@@ -156,7 +158,9 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "again"
         }
         val registry = ToolRegistry().register(tool)
-        val loop = AgentLoop(provider, registry, sessionManager)
+        // ALWAYS_CONTINUE: see the equivalent AgentLoopTest.kt comment — the default guard would
+        // otherwise stop this early via its own round-budget trigger before the hard ceiling.
+        val loop = AgentLoop(provider, registry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
         val session = AgentSession(id = "s6")
         val limitedConfig = AgentConfig(model = "test-model", maxToolRounds = 1)
         every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "loop_tool", "{}"))))
@@ -180,5 +184,71 @@ class AgentLoopStreamTest : FunSpec({
         } catch (e: Exception) {
             e.message shouldBe "stream error"
         }
+    }
+
+    // ── Loop guard ──────────────────────────────────────────────────────────
+
+    test("streamTurn() stops early after 3 consecutive fully-failed rounds under the default guard") {
+        val tool = object : Tool {
+            override val name = "broken"
+            override val description = ""
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String = throw RuntimeException("nope")
+        }
+        val registry = ToolRegistry().register(tool)
+        val loop = AgentLoop(provider, registry, sessionManager)
+        val session = AgentSession(id = "s8")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "broken", "{}"))))
+
+        loop.streamTurn(session, "go", config.copy(maxToolRounds = 20)) {}
+
+        session.branch().last().content shouldContain "Stopped early"
+        session.branch().last().content shouldContain "3 consecutive"
+        coVerify(exactly = 3) { provider.stream(any()) }
+    }
+
+    test("streamTurn() stops early when a glob/grep search broadens beyond an earlier scoped path") {
+        val tool = object : Tool {
+            override val name = "glob"
+            override val description = ""
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "no matches"
+        }
+        val registry = ToolRegistry().register(tool)
+        val loop = AgentLoop(provider, registry, sessionManager)
+        val session = AgentSession(id = "s9")
+        var round = 0
+        every { provider.stream(any()) } answers {
+            round++
+            if (round == 1) flowOf(StreamEvent.ToolCallsReady(
+                listOf(ToolCall("c1", "glob", """{"path":"transcribe","pattern":"*.txt"}"""))
+            ))
+            else flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c2", "glob", """{"pattern":"**/*transcribe*"}"""))))
+        }
+
+        loop.streamTurn(session, "go", config.copy(maxToolRounds = 20)) {}
+
+        session.branch().last().content shouldContain "Stopped early"
+        session.branch().last().content shouldContain "broadened"
+        coVerify(exactly = 2) { provider.stream(any()) }
+    }
+
+    test("streamTurn() stops early when approaching the tool-round budget under the default guard") {
+        val tool = object : Tool {
+            override val name = "ok"
+            override val description = ""
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "fine"
+        }
+        val registry = ToolRegistry().register(tool)
+        val loop = AgentLoop(provider, registry, sessionManager)
+        val session = AgentSession(id = "s10")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "ok", "{}"))))
+
+        loop.streamTurn(session, "go", config.copy(maxToolRounds = 4)) {}
+
+        session.branch().last().content shouldContain "Stopped early"
+        session.branch().last().content shouldContain "round"
+        coVerify(exactly = 1) { provider.stream(any()) }
     }
 })

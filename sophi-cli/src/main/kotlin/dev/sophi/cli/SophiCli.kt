@@ -186,6 +186,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
         val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal, inputSource)
+        val loopGuardPolicy = TerminalLoopGuardPolicy(mordantTerminal, inputSource)
 
         val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
         val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
@@ -217,7 +218,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             provider,
             registry,
             sessionManager,
-            confirmationPolicy = confirmationPolicy
+            confirmationPolicy = confirmationPolicy,
+            loopGuard = loopGuardPolicy
         )
         val compactor = ContextCompactor(provider)
 
