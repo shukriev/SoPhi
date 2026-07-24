@@ -3,12 +3,9 @@ package dev.sophi.core.tools
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import kotlin.io.path.isRegularFile
 import kotlin.io.path.relativeTo
-import kotlin.streams.asSequence
 
 private const val DEFAULT_MAX_RESULTS = 200
 private val DEFAULT_SKIP_DIRS = setOf(".git", "build", "target", "node_modules", ".gradle")
@@ -33,16 +30,12 @@ class GlobTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
 
         val matcher = root.fileSystem.getPathMatcher("glob:${args.pattern}")
 
-        val matches = Files.walk(searchRoot).use { stream ->
-            stream.asSequence()
-                .filter { it.isRegularFile() }
-                .map { it.relativeTo(root) }
-                .filter { relative -> DEFAULT_SKIP_DIRS.none { skip -> relative.any { part -> part.toString() == skip } } }
-                .filter { matcher.matches(it) }
-                .map { it.toString() }
-                .toList()
-                .sorted()
-        }
+        val matches = walkRegularFiles(searchRoot)
+            .map { it.relativeTo(root) }
+            .filter { relative -> DEFAULT_SKIP_DIRS.none { skip -> relative.any { part -> part.toString() == skip } } }
+            .filter { matcher.matches(it) }
+            .map { it.toString() }
+            .sorted()
 
         return if (matches.isEmpty()) "No files found" else matches.take(DEFAULT_MAX_RESULTS).joinToString("\n")
     }
