@@ -20,6 +20,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 @kotlinx.serialization.Serializable
 private data class ToolCallRecord(val id: String, val name: String, val argumentsJson: String)
@@ -28,14 +30,66 @@ private data class PendingEntry(
     val role: EntryRole, val content: String, val metadata: Map<String, String>
 )
 
-private val entryJson = kotlinx.serialization.json.Json
+private data class ToolCallOutcome(val call: ToolCall, val message: Message, val failed: Boolean)
+
+private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+private const val LOOP_GUARD_FAILURE_THRESHOLD = 3
+private const val LOOP_GUARD_ROUND_BUDGET_MARGIN = 3
+private val SEARCH_TOOL_NAMES = setOf("glob", "grep")
+
+/**
+ * Tracks the state a LoopGuardPolicy check needs across rounds of a single turn: how many
+ * fully-failed rounds happened in a row, the narrowest path a glob/grep call has scoped into so
+ * far, and whether the round-budget warning already fired once. One instance per turn() /
+ * streamTurn() call — never shared or reused across turns.
+ */
+private class LoopGuardState(private val maxToolRounds: Int) {
+    private var consecutiveFailedRounds = 0
+    private var narrowestSearchPath: String? = null
+    private var roundBudgetWarned = false
+
+    private fun extractPathArg(argumentsJson: String): String? = runCatching {
+        (entryJson.parseToJsonElement(argumentsJson).jsonObject["path"])?.jsonPrimitive?.content
+    }.getOrNull()
+
+    /** Call once per round, after that round's tool calls have all completed. */
+    fun afterRound(outcomes: List<ToolCallOutcome>, roundAfterIncrement: Int): String? {
+        val roundFullyFailed = outcomes.isNotEmpty() && outcomes.all { it.failed }
+        consecutiveFailedRounds = if (roundFullyFailed) consecutiveFailedRounds + 1 else 0
+        if (consecutiveFailedRounds >= LOOP_GUARD_FAILURE_THRESHOLD) {
+            val streak = consecutiveFailedRounds
+            consecutiveFailedRounds = 0
+            return "$streak consecutive tool-call rounds failed in a row"
+        }
+
+        for (outcome in outcomes) {
+            if (outcome.call.name !in SEARCH_TOOL_NAMES) continue
+            val path = extractPathArg(outcome.call.argumentsJson)
+            val previous = narrowestSearchPath
+            if (previous != null && path == null) {
+                narrowestSearchPath = null
+                return "search scope broadened from \"$previous\" to the whole working directory"
+            }
+            if (narrowestSearchPath == null) narrowestSearchPath = path
+        }
+
+        if (!roundBudgetWarned && roundAfterIncrement >= maxToolRounds - LOOP_GUARD_ROUND_BUDGET_MARGIN) {
+            roundBudgetWarned = true
+            return "approaching the tool-round limit ($roundAfterIncrement/$maxToolRounds rounds used)"
+        }
+
+        return null
+    }
+}
 
 class AgentLoop(
     private val provider: LLMProvider,
     private val registry: ToolRegistry,
     private val sessionManager: SessionManager,
     private val compactor: ContextCompactor? = null,
-    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL
+    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+    private val loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
 ) {
     suspend fun turn(
         session: AgentSession,
@@ -48,6 +102,7 @@ class AgentLoop(
 
         var toolRound = 0
         val pendingRounds = mutableListOf<PendingEntry>()
+        val loopGuardState = LoopGuardState(config.maxToolRounds)
 
         while (true) {
             val request = CompletionRequest(
@@ -94,7 +149,7 @@ class AgentLoop(
                         call to allowed
                     }
 
-                    val toolResults = coroutineScope {
+                    val toolOutcomes = coroutineScope {
                         allowedCalls.map { (call, allowed) ->
                             async {
                                 onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
@@ -112,15 +167,15 @@ class AgentLoop(
                                         ?: run { failed = true; "Error: Tool '${call.name}' not found" }
                                 }
                                 onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
-                                Message(
-                                    role = MessageRole.TOOL,
-                                    content = result,
-                                    toolCallId = call.id,
-                                    toolName = call.name
+                                ToolCallOutcome(
+                                    call,
+                                    Message(role = MessageRole.TOOL, content = result, toolCallId = call.id, toolName = call.name),
+                                    failed
                                 )
                             }
                         }.awaitAll()
                     }
+                    val toolResults = toolOutcomes.map { it.message }
                     messages.addAll(toolResults)
                     toolResults.forEach { m ->
                         pendingRounds.add(PendingEntry(
@@ -129,6 +184,17 @@ class AgentLoop(
                         ))
                     }
                     toolRound++
+
+                    val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
+                    if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
+                        val stopMessage = "[Stopped early: $guardReason]"
+                        onEvent(TurnEvent.Token(stopMessage))
+                        session.append(EntryRole.USER, userInput)
+                        pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
+                        session.append(EntryRole.ASSISTANT, stopMessage)
+                        sessionManager.save(session)
+                        return session
+                    }
                 }
                 is LLMResponse.Error -> {
                     throw IllegalStateException("LLM error: ${response.message}", response.cause)
@@ -148,6 +214,7 @@ class AgentLoop(
 
         var toolRound = 0
         val pendingRounds = mutableListOf<PendingEntry>()
+        val loopGuardState = LoopGuardState(config.maxToolRounds)
 
         while (true) {
             val request = CompletionRequest(
@@ -206,7 +273,7 @@ class AgentLoop(
                 call to allowed
             }
 
-            val toolResults = coroutineScope {
+            val toolOutcomes = coroutineScope {
                 allowedCalls.map { (call, allowed) ->
                     async {
                         onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
@@ -224,10 +291,15 @@ class AgentLoop(
                                 ?: run { failed = true; "Error: Tool '${call.name}' not found" }
                         }
                         onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
-                        Message(role = MessageRole.TOOL, content = result, toolCallId = call.id, toolName = call.name)
+                        ToolCallOutcome(
+                            call,
+                            Message(role = MessageRole.TOOL, content = result, toolCallId = call.id, toolName = call.name),
+                            failed
+                        )
                     }
                 }.awaitAll()
             }
+            val toolResults = toolOutcomes.map { it.message }
             messages.addAll(toolResults)
             toolResults.forEach { m ->
                 pendingRounds.add(PendingEntry(
@@ -236,6 +308,17 @@ class AgentLoop(
                 ))
             }
             toolRound++
+
+            val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
+            if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
+                val stopMessage = "[Stopped early: $guardReason]"
+                onEvent(TurnEvent.Token(stopMessage))
+                session.append(EntryRole.USER, userInput)
+                pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
+                session.append(EntryRole.ASSISTANT, stopMessage)
+                sessionManager.save(session)
+                return session
+            }
         }
     }
 }

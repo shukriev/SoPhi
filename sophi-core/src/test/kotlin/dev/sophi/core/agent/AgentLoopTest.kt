@@ -11,6 +11,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.Runs
 import io.mockk.clearMocks
 import io.mockk.coEvery
@@ -228,7 +229,7 @@ class AgentLoopTest : FunSpec({
         toolResultMsg.content shouldBe "Error: disk full"
     }
 
-    test("turn() throws IllegalStateException when maxToolRounds exceeded") {
+    test("turn() throws IllegalStateException when maxToolRounds exceeded and the loop guard always continues") {
         val session = AgentSession(id = "s1")
         val toolRegistry = ToolRegistry()
         toolRegistry.register(object : dev.sophi.core.tools.Tool {
@@ -237,7 +238,10 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "still looping"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        // ALWAYS_CONTINUE: the loop guard's own "approaching the round budget" trigger would
+        // otherwise stop this early under the default NEVER_CONTINUE policy (see the dedicated
+        // loop-guard tests below) — this test is specifically about the hard ceiling underneath it.
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
         val tightConfig = config.copy(maxToolRounds = 2)
 
         coEvery { provider.complete(any()) } returns LLMResponse.ToolUse(
@@ -246,6 +250,117 @@ class AgentLoopTest : FunSpec({
         )
 
         shouldThrow<IllegalStateException> { loopWithTool.turn(session, "go", tightConfig) }
+    }
+
+    // ── Loop guard ──────────────────────────────────────────────────────────
+
+    test("turn() stops early after 3 consecutive fully-failed rounds under the default (never-continue) guard") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "broken"
+            override val description = "Always fails"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String = throw RuntimeException("nope")
+        })
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+
+        coEvery { provider.complete(any()) } returns LLMResponse.ToolUse(
+            calls = listOf(dev.sophi.ai.api.ToolCall("c1", "broken", "{}")),
+            usage = TokenUsage(1, 0)
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "3 consecutive"
+        coVerify(exactly = 3) { provider.complete(any()) }
+    }
+
+    test("turn() keeps going past 3 consecutive failures when the loop guard says yes") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        var attempt = 0
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "flaky"
+            override val description = "Fails 3 times then succeeds"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String {
+                attempt++
+                if (attempt <= 3) throw RuntimeException("nope")
+                return "finally"
+            }
+        })
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c1", "flaky", "{}")), usage = TokenUsage(1, 0)),
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c2", "flaky", "{}")), usage = TokenUsage(1, 0)),
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c3", "flaky", "{}")), usage = TokenUsage(1, 0)),
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c4", "flaky", "{}")), usage = TokenUsage(1, 0)),
+            LLMResponse.Text("recovered", TokenUsage(1, 1))
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldBe "recovered"
+    }
+
+    test("turn() stops early when a glob/grep search broadens beyond an earlier scoped path") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "glob"
+            override val description = "Finds files"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "no matches"
+        })
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(
+                calls = listOf(dev.sophi.ai.api.ToolCall("c1", "glob", """{"path":"transcribe","pattern":"*.txt"}""")),
+                usage = TokenUsage(1, 0)
+            ),
+            LLMResponse.ToolUse(
+                calls = listOf(dev.sophi.ai.api.ToolCall("c2", "glob", """{"pattern":"**/*transcribe*"}""")),
+                usage = TokenUsage(1, 0)
+            )
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "broadened"
+        coVerify(exactly = 2) { provider.complete(any()) }
+    }
+
+    test("turn() stops early when approaching the tool-round budget under the default guard") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "ok"
+            override val description = "Always succeeds"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "fine"
+        })
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+
+        coEvery { provider.complete(any()) } returns LLMResponse.ToolUse(
+            calls = listOf(dev.sophi.ai.api.ToolCall("c1", "ok", "{}")),
+            usage = TokenUsage(1, 0)
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        // margin is 3: with maxToolRounds=4, round 1 (4-3=1) already crosses it
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 4))
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "round"
+        coVerify(exactly = 1) { provider.complete(any()) }
     }
 
     // ── Turn events ──────────────────────────────────────────────────────────
