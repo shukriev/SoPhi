@@ -137,6 +137,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
         val mordantTerminal = Terminal()
+        val sophiTerminal = SophiTerminal.create()
+        val inputSource: InputSource =
+            if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
 
         // Learning: capture tool outcomes and inject reliability + lessons sections into the system prompt.
         val learningConfig = LearningConfig(sessionModel = model)
@@ -182,7 +185,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
         val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
-        val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal)
+        val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal, inputSource)
 
         val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
         val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
@@ -217,14 +220,17 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             confirmationPolicy = confirmationPolicy
         )
         val compactor = ContextCompactor(provider)
-        val sophiTerminal = SophiTerminal.create()
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
-        mordantTerminal.println("Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad\n")
+        mordantTerminal.println(
+            "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
+                "/schedule /feedback /lessons /memory\n"
+        )
 
-        val slashHandler = SlashHandler(sessionManager, compactor, config, learningPlugin) { mordantTerminal.println(it) }
-        val inputSource: InputSource =
-            if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
+        val slashHandler = SlashHandler(
+            sessionManager, compactor, config, learningPlugin,
+            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin
+        ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)
         } else {
@@ -292,6 +298,10 @@ private class LegacyReadLineInputSource : InputSource {
     override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
         kotlinx.coroutines.delay(Long.MAX_VALUE)
     }
+    // No raw-mode reader loop is running in this (non-interactive) mode, so a plain, independent
+    // stdin read is safe here — unlike JLineInputSource, there's nothing for it to race against.
+    override suspend fun awaitYesNo(): Boolean =
+        kotlin.io.readlnOrNull()?.trim()?.equals("y", ignoreCase = true) == true
 }
 
 internal fun buildBuiltinTools(braveApiKeyOption: String?): List<Tool> {

@@ -3,13 +3,10 @@ package dev.sophi.core.tools
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import kotlin.io.path.isRegularFile
 import kotlin.io.path.readLines
 import kotlin.io.path.relativeTo
-import kotlin.streams.asSequence
 
 private const val DEFAULT_MAX_RESULTS = 200
 private val DEFAULT_SKIP_DIRS = setOf(".git", "build", "target", "node_modules", ".gradle")
@@ -41,23 +38,21 @@ class GrepTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val maxResults = args.maxResults ?: DEFAULT_MAX_RESULTS
         val fileMatcher = args.filePattern?.let { root.fileSystem.getPathMatcher("glob:$it") }
 
-        val allMatches = Files.walk(searchRoot).use { stream ->
-            stream.asSequence()
-                .filter { it.isRegularFile() }
-                .filter { path ->
-                    val relative = path.relativeTo(root)
-                    DEFAULT_SKIP_DIRS.none { skip -> relative.any { part -> part.toString() == skip } }
-                }
-                .filter { fileMatcher == null || fileMatcher.matches(it.fileName) }
-                .flatMap { file ->
-                    val lines = runCatching { file.readLines() }.getOrDefault(emptyList())
-                    lines.withIndex()
-                        .filter { (_, line) -> regex.containsMatchIn(line) }
-                        .map { (i, line) -> "${file.relativeTo(root)}:${i + 1}: $line" }
-                }
-                .take(maxResults + 1)
-                .toList()
-        }
+        val allMatches = walkRegularFiles(searchRoot)
+            .asSequence()
+            .filter { path ->
+                val relative = path.relativeTo(root)
+                DEFAULT_SKIP_DIRS.none { skip -> relative.any { part -> part.toString() == skip } }
+            }
+            .filter { fileMatcher == null || fileMatcher.matches(it.fileName) }
+            .flatMap { file ->
+                val lines = runCatching { file.readLines() }.getOrDefault(emptyList())
+                lines.withIndex()
+                    .filter { (_, line) -> regex.containsMatchIn(line) }
+                    .map { (i, line) -> "${file.relativeTo(root)}:${i + 1}: $line" }
+            }
+            .take(maxResults + 1)
+            .toList()
 
         if (allMatches.isEmpty()) return "No matches found"
         val truncated = allMatches.size > maxResults

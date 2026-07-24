@@ -5,6 +5,7 @@ import java.time.Instant
 sealed class StreamingPhase(open val startTime: Instant = Instant.now()) {
     data class Generating(
         val tokenCount: Int = 0,
+        val reasoningTokenCount: Int = 0,
         override val startTime: Instant = Instant.now()
     ) : StreamingPhase(startTime)
 

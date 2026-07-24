@@ -71,5 +71,5 @@ fun buildOpenAiCompatProvider(
         .openAiClient(client)
         .options(options)
         .build()
-    return OpenAICompatProvider(chatModel, name = name)
+    return OpenAICompatProvider(chatModel, client, name = name)
 }

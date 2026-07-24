@@ -5,4 +5,5 @@ class JLineInputSource(private val sophiTerminal: SophiTerminal) : InputSource {
     override suspend fun awaitEsc() = sophiTerminal.awaitEsc()
     override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) =
         sophiTerminal.awaitControlKeys(toggleKey, onToggle)
+    override suspend fun awaitYesNo(): Boolean = sophiTerminal.awaitYesNo()
 }

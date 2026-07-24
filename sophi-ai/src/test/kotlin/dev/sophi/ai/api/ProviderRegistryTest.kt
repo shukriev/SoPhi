@@ -12,7 +12,7 @@ class ProviderRegistryTest : FunSpec({
         override val name = providerName
         override suspend fun complete(request: CompletionRequest): LLMResponse =
             LLMResponse.Error("stub")
-        override fun stream(request: CompletionRequest): Flow<String> = flowOf()
+        override fun stream(request: CompletionRequest): Flow<StreamEvent> = flowOf()
     }
 
     test("get() returns the provider registered under that name") {

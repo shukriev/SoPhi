@@ -42,4 +42,9 @@ class ResponseRendererTest : FunSpec({
             TextColors.gray("  → ") + "line one"
         ).joinToString("\n")
     }
+
+    test("renderReasoning() renders a dimmed thought-bubble line") {
+        val rendered = ResponseRenderer.renderReasoning("first I'll check the docs")
+        rendered shouldBe TextStyles.dim("💭 first I'll check the docs")
+    }
 })

@@ -2,7 +2,7 @@
 name: sophi-architecture
 description: Sophi module contracts, conventions, and ADR index for working on this codebase
 tools: [read, bash, grep, find]
-auto_detect: [sophi-core, sophi-ai, sophi-cli, AgentSession, LLMProvider, sophi-extensions, sophi-skills, KharnessPlugin]
+auto_detect: [sophi-core, sophi-ai, sophi-cli, AgentSession, LLMProvider, sophi-extensions, sophi-skills, PluginRegistry]
 ---
 
 # Sophi Architecture Skill
@@ -18,8 +18,8 @@ auto_detect: [sophi-core, sophi-ai, sophi-cli, AgentSession, LLMProvider, sophi-
 | `dev.sophi.core.context` | `ContextManager`, compaction strategy |
 | `dev.sophi.core.prompt` | `SystemPromptBuilder`, `AgentsMdLoader`, `SystemMdLoader` |
 | `dev.sophi.skills` | `SkillLoader`, `SkillSummary`, `Skill` |
-| `dev.sophi.extensions` | `KharnessPlugin`, `AgentHook`, `PluginRegistry`, `HookChain`, `PluginContext` |
-| `dev.sophi.cli` | `KharnessCommand`, `TerminalUI`, `RpcMode`, slash command dispatch |
+| `dev.sophi.extensions` | `PluginRegistry`, `AgentHook`, `HookContext`, `HookPoint`, `TurnEventBridge` |
+| `dev.sophi.cli` | `SophiCli`, `TuiEngine`, `SophiTerminal`, `TurnController`, `SlashHandler` (in-session `/list /branch /checkout /compact /good /bad /schedule /feedback /lessons /memory`), `ScheduleCommand`/`ScheduleDaemonCommand`/`ScheduleRunDueCommand`/`ScheduleInstallLaunchdCommand`/`GoalCommand`/`MemoryCommand`/`McpServeCommand` (top-level `sophi <name> ...` subcommands, distinct from the slash commands above) |
 | `dev.sophi.web` | Spring Boot app, `AgentController`, WebSocket config, SSE endpoints |
 | `dev.sophi.sdk` | `Sophi` factory object, `SessionBuilder`, `RuntimeBuilder` |
 | `dev.sophi.infra` | `AuthManager`, `AuthStorage`, `BudgetTracker`, `PermissionGatePlugin` |

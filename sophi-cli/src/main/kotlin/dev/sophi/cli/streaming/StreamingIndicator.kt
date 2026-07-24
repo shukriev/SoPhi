@@ -14,7 +14,7 @@ object StreamingIndicator {
         val elapsed = String.format(Locale.ROOT, "%.1f", phase.elapsedSeconds())
         return when (phase) {
             is StreamingPhase.Generating ->
-                "$frame Generating... (${phase.tokenCount} tokens, ${elapsed}s)"
+                "$frame Generating... (${phase.tokenCount + phase.reasoningTokenCount} tokens, ${elapsed}s)"
             is StreamingPhase.ExecutingTool ->
                 "🔧 Calling ${phase.toolName}... (${elapsed}s)"
         }

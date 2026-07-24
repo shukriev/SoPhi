@@ -5,8 +5,10 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.createDirectory
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.setPosixFilePermissions
 import kotlin.io.path.writeText
 
 class GrepToolTest : FunSpec({
@@ -79,5 +81,19 @@ class GrepToolTest : FunSpec({
 
         // Should find the file even though the absolute path contains "build" ancestor
         result shouldContain "a.txt"
+    }
+
+    // Regression: same Files.walk()-aborts-on-first-permission-error issue as GlobTool.
+    test("execute() skips an unreadable subdirectory instead of aborting the whole search") {
+        val locked = root.resolve("locked").also { it.createDirectory() }
+        locked.resolve("secret.txt").writeText("target\n")
+        root.resolve("visible.txt").writeText("target\n")
+        try {
+            locked.setPosixFilePermissions(PosixFilePermissions.fromString("---------"))
+            val result = runBlocking { tool.execute("""{"pattern":"target"}""") }
+            result shouldContain "visible.txt"
+        } finally {
+            locked.setPosixFilePermissions(PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
     }
 })

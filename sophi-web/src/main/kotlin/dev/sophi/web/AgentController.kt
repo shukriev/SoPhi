@@ -31,6 +31,12 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
+internal fun sseEventFor(event: TurnEvent): SseEmitter.SseEventBuilder? = when (event) {
+    is TurnEvent.Token -> SseEmitter.event().data(event.text)
+    is TurnEvent.ReasoningToken -> SseEmitter.event().name("reasoning").data(event.text)
+    else -> null
+}
+
 @RestController
 @RequestMapping("/api")
 class AgentController(
@@ -112,7 +118,7 @@ class AgentController(
                     val bridge = pluginRegistry.turnEventBridge(id)
                     agentLoop.streamTurn(session, input, config) { event ->
                         bridge(event)
-                        if (event is TurnEvent.Token) emitter.send(SseEmitter.event().data(event.text).build())
+                        sseEventFor(event)?.let { emitter.send(it.build()) }
                     }
                 }
                 runCatching { pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(id)) }

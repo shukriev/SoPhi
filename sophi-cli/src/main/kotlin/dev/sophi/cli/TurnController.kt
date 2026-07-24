@@ -40,8 +40,10 @@ class TurnController(
 ) {
     suspend fun runTurn(session: AgentSession, userInput: String): AgentSession = coroutineScope {
         val buffer = StringBuilder()
+        val reasoningBuffer = StringBuilder()
         val pendingArgs = mutableMapOf<String, String>()
         var tokenCount = 0
+        var reasoningTokenCount = 0
         var currentPhase: StreamingPhase? = StreamingPhase.Generating()
         var tokenViewState = TokenViewToggleState()
         val animationTimer = AnimationTimer()
@@ -49,7 +51,7 @@ class TurnController(
         fun render() {
             val phase = currentPhase ?: return
             val display = if (tokenViewState.isViewingTokens && phase is StreamingPhase.Generating) {
-                TokenStreamFormatter.renderTokenStream(phase, buffer.toString())
+                TokenStreamFormatter.renderTokenStream(phase, reasoningBuffer.toString(), buffer.toString())
             } else {
                 StreamingIndicator.renderSpinner(phase, animationTimer.nextFrame())
             }
@@ -79,7 +81,17 @@ class TurnController(
                             buffer.append(event.text)
                             tokenCount++
                             val startTime = (currentPhase as? StreamingPhase.Generating)?.startTime ?: Instant.now()
-                            currentPhase = StreamingPhase.Generating(tokenCount = tokenCount, startTime = startTime)
+                            currentPhase = StreamingPhase.Generating(
+                                tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount, startTime = startTime
+                            )
+                        }
+                        is TurnEvent.ReasoningToken -> {
+                            reasoningBuffer.append(event.text)
+                            reasoningTokenCount++
+                            val startTime = (currentPhase as? StreamingPhase.Generating)?.startTime ?: Instant.now()
+                            currentPhase = StreamingPhase.Generating(
+                                tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount, startTime = startTime
+                            )
                         }
                         is TurnEvent.ToolCallStarted -> {
                             pendingArgs[event.name] = event.argsJson
@@ -90,7 +102,7 @@ class TurnController(
                             val args = pendingArgs.remove(event.name) ?: ""
                             output(ResponseRenderer.renderToolCall(event.name, args, event.result))
                             if (autoExitTokenView) tokenViewState = TokenViewToggleState()
-                            currentPhase = StreamingPhase.Generating(tokenCount = tokenCount)
+                            currentPhase = StreamingPhase.Generating(tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount)
                             render()
                         }
                     }
@@ -106,11 +118,16 @@ class TurnController(
             }
         }
 
+        fun outputReasoningIfAny() {
+            if (reasoningBuffer.isNotEmpty()) output(ResponseRenderer.renderReasoning(reasoningBuffer.toString()))
+        }
+
         select<AgentSession> {
             turnDeferred.onAwait { (result, error) ->
                 animationJob.cancel()
                 controlKeysDeferred.cancel()
                 liveRegion.clear()
+                outputReasoningIfAny()
                 if (error != null) {
                     output(ResponseRenderer.renderText(buffer.toString()) + " [error: ${error.message}]")
                     onTurnSettled(userInput, buffer.toString(), error)
@@ -125,6 +142,7 @@ class TurnController(
                 animationJob.cancel()
                 turnDeferred.cancel()
                 liveRegion.clear()
+                outputReasoningIfAny()
                 output(ResponseRenderer.renderText(buffer.toString()) + " [interrupted]")
                 onTurnSettled(userInput, buffer.toString(), null)
                 session

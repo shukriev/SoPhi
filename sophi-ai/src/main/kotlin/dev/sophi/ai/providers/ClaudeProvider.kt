@@ -3,6 +3,7 @@ package dev.sophi.ai.providers
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.StreamEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -27,10 +28,10 @@ class ClaudeProvider(
                 )
         }
 
-    override fun stream(request: CompletionRequest): Flow<String> =
+    override fun stream(request: CompletionRequest): Flow<StreamEvent> =
         chatModel.stream(request.toPrompt())
             .filter { it.result?.output?.text?.isNotEmpty() == true }
-            .map { it.result!!.output!!.text!! }
+            .map { StreamEvent.Content(it.result!!.output!!.text!!) as StreamEvent }
             .asFlow()
             .catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }
 
