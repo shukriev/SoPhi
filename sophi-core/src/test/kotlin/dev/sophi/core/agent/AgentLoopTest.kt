@@ -15,7 +15,6 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.Runs
 import io.mockk.clearMocks
-import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
@@ -39,7 +38,7 @@ class AgentLoopTest : FunSpec({
 
     test("turn() appends USER then ASSISTANT entries on text response") {
         val session = AgentSession(id = "s1")
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("Hello!", TokenUsage(10, 5))
+        every { provider.stream(any()) } returns LLMResponse.Text("Hello!", TokenUsage(10, 5)).toStreamFlow()
         every { sessionManager.save(any()) } just Runs
 
         val result = loop.turn(session, "Hi", config)
@@ -53,7 +52,7 @@ class AgentLoopTest : FunSpec({
 
     test("turn() calls sessionManager.save() exactly once on text response") {
         val session = AgentSession(id = "s1")
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("OK", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns LLMResponse.Text("OK", TokenUsage(1, 1)).toStreamFlow()
         every { sessionManager.save(any()) } just Runs
 
         loop.turn(session, "test", config)
@@ -67,9 +66,9 @@ class AgentLoopTest : FunSpec({
         session.append(EntryRole.ASSISTANT, "previous answer")
 
         var capturedRequest: dev.sophi.ai.api.CompletionRequest? = null
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequest = firstArg()
-            LLMResponse.Text("response", TokenUsage(1, 1))
+            LLMResponse.Text("response", TokenUsage(1, 1)).toStreamFlow()
         }
         every { sessionManager.save(any()) } just Runs
 
@@ -83,9 +82,9 @@ class AgentLoopTest : FunSpec({
     test("turn() passes model and systemPrompt from AgentConfig to CompletionRequest") {
         val session = AgentSession(id = "s1")
         var capturedRequest: dev.sophi.ai.api.CompletionRequest? = null
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequest = firstArg()
-            LLMResponse.Text("ok", TokenUsage(1, 1))
+            LLMResponse.Text("ok", TokenUsage(1, 1)).toStreamFlow()
         }
         every { sessionManager.save(any()) } just Runs
 
@@ -124,12 +123,12 @@ class AgentLoopTest : FunSpec({
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
 
-        coEvery { provider.complete(any()) } returnsMany listOf(
+        every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("call-1", "calculator", "{}")),
                 usage = TokenUsage(10, 0)
-            ),
-            LLMResponse.Text("The answer is 42", TokenUsage(5, 8))
+            ).toStreamFlow(),
+            LLMResponse.Text("The answer is 42", TokenUsage(5, 8)).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
@@ -138,7 +137,7 @@ class AgentLoopTest : FunSpec({
         // USER, ASSISTANT (tool-call round, replay=false), TOOL_RESULT (replay=false), final ASSISTANT
         result.branch() shouldHaveSize 4
         result.branch().last().content shouldBe "The answer is 42"
-        coVerify(exactly = 2) { provider.complete(any()) }
+        coVerify(exactly = 2) { provider.stream(any()) }
     }
 
     test("turn() includes tool call and result in subsequent CompletionRequest messages") {
@@ -153,15 +152,15 @@ class AgentLoopTest : FunSpec({
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
 
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequests.add(firstArg())
             if (capturedRequests.size == 1)
                 LLMResponse.ToolUse(
                     calls = listOf(dev.sophi.ai.api.ToolCall("c1", "ping", "{}")),
                     usage = TokenUsage(1, 0)
-                )
+                ).toStreamFlow()
             else
-                LLMResponse.Text("done", TokenUsage(1, 1))
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         }
         every { sessionManager.save(any()) } just Runs
 
@@ -182,15 +181,15 @@ class AgentLoopTest : FunSpec({
         val loopNoTools = AgentLoop(provider, emptyRegistry, sessionManager)
 
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequests.add(firstArg())
             if (capturedRequests.size == 1)
                 LLMResponse.ToolUse(
                     calls = listOf(dev.sophi.ai.api.ToolCall("c1", "nonexistent", "{}")),
                     usage = TokenUsage(1, 0)
-                )
+                ).toStreamFlow()
             else
-                LLMResponse.Text("fallback", TokenUsage(1, 1))
+                LLMResponse.Text("fallback", TokenUsage(1, 1)).toStreamFlow()
         }
         every { sessionManager.save(any()) } just Runs
 
@@ -213,15 +212,15 @@ class AgentLoopTest : FunSpec({
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
 
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequests.add(firstArg())
             if (capturedRequests.size == 1)
                 LLMResponse.ToolUse(
                     calls = listOf(dev.sophi.ai.api.ToolCall("c1", "broken", "{}")),
                     usage = TokenUsage(1, 0)
-                )
+                ).toStreamFlow()
             else
-                LLMResponse.Text("recovered", TokenUsage(1, 1))
+                LLMResponse.Text("recovered", TokenUsage(1, 1)).toStreamFlow()
         }
         every { sessionManager.save(any()) } just Runs
 
@@ -246,10 +245,10 @@ class AgentLoopTest : FunSpec({
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
         val tightConfig = config.copy(maxToolRounds = 2)
 
-        coEvery { provider.complete(any()) } returns LLMResponse.ToolUse(
+        every { provider.stream(any()) } returns LLMResponse.ToolUse(
             calls = listOf(dev.sophi.ai.api.ToolCall("c1", "loop", "{}")),
             usage = TokenUsage(1, 0)
-        )
+        ).toStreamFlow()
 
         shouldThrow<IllegalStateException> { loopWithTool.turn(session, "go", tightConfig) }
     }
@@ -267,17 +266,17 @@ class AgentLoopTest : FunSpec({
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
 
-        coEvery { provider.complete(any()) } returns LLMResponse.ToolUse(
+        every { provider.stream(any()) } returns LLMResponse.ToolUse(
             calls = listOf(dev.sophi.ai.api.ToolCall("c1", "broken", "{}")),
             usage = TokenUsage(1, 0)
-        )
+        ).toStreamFlow()
         every { sessionManager.save(any()) } just Runs
 
         val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "3 consecutive"
-        coVerify(exactly = 3) { provider.complete(any()) }
+        coVerify(exactly = 3) { provider.stream(any()) }
     }
 
     test("turn() keeps going past 3 consecutive failures when the loop guard says yes") {
@@ -296,12 +295,12 @@ class AgentLoopTest : FunSpec({
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
 
-        coEvery { provider.complete(any()) } returnsMany listOf(
-            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c1", "flaky", "{}")), usage = TokenUsage(1, 0)),
-            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c2", "flaky", "{}")), usage = TokenUsage(1, 0)),
-            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c3", "flaky", "{}")), usage = TokenUsage(1, 0)),
-            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c4", "flaky", "{}")), usage = TokenUsage(1, 0)),
-            LLMResponse.Text("recovered", TokenUsage(1, 1))
+        every { provider.stream(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c1", "flaky", "{}")), usage = TokenUsage(1, 0)).toStreamFlow(),
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c2", "flaky", "{}")), usage = TokenUsage(1, 0)).toStreamFlow(),
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c3", "flaky", "{}")), usage = TokenUsage(1, 0)).toStreamFlow(),
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c4", "flaky", "{}")), usage = TokenUsage(1, 0)).toStreamFlow(),
+            LLMResponse.Text("recovered", TokenUsage(1, 1)).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
@@ -321,15 +320,15 @@ class AgentLoopTest : FunSpec({
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
 
-        coEvery { provider.complete(any()) } returnsMany listOf(
+        every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c1", "glob", """{"path":"transcribe","pattern":"*.txt"}""")),
                 usage = TokenUsage(1, 0)
-            ),
+            ).toStreamFlow(),
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c2", "glob", """{"pattern":"**/*transcribe*"}""")),
                 usage = TokenUsage(1, 0)
-            )
+            ).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
@@ -337,7 +336,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "broadened"
-        coVerify(exactly = 2) { provider.complete(any()) }
+        coVerify(exactly = 2) { provider.stream(any()) }
     }
 
     test("turn() stops early when approaching the tool-round budget under the default guard") {
@@ -351,10 +350,10 @@ class AgentLoopTest : FunSpec({
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
 
-        coEvery { provider.complete(any()) } returns LLMResponse.ToolUse(
+        every { provider.stream(any()) } returns LLMResponse.ToolUse(
             calls = listOf(dev.sophi.ai.api.ToolCall("c1", "ok", "{}")),
             usage = TokenUsage(1, 0)
-        )
+        ).toStreamFlow()
         every { sessionManager.save(any()) } just Runs
 
         // margin is 3: with maxToolRounds=4, round 1 (4-3=1) already crosses it
@@ -362,14 +361,14 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "round"
-        coVerify(exactly = 1) { provider.complete(any()) }
+        coVerify(exactly = 1) { provider.stream(any()) }
     }
 
     // ── Turn events ──────────────────────────────────────────────────────────
 
     test("turn() emits a single Token event with the final text when there are no tool calls") {
         val session = AgentSession(id = "s1")
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("Hello!", TokenUsage(10, 5))
+        every { provider.stream(any()) } returns LLMResponse.Text("Hello!", TokenUsage(10, 5)).toStreamFlow()
         every { sessionManager.save(any()) } just Runs
 
         val events = mutableListOf<TurnEvent>()
@@ -388,12 +387,12 @@ class AgentLoopTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "42"
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
-        coEvery { provider.complete(any()) } returnsMany listOf(
+        every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("call-1", "calculator", "{}")),
                 usage = TokenUsage(10, 0)
-            ),
-            LLMResponse.Text("The answer is 42", TokenUsage(5, 8))
+            ).toStreamFlow(),
+            LLMResponse.Text("The answer is 42", TokenUsage(5, 8)).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
@@ -418,12 +417,12 @@ class AgentLoopTest : FunSpec({
                 throw RuntimeException("disk full")
         })
         val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
-        coEvery { provider.complete(any()) } returnsMany listOf(
+        every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c1", "broken", "{}")),
                 usage = TokenUsage(1, 0)
-            ),
-            LLMResponse.Text("recovered", TokenUsage(1, 1))
+            ).toStreamFlow(),
+            LLMResponse.Text("recovered", TokenUsage(1, 1)).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
@@ -452,12 +451,12 @@ class AgentLoopTest : FunSpec({
             throw AssertionError("should not be called for a SAFE tool")
         }
         val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
-        coEvery { provider.complete(any()) } returnsMany listOf(
+        every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c1", "safe-tool", "{}")),
                 usage = TokenUsage(1, 0)
-            ),
-            LLMResponse.Text("done", TokenUsage(1, 1))
+            ).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
@@ -485,15 +484,15 @@ class AgentLoopTest : FunSpec({
             confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { _, _ -> false }
         )
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequests.add(firstArg())
             if (capturedRequests.size == 1)
                 LLMResponse.ToolUse(
                     calls = listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}")),
                     usage = TokenUsage(1, 0)
-                )
+                ).toStreamFlow()
             else
-                LLMResponse.Text("acknowledged", TokenUsage(1, 1))
+                LLMResponse.Text("acknowledged", TokenUsage(1, 1)).toStreamFlow()
         }
         every { sessionManager.save(any()) } just Runs
 
@@ -518,12 +517,12 @@ class AgentLoopTest : FunSpec({
             provider, toolRegistry, sessionManager,
             confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { _, _ -> true }
         )
-        coEvery { provider.complete(any()) } returnsMany listOf(
+        every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}")),
                 usage = TokenUsage(1, 0)
-            ),
-            LLMResponse.Text("done", TokenUsage(1, 1))
+            ).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
@@ -552,15 +551,15 @@ class AgentLoopTest : FunSpec({
         })
         val policy = dev.sophi.core.tools.ConfirmationPolicy { toolName, _ -> log.add("confirm:$toolName"); true }
         val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
-        coEvery { provider.complete(any()) } returnsMany listOf(
+        every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(
                     dev.sophi.ai.api.ToolCall("c1", "d1", "{}"),
                     dev.sophi.ai.api.ToolCall("c2", "d2", "{}")
                 ),
                 usage = TokenUsage(1, 0)
-            ),
-            LLMResponse.Text("done", TokenUsage(1, 1))
+            ).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         )
         every { sessionManager.save(any()) } just Runs
 
