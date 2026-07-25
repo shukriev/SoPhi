@@ -9,7 +9,7 @@ import dev.sophi.learning.JsonlLog
 import dev.sophi.learning.LearningConfig
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.string.shouldContain
-import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
 import kotlin.io.path.createTempDirectory
 
@@ -27,12 +27,12 @@ class SophiRuntimeLearningTest : FunSpec({
 
         val provider = mockk<LLMProvider>()
         var call = 0
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             call++
             if (call == 1)
-                LLMResponse.ToolUse(listOf(ToolCall("c1", "boom", "{}")), TokenUsage(1, 1))
+                LLMResponse.ToolUse(listOf(ToolCall("c1", "boom", "{}")), TokenUsage(1, 1)).toStreamFlow()
             else
-                LLMResponse.Text("done", TokenUsage(1, 1))
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         }
 
         val builder = RuntimeBuilder()
