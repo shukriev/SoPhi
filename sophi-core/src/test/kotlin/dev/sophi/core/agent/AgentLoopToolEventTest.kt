@@ -15,7 +15,6 @@ import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.mockk.Runs
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -32,9 +31,9 @@ class AgentLoopToolEventTest : FunSpec({
 
     suspend fun runOneToolTurn(tool: Tool): List<TurnEvent> {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returnsMany listOf(
-            LLMResponse.ToolUse(listOf(ToolCall("c1", tool.name, "{}")), TokenUsage(1, 1)),
-            LLMResponse.Text("done", TokenUsage(1, 1))
+        every { provider.stream(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(listOf(ToolCall("c1", tool.name, "{}")), TokenUsage(1, 1)).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         )
         val loop = AgentLoop(provider, ToolRegistry().register(tool), sessionManager)
         val events = mutableListOf<TurnEvent>()
@@ -58,9 +57,9 @@ class AgentLoopToolEventTest : FunSpec({
     test("tool rounds are persisted as replay=false entries in order") {
         // reuse runOneToolTurn's provider scripting but keep the session:
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returnsMany listOf(
-            LLMResponse.ToolUse(listOf(ToolCall("c1", "ok", "{}")), TokenUsage(1, 1)),
-            LLMResponse.Text("done", TokenUsage(1, 1))
+        every { provider.stream(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(listOf(ToolCall("c1", "ok", "{}")), TokenUsage(1, 1)).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         )
         val loop = AgentLoop(provider, ToolRegistry().register(FixedTool("ok") { "fine" }), sessionManager)
         val session = loop.turn(AgentSession(id = "s2"), "go", config)
