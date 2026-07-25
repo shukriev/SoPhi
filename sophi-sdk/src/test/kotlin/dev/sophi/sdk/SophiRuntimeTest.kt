@@ -105,12 +105,12 @@ class SophiRuntimeTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "should not run"
         }
         val capturedRequests = mutableListOf<CompletionRequest>()
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequests.add(firstArg())
             if (capturedRequests.size == 1)
-                LLMResponse.ToolUse(calls = listOf(ToolCall("c1", "danger", "{}")), usage = TokenUsage(1, 0))
+                LLMResponse.ToolUse(calls = listOf(ToolCall("c1", "danger", "{}")), usage = TokenUsage(1, 0)).toStreamFlow()
             else
-                LLMResponse.Text("done", TokenUsage(1, 1))
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         }
 
         val builder = RuntimeBuilder()
