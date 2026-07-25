@@ -2,6 +2,7 @@ package dev.sophi.core.agent
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -20,6 +21,7 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.flow.flow
 
 class AgentLoopTest : FunSpec({
     val provider = mockk<LLMProvider>()
@@ -93,16 +95,16 @@ class AgentLoopTest : FunSpec({
         capturedRequest!!.systemPrompt shouldBe "You are helpful."
     }
 
-    test("turn() throws IllegalStateException on LLMResponse.Error") {
+    test("turn() throws IllegalStateException when provider.stream() fails") {
         val session = AgentSession(id = "s1")
-        coEvery { provider.complete(any()) } returns LLMResponse.Error("provider down")
+        every { provider.stream(any()) } returns flow<StreamEvent> { throw IllegalStateException("provider down") }
 
         shouldThrow<IllegalStateException> { loop.turn(session, "test", config) }
     }
 
     test("turn() does NOT modify session on error") {
         val session = AgentSession(id = "s1")
-        coEvery { provider.complete(any()) } returns LLMResponse.Error("boom")
+        every { provider.stream(any()) } returns flow<StreamEvent> { throw IllegalStateException("boom") }
 
         runCatching { loop.turn(session, "test", config) }
 
