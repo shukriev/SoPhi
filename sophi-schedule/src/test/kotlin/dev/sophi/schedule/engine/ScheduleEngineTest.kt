@@ -3,6 +3,7 @@ package dev.sophi.schedule.engine
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ToolRegistry
@@ -20,7 +21,10 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlin.io.path.createTempDirectory
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -44,7 +48,7 @@ class ScheduleEngineTest : FunSpec({
 
     test("tickOnce runs a due Recurring task and records a Succeeded run") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("checked, nothing new", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("checked, nothing new"))
         val (engine, taskStore, runLog) = engine(provider)
         // Trigger.Once(atMs = 0L) makes nextRunAtMs deterministic (0), so tickOnce(nowMs = 1L) is due.
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "check"))
@@ -55,7 +59,7 @@ class ScheduleEngineTest : FunSpec({
 
     test("tickOnce skips a task whose nextRunAtMs is in the future") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("x", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("x"))
         val (engine, taskStore, runLog) = engine(provider)
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Interval(3600), mode = TaskMode.Recurring, prompt = "p"))
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = System.currentTimeMillis()) }
@@ -66,12 +70,12 @@ class ScheduleEngineTest : FunSpec({
         val provider = mockk<LLMProvider>()
         val inFlight = AtomicInteger(0)
         val maxObservedConcurrency = AtomicInteger(0)
-        coEvery { provider.complete(any()) } coAnswers {
+        every { provider.stream(any()) } returns flow {
             val now = inFlight.incrementAndGet()
             maxObservedConcurrency.updateAndGet { maxOf(it, now) }
             kotlinx.coroutines.delay(50)
             inFlight.decrementAndGet()
-            LLMResponse.Text("done", TokenUsage(1, 1))
+            emit(StreamEvent.Content("done"))
         }
         val (engine, taskStore, _) = engine(provider, maxConcurrentTasks = 4)
         taskStore.add(ScheduledTask(name = "a", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p"))
@@ -82,7 +86,7 @@ class ScheduleEngineTest : FunSpec({
 
     test("one task's failure does not abort the tick or other due tasks") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } throws RuntimeException("LLM unreachable")
+        every { provider.stream(any()) } throws RuntimeException("LLM unreachable")
         val (engine, taskStore, runLog) = engine(provider)
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p"))
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
@@ -92,11 +96,8 @@ class ScheduleEngineTest : FunSpec({
 
     test("a Goal-mode task runs via GoalRunner and records GoalMet") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } answers {
-            val req = firstArg<CompletionRequest>()
-            if (req.maxTokens == 8) LLMResponse.Text("YES", TokenUsage(1, 1))
-            else LLMResponse.Text("did the thing", TokenUsage(1, 1))
-        }
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did the thing"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
         val (engine, taskStore, runLog) = engine(provider)
         val task = taskStore.add(ScheduledTask(
             name = "goal-task", trigger = Trigger.Once(atMs = 0L),
@@ -107,7 +108,7 @@ class ScheduleEngineTest : FunSpec({
 
     test("runNow executes a task immediately regardless of nextRunAtMs and returns its RunRecord") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("manual run", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("manual run"))
         val (engine, taskStore, _) = engine(provider)
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
         val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
@@ -123,7 +124,7 @@ class ScheduleEngineTest : FunSpec({
 
     test("notifier is called once per completed run") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("x", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("x"))
         val notified = mutableListOf<String>()
         val (engine, taskStore, _) = engine(provider, notifier = Notifier { task, _ -> notified.add(task.id) })
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
@@ -133,9 +134,9 @@ class ScheduleEngineTest : FunSpec({
 
     test("a run exceeding taskTimeoutMs is recorded as Failed with a clear timeout message, not hung forever") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } coAnswers {
+        every { provider.stream(any()) } returns flow {
             kotlinx.coroutines.delay(500)
-            LLMResponse.Text("too late", TokenUsage(1, 1))
+            emit(StreamEvent.Content("too late"))
         }
         val (engine, taskStore, _) = engine(provider, taskTimeoutMs = 50)
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
@@ -147,9 +148,9 @@ class ScheduleEngineTest : FunSpec({
     test("maxTokens is configurable and threaded into every task's AgentConfig") {
         val provider = mockk<LLMProvider>()
         var capturedMaxTokens: Int? = null
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedMaxTokens = firstArg<CompletionRequest>().maxTokens
-            LLMResponse.Text("x", TokenUsage(1, 1))
+            flowOf(StreamEvent.Content("x"))
         }
         val home = tempdir().toPath()
         val taskStore = TaskStore(home.resolve("tasks.json"))
@@ -166,13 +167,15 @@ class ScheduleEngineTest : FunSpec({
 
     test("one task timing out does not abort concurrently-running tasks in the same tick") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } coAnswers {
+        every { provider.stream(any()) } answers {
             val req = firstArg<CompletionRequest>()
             if (req.messages.first().content == "slow") {
-                kotlinx.coroutines.delay(500)
-                LLMResponse.Text("too late", TokenUsage(1, 1))
+                flow {
+                    kotlinx.coroutines.delay(500)
+                    emit(StreamEvent.Content("too late"))
+                }
             } else {
-                LLMResponse.Text("fast", TokenUsage(1, 1))
+                flowOf(StreamEvent.Content("fast"))
             }
         }
         val (engine, taskStore, runLog) = engine(provider, taskTimeoutMs = 50)
