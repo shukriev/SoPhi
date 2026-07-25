@@ -429,7 +429,7 @@ class SkillLoader {
 | project skeleton | M0 | complete | — |
 | `sophi-ai` | M1 | complete | [article-04](articles/article-04.md) |
 | `sophi-core` (session) | M1 | complete | [article-05](articles/article-05.md) |
-| `sophi-core` (loop + tools) | M1 | complete | [article-05](articles/article-05.md) (covers ADR-005 and ADR-006 together) |
+| `sophi-core` (loop + tools) | M1 | complete | [article-06](articles/article-06.md) |
 | `sophi-cli` print mode | M1 | complete | [article-09](articles/article-09.md) |
 | `sophi-skills` | M3 | complete | [article-07](articles/article-07.md) |
 | `sophi-extensions` | M3 | complete | [article-08](articles/article-08.md) |
