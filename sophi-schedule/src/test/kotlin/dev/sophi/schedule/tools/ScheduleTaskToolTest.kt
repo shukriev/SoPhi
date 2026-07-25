@@ -165,4 +165,40 @@ class ScheduleTaskToolTest : FunSpec({
         result shouldContain "t1"
         result shouldContain "t2"
     }
+
+    // ── cron ────────────────────────────────────────────────────────────────
+
+    test("create with trigger_type=cron and a valid cron_expression persists a task") {
+        val s = store()
+        val tool = ScheduleTaskTool(s, runLog())
+        val result = runBlocking {
+            tool.execute("""{"action":"create","name":"daily","prompt":"summarize","trigger_type":"cron","cron_expression":"0 9 * * *","mode":"recurring"}""")
+        }
+        result shouldContain "Created task"
+        val task = s.list().single()
+        (task.trigger as Trigger.Cron).expression shouldBe "0 9 * * *"
+    }
+
+    test("create with trigger_type=cron and an invalid cron_expression returns an Error string and does not persist") {
+        val s = store()
+        val result = runBlocking {
+            ScheduleTaskTool(s, runLog()).execute("""{"action":"create","name":"bad","prompt":"p","trigger_type":"cron","cron_expression":"not a cron","mode":"recurring"}""")
+        }
+        result shouldContain "Error: invalid cron expression"
+        s.list() shouldBe emptyList()
+    }
+
+    test("create with trigger_type=cron and no cron_expression returns an Error string") {
+        val result = runBlocking {
+            ScheduleTaskTool(store(), runLog()).execute("""{"action":"create","name":"t","prompt":"p","trigger_type":"cron","mode":"recurring"}""")
+        }
+        result shouldContain "'cron_expression' is required"
+    }
+
+    test("list renders a Cron trigger's expression") {
+        val s = store()
+        s.add(ScheduledTask(name = "t", trigger = Trigger.Cron("0 9 * * *"), mode = TaskMode.Recurring, prompt = "p"))
+        val result = runBlocking { ScheduleTaskTool(s, runLog()).execute("""{"action":"list"}""") }
+        result shouldContain "cron '0 9 * * *'"
+    }
 })

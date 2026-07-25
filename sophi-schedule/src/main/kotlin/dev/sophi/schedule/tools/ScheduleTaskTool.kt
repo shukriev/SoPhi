@@ -1,6 +1,7 @@
 package dev.sophi.schedule.tools
 
 import dev.sophi.core.tools.Tool
+import dev.sophi.schedule.model.CronSchedules
 import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.StopCondition
 import dev.sophi.schedule.model.TaskMode
@@ -22,6 +23,7 @@ private data class ManageTaskArgs(
     @SerialName("trigger_type") val triggerType: String? = null,
     @SerialName("every_seconds") val everySeconds: Long? = null,
     @SerialName("at_ms") val atMs: Long? = null,
+    @SerialName("cron_expression") val cronExpression: String? = null,
     val mode: String? = null,
     @SerialName("stop_condition_type") val stopConditionType: String? = null,
     @SerialName("shell_command") val shellCommand: String? = null,
@@ -42,9 +44,10 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
           "action":{"type":"string","enum":["create","list","update","pause","resume","remove","runs"]},
           "name":{"type":"string"},
           "prompt":{"type":"string","description":"Instruction given to the agent each time this task runs"},
-          "trigger_type":{"type":"string","enum":["interval","once","manual"]},
+          "trigger_type":{"type":"string","enum":["interval","once","cron","manual"]},
           "every_seconds":{"type":"integer","description":"Required when trigger_type=interval"},
           "at_ms":{"type":"integer","description":"Epoch millis; required when trigger_type=once"},
+          "cron_expression":{"type":"string","description":"Required when trigger_type=cron. Standard 5-field Unix cron syntax (minute hour day-of-month month day-of-week), e.g. \"0 9 * * *\" for 9am daily. Resolved in the local system timezone."},
           "mode":{"type":"string","enum":["recurring","goal"]},
           "stop_condition_type":{"type":"string","enum":["llm_judged","shell_check"],"description":"Required when mode=goal"},
           "shell_command":{"type":"string","description":"Required when stop_condition_type=shell_check"},
@@ -78,8 +81,12 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 ?: return "Error: 'every_seconds' is required for trigger_type=interval"
             "once" -> args.atMs?.let { Trigger.Once(it) }
                 ?: return "Error: 'at_ms' is required for trigger_type=once"
+            "cron" -> args.cronExpression?.let { expr ->
+                CronSchedules.validate(expr)?.let { error -> return "Error: invalid cron expression: $error" }
+                Trigger.Cron(expr)
+            } ?: return "Error: 'cron_expression' is required for trigger_type=cron"
             "manual" -> Trigger.Manual
-            else -> return "Error: 'trigger_type' must be interval, once, or manual"
+            else -> return "Error: 'trigger_type' must be interval, once, cron, or manual"
         }
         val mode = when (args.mode) {
             "recurring" -> TaskMode.Recurring
@@ -118,8 +125,12 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 ?: return "Error: 'every_seconds' is required when trigger_type=interval"
             "once" -> args.atMs?.let { Trigger.Once(it) }
                 ?: return "Error: 'at_ms' is required when trigger_type=once"
+            "cron" -> args.cronExpression?.let { expr ->
+                CronSchedules.validate(expr)?.let { error -> return "Error: invalid cron expression: $error" }
+                Trigger.Cron(expr)
+            } ?: return "Error: 'cron_expression' is required when trigger_type=cron"
             "manual" -> Trigger.Manual
-            else -> return "Error: 'trigger_type' must be interval, once, or manual"
+            else -> return "Error: 'trigger_type' must be interval, once, cron, or manual"
         }
 
         val updated = store.update(id) { task ->
@@ -136,6 +147,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
     private fun renderTrigger(trigger: Trigger): String = when (trigger) {
         is Trigger.Interval -> "every ${trigger.everySeconds}s"
         is Trigger.Once -> "once at epoch ${trigger.atMs}ms"
+        is Trigger.Cron -> "cron '${trigger.expression}'"
         is Trigger.Manual -> "manual"
     }
 

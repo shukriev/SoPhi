@@ -1,5 +1,6 @@
 package dev.sophi.schedule.store
 
+import dev.sophi.schedule.model.CronSchedules
 import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.Trigger
 import kotlinx.serialization.decodeFromString
@@ -79,12 +80,14 @@ class TaskStore(private val path: Path) {
     private fun initialNextRunAt(trigger: Trigger): Long? = when (trigger) {
         is Trigger.Interval -> System.currentTimeMillis() + trigger.everySeconds * 1000
         is Trigger.Once -> trigger.atMs
+        is Trigger.Cron -> CronSchedules.nextFireTimeAfter(trigger.expression, System.currentTimeMillis())
         is Trigger.Manual -> null
     }
 
     private fun rescheduleNextRunAt(trigger: Trigger, finishedAtMs: Long): Long? = when (trigger) {
         is Trigger.Interval -> finishedAtMs + trigger.everySeconds * 1000
         is Trigger.Once -> null
+        is Trigger.Cron -> CronSchedules.nextFireTimeAfter(trigger.expression, finishedAtMs)
         is Trigger.Manual -> null
     }
 

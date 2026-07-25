@@ -185,4 +185,17 @@ class ScheduleEngineTest : FunSpec({
         (runLog.forTask(slow.id).single().outcome is RunOutcome.Failed) shouldBe true
         runLog.forTask(fast.id).single().outcome shouldBe RunOutcome.Succeeded
     }
+
+    test("a due Cron-triggered task fires via tickOnce and records a Succeeded run") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("checked cron task"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Cron("0 9 * * *"), mode = TaskMode.Recurring, prompt = "check"))
+        // add() computes a future nextRunAtMs for a Cron trigger; force it due, the same
+        // way the Trigger.Once(atMs = 0L) tests elsewhere in this file already do.
+        taskStore.update(task.id) { it.copy(nextRunAtMs = 1L) }
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 2L) }
+        runLog.forTask(task.id).single().outcome shouldBe RunOutcome.Succeeded
+    }
 })
