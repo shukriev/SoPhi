@@ -14,8 +14,8 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -83,7 +83,7 @@ class SubagentToolTest : FunSpec({
         val result = runBlocking { tool.execute("""{"subagent_type":"ghost","prompt":"do something"}""") }
 
         result shouldContain "unknown subagent type"
-        coVerify(exactly = 0) { provider.complete(any()) }
+        coVerify(exactly = 0) { provider.stream(any()) }
     }
 
     test("execute() returns error when max delegation depth is exceeded, without calling the LLM") {
@@ -93,12 +93,12 @@ class SubagentToolTest : FunSpec({
         val result = runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
 
         result shouldContain "max delegation depth"
-        coVerify(exactly = 0) { provider.complete(any()) }
+        coVerify(exactly = 0) { provider.stream(any()) }
     }
 
     test("execute() runs the nested loop and returns its final text") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("Found it in Auth.kt", TokenUsage(10, 5))
+        every { provider.stream(any()) } returns LLMResponse.Text("Found it in Auth.kt", TokenUsage(10, 5)).toStreamFlow()
         val tool = buildTool(listOf(explore), provider, createTempDirectory("subagent-test"))
 
         val result = runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""") }
@@ -108,7 +108,7 @@ class SubagentToolTest : FunSpec({
 
     test("execute() persists the subagent session tagged with the parent session id") {
         val provider = mockk<LLMProvider>()
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("done", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         val sessionsDir = createTempDirectory("subagent-test")
         val sessionManager = FileSessionManager(sessionsDir)
         val tool = SubagentTool(
@@ -130,9 +130,9 @@ class SubagentToolTest : FunSpec({
     test("execute() scopes the nested loop to only the definition's allowedTools") {
         val provider = mockk<LLMProvider>()
         val capturedRequests = mutableListOf<CompletionRequest>()
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequests.add(firstArg())
-            LLMResponse.Text("ok", TokenUsage(1, 1))
+            LLMResponse.Text("ok", TokenUsage(1, 1)).toStreamFlow()
         }
         val fullRegistry = ToolRegistry().register(readTool).register(writeTool())
         val tool = buildTool(listOf(explore), provider, createTempDirectory("subagent-test"), fullRegistry = fullRegistry)
@@ -145,9 +145,9 @@ class SubagentToolTest : FunSpec({
     test("execute() allows further delegation only when allowedTools includes the delegate tool itself") {
         val provider = mockk<LLMProvider>()
         val capturedRequests = mutableListOf<CompletionRequest>()
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             capturedRequests.add(firstArg())
-            LLMResponse.Text("ok", TokenUsage(1, 1))
+            LLMResponse.Text("ok", TokenUsage(1, 1)).toStreamFlow()
         }
         val tool = buildTool(listOf(recursive), provider, createTempDirectory("subagent-test"))
 
@@ -181,7 +181,7 @@ class SubagentToolTest : FunSpec({
         fullRegistry.register(depth0Tool)
 
         var callCount = 0
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             callCount++
             if (callCount == 1) {
                 // depth-0's own nested loop decides to delegate one level further.
@@ -194,13 +194,13 @@ class SubagentToolTest : FunSpec({
                         )
                     ),
                     usage = TokenUsage(5, 5)
-                )
+                ).toStreamFlow()
             } else {
                 // Every completion from here on (the depth-1 subagent's own turn, and the
                 // depth-0 loop's follow-up turn once the tool result comes back) settles on
                 // the same final text, so the value that survives to the top is unambiguously
                 // the depth-1 subagent's answer.
-                LLMResponse.Text("depth-1 subagent result", TokenUsage(5, 5))
+                LLMResponse.Text("depth-1 subagent result", TokenUsage(5, 5)).toStreamFlow()
             }
         }
 
@@ -237,7 +237,7 @@ class SubagentToolTest : FunSpec({
         fullRegistry.register(depth0Tool)
 
         var callCount = 0
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             callCount++
             capturedRequests.add(firstArg())
             if (callCount == 1) {
@@ -250,9 +250,9 @@ class SubagentToolTest : FunSpec({
                         )
                     ),
                     usage = TokenUsage(5, 5)
-                )
+                ).toStreamFlow()
             } else {
-                LLMResponse.Text("stopped", TokenUsage(1, 1))
+                LLMResponse.Text("stopped", TokenUsage(1, 1)).toStreamFlow()
             }
         }
 
@@ -291,15 +291,15 @@ class SubagentToolTest : FunSpec({
         )
         val provider = mockk<LLMProvider>()
         var callCount = 0
-        coEvery { provider.complete(any()) } answers {
+        every { provider.stream(any()) } answers {
             callCount++
             if (callCount == 1)
                 LLMResponse.ToolUse(
                     calls = listOf(ToolCall("c1", "danger", "{}")),
                     usage = TokenUsage(1, 0)
-                )
+                ).toStreamFlow()
             else
-                LLMResponse.Text("acknowledged", TokenUsage(1, 1))
+                LLMResponse.Text("acknowledged", TokenUsage(1, 1)).toStreamFlow()
         }
         val fullRegistry = ToolRegistry().register(destructiveTool)
         val tool = SubagentTool(
