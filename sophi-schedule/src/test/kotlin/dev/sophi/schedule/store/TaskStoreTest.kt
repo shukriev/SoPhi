@@ -117,4 +117,23 @@ class TaskStoreTest : FunSpec({
     test("update() returns false for an unknown id") {
         store().update("no-such-id") { it } shouldBe false
     }
+
+    test("add computes nextRunAtMs for a Cron trigger and persists the task") {
+        val s = store()
+        val before = System.currentTimeMillis()
+        val saved = s.add(ScheduledTask(
+            name = "t", trigger = Trigger.Cron("0 9 * * *"), mode = TaskMode.Recurring, prompt = "p"))
+        saved.nextRunAtMs.shouldNotBeNull()
+        (saved.nextRunAtMs!! > before) shouldBe true
+    }
+
+    test("recordRun reschedules a Cron task from finishedAtMs, not from now") {
+        val s = store()
+        val task = s.add(ScheduledTask(
+            name = "t", trigger = Trigger.Cron("0 9 * * *"), mode = TaskMode.Recurring, prompt = "p"))
+        val finishedAtMs = 1_000_000L
+        s.recordRun(task.id, finishedAtMs = finishedAtMs) shouldBe true
+        val updated = s.get(task.id)!!
+        (updated.nextRunAtMs!! > finishedAtMs) shouldBe true
+    }
 })

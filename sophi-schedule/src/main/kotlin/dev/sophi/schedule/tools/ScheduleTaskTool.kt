@@ -136,6 +136,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
     private fun renderTrigger(trigger: Trigger): String = when (trigger) {
         is Trigger.Interval -> "every ${trigger.everySeconds}s"
         is Trigger.Once -> "once at epoch ${trigger.atMs}ms"
+        is Trigger.Cron -> "cron '${trigger.expression}'"
         is Trigger.Manual -> "manual"
     }
 
