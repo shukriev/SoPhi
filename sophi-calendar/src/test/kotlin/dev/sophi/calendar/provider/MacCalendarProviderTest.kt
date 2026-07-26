@@ -7,6 +7,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import java.time.DayOfWeek
 
 private const val FIELD_SEP_FOR_TEST = "::SOPHI_FIELD::"
@@ -148,5 +149,41 @@ class MacCalendarProviderTest : FunSpec({
         val provider = MacCalendarProvider(runScript = { script -> captured = script; "" })
         provider.list("Home", 0L, 1L)
         captured shouldContain "start date < rangeEnd and end date > rangeStart"
+    }
+
+    test("update with only a title patch sets summary and leaves other fields alone") {
+        var captured = ""
+        val resultLine = listOf("ID1", "New Title", "2026", "8", "1", "0", "2026", "8", "1", "3600", "false", "", "").joinToString(FIELD_SEP_FOR_TEST)
+        val provider = MacCalendarProvider(runScript = { script -> captured = script; resultLine })
+        val updated = provider.update("ID1", "Home", dev.sophi.calendar.model.CalendarEventPatch(title = "New Title"))
+        updated.title shouldBe "New Title"
+        captured shouldContain "set summary of theEvent to \"New Title\""
+        captured shouldNotContain "set location of theEvent"
+    }
+
+    test("update throws when the event id doesn't exist") {
+        val provider = MacCalendarProvider(runScript = { "NOT_FOUND" })
+        val ex = runCatching {
+            provider.update("missing", "Home", dev.sophi.calendar.model.CalendarEventPatch(title = "x"))
+        }.exceptionOrNull()
+        ex?.message shouldContain "missing"
+    }
+
+    test("update with clearRecurrence=true sets recurrence to an empty string") {
+        var captured = ""
+        val resultLine = listOf("ID1", "T", "2026", "8", "1", "0", "2026", "8", "1", "3600", "false", "", "").joinToString(FIELD_SEP_FOR_TEST)
+        val provider = MacCalendarProvider(runScript = { script -> captured = script; resultLine })
+        provider.update("ID1", "Home", dev.sophi.calendar.model.CalendarEventPatch(clearRecurrence = true))
+        captured shouldContain "set recurrence of theEvent to \"\""
+    }
+
+    test("delete removes the event and returns true") {
+        val provider = MacCalendarProvider(runScript = { "DELETED" })
+        provider.delete("ID1", "Home") shouldBe true
+    }
+
+    test("delete returns false when the event id doesn't exist") {
+        val provider = MacCalendarProvider(runScript = { "NOT_FOUND" })
+        provider.delete("missing", "Home") shouldBe false
     }
 })

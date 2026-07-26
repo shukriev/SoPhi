@@ -206,8 +206,74 @@ class MacCalendarProvider(
             secondsSinceMidnight / 3600, (secondsSinceMidnight % 3600) / 60, secondsSinceMidnight % 60, 0,
             ZoneId.systemDefault()
         ).toInstant().toEpochMilli()
-    override fun update(eventId: String, calendarId: String?, patch: CalendarEventPatch): CalendarEvent = TODO("Task 6")
-    override fun delete(eventId: String, calendarId: String?): Boolean = TODO("Task 6")
+    override fun update(eventId: String, calendarId: String?, patch: CalendarEventPatch): CalendarEvent {
+        val calendarName = calendarId ?: defaultCalendarName()
+        val dateSetup = StringBuilder()
+        val setters = StringBuilder()
+
+        patch.title?.let { setters.append("\n                    set summary of theEvent to ${quote(it)}") }
+        patch.location?.let { setters.append("\n                    set location of theEvent to ${quote(it)}") }
+        patch.notes?.let { setters.append("\n                    set description of theEvent to ${quote(it)}") }
+        patch.allDay?.let { setters.append("\n                    set allday event of theEvent to $it") }
+
+        val startMs = if (patch.allDay == true && patch.startDate != null) parseIsoDateToEpochMs(patch.startDate) else patch.start
+        startMs?.let {
+            dateSetup.append(epochMsToAppleScriptDate(it, "newStart")).append("\n")
+            setters.append("\n                    set start date of theEvent to newStart")
+        }
+        val endMs = if (patch.allDay == true && patch.endDate != null) parseIsoDateToEpochMs(patch.endDate) else patch.end
+        endMs?.let {
+            dateSetup.append(epochMsToAppleScriptDate(it, "newEnd")).append("\n")
+            setters.append("\n                    set end date of theEvent to newEnd")
+        }
+
+        if (patch.clearRecurrence) {
+            setters.append("\n                    set recurrence of theEvent to \"\"")
+        } else {
+            patch.recurrence?.let { setters.append("\n                    set recurrence of theEvent to ${quote(toRRule(it))}") }
+        }
+        patch.reminderMinutesBefore?.let {
+            setters.append("\n                    if (count of display alarms of theEvent) > 0 then delete display alarm 1 of theEvent")
+            setters.append("\n                    make new display alarm at end of display alarms of theEvent with properties {trigger interval:-$it}")
+        }
+
+        val script = """
+            $HANDLERS_PRELUDE
+            $dateSetup
+            tell application "Calendar"
+                tell calendar ${quote(calendarName)}
+                    try
+                        set theEvent to (first event whose uid is ${quote(eventId)})
+                    on error
+                        return "NOT_FOUND"
+                    end try$setters
+                    return my formatEvent(theEvent)
+                end tell
+            end tell
+        """.trimIndent()
+
+        val output = runScript(script).trim()
+        check(output != "NOT_FOUND") { "No event found with id $eventId" }
+        return parseEventLine(output, calendarName)
+    }
+
+    override fun delete(eventId: String, calendarId: String?): Boolean {
+        val calendarName = calendarId ?: defaultCalendarName()
+        val script = """
+            tell application "Calendar"
+                tell calendar ${quote(calendarName)}
+                    try
+                        set theEvent to (first event whose uid is ${quote(eventId)})
+                        delete theEvent
+                        return "DELETED"
+                    on error
+                        return "NOT_FOUND"
+                    end try
+                end tell
+            end tell
+        """.trimIndent()
+        return runScript(script).trim() == "DELETED"
+    }
 
     companion object {
         internal fun toRRuleForTest(r: Recurrence): String = MacCalendarProvider().toRRule(r)
