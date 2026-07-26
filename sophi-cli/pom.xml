@@ -44,6 +44,10 @@
         </dependency>
         <dependency>
             <groupId>dev.sophi</groupId>
+            <artifactId>sophi-calendar</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.sophi</groupId>
             <artifactId>sophi-skills</artifactId>
         </dependency>
         <dependency>

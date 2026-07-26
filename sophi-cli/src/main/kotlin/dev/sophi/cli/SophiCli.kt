@@ -27,6 +27,12 @@ import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
+import dev.sophi.calendar.tools.CreateCalendarEventTool
+import dev.sophi.calendar.tools.DeleteCalendarEventTool
+import dev.sophi.calendar.tools.GetCalendarEventTool
+import dev.sophi.calendar.tools.ListCalendarEventsTool
+import dev.sophi.calendar.tools.ListCalendarsTool
+import dev.sophi.calendar.tools.UpdateCalendarEventTool
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningConfig
@@ -197,6 +203,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")),
             dev.sophi.schedule.store.RunLog(Path.of(scheduleDirStr).resolve("runs.jsonl"))
         ))
+        val calendarProvider = buildCalendarProvider()
+        registry.register(CreateCalendarEventTool(calendarProvider))
+        registry.register(ListCalendarEventsTool(calendarProvider))
+        registry.register(GetCalendarEventTool(calendarProvider))
+        registry.register(UpdateCalendarEventTool(calendarProvider))
+        registry.register(DeleteCalendarEventTool(calendarProvider))
+        registry.register(ListCalendarsTool(calendarProvider))
         val mcpClientManager = McpClientManager()
         val mcpConfigPath = Path.of(mcpConfigPathStr)
         if (mcpConfigPath.exists()) {
