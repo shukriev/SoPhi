@@ -6,7 +6,8 @@
 |-------|-------|
 | Current milestone | M7 — Jane's Theory memory (palace v1) complete |
 | Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory, sophi-schedule |
-| Last updated | 2026-07-22 |
+| Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
+| Last updated | 2026-07-26 |
 
 ---
 
@@ -66,6 +67,11 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │  ScheduleEngine (tickOnce/runNow) · GoalRunner · TaskStore /  │
 │  RunLog · Notifier · manage_scheduled_task Tool               │
 └──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│    sophi-calendar  (native OS calendar integration)          │
+│  CalendarProvider · MacCalendarProvider (osascript) ·        │
+│  create/list/get/update/delete_calendar_event, list_calendars │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 | Module | Purpose | Status |
@@ -78,6 +84,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
 | `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn | complete |
 | `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `GoalRunner` (LLM-judged/shell-checked stop conditions), `TaskStore`/`RunLog`, `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven | complete |
+| `sophi-calendar` | Native OS calendar CRUD: `CalendarProvider` seam, `MacCalendarProvider` (AppleScript/Calendar.app) — Windows/Linux deferred; six create/read/update/delete/list Tools | in progress |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
 | `sophi-sdk` | Embeddable library for Spring `@Service` beans | complete |
@@ -419,6 +426,7 @@ class SkillLoader {
 | [ADR-012](adr/ADR-012-offline-trajectory-export.md) | Fine-tuning support | Offline `sophi export` to SFT/DPO datasets — training out of scope |
 | [ADR-013](adr/ADR-013-memory-as-plugin-context-contributor.md) | Declarative memory placement | Separate sophi-memory module; per-turn context via new ContextContributor SPI |
 | [ADR-014](adr/ADR-014-scheduled-goal-tasks.md) | Scheduled & goal-based tasks | Trigger×Mode unification; local-only for v1; per-task destructive allowlist; OS-scheduler-first tick model |
+| [ADR-015](adr/ADR-015-native-os-calendar-integration.md) | Native OS calendar integration | `CalendarProvider` seam; per-action risk-gated tools; structured recurrence; macOS-only v1, Windows/Linux deferred |
 
 ---
 
@@ -444,3 +452,4 @@ class SkillLoader {
 | `sophi-learning` phase 4 — trajectory export | M6 | complete | [article-17](articles/article-17.md) |
 | `sophi-memory` — Jane's Theory memory palace | M7 | complete | [article-18](articles/article-18.md) |
 | `sophi-schedule` — scheduled & goal-based tasks | post-M7 | complete | [article-19](articles/article-19.md) |
+| `sophi-calendar` — native OS calendar integration (macOS) | post-M7 | in progress | [article-21](articles/article-21.md) |
