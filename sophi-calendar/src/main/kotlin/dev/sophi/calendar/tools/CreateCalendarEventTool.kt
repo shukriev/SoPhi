@@ -7,6 +7,8 @@ import dev.sophi.core.tools.Tool
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 @Serializable
 private data class RecurrenceArgs(
@@ -21,8 +23,8 @@ private data class RecurrenceArgs(
 private data class CreateEventArgs(
     val title: String? = null,
     @SerialName("calendar_id") val calendarId: String? = null,
-    val start: Long? = null,
-    val end: Long? = null,
+    val start: String? = null,
+    val end: String? = null,
     @SerialName("all_day") val allDay: Boolean = false,
     @SerialName("start_date") val startDate: String? = null,
     @SerialName("end_date") val endDate: String? = null,
@@ -42,13 +44,16 @@ private fun RecurrenceArgs.toModel(): Recurrence = Recurrence(
 
 class CreateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "create_calendar_event"
-    override val description = "Create a calendar event (optionally recurring or all-day) on the native OS calendar"
+    override val description = "Create a calendar event (optionally recurring or all-day) on the native OS calendar. " +
+        "start/end (or start_date/end_date for all-day) are epoch millis / ISO dates you must compute yourself — " +
+        "if the request uses a relative date or time (\"tomorrow\", \"next Monday\", \"in an hour\"), call " +
+        "get_current_datetime first to establish the current date and timezone; never guess it."
     override val parametersJson = """
         {"type":"object","properties":{
           "title":{"type":"string"},
           "calendar_id":{"type":"string","description":"Defaults to the OS default calendar"},
-          "start":{"type":"integer","description":"Epoch millis; required unless all_day=true"},
-          "end":{"type":"integer","description":"Epoch millis; required unless all_day=true"},
+          "start":{"type":"string","description":"ISO-8601 local date-time without a UTC offset (e.g. 2026-07-27T12:00:00) — interpreted in the OS's local timezone, matching get_current_datetime's zone; required unless all_day=true"},
+          "end":{"type":"string","description":"ISO-8601 local date-time, same format as start; required unless all_day=true"},
           "all_day":{"type":"boolean","default":false},
           "start_date":{"type":"string","description":"ISO YYYY-MM-DD; required when all_day=true"},
           "end_date":{"type":"string","description":"ISO YYYY-MM-DD; required when all_day=true"},
@@ -67,22 +72,32 @@ class CreateCalendarEventTool(private val provider: CalendarProvider) : Tool {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    private fun parseLocalDateTime(s: String): Long? =
+        runCatching { LocalDateTime.parse(s).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() }.getOrNull()
+
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString(CreateEventArgs.serializer(), argumentsJson)
         val title = args.title ?: return "Error: 'title' is required"
+        var startMs = 0L
+        var endMs = 0L
         if (args.allDay) {
             if (args.startDate == null || args.endDate == null) {
                 return "Error: 'start_date' and 'end_date' are required when all_day=true"
             }
-        } else if (args.start == null || args.end == null) {
-            return "Error: 'start' and 'end' are required unless all_day=true"
+        } else {
+            val startStr = args.start ?: return "Error: 'start' and 'end' are required unless all_day=true"
+            val endStr = args.end ?: return "Error: 'start' and 'end' are required unless all_day=true"
+            startMs = parseLocalDateTime(startStr)
+                ?: return "Error: invalid 'start' datetime '$startStr', expected ISO-8601 like 2026-07-27T12:00:00"
+            endMs = parseLocalDateTime(endStr)
+                ?: return "Error: invalid 'end' datetime '$endStr', expected ISO-8601 like 2026-07-27T12:00:00"
         }
 
         val event = CalendarEvent(
             calendarId = args.calendarId,
             title = title,
-            start = args.start ?: 0,
-            end = args.end ?: 0,
+            start = startMs,
+            end = endMs,
             allDay = args.allDay,
             startDate = args.startDate,
             endDate = args.endDate,

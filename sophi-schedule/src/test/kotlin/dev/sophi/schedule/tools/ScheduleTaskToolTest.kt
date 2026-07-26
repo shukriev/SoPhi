@@ -12,6 +12,11 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
+import java.time.LocalDateTime
+import java.time.ZoneId
+
+private fun epochMs(iso: String): Long =
+    LocalDateTime.parse(iso).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
 class ScheduleTaskToolTest : FunSpec({
     fun store(): TaskStore = TaskStore(tempdir().toPath().resolve("tasks.json"))
@@ -31,6 +36,30 @@ class ScheduleTaskToolTest : FunSpec({
         val task = s.list().single()
         task.name shouldContain "monitor"
         (task.trigger is Trigger.Interval) shouldBe true
+    }
+
+    test("create with trigger_type=once persists a Trigger.Once with the parsed epoch") {
+        val s = store()
+        val tool = ScheduleTaskTool(s, runLog())
+        val result = runBlocking {
+            tool.execute(
+                """{"action":"create","name":"reminder","prompt":"ping me","trigger_type":"once","at":"2026-08-01T09:00:00","mode":"recurring"}"""
+            )
+        }
+        result shouldContain "Created task"
+        val trigger = s.list().single().trigger as Trigger.Once
+        trigger.atMs shouldBe epochMs("2026-08-01T09:00:00")
+    }
+
+    test("create with trigger_type=once and an invalid 'at' returns an Error string") {
+        val s = store()
+        val result = runBlocking {
+            ScheduleTaskTool(s, runLog()).execute(
+                """{"action":"create","name":"reminder","prompt":"ping me","trigger_type":"once","at":"not-a-date","mode":"recurring"}"""
+            )
+        }
+        result shouldContain "Error"
+        s.list() shouldBe emptyList()
     }
 
     test("create with mode=goal and stop_condition_type=shell_check persists a Goal task") {
@@ -112,6 +141,17 @@ class ScheduleTaskToolTest : FunSpec({
         runBlocking { tool.execute("""{"action":"update","task_id":"${task.id}","trigger_type":"interval","every_seconds":3600}""") }
         val updated = s.get(task.id)!!
         (updated.trigger as Trigger.Interval).everySeconds shouldBe 3600
+    }
+
+    test("update changes trigger_type=once's 'at' value") {
+        val s = store()
+        val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        val tool = ScheduleTaskTool(s, runLog())
+        runBlocking {
+            tool.execute("""{"action":"update","task_id":"${task.id}","trigger_type":"once","at":"2026-09-01T10:00:00"}""")
+        }
+        val trigger = s.get(task.id)!!.trigger as Trigger.Once
+        trigger.atMs shouldBe epochMs("2026-09-01T10:00:00")
     }
 
     test("update changes the destructive tool allowlist") {
