@@ -13,6 +13,28 @@ import java.time.format.DateTimeFormatter
 
 private const val FIELD_SEP = "::SOPHI_FIELD::"
 
+private val HANDLERS_PRELUDE = """
+    on clean(t)
+        if t is missing value then return ""
+        set t to t as text
+        set {tid, my text item delimiters} to {my text item delimiters, return}
+        set parts to text items of t
+        set my text item delimiters to " "
+        set t to parts as text
+        set my text item delimiters to tid
+        return t
+    end clean
+
+    on formatEvent(e)
+        set sd to start date of e
+        set ed to end date of e
+        return (uid of e) & "$FIELD_SEP" & (summary of e as text) & "$FIELD_SEP" & ¬
+            (year of sd as text) & "$FIELD_SEP" & (month of sd as integer as text) & "$FIELD_SEP" & (day of sd as text) & "$FIELD_SEP" & (time of sd as text) & "$FIELD_SEP" & ¬
+            (year of ed as text) & "$FIELD_SEP" & (month of ed as integer as text) & "$FIELD_SEP" & (day of ed as text) & "$FIELD_SEP" & (time of ed as text) & "$FIELD_SEP" & ¬
+            (allday event of e as text) & "$FIELD_SEP" & my clean(location of e) & "$FIELD_SEP" & my clean(description of e)
+    end formatEvent
+""".trimIndent()
+
 class MacCalendarProvider(
     private val runScript: (String) -> String = { script ->
         val process = ProcessBuilder("osascript", "-e", script).redirectErrorStream(true).start()
@@ -119,8 +141,71 @@ class MacCalendarProvider(
         val id = runScript(script).trim()
         return event.copy(id = id, calendarId = calendarName)
     }
-    override fun get(eventId: String, calendarId: String?): CalendarEvent? = TODO("Task 5")
-    override fun list(calendarId: String?, rangeStartMs: Long, rangeEndMs: Long): List<CalendarEvent> = TODO("Task 5")
+    override fun get(eventId: String, calendarId: String?): CalendarEvent? {
+        val calendarName = calendarId ?: defaultCalendarName()
+        val script = """
+            $HANDLERS_PRELUDE
+            tell application "Calendar"
+                tell calendar ${quote(calendarName)}
+                    try
+                        set theEvent to (first event whose uid is ${quote(eventId)})
+                    on error
+                        return "NOT_FOUND"
+                    end try
+                    return my formatEvent(theEvent)
+                end tell
+            end tell
+        """.trimIndent()
+        val output = runScript(script).trim()
+        if (output == "NOT_FOUND" || output.isEmpty()) return null
+        return parseEventLine(output, calendarName)
+    }
+
+    override fun list(calendarId: String?, rangeStartMs: Long, rangeEndMs: Long): List<CalendarEvent> {
+        val calendarName = calendarId ?: defaultCalendarName()
+        val script = """
+            $HANDLERS_PRELUDE
+            ${epochMsToAppleScriptDate(rangeStartMs, "rangeStart")}
+            ${epochMsToAppleScriptDate(rangeEndMs, "rangeEnd")}
+            tell application "Calendar"
+                tell calendar ${quote(calendarName)}
+                    set matches to (every event whose start date < rangeEnd and end date > rangeStart)
+                    set outputLines to {}
+                    repeat with e in matches
+                        set end of outputLines to my formatEvent(e)
+                    end repeat
+                    set {tid, my text item delimiters} to {my text item delimiters, linefeed}
+                    set result to outputLines as text
+                    set my text item delimiters to tid
+                    return result
+                end tell
+            end tell
+        """.trimIndent()
+        val output = runScript(script).trim()
+        if (output.isEmpty()) return emptyList()
+        return output.lines().map { parseEventLine(it, calendarName) }
+    }
+
+    private fun parseEventLine(line: String, calendarName: String): CalendarEvent {
+        val f = line.split(FIELD_SEP)
+        return CalendarEvent(
+            id = f[0],
+            calendarId = calendarName,
+            title = f[1],
+            start = ymdSecToEpochMs(f[2].toInt(), f[3].toInt(), f[4].toInt(), f[5].toInt()),
+            end = ymdSecToEpochMs(f[6].toInt(), f[7].toInt(), f[8].toInt(), f[9].toInt()),
+            allDay = f[10] == "true",
+            location = f[11].ifBlank { null },
+            notes = f[12].ifBlank { null }
+        )
+    }
+
+    private fun ymdSecToEpochMs(year: Int, month: Int, day: Int, secondsSinceMidnight: Int): Long =
+        ZonedDateTime.of(
+            year, month, day,
+            secondsSinceMidnight / 3600, (secondsSinceMidnight % 3600) / 60, secondsSinceMidnight % 60, 0,
+            ZoneId.systemDefault()
+        ).toInstant().toEpochMilli()
     override fun update(eventId: String, calendarId: String?, patch: CalendarEventPatch): CalendarEvent = TODO("Task 6")
     override fun delete(eventId: String, calendarId: String?): Boolean = TODO("Task 6")
 

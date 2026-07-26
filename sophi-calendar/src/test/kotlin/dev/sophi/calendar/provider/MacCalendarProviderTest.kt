@@ -4,9 +4,12 @@ import dev.sophi.calendar.model.CalendarInfo
 import dev.sophi.calendar.model.Frequency
 import dev.sophi.calendar.model.Recurrence
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import java.time.DayOfWeek
+
+private const val FIELD_SEP_FOR_TEST = "::SOPHI_FIELD::"
 
 class MacCalendarProviderTest : FunSpec({
     test("listCalendars parses one calendar name per line, first line is default") {
@@ -104,5 +107,46 @@ class MacCalendarProviderTest : FunSpec({
             )
         )
         captured shouldContain "allday event:true"
+    }
+
+    test("get parses a formatted event line into a CalendarEvent") {
+        // 2026-08-01 15:00:00 local -> 2026-08-01 16:00:00 local
+        val line = listOf(
+            "ABC", "Standup", "2026", "8", "1", "54000", "2026", "8", "1", "57600", "false", "Room 1", "Notes"
+        ).joinToString(FIELD_SEP_FOR_TEST)
+        val provider = MacCalendarProvider(runScript = { line })
+        val event = provider.get("ABC", "Home")
+        event.shouldNotBeNull()
+        event!!.id shouldBe "ABC"
+        event.title shouldBe "Standup"
+        event.location shouldBe "Room 1"
+        event.notes shouldBe "Notes"
+        event.calendarId shouldBe "Home"
+    }
+
+    test("get returns null when Calendar.app reports NOT_FOUND") {
+        val provider = MacCalendarProvider(runScript = { "NOT_FOUND" })
+        provider.get("missing", "Home") shouldBe null
+    }
+
+    test("list parses multiple event lines, one per line") {
+        val line1 = listOf("ID1", "A", "2026", "8", "1", "0", "2026", "8", "1", "3600", "false", "", "").joinToString(FIELD_SEP_FOR_TEST)
+        val line2 = listOf("ID2", "B", "2026", "8", "2", "0", "2026", "8", "2", "3600", "false", "", "").joinToString(FIELD_SEP_FOR_TEST)
+        val provider = MacCalendarProvider(runScript = { "$line1\n$line2" })
+        val events = provider.list("Home", 0L, Long.MAX_VALUE)
+        events.map { it.id } shouldBe listOf("ID1", "ID2")
+        events.map { it.title } shouldBe listOf("A", "B")
+    }
+
+    test("list returns an empty list when Calendar.app reports no matches") {
+        val provider = MacCalendarProvider(runScript = { "" })
+        provider.list("Home", 0L, 1L) shouldBe emptyList()
+    }
+
+    test("list script uses an overlap filter, not a starts-within filter") {
+        var captured = ""
+        val provider = MacCalendarProvider(runScript = { script -> captured = script; "" })
+        provider.list("Home", 0L, 1L)
+        captured shouldContain "start date < rangeEnd and end date > rangeStart"
     }
 })
