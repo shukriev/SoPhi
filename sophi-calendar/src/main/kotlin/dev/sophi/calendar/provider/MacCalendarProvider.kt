@@ -86,7 +86,39 @@ class MacCalendarProvider(
 
     // Placeholder overrides implemented in Tasks 4-6; keeps this file compiling
     // standalone for this task's test run.
-    override fun create(event: CalendarEvent): CalendarEvent = TODO("Task 4")
+    override fun create(event: CalendarEvent): CalendarEvent {
+        val calendarName = event.calendarId ?: defaultCalendarName()
+        val startMs = if (event.allDay) {
+            parseIsoDateToEpochMs(requireNotNull(event.startDate) { "startDate is required when allDay=true" })
+        } else event.start
+        val endMs = if (event.allDay) {
+            parseIsoDateToEpochMs(requireNotNull(event.endDate) { "endDate is required when allDay=true" })
+        } else event.end
+
+        val props = StringBuilder("summary:${quote(event.title)}, start date:newStart, end date:newEnd")
+        event.location?.let { props.append(", location:${quote(it)}") }
+        event.notes?.let { props.append(", description:${quote(it)}") }
+        if (event.allDay) props.append(", allday event:true")
+
+        val recurrenceLine = event.recurrence?.let { "\n                set recurrence of newEvent to ${quote(toRRule(it))}" } ?: ""
+        val reminderLine = event.reminderMinutesBefore?.let {
+            "\n                make new display alarm at end of display alarms of newEvent with properties {trigger interval:-$it}"
+        } ?: ""
+
+        val script = """
+            ${epochMsToAppleScriptDate(startMs, "newStart")}
+            ${epochMsToAppleScriptDate(endMs, "newEnd")}
+            tell application "Calendar"
+                tell calendar ${quote(calendarName)}
+                    set newEvent to make new event with properties {$props}$recurrenceLine$reminderLine
+                    return uid of newEvent
+                end tell
+            end tell
+        """.trimIndent()
+
+        val id = runScript(script).trim()
+        return event.copy(id = id, calendarId = calendarName)
+    }
     override fun get(eventId: String, calendarId: String?): CalendarEvent? = TODO("Task 5")
     override fun list(calendarId: String?, rangeStartMs: Long, rangeEndMs: Long): List<CalendarEvent> = TODO("Task 5")
     override fun update(eventId: String, calendarId: String?, patch: CalendarEventPatch): CalendarEvent = TODO("Task 6")

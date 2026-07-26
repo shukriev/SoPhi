@@ -48,4 +48,61 @@ class MacCalendarProviderTest : FunSpec({
         )
         rrule shouldContain "BYDAY=MO,WE,FR"
     }
+
+    test("create builds an AppleScript that sets summary, dates, and returns the uid") {
+        var captured = ""
+        val provider = MacCalendarProvider(runScript = { script -> captured = script; "ABC-123" })
+        val result = provider.create(
+            dev.sophi.calendar.model.CalendarEvent(
+                calendarId = "Home", title = "Standup", start = 1785700000000L, end = 1785703600000L
+            )
+        )
+        result.id shouldBe "ABC-123"
+        result.calendarId shouldBe "Home"
+        captured shouldContain "make new event"
+        captured shouldContain "summary:\"Standup\""
+        captured shouldContain "tell calendar \"Home\""
+    }
+
+    test("create resolves a null calendarId to the default calendar") {
+        val provider = MacCalendarProvider(runScript = { script ->
+            if (script.contains("repeat with c in calendars")) "Home\n" else "XYZ"
+        })
+        val result = provider.create(dev.sophi.calendar.model.CalendarEvent(title = "x", start = 1L, end = 2L))
+        result.calendarId shouldBe "Home"
+    }
+
+    test("create with a recurrence sets the recurrence property to an RRULE string") {
+        var captured = ""
+        val provider = MacCalendarProvider(runScript = { script -> captured = script; "ID1" })
+        provider.create(
+            dev.sophi.calendar.model.CalendarEvent(
+                calendarId = "Home", title = "Standup", start = 1L, end = 2L,
+                recurrence = dev.sophi.calendar.model.Recurrence(frequency = dev.sophi.calendar.model.Frequency.DAILY, count = 10)
+            )
+        )
+        captured shouldContain "set recurrence of newEvent to \"FREQ=DAILY;INTERVAL=1;COUNT=10\""
+    }
+
+    test("create with a reminder adds a display alarm with a negative trigger interval") {
+        var captured = ""
+        val provider = MacCalendarProvider(runScript = { script -> captured = script; "ID1" })
+        provider.create(
+            dev.sophi.calendar.model.CalendarEvent(
+                calendarId = "Home", title = "Standup", start = 1L, end = 2L, reminderMinutesBefore = 15
+            )
+        )
+        captured shouldContain "trigger interval:-15"
+    }
+
+    test("create for an all-day event uses startDate/endDate and sets allday event to true") {
+        var captured = ""
+        val provider = MacCalendarProvider(runScript = { script -> captured = script; "ID1" })
+        provider.create(
+            dev.sophi.calendar.model.CalendarEvent(
+                calendarId = "Home", title = "Vacation", allDay = true, startDate = "2026-08-01", endDate = "2026-08-05"
+            )
+        )
+        captured shouldContain "allday event:true"
+    }
 })
