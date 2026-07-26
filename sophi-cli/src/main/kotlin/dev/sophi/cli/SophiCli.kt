@@ -20,6 +20,7 @@ import dev.sophi.core.tools.EditTool
 import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.FileReadTool
 import dev.sophi.core.tools.FileWriteTool
+import dev.sophi.core.tools.GetCurrentDateTimeTool
 import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.Tool
@@ -324,7 +325,8 @@ private class LegacyReadLineInputSource : InputSource {
 
 internal fun buildBuiltinTools(braveApiKeyOption: String?): List<Tool> {
     val tools = mutableListOf<Tool>(
-        FileReadTool(), FileWriteTool(), GrepTool(), GlobTool(), EditTool(), BashTool(), FetchUrlTool()
+        FileReadTool(), FileWriteTool(), GrepTool(), GlobTool(), EditTool(), BashTool(), FetchUrlTool(),
+        GetCurrentDateTimeTool()
     )
     val braveApiKey = braveApiKeyOption ?: System.getenv("BRAVE_SEARCH_API_KEY")
     if (braveApiKey != null) {
