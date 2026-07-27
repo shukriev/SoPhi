@@ -11,5 +11,8 @@ sealed class Trigger {
     data class Once(val atMs: Long) : Trigger()
 
     @Serializable
+    data class Cron(val expression: String) : Trigger()
+
+    @Serializable
     object Manual : Trigger()
 }
