@@ -161,7 +161,7 @@ class ScheduleTaskToolTest : FunSpec({
         runBlocking {
             tool.execute("""{"action":"update","task_id":"${task.id}","destructive_tool_allowlist":["write_file"]}""")
         }
-        s.get(task.id)!!.destructiveToolAllowlist shouldBe setOf("write_file")
+        s.get(task.id)!!.toolGrants shouldBe setOf("write_file")
     }
 
     test("update without task_id returns an Error string") {

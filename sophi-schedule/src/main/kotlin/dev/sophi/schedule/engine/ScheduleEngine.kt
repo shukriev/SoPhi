@@ -66,8 +66,11 @@ class ScheduleEngine(
                     ?.let { type -> agentDefinitions.find { it.name == type } }
                     ?.let { def -> fullRegistry.subset(def.allowedTools) }
                     ?: fullRegistry
-                val confirmationPolicy = AllowlistConfirmationPolicy(task.destructiveToolAllowlist)
-                val loop = AgentLoop(provider, scopedRegistry, sessionManager, confirmationPolicy = confirmationPolicy)
+                val loop = AgentLoop(
+                    provider, scopedRegistry, sessionManager,
+                    confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
+                    grants = task.toolGrants
+                )
                 val config = AgentConfig(model = model, maxTokens = maxTokens)
 
                 val (outcome, summary) = when (val mode = task.mode) {

@@ -121,7 +121,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 trigger = trigger,
                 mode = mode,
                 prompt = prompt,
-                destructiveToolAllowlist = args.destructiveToolAllowlist?.toSet() ?: emptySet()
+                toolGrants = args.destructiveToolAllowlist?.toSet() ?: emptySet()
             )
         )
         return "Created task ${task.id} (${task.name})"
@@ -154,7 +154,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 name = args.name ?: task.name,
                 prompt = args.prompt ?: task.prompt,
                 trigger = newTrigger ?: task.trigger,
-                destructiveToolAllowlist = args.destructiveToolAllowlist?.toSet() ?: task.destructiveToolAllowlist
+                toolGrants = args.destructiveToolAllowlist?.toSet() ?: task.toolGrants
             )
         }
         return if (updated) "Updated $id" else "Error: no task found with id $id"
