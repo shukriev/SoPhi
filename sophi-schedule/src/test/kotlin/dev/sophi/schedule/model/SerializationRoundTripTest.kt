@@ -16,7 +16,7 @@ class SerializationRoundTripTest : FunSpec({
             trigger = Trigger.Interval(everySeconds = 3600),
             mode = TaskMode.Recurring,
             prompt = "check my feed",
-            destructiveToolAllowlist = setOf("fetch_url"),
+            toolGrants = setOf("fetch_url"),
             createdAtMs = 1000L
         )
         val encoded = json.encodeToString(task)
@@ -71,5 +71,24 @@ class SerializationRoundTripTest : FunSpec({
         val a = ScheduledTask(name = "a", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p")
         val b = ScheduledTask(name = "b", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p")
         (a.id != b.id) shouldBe true
+    }
+
+    test("ScheduledTask JSON with the old destructiveToolAllowlist key deserializes with toolGrants defaulted to empty") {
+        // Exact shape verified empirically pre-rename by encoding a real ScheduledTask
+        // (default kotlinx.serialization polymorphic discriminator: key "type", value
+        // = fully-qualified subclass name — no @SerialName overrides exist on Trigger/TaskMode).
+        // Uses a locally-configured ignoreUnknownKeys=true Json, matching TaskStore's own
+        // Json config (TaskStore.kt) — production reads are always tolerant of unknown keys;
+        // this file's shared `json` above intentionally isn't, to catch accidental field drift
+        // in the round-trip tests.
+        val tolerantJson = Json { ignoreUnknownKeys = true }
+        val oldFormatJson = """
+            {"id":"task_old","name":"legacy","trigger":{"type":"dev.sophi.schedule.model.Trigger.Manual"},
+             "mode":{"type":"dev.sophi.schedule.model.TaskMode.Recurring"},"prompt":"p",
+             "destructiveToolAllowlist":["fetch_url"],"subagentType":null,"enabled":true,
+             "lastRunAtMs":null,"nextRunAtMs":null,"iterationCount":0,"createdAtMs":1000}
+        """.trimIndent()
+        val decoded = tolerantJson.decodeFromString<ScheduledTask>(oldFormatJson)
+        decoded.toolGrants shouldBe emptySet()
     }
 })

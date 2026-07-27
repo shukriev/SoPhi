@@ -11,7 +11,7 @@ class ToolRiskLevelTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "ok"
         }
-        tool.riskLevel shouldBe RiskLevel.SAFE
+        tool.riskLevel("{}") shouldBe RiskLevel.SAFE
     }
 
     test("riskLevel can be overridden to DESTRUCTIVE") {
@@ -19,9 +19,22 @@ class ToolRiskLevelTest : FunSpec({
             override val name = "danger"
             override val description = "does something risky"
             override val parametersJson = "{}"
-            override val riskLevel = RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String) = "done"
         }
-        tool.riskLevel shouldBe RiskLevel.DESTRUCTIVE
+        tool.riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
+    }
+
+    test("riskLevel can inspect the arguments it's given") {
+        val tool = object : Tool {
+            override val name = "conditional"
+            override val description = "risk depends on args"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) =
+                if (argumentsJson.contains("safe")) RiskLevel.SAFE else RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "done"
+        }
+        tool.riskLevel("""{"mode":"safe"}""") shouldBe RiskLevel.SAFE
+        tool.riskLevel("""{"mode":"other"}""") shouldBe RiskLevel.DESTRUCTIVE
     }
 })

@@ -7,7 +7,7 @@ import kotlinx.coroutines.runBlocking
 
 class UpdateCalendarEventToolTest : FunSpec({
     test("riskLevel is DESTRUCTIVE") {
-        UpdateCalendarEventTool(FakeCalendarProvider()).riskLevel shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+        UpdateCalendarEventTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
     }
 
     test("update changes only the provided field") {

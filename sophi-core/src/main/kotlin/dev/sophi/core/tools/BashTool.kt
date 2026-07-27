@@ -14,6 +14,12 @@ private const val DEFAULT_TIMEOUT_SECONDS = 120L
 private const val MAX_TIMEOUT_SECONDS = 300L
 private const val MAX_OUTPUT_CHARS = 100_000
 
+private val READ_ONLY_PREFIXES = listOf(
+    "ls", "cat", "pwd", "echo", "head", "tail", "wc", "find",
+    "git status", "git log", "git diff", "git show"
+)
+private val UNSAFE_SHELL_CHARS = charArrayOf(';', '&', '|', '>', '<', '`', '$')
+
 @Serializable
 private data class BashArgs(val command: String, val timeoutSeconds: Long? = null)
 
@@ -21,7 +27,14 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
 
     override val name = "bash"
     override val description = "Run a shell command in the working directory"
-    override val riskLevel = RiskLevel.DESTRUCTIVE
+    override fun riskLevel(argumentsJson: String): RiskLevel {
+        val command = runCatching { json.decodeFromString<BashArgs>(argumentsJson).command }
+            .getOrNull() ?: return RiskLevel.DESTRUCTIVE
+        val trimmed = command.trim()
+        val looksReadOnly = READ_ONLY_PREFIXES.any { trimmed.startsWith(it) } &&
+            command.none { it in UNSAFE_SHELL_CHARS }
+        return if (looksReadOnly) RiskLevel.CAUTION else RiskLevel.DESTRUCTIVE
+    }
     override val parametersJson = """
         {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"}},"required":["command"]}
     """.trimIndent()

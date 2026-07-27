@@ -7,7 +7,7 @@ import kotlinx.coroutines.runBlocking
 
 class DeleteCalendarEventToolTest : FunSpec({
     test("riskLevel is DESTRUCTIVE") {
-        DeleteCalendarEventTool(FakeCalendarProvider()).riskLevel shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+        DeleteCalendarEventTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
     }
 
     test("delete removes the event") {

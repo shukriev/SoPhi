@@ -17,7 +17,7 @@ private fun fakeTool(toolName: String, risk: RiskLevel = RiskLevel.SAFE, paramet
         override val name = toolName
         override val description = "fake tool for testing"
         override val parametersJson = parametersJson
-        override val riskLevel = risk
+        override fun riskLevel(argumentsJson: String) = risk
         override suspend fun execute(argumentsJson: String) = "ok"
     }
 
@@ -62,7 +62,10 @@ class McpServerBuilderTest : FunSpec({
             name = "test",
             transport = McpTransport.STDIO,
             command = listOf("java", "-cp", classpath, "dev.sophi.mcp.server.TestExposedServerMainKt"),
-            env = mapOf("DANGER_TOOL_MARKER_FILE" to markerFile.toString())
+            env = mapOf(
+                "DANGER_TOOL_MARKER_FILE" to markerFile.toString(),
+                "CAREFUL_TOOL_MARKER_FILE" to Files.createTempFile("careful-tool-marker", ".txt").toString()
+            )
         )
         val connector = StdioMcpConnector()
 
@@ -75,11 +78,38 @@ class McpServerBuilderTest : FunSpec({
             Triple(tools, echo, danger)
         }
 
-        remoteTools.map { it.name } shouldBe listOf("echo", "danger")
+        remoteTools.map { it.name } shouldBe listOf("echo", "danger", "careful")
         echoReply shouldBe """{"text":"hi"}"""
-        dangerReply shouldBe "Denied: 'danger' is a destructive tool and cannot be called via mcp-serve"
+        dangerReply shouldBe "Denied: 'danger' is not a SAFE tool and cannot be called via mcp-serve"
         // The genuine proof: DangerTool.execute() was never invoked, so it never wrote the marker.
         Files.exists(markerFile) shouldBe false
+    }
+
+    test("exposed CAUTION tool is denied over a real stdio round-trip, same as DESTRUCTIVE") {
+        val classpath = System.getProperty("java.class.path")
+        val carefulMarkerFile = Files.createTempFile("careful-tool-marker", ".txt")
+        Files.delete(carefulMarkerFile)
+
+        val config = McpServerConfig(
+            name = "test",
+            transport = McpTransport.STDIO,
+            command = listOf("java", "-cp", classpath, "dev.sophi.mcp.server.TestExposedServerMainKt"),
+            env = mapOf(
+                "DANGER_TOOL_MARKER_FILE" to Files.createTempFile("danger-tool-marker", ".txt").toString(),
+                "CAREFUL_TOOL_MARKER_FILE" to carefulMarkerFile.toString()
+            )
+        )
+        val connector = StdioMcpConnector()
+
+        val carefulReply = runBlocking {
+            val session = connector.connect(config)
+            val reply = session.callTool("careful", "{}")
+            session.close()
+            reply
+        }
+
+        carefulReply shouldBe "Denied: 'careful' is not a SAFE tool and cannot be called via mcp-serve"
+        Files.exists(carefulMarkerFile) shouldBe false
     }
 
     test("exposed tool's inputSchema round-trips over stdio with real properties/required, not an empty default") {

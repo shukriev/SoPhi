@@ -3,6 +3,7 @@ package dev.sophi.core.agent
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.serialization.Serializable
@@ -15,7 +16,8 @@ private const val DELEGATE_TOOL_NAME = "delegate_to_subagent"
 @Serializable
 private data class SubagentArgs(
     @SerialName("subagent_type") val subagentType: String,
-    val prompt: String
+    val prompt: String,
+    @SerialName("expected_tools") val expectedTools: List<String>? = null
 )
 
 class SubagentTool(
@@ -38,10 +40,21 @@ class SubagentTool(
             definitions.joinToString("\n") { "- ${it.name}: ${it.description}" }
     }
     override val parametersJson = """
-        {"type":"object","properties":{"subagent_type":{"type":"string","description":"Which agent type to delegate to"},"description":{"type":"string","description":"Short 3-5 word description of the task"},"prompt":{"type":"string","description":"The task for the subagent to perform"}},"required":["subagent_type","prompt"]}
+        {"type":"object","properties":{"subagent_type":{"type":"string","description":"Which agent type to delegate to"},"description":{"type":"string","description":"Short 3-5 word description of the task"},"prompt":{"type":"string","description":"The task for the subagent to perform"},"expected_tools":{"type":"array","items":{"type":"string"},"description":"Tool names you expect this subagent to need, if known — declaring them upfront lets it use them without asking again for each call"}},"required":["subagent_type","prompt"]}
     """.trimIndent()
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    override fun riskLevel(argumentsJson: String): RiskLevel {
+        val args = runCatching { json.decodeFromString<SubagentArgs>(argumentsJson) }.getOrNull()
+            ?: return RiskLevel.SAFE
+        val tiers = args.expectedTools.orEmpty().mapNotNull { fullRegistry.getOrNull(it)?.riskLevel("{}") }
+        return when {
+            RiskLevel.DESTRUCTIVE in tiers -> RiskLevel.DESTRUCTIVE
+            RiskLevel.CAUTION in tiers -> RiskLevel.CAUTION
+            else -> RiskLevel.SAFE
+        }
+    }
 
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<SubagentArgs>(argumentsJson)
@@ -69,7 +82,11 @@ class SubagentTool(
             )
         }
 
-        val nestedLoop = AgentLoop(provider, scopedRegistry, sessionManager, confirmationPolicy = confirmationPolicy)
+        val nestedLoop = AgentLoop(
+            provider, scopedRegistry, sessionManager,
+            confirmationPolicy = confirmationPolicy,
+            grants = args.expectedTools?.toSet() ?: emptySet()
+        )
         val subSession = sessionManager.create(
             title = "subagent:${definition.name}",
             parentSessionId = parentSessionId

@@ -10,7 +10,7 @@ data class ScheduledTask(
     val trigger: Trigger,
     val mode: TaskMode,
     val prompt: String,
-    val destructiveToolAllowlist: Set<String> = emptySet(),
+    val toolGrants: Set<String> = emptySet(),
     val subagentType: String? = null,
     val enabled: Boolean = true,
     val lastRunAtMs: Long? = null,

@@ -3,6 +3,7 @@ package dev.sophi.calendar.tools
 import dev.sophi.calendar.model.CalendarEvent
 import dev.sophi.calendar.model.Recurrence
 import dev.sophi.calendar.provider.CalendarProvider
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -44,6 +45,7 @@ private fun RecurrenceArgs.toModel(): Recurrence = Recurrence(
 
 class CreateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "create_calendar_event"
+    override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.CAUTION
     override val description = "Create a calendar event (optionally recurring or all-day) on the native OS calendar. " +
         "start/end (or start_date/end_date for all-day) are epoch millis / ISO dates you must compute yourself — " +
         "if the request uses a relative date or time (\"tomorrow\", \"next Monday\", \"in an hour\"), call " +

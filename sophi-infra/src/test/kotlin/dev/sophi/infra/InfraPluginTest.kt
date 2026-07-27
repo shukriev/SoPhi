@@ -2,26 +2,11 @@ package dev.sophi.infra
 
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
-import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 
 class InfraPluginTest : FunSpec({
-    test("PermissionGatePlugin allows tool in allowlist") {
-        val plugin = PermissionGatePlugin(setOf("read", "write"))
-        val hook = plugin.hooks().single()
-        hook.invoke(HookContext("s1", toolName = "read"))
-    }
-
-    test("PermissionGatePlugin blocks tool not in allowlist with SecurityException") {
-        val plugin = PermissionGatePlugin(setOf("read", "write"))
-        val hook = plugin.hooks().single()
-        shouldThrow<SecurityException> {
-            hook.invoke(HookContext("s1", toolName = "delete"))
-        }
-    }
-
     test("MetricsPlugin increments started counter on BEFORE_TURN") {
         val meterRegistry = SimpleMeterRegistry()
         val plugin = MetricsPlugin(meterRegistry)

@@ -12,6 +12,7 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.async
@@ -88,6 +89,7 @@ class AgentLoop(
     private val sessionManager: SessionManager,
     private val compactor: ContextCompactor? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+    private val grants: Set<String> = emptySet(),
     private val loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
 ) {
     suspend fun turn(
@@ -160,10 +162,20 @@ class AgentLoop(
                 )
             ))
 
-            val allowedCalls = toolCalls.map { call ->
+            val classified = toolCalls.map { call ->
                 val tool = registry.getOrNull(call.name)
-                val allowed = tool == null || tool.riskLevel == RiskLevel.SAFE ||
-                    confirmationPolicy.confirm(call.name, call.argumentsJson)
+                val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
+                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier)
+            }
+            val needsDecision = classified.filter { (_, req) ->
+                req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
+            }
+            val decisions = if (needsDecision.isEmpty()) emptyMap()
+                else confirmationPolicy.confirm(needsDecision.map { it.second })
+            val allowedCalls = classified.map { (call, req) ->
+                val allowed = req.riskLevel == RiskLevel.SAFE ||
+                    req.toolName in grants ||
+                    decisions[req.callId] == true
                 call to allowed
             }
 
