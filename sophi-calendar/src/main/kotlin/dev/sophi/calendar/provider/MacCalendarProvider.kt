@@ -25,14 +25,16 @@ private val HANDLERS_PRELUDE = """
         return t
     end clean
 
-    on formatEvent(e)
-        set sd to start date of e
-        set ed to end date of e
-        return (uid of e) & "$FIELD_SEP" & (summary of e as text) & "$FIELD_SEP" & ¬
-            (year of sd as text) & "$FIELD_SEP" & (month of sd as integer as text) & "$FIELD_SEP" & (day of sd as text) & "$FIELD_SEP" & (time of sd as text) & "$FIELD_SEP" & ¬
-            (year of ed as text) & "$FIELD_SEP" & (month of ed as integer as text) & "$FIELD_SEP" & (day of ed as text) & "$FIELD_SEP" & (time of ed as text) & "$FIELD_SEP" & ¬
-            (allday event of e as text) & "$FIELD_SEP" & my clean(location of e) & "$FIELD_SEP" & my clean(description of e)
-    end formatEvent
+    using terms from application "Calendar"
+        on formatEvent(e)
+            set sd to start date of e
+            set ed to end date of e
+            return (uid of e) & "$FIELD_SEP" & (summary of e as text) & "$FIELD_SEP" & ¬
+                (year of sd as text) & "$FIELD_SEP" & (month of sd as integer as text) & "$FIELD_SEP" & (day of sd as text) & "$FIELD_SEP" & (time of sd as text) & "$FIELD_SEP" & ¬
+                (year of ed as text) & "$FIELD_SEP" & (month of ed as integer as text) & "$FIELD_SEP" & (day of ed as text) & "$FIELD_SEP" & (time of ed as text) & "$FIELD_SEP" & ¬
+                (allday event of e as text) & "$FIELD_SEP" & my clean(location of e) & "$FIELD_SEP" & my clean(description of e)
+        end formatEvent
+    end using terms from
 """.trimIndent()
 
 class MacCalendarProvider(
