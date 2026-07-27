@@ -133,7 +133,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "deleted"
         }
         val registry = ToolRegistry().register(destructiveTool)
-        val loop = AgentLoop(provider, registry, sessionManager, confirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE)
+        val loop = AgentLoop(provider, registry, sessionManager, confirmationPolicy = ConfirmationPolicy.DENY_ALL)
         val session = AgentSession(id = "s5")
         var round = 0
         every { provider.stream(any()) } answers {

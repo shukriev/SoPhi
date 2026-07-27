@@ -62,9 +62,12 @@ class AgentConfigurationTest : FunSpec({
         config.toolRegistry(McpClientManager()).names() shouldNotContain "web_search"
     }
 
-    test("confirmationPolicy() defaults to DENY_DESTRUCTIVE") {
+    test("confirmationPolicy() defaults to DENY_ALL") {
         val config = AgentConfiguration(ProviderProperties(type = "claude", apiKey = "sk-ant-test"))
-        config.confirmationPolicy().confirm("bash", "{}") shouldBe false
+        val requests = listOf(
+            dev.sophi.core.tools.ConfirmationRequest("c1", "bash", "{}", dev.sophi.core.tools.RiskLevel.DESTRUCTIVE)
+        )
+        kotlinx.coroutines.runBlocking { config.confirmationPolicy().confirm(requests) } shouldBe mapOf("c1" to false)
     }
 
     test("mcpClientManager() connects zero servers when .sophi/mcp.json is absent, registering no MCP tools") {

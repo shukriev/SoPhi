@@ -27,7 +27,7 @@ class RuntimeBuilder {
 
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
-    private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE
+    private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
     private var mcpConfigPath: Path? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var learningConfig: LearningConfig? = null

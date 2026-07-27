@@ -118,7 +118,7 @@ class SophiRuntimeTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
         val rt = builder
             .tool(destructiveTool)
-            .confirmationPolicy(ConfirmationPolicy { _, _ -> false })
+            .confirmationPolicy(ConfirmationPolicy { requests -> requests.associate { it.callId to false } })
             .build()
 
         val sessionId = rt.newSession()

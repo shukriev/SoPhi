@@ -1,23 +1,50 @@
 package dev.sophi.cli
 
 import com.github.ajalt.mordant.terminal.Terminal
+import dev.sophi.core.tools.ConfirmationRequest
+import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
 
 class TerminalConfirmationPolicyTest : FunSpec({
-    test("confirm() returns true when the answer is yes") {
+    val bashRequest = ConfirmationRequest("c1", "bash", """{"command":"ls"}""", RiskLevel.DESTRUCTIVE)
+
+    test("confirm() returns true for the single request when the answer is yes") {
         val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(true)))
-        runBlocking { policy.confirm("bash", """{"command":"ls"}""") } shouldBe true
+        runBlocking { policy.confirm(listOf(bashRequest)) } shouldBe mapOf("c1" to true)
     }
 
-    test("confirm() returns false when the answer is no") {
+    test("confirm() returns false for the single request when the answer is no") {
         val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(false)))
-        runBlocking { policy.confirm("bash", """{"command":"ls"}""") } shouldBe false
+        runBlocking { policy.confirm(listOf(bashRequest)) } shouldBe mapOf("c1" to false)
     }
 
     test("confirm() returns false when there is no answer queued") {
         val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList()))
-        runBlocking { policy.confirm("bash", """{"command":"ls"}""") } shouldBe false
+        runBlocking { policy.confirm(listOf(bashRequest)) } shouldBe mapOf("c1" to false)
+    }
+
+    test("confirm() returns an empty map for an empty request list without prompting") {
+        val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList()))
+        runBlocking { policy.confirm(emptyList()) } shouldBe emptyMap()
+    }
+
+    test("confirm() applies one allow-all answer to every request in a multi-call batch") {
+        val requests = listOf(
+            bashRequest,
+            ConfirmationRequest("c2", "write_file", "{}", RiskLevel.DESTRUCTIVE)
+        )
+        val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(true)))
+        runBlocking { policy.confirm(requests) } shouldBe mapOf("c1" to true, "c2" to true)
+    }
+
+    test("confirm() applies one deny-all answer to every request in a multi-call batch") {
+        val requests = listOf(
+            bashRequest,
+            ConfirmationRequest("c2", "write_file", "{}", RiskLevel.DESTRUCTIVE)
+        )
+        val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(false)))
+        runBlocking { policy.confirm(requests) } shouldBe mapOf("c1" to false, "c2" to false)
     }
 })

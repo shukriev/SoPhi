@@ -309,7 +309,7 @@ class SubagentToolTest : FunSpec({
             sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
             parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
-            confirmationPolicy = ConfirmationPolicy { _, _ -> false }
+            confirmationPolicy = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
         )
 
         runBlocking { tool.execute("""{"subagent_type":"operator","prompt":"do it"}""") }
