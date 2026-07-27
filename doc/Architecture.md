@@ -7,7 +7,8 @@
 | Current milestone | M7 — Jane's Theory memory (palace v1) complete |
 | Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory, sophi-schedule |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
-| Last updated | 2026-07-26 |
+| Designs approved, not yet implemented | Tiered tool confirmation & grants (ADR-016) — `RiskLevel` gains `CAUTION`; `Tool.riskLevel` becomes argument-aware; `ConfirmationPolicy` batches per round; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
+| Last updated | 2026-07-27 |
 
 ---
 
@@ -51,7 +52,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 └────────────────┘  └───────────┘  └────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │                       sophi-infra                            │
-│  Auth  ·  Budget tracker  ·  Observability  ·  Permissions   │
+│  Auth  ·  Budget tracker  ·  Observability                   │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │              sophi-learning  (observes via hooks)            │
@@ -88,7 +89,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
 | `sophi-sdk` | Embeddable library for Spring `@Service` beans | complete |
-| `sophi-infra` | Auth, budget, observability, permission gates | complete |
+| `sophi-infra` | Auth, budget, observability | complete |
 
 **Dependency direction rules (never violate):**
 - `sophi-core` never imports from `sophi-web`, `sophi-cli`, `sophi-sdk`, or `sophi-infra`
@@ -249,15 +250,51 @@ interface SessionManager {
 
 The unit of capability the agent loop can invoke. Parameters and results are plain JSON strings;
 the loop handles error catching and forwards errors back to the LLM as `"Error: <message>"`.
+`riskLevel` is argument-aware (ADR-016) — most tools ignore the argument and return a
+constant, but `bash`/`manage_scheduled_task`/`delegate_to_subagent` inspect it to classify
+accurately rather than adopting one fixed worst-case tier.
 
 ```kotlin
+enum class RiskLevel { SAFE, CAUTION, DESTRUCTIVE }
+
 interface Tool {
     val name: String
     val description: String
     val parametersJson: String    // JSON Schema forwarded verbatim as ToolDefinition
+    fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.SAFE
     suspend fun execute(argumentsJson: String): String
 }
 ```
+
+### ConfirmationPolicy + grants (`dev.sophi.core.tools`)
+
+Gates non-`SAFE` tool calls in `AgentLoop` (ADR-016). One batched request per
+tool-calling round, not one per call — matching the round's already-parallel
+execution. `AgentLoop.grants` is a `Set<String>` of tool names a scope may run without
+asking again at all, regardless of tier; `ScheduledTask.toolGrants` and
+`delegate_to_subagent`'s `expected_tools` are the two things that populate it.
+
+```kotlin
+data class ConfirmationRequest(
+    val callId: String, val toolName: String, val argumentsJson: String, val riskLevel: RiskLevel
+)
+
+fun interface ConfirmationPolicy {
+    suspend fun confirm(requests: List<ConfirmationRequest>): Map<String, Boolean>  // callId -> allowed
+
+    companion object {
+        val ALLOW_ALL: ConfirmationPolicy
+        val DENY_ALL: ConfirmationPolicy   // anything not SAFE and not in grants is denied
+    }
+}
+```
+
+`CAUTION` auto-runs only when a human is attending the session (`TerminalConfirmationPolicy`
+in `sophi-cli`); unattended contexts (`sophi-web`, `sophi-sdk`, ungranted `sophi-schedule`
+runs) treat it the same as `DESTRUCTIVE` — a grant or an explicit confirmation, or it's
+denied. `manage_scheduled_task`/`delegate_to_subagent` report `DESTRUCTIVE` themselves
+whenever the call would populate a grant, so proposing future or delegated power goes
+through this same mechanism instead of being a `SAFE` side door.
 
 ### SophiPlugin + AgentHook (`dev.sophi.extensions`)
 
@@ -427,6 +464,7 @@ class SkillLoader {
 | [ADR-013](adr/ADR-013-memory-as-plugin-context-contributor.md) | Declarative memory placement | Separate sophi-memory module; per-turn context via new ContextContributor SPI |
 | [ADR-014](adr/ADR-014-scheduled-goal-tasks.md) | Scheduled & goal-based tasks | Trigger×Mode unification; local-only for v1; per-task destructive allowlist; OS-scheduler-first tick model |
 | [ADR-015](adr/ADR-015-native-os-calendar-integration.md) | Native OS calendar integration | `CalendarProvider` seam; per-action risk-gated tools; structured recurrence; macOS-only v1, Windows/Linux deferred |
+| [ADR-016](adr/ADR-016-tiered-tool-confirmation.md) | Tiered tool-call confirmation and grants | Three-tier argument-aware `RiskLevel`; batched `ConfirmationPolicy`; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
 
 ---
 
@@ -453,3 +491,4 @@ class SkillLoader {
 | `sophi-memory` — Jane's Theory memory palace | M7 | complete | [article-18](articles/article-18.md) |
 | `sophi-schedule` — scheduled & goal-based tasks | post-M7 | complete | [article-19](articles/article-19.md) |
 | `sophi-calendar` — native OS calendar integration (macOS) | post-M7 | in progress | [article-21](articles/article-21.md) |
+| `sophi-core`/`sophi-schedule` — tiered tool confirmation & grants | post-M7 | design | [article-22](articles/article-22.md) |
