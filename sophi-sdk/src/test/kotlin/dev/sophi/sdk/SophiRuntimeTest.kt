@@ -128,6 +128,39 @@ class SophiRuntimeTest : FunSpec({
             "Error: Tool 'danger' execution denied by confirmation policy"
     }
 
+    test("RuntimeBuilder.grants lets a granted tool run without consulting confirmationPolicy") {
+        val provider = mockk<LLMProvider>()
+        var executed = false
+        val destructiveTool = object : Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed = true; return "ran" }
+        }
+        var callCount = 0
+        every { provider.stream(any()) } answers {
+            callCount++
+            if (callCount == 1)
+                LLMResponse.ToolUse(calls = listOf(ToolCall("c1", "danger", "{}")), usage = TokenUsage(1, 0)).toStreamFlow()
+            else
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        }
+
+        val builder = RuntimeBuilder()
+        builder.provider = provider
+        builder.sessionsDir = createTempDirectory("sophi-sdk-test")
+        val rt = builder
+            .tool(destructiveTool)
+            .grants(setOf("danger"))
+            .build()
+
+        val sessionId = rt.newSession()
+        rt.turn(sessionId, "go")
+
+        executed shouldBe true
+    }
+
     test("RuntimeBuilder.mcpConfig registers tools returned by McpClientManager.connect and build() closes it via SophiRuntime.close()") {
         val provider = mockk<LLMProvider>()
         val mcpManager = mockk<McpClientManager>()

@@ -36,12 +36,29 @@ private class DangerTool : Tool {
 }
 
 /**
+ * A CAUTION tool with the same execute()-side-effect proof pattern as [DangerTool], used to
+ * confirm [buildMcpServer] denies CAUTION exactly like DESTRUCTIVE, not just the tier it
+ * originally shipped checking for.
+ */
+private class CarefulTool : Tool {
+    override val name = "careful"
+    override val description = "A CAUTION tool that should never actually run when exposed"
+    override fun riskLevel(argumentsJson: String) = RiskLevel.CAUTION
+    override val parametersJson = """{"type":"object","properties":{}}"""
+    override suspend fun execute(argumentsJson: String): String {
+        System.getenv("CAREFUL_TOOL_MARKER_FILE")?.let { File(it).writeText("EXECUTED") }
+        return "SHOULD NOT RUN"
+    }
+}
+
+/**
  * Test-only fixture: launched by [McpServerBuilderTest] as a real subprocess via
  * `java -cp <classpath> dev.sophi.mcp.server.TestExposedServerMainKt`, exposing one SAFE
- * tool ("echo") and one DESTRUCTIVE tool ("danger") through [buildMcpServer].
+ * tool ("echo"), one DESTRUCTIVE tool ("danger"), and one CAUTION tool ("careful") through
+ * [buildMcpServer].
  */
 fun main() = runBlocking {
-    val server = buildMcpServer(listOf(EchoTool(), DangerTool()), setOf("echo", "danger"))
+    val server = buildMcpServer(listOf(EchoTool(), DangerTool(), CarefulTool()), setOf("echo", "danger", "careful"))
     val transport = StdioServerTransport(
         input = System.`in`.asSource().buffered(),
         output = System.out.asSink().buffered()

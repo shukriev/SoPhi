@@ -28,6 +28,7 @@ class RuntimeBuilder {
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
     private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
+    private var grants: Set<String> = emptySet()
     private var mcpConfigPath: Path? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var learningConfig: LearningConfig? = null
@@ -36,6 +37,7 @@ class RuntimeBuilder {
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
+    fun grants(names: Set<String>): RuntimeBuilder = apply { grants = names }
     fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
     fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
@@ -58,7 +60,7 @@ class RuntimeBuilder {
             maxTokens = maxTokens,
             systemPrompt = systemPrompt
         )
-        val loop = AgentLoop(p, registry, sm, confirmationPolicy = confirmationPolicy)
+        val loop = AgentLoop(p, registry, sm, confirmationPolicy = confirmationPolicy, grants = grants)
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
 
         val learningPlugin = learningConfig?.let { cfg ->

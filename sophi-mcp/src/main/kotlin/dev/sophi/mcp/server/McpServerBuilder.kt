@@ -53,11 +53,11 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
         val inputSchema = McpJson.decodeFromString<ToolSchema>(tool.parametersJson)
         server.addTool(name = tool.name, description = tool.description, inputSchema = inputSchema) { request ->
             val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
-            if (tool.riskLevel(argumentsJson) == RiskLevel.DESTRUCTIVE) {
+            if (tool.riskLevel(argumentsJson) != RiskLevel.SAFE) {
                 CallToolResult(
                     isError = true,
                     content = listOf(
-                        TextContent("Denied: '${tool.name}' is a destructive tool and cannot be called via mcp-serve")
+                        TextContent("Denied: '${tool.name}' is not a SAFE tool and cannot be called via mcp-serve")
                     )
                 )
             } else {
