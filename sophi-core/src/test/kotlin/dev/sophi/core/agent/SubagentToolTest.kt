@@ -316,4 +316,68 @@ class SubagentToolTest : FunSpec({
 
         executed shouldBe false
     }
+
+    test("riskLevel is SAFE when expected_tools is omitted") {
+        val tool = buildTool(listOf(explore), mockk(), createTempDirectory("subagent-test"))
+        tool.riskLevel("""{"subagent_type":"explore","prompt":"go"}""") shouldBe RiskLevel.SAFE
+    }
+
+    test("riskLevel reflects the worst tier among declared expected_tools") {
+        val destructiveTool = object : Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "ran"
+        }
+        val fullRegistry = ToolRegistry().register(readTool).register(destructiveTool)
+        val tool = buildTool(listOf(explore), mockk(), createTempDirectory("subagent-test"), fullRegistry = fullRegistry)
+
+        tool.riskLevel("""{"subagent_type":"explore","prompt":"go","expected_tools":["read_file"]}""") shouldBe RiskLevel.SAFE
+        tool.riskLevel("""{"subagent_type":"explore","prompt":"go","expected_tools":["read_file","danger"]}""") shouldBe RiskLevel.DESTRUCTIVE
+    }
+
+    test("execute() grants a declared expected_tool to the nested loop without re-confirming it") {
+        val destructiveTool = object : Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "ran it"
+        }
+        val destructiveDef = AgentDefinition(
+            name = "operator",
+            description = "Can run destructive tools",
+            systemPrompt = "You take action.",
+            allowedTools = listOf("danger")
+        )
+        val provider = mockk<LLMProvider>()
+        var callCount = 0
+        every { provider.stream(any()) } answers {
+            callCount++
+            if (callCount == 1)
+                LLMResponse.ToolUse(
+                    calls = listOf(ToolCall("c1", "danger", "{}")),
+                    usage = TokenUsage(1, 0)
+                ).toStreamFlow()
+            else
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        }
+        val fullRegistry = ToolRegistry().register(destructiveTool)
+        val tool = SubagentTool(
+            definitions = listOf(destructiveDef),
+            provider = provider,
+            fullRegistry = fullRegistry,
+            sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
+            parentSessionId = "parent-1",
+            parentConfig = AgentConfig(model = "parent-model"),
+            confirmationPolicy = ConfirmationPolicy { throw AssertionError("should not be consulted for a granted tool") }
+        )
+
+        val result = runBlocking {
+            tool.execute("""{"subagent_type":"operator","prompt":"do it","expected_tools":["danger"]}""")
+        }
+
+        result shouldBe "done"
+    }
 })
