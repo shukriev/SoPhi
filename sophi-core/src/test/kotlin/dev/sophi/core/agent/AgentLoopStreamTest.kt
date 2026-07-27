@@ -129,7 +129,7 @@ class AgentLoopStreamTest : FunSpec({
             override val name = "delete_file"
             override val description = ""
             override val parametersJson = "{}"
-            override val riskLevel = RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String) = "deleted"
         }
         val registry = ToolRegistry().register(destructiveTool)

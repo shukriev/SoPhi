@@ -23,7 +23,7 @@ class FetchUrlTool(
 
     override val name = "fetch_url"
     override val description = "Fetch the text content of a public http(s) URL"
-    override val riskLevel = RiskLevel.DESTRUCTIVE
+    override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
     override val parametersJson = """
         {"type":"object","properties":{"url":{"type":"string","description":"The http(s) URL to fetch"}},"required":["url"]}
     """.trimIndent()

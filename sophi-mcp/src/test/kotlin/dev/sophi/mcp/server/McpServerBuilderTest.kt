@@ -17,7 +17,7 @@ private fun fakeTool(toolName: String, risk: RiskLevel = RiskLevel.SAFE, paramet
         override val name = toolName
         override val description = "fake tool for testing"
         override val parametersJson = parametersJson
-        override val riskLevel = risk
+        override fun riskLevel(argumentsJson: String) = risk
         override suspend fun execute(argumentsJson: String) = "ok"
     }
 

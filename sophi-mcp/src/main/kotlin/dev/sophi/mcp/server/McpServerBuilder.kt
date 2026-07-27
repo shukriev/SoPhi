@@ -52,7 +52,8 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
         val tool = toolsByName.getValue(name)
         val inputSchema = McpJson.decodeFromString<ToolSchema>(tool.parametersJson)
         server.addTool(name = tool.name, description = tool.description, inputSchema = inputSchema) { request ->
-            if (tool.riskLevel == RiskLevel.DESTRUCTIVE) {
+            val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
+            if (tool.riskLevel(argumentsJson) == RiskLevel.DESTRUCTIVE) {
                 CallToolResult(
                     isError = true,
                     content = listOf(
@@ -61,7 +62,6 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
                 )
             } else {
                 try {
-                    val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
                     CallToolResult(content = listOf(TextContent(tool.execute(argumentsJson))))
                 } catch (e: Exception) {
                     CallToolResult(isError = true, content = listOf(TextContent("Error: ${e.message}")))

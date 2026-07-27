@@ -13,7 +13,7 @@ private fun epochMs(iso: String): Long =
 
 class ListCalendarEventsToolTest : FunSpec({
     test("riskLevel is SAFE") {
-        ListCalendarEventsTool(FakeCalendarProvider()).riskLevel shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+        ListCalendarEventsTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
     }
 
     test("list returns matching events within the range") {

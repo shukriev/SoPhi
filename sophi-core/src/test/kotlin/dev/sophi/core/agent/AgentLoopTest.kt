@@ -473,7 +473,7 @@ class AgentLoopTest : FunSpec({
             override val name = "danger"
             override val description = "Risky"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String): String {
                 executed = true
                 return "should not run"
@@ -510,7 +510,7 @@ class AgentLoopTest : FunSpec({
             override val name = "danger"
             override val description = "Risky"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String) = "did the risky thing"
         })
         val loopWithPolicy = AgentLoop(
@@ -539,14 +539,14 @@ class AgentLoopTest : FunSpec({
             override val name = "d1"
             override val description = "Risky 1"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String): String { log.add("exec:d1"); return "1" }
         })
         toolRegistry.register(object : dev.sophi.core.tools.Tool {
             override val name = "d2"
             override val description = "Risky 2"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String): String { log.add("exec:d2"); return "2" }
         })
         val policy = dev.sophi.core.tools.ConfirmationPolicy { toolName, _ -> log.add("confirm:$toolName"); true }

@@ -21,7 +21,7 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
 
     override val name = "bash"
     override val description = "Run a shell command in the working directory"
-    override val riskLevel = RiskLevel.DESTRUCTIVE
+    override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
     override val parametersJson = """
         {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"}},"required":["command"]}
     """.trimIndent()

@@ -7,7 +7,7 @@ import kotlinx.coroutines.runBlocking
 
 class GetCalendarEventToolTest : FunSpec({
     test("riskLevel is SAFE") {
-        GetCalendarEventTool(FakeCalendarProvider()).riskLevel shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+        GetCalendarEventTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
     }
 
     test("get returns the event's fields when found") {

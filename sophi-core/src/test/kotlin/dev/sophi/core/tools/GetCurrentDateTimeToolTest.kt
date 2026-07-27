@@ -11,7 +11,7 @@ import java.time.ZonedDateTime
 
 class GetCurrentDateTimeToolTest : FunSpec({
     test("riskLevel is SAFE") {
-        GetCurrentDateTimeTool().riskLevel shouldBe RiskLevel.SAFE
+        GetCurrentDateTimeTool().riskLevel("{}") shouldBe RiskLevel.SAFE
     }
 
     test("returns epoch millis, ISO datetime, timezone, and day of week for a fixed clock") {

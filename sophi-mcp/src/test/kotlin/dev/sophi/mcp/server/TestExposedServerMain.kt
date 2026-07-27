@@ -27,7 +27,7 @@ private class EchoTool : Tool {
 private class DangerTool : Tool {
     override val name = "danger"
     override val description = "A destructive tool that should never actually run when exposed"
-    override val riskLevel = RiskLevel.DESTRUCTIVE
+    override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
     override val parametersJson = """{"type":"object","properties":{}}"""
     override suspend fun execute(argumentsJson: String): String {
         System.getenv("DANGER_TOOL_MARKER_FILE")?.let { File(it).writeText("EXECUTED") }

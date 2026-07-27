@@ -63,7 +63,7 @@ class GrepToolTest : FunSpec({
     }
 
     test("riskLevel is SAFE") {
-        tool.riskLevel shouldBe RiskLevel.SAFE
+        tool.riskLevel("{}") shouldBe RiskLevel.SAFE
     }
 
     test("execute() should find matches even when root's ancestor is a skip directory name") {

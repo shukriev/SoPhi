@@ -16,7 +16,7 @@ private data class DeleteEventArgs(
 class DeleteCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "delete_calendar_event"
     override val description = "Delete a calendar event by id"
-    override val riskLevel = RiskLevel.DESTRUCTIVE
+    override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
     override val parametersJson = """
         {"type":"object","properties":{
           "event_id":{"type":"string"},

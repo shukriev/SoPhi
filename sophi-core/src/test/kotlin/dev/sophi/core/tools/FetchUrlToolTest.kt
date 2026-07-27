@@ -70,6 +70,6 @@ class FetchUrlToolTest : FunSpec({
     }
 
     test("riskLevel is DESTRUCTIVE") {
-        FetchUrlTool(mockk()).riskLevel shouldBe RiskLevel.DESTRUCTIVE
+        FetchUrlTool(mockk()).riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
     }
 })

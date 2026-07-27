@@ -101,7 +101,7 @@ class SophiRuntimeTest : FunSpec({
             override val name = "danger"
             override val description = "risky"
             override val parametersJson = "{}"
-            override val riskLevel = RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String) = "should not run"
         }
         val capturedRequests = mutableListOf<CompletionRequest>()

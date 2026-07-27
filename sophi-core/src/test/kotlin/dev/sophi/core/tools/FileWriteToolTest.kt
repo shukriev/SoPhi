@@ -63,6 +63,6 @@ class FileWriteToolTest : FunSpec({
     }
 
     test("riskLevel is DESTRUCTIVE") {
-        tool.riskLevel shouldBe RiskLevel.DESTRUCTIVE
+        tool.riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
     }
 })

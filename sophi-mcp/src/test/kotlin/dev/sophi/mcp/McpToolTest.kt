@@ -18,7 +18,7 @@ class McpToolTest : FunSpec({
     test("riskLevel defaults to DESTRUCTIVE") {
         val session = mockk<McpSession>()
         val tool = McpTool(session, "filesystem", RemoteToolInfo("read_file", "reads a file", "{}"), emptySet())
-        tool.riskLevel shouldBe RiskLevel.DESTRUCTIVE
+        tool.riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
     }
 
     test("riskLevel is SAFE when the remote tool name is in safeTools") {
@@ -26,7 +26,7 @@ class McpToolTest : FunSpec({
         val tool = McpTool(
             session, "filesystem", RemoteToolInfo("list_directory", "lists a directory", "{}"), setOf("list_directory")
         )
-        tool.riskLevel shouldBe RiskLevel.SAFE
+        tool.riskLevel("{}") shouldBe RiskLevel.SAFE
     }
 
     test("execute delegates to session.callTool with the remote (non-namespaced) name") {

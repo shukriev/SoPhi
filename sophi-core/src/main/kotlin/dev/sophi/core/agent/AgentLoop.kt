@@ -162,7 +162,7 @@ class AgentLoop(
 
             val allowedCalls = toolCalls.map { call ->
                 val tool = registry.getOrNull(call.name)
-                val allowed = tool == null || tool.riskLevel == RiskLevel.SAFE ||
+                val allowed = tool == null || tool.riskLevel(call.argumentsJson) == RiskLevel.SAFE ||
                     confirmationPolicy.confirm(call.name, call.argumentsJson)
                 call to allowed
             }
