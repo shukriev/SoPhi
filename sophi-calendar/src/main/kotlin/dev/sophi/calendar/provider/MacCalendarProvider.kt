@@ -52,9 +52,9 @@ class MacCalendarProvider(
                     set end of outputLines to (name of c)
                 end repeat
                 set {tid, my text item delimiters} to {my text item delimiters, linefeed}
-                set result to outputLines as text
+                set resultText to outputLines as text
                 set my text item delimiters to tid
-                return result
+                return resultText
             end tell
         """.trimIndent()
         val output = runScript(script).trim()
@@ -175,9 +175,9 @@ class MacCalendarProvider(
                         set end of outputLines to my formatEvent(e)
                     end repeat
                     set {tid, my text item delimiters} to {my text item delimiters, linefeed}
-                    set result to outputLines as text
+                    set resultText to outputLines as text
                     set my text item delimiters to tid
-                    return result
+                    return resultText
                 end tell
             end tell
         """.trimIndent()
