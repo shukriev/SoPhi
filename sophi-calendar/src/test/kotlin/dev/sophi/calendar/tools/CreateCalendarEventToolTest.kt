@@ -8,8 +8,8 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 class CreateCalendarEventToolTest : FunSpec({
-    test("riskLevel is SAFE") {
-        CreateCalendarEventTool(FakeCalendarProvider()).riskLevel shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+    test("riskLevel is CAUTION") {
+        CreateCalendarEventTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.CAUTION
     }
 
     test("create with required fields persists an event with the correctly parsed local start/end") {

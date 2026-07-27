@@ -33,13 +33,14 @@ class ScheduleEngineTest : FunSpec({
         provider: LLMProvider,
         notifier: Notifier = NoopNotifier,
         maxConcurrentTasks: Int = 4,
-        taskTimeoutMs: Long = 300_000
+        taskTimeoutMs: Long = 300_000,
+        registry: ToolRegistry = ToolRegistry()
     ): Triple<ScheduleEngine, TaskStore, RunLog> {
         val home = tempdir().toPath()
         val taskStore = TaskStore(home.resolve("tasks.json"))
         val runLog = RunLog(home.resolve("runs.jsonl"))
         val engine = ScheduleEngine(
-            taskStore, runLog, provider, ToolRegistry(),
+            taskStore, runLog, provider, registry,
             FileSessionManager(createTempDirectory("schedule-engine-test")),
             notifier, model = "m", maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs
         )
@@ -64,6 +65,69 @@ class ScheduleEngineTest : FunSpec({
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Interval(3600), mode = TaskMode.Recurring, prompt = "p"))
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = System.currentTimeMillis()) }
         runLog.forTask(task.id) shouldBe emptyList()
+    }
+
+    test("tickOnce lets a task run a tool that's in its toolGrants, unattended") {
+        var executed = false
+        val grantedTool = object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed = true; return "ran" }
+        }
+        val provider = mockk<LLMProvider>()
+        var callCount = 0
+        every { provider.stream(any()) } answers {
+            callCount++
+            if (callCount == 1)
+                flowOf(StreamEvent.ToolCallsReady(listOf(
+                    dev.sophi.ai.api.ToolCall("c1", "danger", "{}")
+                )))
+            else
+                flowOf(StreamEvent.Content("done"))
+        }
+        val (engine, taskStore, runLog) = engine(provider, registry = ToolRegistry().register(grantedTool))
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "run it",
+            toolGrants = setOf("danger")
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        executed shouldBe true
+        runLog.forTask(task.id).single().outcome shouldBe RunOutcome.Succeeded
+    }
+
+    test("tickOnce denies a tool that's not in the task's toolGrants, unattended") {
+        var executed = false
+        val ungranted = object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed = true; return "ran" }
+        }
+        val provider = mockk<LLMProvider>()
+        var callCount = 0
+        every { provider.stream(any()) } answers {
+            callCount++
+            if (callCount == 1)
+                flowOf(StreamEvent.ToolCallsReady(listOf(
+                    dev.sophi.ai.api.ToolCall("c1", "danger", "{}")
+                )))
+            else
+                flowOf(StreamEvent.Content("done"))
+        }
+        val (engine, taskStore, _) = engine(provider, registry = ToolRegistry().register(ungranted))
+        taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "run it",
+            toolGrants = emptySet()
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        executed shouldBe false
     }
 
     test("tickOnce runs multiple due tasks concurrently, not sequentially") {

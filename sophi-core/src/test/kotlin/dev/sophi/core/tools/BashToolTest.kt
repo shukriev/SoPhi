@@ -47,7 +47,29 @@ class BashToolTest : FunSpec({
         tool.name shouldBe "bash"
     }
 
-    test("riskLevel is DESTRUCTIVE") {
-        tool.riskLevel shouldBe RiskLevel.DESTRUCTIVE
+    test("riskLevel is CAUTION for a plain read-only command") {
+        tool.riskLevel("""{"command":"git status"}""") shouldBe RiskLevel.CAUTION
+    }
+
+    test("riskLevel is CAUTION for ls, cat, and git log/diff/show") {
+        tool.riskLevel("""{"command":"ls -la"}""") shouldBe RiskLevel.CAUTION
+        tool.riskLevel("""{"command":"cat file.txt"}""") shouldBe RiskLevel.CAUTION
+        tool.riskLevel("""{"command":"git log"}""") shouldBe RiskLevel.CAUTION
+        tool.riskLevel("""{"command":"git diff"}""") shouldBe RiskLevel.CAUTION
+        tool.riskLevel("""{"command":"git show HEAD"}""") shouldBe RiskLevel.CAUTION
+    }
+
+    test("riskLevel is DESTRUCTIVE for a command not on the read-only prefix list") {
+        tool.riskLevel("""{"command":"rm -rf /tmp/x"}""") shouldBe RiskLevel.DESTRUCTIVE
+    }
+
+    test("riskLevel is DESTRUCTIVE when a read-only-looking command is chained with shell metacharacters") {
+        tool.riskLevel("""{"command":"git status; rm -rf /"}""") shouldBe RiskLevel.DESTRUCTIVE
+        tool.riskLevel("""{"command":"ls && rm file"}""") shouldBe RiskLevel.DESTRUCTIVE
+        tool.riskLevel("""{"command":"cat $(danger)"}""") shouldBe RiskLevel.DESTRUCTIVE
+    }
+
+    test("riskLevel is DESTRUCTIVE when arguments cannot be parsed") {
+        tool.riskLevel("not json") shouldBe RiskLevel.DESTRUCTIVE
     }
 })

@@ -8,7 +8,7 @@ import kotlinx.coroutines.runBlocking
 
 class ListCalendarsToolTest : FunSpec({
     test("riskLevel is SAFE") {
-        ListCalendarsTool(FakeCalendarProvider()).riskLevel shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+        ListCalendarsTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
     }
 
     test("lists calendar names and marks the default one") {

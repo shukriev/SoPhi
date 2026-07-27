@@ -39,7 +39,7 @@ app — same core, three ways to run it.
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
-| 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `PermissionGatePlugin`, `MetricsPlugin` |
+| 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `MetricsPlugin` |
 
 They all sit on the same core, so switching between them later is a
 one-line change, not a rewrite.
@@ -183,7 +183,6 @@ plugins, no CLI or HTTP layer required.
 ```kotlin
 import dev.sophi.sdk.Sophi
 import dev.sophi.ai.providers.ClaudeProvider
-import dev.sophi.infra.PermissionGatePlugin
 import dev.sophi.infra.MetricsPlugin
 
 val runtime = Sophi.runtime {
@@ -192,7 +191,7 @@ val runtime = Sophi.runtime {
     systemPrompt = "You are a build assistant."
 
     tool(MyCustomTool())                     // implement dev.sophi.core.tools.Tool
-    plugin(PermissionGatePlugin(allowedTools = setOf("read_file")))
+    grants(setOf("read_file"))               // tool names this runtime may use without confirmation
     plugin(MetricsPlugin(meterRegistry))
 }
 
@@ -249,11 +248,12 @@ Steps to deploy...
 
 **Plugins** (`sophi-extensions`) hook into the turn lifecycle
 (`BEFORE_TURN` / `AFTER_TURN` / `BEFORE_TOOL` / `AFTER_TOOL` / `ON_ERROR`).
-`sophi-infra` ships three ready to use:
+`sophi-infra` ships two ready to use:
 
-- `PermissionGatePlugin(allowedTools)` — blocks any tool call not in an allowlist
 - `MetricsPlugin(meterRegistry)` — emits Micrometer counters for turns started/completed/errored
 - `BudgetTracker` — a standalone tracker (not a `SophiPlugin`) that throws `BudgetExceededException` once a token budget is exceeded; call `record()`/`used()` directly rather than registering it
+
+Tool permissioning is no longer a plugin — `AgentLoop`'s `riskLevel`/`ConfirmationPolicy`/`grants` mechanism (ADR-016) is the one gate; see `RuntimeBuilder.grants(names)` below for the SDK-embedding equivalent of the old allowlist.
 
 Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 `PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery

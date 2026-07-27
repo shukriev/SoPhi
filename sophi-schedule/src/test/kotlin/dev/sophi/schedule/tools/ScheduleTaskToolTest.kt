@@ -154,14 +154,39 @@ class ScheduleTaskToolTest : FunSpec({
         trigger.atMs shouldBe epochMs("2026-09-01T10:00:00")
     }
 
-    test("update changes the destructive tool allowlist") {
+    test("riskLevel is SAFE for create with no tool_grants") {
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.riskLevel("""{"action":"create","name":"t","prompt":"p","trigger_type":"manual","mode":"recurring"}""") shouldBe
+            dev.sophi.core.tools.RiskLevel.SAFE
+    }
+
+    test("riskLevel is DESTRUCTIVE for create with a non-empty tool_grants") {
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.riskLevel("""{"action":"create","name":"t","prompt":"p","trigger_type":"manual","mode":"recurring","tool_grants":["bash"]}""") shouldBe
+            dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+    }
+
+    test("riskLevel is DESTRUCTIVE for update with a non-empty tool_grants") {
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.riskLevel("""{"action":"update","task_id":"t1","tool_grants":["bash"]}""") shouldBe
+            dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+    }
+
+    test("riskLevel is SAFE for list, pause, resume, remove, and runs regardless of tool_grants") {
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.riskLevel("""{"action":"list"}""") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+        tool.riskLevel("""{"action":"pause","task_id":"t1"}""") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+        tool.riskLevel("""{"action":"remove","task_id":"t1"}""") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+    }
+
+    test("update using tool_grants persists it under the renamed field") {
         val s = store()
         val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
         val tool = ScheduleTaskTool(s, runLog())
         runBlocking {
-            tool.execute("""{"action":"update","task_id":"${task.id}","destructive_tool_allowlist":["write_file"]}""")
+            tool.execute("""{"action":"update","task_id":"${task.id}","tool_grants":["write_file"]}""")
         }
-        s.get(task.id)!!.destructiveToolAllowlist shouldBe setOf("write_file")
+        s.get(task.id)!!.toolGrants shouldBe setOf("write_file")
     }
 
     test("update without task_id returns an Error string") {

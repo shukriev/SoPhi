@@ -447,7 +447,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "ok"
         })
-        val policy = dev.sophi.core.tools.ConfirmationPolicy { _, _ ->
+        val policy = dev.sophi.core.tools.ConfirmationPolicy { _ ->
             throw AssertionError("should not be called for a SAFE tool")
         }
         val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
@@ -473,7 +473,7 @@ class AgentLoopTest : FunSpec({
             override val name = "danger"
             override val description = "Risky"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String): String {
                 executed = true
                 return "should not run"
@@ -481,7 +481,9 @@ class AgentLoopTest : FunSpec({
         })
         val loopWithPolicy = AgentLoop(
             provider, toolRegistry, sessionManager,
-            confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { _, _ -> false }
+            confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { requests ->
+                requests.associate { it.callId to false }
+            }
         )
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
         every { provider.stream(any()) } answers {
@@ -510,12 +512,14 @@ class AgentLoopTest : FunSpec({
             override val name = "danger"
             override val description = "Risky"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String) = "did the risky thing"
         })
         val loopWithPolicy = AgentLoop(
             provider, toolRegistry, sessionManager,
-            confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { _, _ -> true }
+            confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { requests ->
+                requests.associate { it.callId to true }
+            }
         )
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
@@ -531,7 +535,7 @@ class AgentLoopTest : FunSpec({
         result.branch().last().content shouldBe "done"
     }
 
-    test("turn() resolves all confirmations before executing any tool in the batch") {
+    test("turn() resolves all confirmations for a round in a single confirmationPolicy.confirm() call") {
         val session = AgentSession(id = "s1")
         val log = java.util.Collections.synchronizedList(mutableListOf<String>())
         val toolRegistry = ToolRegistry()
@@ -539,17 +543,22 @@ class AgentLoopTest : FunSpec({
             override val name = "d1"
             override val description = "Risky 1"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String): String { log.add("exec:d1"); return "1" }
         })
         toolRegistry.register(object : dev.sophi.core.tools.Tool {
             override val name = "d2"
             override val description = "Risky 2"
             override val parametersJson = "{}"
-            override val riskLevel = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String): String { log.add("exec:d2"); return "2" }
         })
-        val policy = dev.sophi.core.tools.ConfirmationPolicy { toolName, _ -> log.add("confirm:$toolName"); true }
+        var confirmCallCount = 0
+        val policy = dev.sophi.core.tools.ConfirmationPolicy { requests ->
+            confirmCallCount++
+            requests.forEach { log.add("confirm:${it.toolName}") }
+            requests.associate { it.callId to true }
+        }
         val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
@@ -565,6 +574,39 @@ class AgentLoopTest : FunSpec({
 
         loopWithPolicy.turn(session, "go", config)
 
-        log.take(2) shouldBe listOf("confirm:d1", "confirm:d2")
+        confirmCallCount shouldBe 1
+        log.filter { it.startsWith("confirm:") }.toSet() shouldBe setOf("confirm:d1", "confirm:d2")
+    }
+
+    test("turn() lets a granted tool run without consulting confirmationPolicy") {
+        val session = AgentSession(id = "s1")
+        var executed = false
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "Risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed = true; return "ran" }
+        })
+        val policy = dev.sophi.core.tools.ConfirmationPolicy {
+            throw AssertionError("should not be called for a granted tool")
+        }
+        val loopWithGrant = AgentLoop(
+            provider, toolRegistry, sessionManager,
+            confirmationPolicy = policy, grants = setOf("danger")
+        )
+        every { provider.stream(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(
+                calls = listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}")),
+                usage = TokenUsage(1, 0)
+            ).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        loopWithGrant.turn(session, "go", config)
+
+        executed shouldBe true
     }
 })

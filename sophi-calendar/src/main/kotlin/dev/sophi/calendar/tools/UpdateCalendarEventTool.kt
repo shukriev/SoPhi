@@ -46,7 +46,7 @@ private fun UpdateRecurrenceArgs.toModel(): Recurrence = Recurrence(
 class UpdateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "update_calendar_event"
     override val description = "Update fields on an existing calendar event; omitted fields are left unchanged"
-    override val riskLevel = RiskLevel.DESTRUCTIVE
+    override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
     override val parametersJson = """
         {"type":"object","properties":{
           "event_id":{"type":"string"},

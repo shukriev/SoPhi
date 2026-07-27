@@ -81,7 +81,7 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
     }
 
     @Bean
-    fun confirmationPolicy(): ConfirmationPolicy = ConfirmationPolicy.DENY_DESTRUCTIVE
+    fun confirmationPolicy(): ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
 
     @Bean(destroyMethod = "close")
     fun mcpClientManager(): McpClientManager = McpClientManager()
