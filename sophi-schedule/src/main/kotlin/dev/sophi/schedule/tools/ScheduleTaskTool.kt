@@ -1,5 +1,6 @@
 package dev.sophi.schedule.tools
 
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.schedule.model.CronSchedules
 import dev.sophi.schedule.model.ScheduledTask
@@ -30,12 +31,18 @@ private data class ManageTaskArgs(
     @SerialName("stop_condition_type") val stopConditionType: String? = null,
     @SerialName("shell_command") val shellCommand: String? = null,
     @SerialName("max_iterations") val maxIterations: Int? = null,
-    @SerialName("destructive_tool_allowlist") val destructiveToolAllowlist: List<String>? = null,
+    @SerialName("tool_grants") val toolGrants: List<String>? = null,
     @SerialName("task_id") val taskId: String? = null
 )
 
 class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog) : Tool {
     override val name = TOOL_NAME
+    override fun riskLevel(argumentsJson: String): RiskLevel {
+        val args = runCatching { json.decodeFromString(ManageTaskArgs.serializer(), argumentsJson) }.getOrNull()
+            ?: return RiskLevel.SAFE
+        val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
+        return if (grantingPower) RiskLevel.DESTRUCTIVE else RiskLevel.SAFE
+    }
     override val description =
         "Create, list, update, pause, resume, or remove a scheduled or goal-based background task, " +
             "and inspect its run history (outcome + duration of each past run). " +
@@ -57,7 +64,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
           "stop_condition_type":{"type":"string","enum":["llm_judged","shell_check"],"description":"Required when mode=goal"},
           "shell_command":{"type":"string","description":"Required when stop_condition_type=shell_check"},
           "max_iterations":{"type":"integer","description":"Required when mode=goal"},
-          "destructive_tool_allowlist":{"type":"array","items":{"type":"string"},"description":"Destructive tool names this task may call unattended, e.g. fetch_url"},
+          "tool_grants":{"type":"array","items":{"type":"string"},"description":"Tool names this task may call unattended without confirmation, e.g. fetch_url"},
           "task_id":{"type":"string","description":"Required for update, pause, resume, remove; optional filter for runs"}
         },"required":["action"]}
     """.trimIndent()
@@ -121,7 +128,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 trigger = trigger,
                 mode = mode,
                 prompt = prompt,
-                toolGrants = args.destructiveToolAllowlist?.toSet() ?: emptySet()
+                toolGrants = args.toolGrants?.toSet() ?: emptySet()
             )
         )
         return "Created task ${task.id} (${task.name})"
@@ -154,7 +161,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 name = args.name ?: task.name,
                 prompt = args.prompt ?: task.prompt,
                 trigger = newTrigger ?: task.trigger,
-                toolGrants = args.destructiveToolAllowlist?.toSet() ?: task.toolGrants
+                toolGrants = args.toolGrants?.toSet() ?: task.toolGrants
             )
         }
         return if (updated) "Updated $id" else "Error: no task found with id $id"
