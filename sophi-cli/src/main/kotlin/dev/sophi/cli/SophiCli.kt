@@ -175,7 +175,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                     val palace = dev.sophi.memory.jane.JanesPalace(
                         dev.sophi.memory.jane.JanesPalaceConfig(sessionModel = model),
                         provider, embProvider, embModel,
-                        onWarning = { msg -> mordantTerminal.println(TextColors.yellow(msg)) })
+                        // Encoding runs fire-and-forget on AFTER_TURN (MemoryPlugin), so this
+                        // warning can arrive at any time relative to the next readLine() prompt —
+                        // printAbove keeps it from landing glued onto that prompt's line.
+                        onWarning = { msg ->
+                            if (sophiTerminal.isInteractive) sophiTerminal.printAbove(TextColors.yellow(msg).toString())
+                            else mordantTerminal.println(TextColors.yellow(msg))
+                        })
                     dev.sophi.memory.MemoryPlugin(palace)
                 }
             }

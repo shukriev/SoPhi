@@ -52,6 +52,15 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
             null
         }
 
+    /**
+     * Prints a message above the current prompt line via JLine's own out-of-band message API,
+     * instead of a raw write to the terminal. A message that can arrive asynchronously relative
+     * to the main input loop (a fire-and-forget background job's warning, say) needs this: a
+     * plain println while readLine() already has a prompt (and possibly partial user input)
+     * drawn would land glued onto that same line rather than getting a fresh one.
+     */
+    fun printAbove(text: String) = reader.printAbove(text)
+
     val isInteractive: Boolean
         get() = jlineTerminal.type != Terminal.TYPE_DUMB && jlineTerminal.type != Terminal.TYPE_DUMB_COLOR
 
