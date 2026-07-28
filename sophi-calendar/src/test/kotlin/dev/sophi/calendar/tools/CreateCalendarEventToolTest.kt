@@ -52,6 +52,43 @@ class CreateCalendarEventToolTest : FunSpec({
         provider.events.values.single().allDay shouldBe true
     }
 
+    test("create with start_date/end_date but no all_day flag returns an Error that names what was actually supplied") {
+        val provider = FakeCalendarProvider()
+        val result = runBlocking {
+            CreateCalendarEventTool(provider).execute(
+                """{"title":"Anniversary","start_date":"2026-09-24","end_date":"2026-09-24"}"""
+            )
+        }
+        result shouldContain "Error"
+        result shouldContain "start_date"
+        result shouldContain "\"all_day\": true"
+        provider.events shouldBe emptyMap()
+    }
+
+    test("create with an epoch-millis-looking 'start' string returns an Error naming the mistake specifically") {
+        val provider = FakeCalendarProvider()
+        val result = runBlocking {
+            CreateCalendarEventTool(provider).execute(
+                """{"title":"x","start":"1758642600000","end":"1759337400000"}"""
+            )
+        }
+        result shouldContain "Error"
+        result shouldContain "epoch"
+        provider.events shouldBe emptyMap()
+    }
+
+    test("create with all_day=true and a start_date carrying a time-of-day suffix returns a clear Error before reaching the provider") {
+        val provider = FakeCalendarProvider()
+        val result = runBlocking {
+            CreateCalendarEventTool(provider).execute(
+                """{"title":"Anniversary","all_day":true,"start_date":"2026-09-24T18:30:00","end_date":"2026-09-24"}"""
+            )
+        }
+        result shouldContain "Error"
+        result shouldContain "start_date"
+        provider.events shouldBe emptyMap()
+    }
+
     test("create with a recurrence object passes it through to the provider") {
         val provider = FakeCalendarProvider()
         runBlocking {
