@@ -170,8 +170,17 @@ class AgentLoop(
             val needsDecision = classified.filter { (_, req) ->
                 req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
             }
-            val decisions = if (needsDecision.isEmpty()) emptyMap()
-                else confirmationPolicy.confirm(needsDecision.map { it.second })
+            val decisions = if (needsDecision.isEmpty()) {
+                emptyMap()
+            } else {
+                val requests = needsDecision.map { it.second }
+                onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
+                try {
+                    confirmationPolicy.confirm(requests)
+                } finally {
+                    onEvent(TurnEvent.ConfirmationFinished)
+                }
+            }
             val allowedCalls = classified.map { (call, req) ->
                 val allowed = req.riskLevel == RiskLevel.SAFE ||
                     req.toolName in grants ||
