@@ -48,6 +48,12 @@ class AgentLoopToolEventTest : FunSpec({
         finished.durationMillis shouldBeGreaterThanOrEqual 0L
     }
 
+    test("tool returning an 'Error: '-prefixed string (without throwing) emits ToolCallFinished with isError=true") {
+        val finished = runOneToolTurn(FixedTool("validating") { "Error: 'start' and 'end' are required unless all_day=true" })
+            .filterIsInstance<TurnEvent.ToolCallFinished>().single()
+        finished.isError.shouldBeTrue()
+    }
+
     test("throwing tool emits ToolCallFinished with isError=true") {
         val finished = runOneToolTurn(FixedTool("boom") { error("nope") })
             .filterIsInstance<TurnEvent.ToolCallFinished>().single()

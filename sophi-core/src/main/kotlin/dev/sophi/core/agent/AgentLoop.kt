@@ -170,8 +170,17 @@ class AgentLoop(
             val needsDecision = classified.filter { (_, req) ->
                 req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
             }
-            val decisions = if (needsDecision.isEmpty()) emptyMap()
-                else confirmationPolicy.confirm(needsDecision.map { it.second })
+            val decisions = if (needsDecision.isEmpty()) {
+                emptyMap()
+            } else {
+                val requests = needsDecision.map { it.second }
+                onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
+                try {
+                    confirmationPolicy.confirm(requests)
+                } finally {
+                    onEvent(TurnEvent.ConfirmationFinished)
+                }
+            }
             val allowedCalls = classified.map { (call, req) ->
                 val allowed = req.riskLevel == RiskLevel.SAFE ||
                     req.toolName in grants ||
@@ -196,6 +205,10 @@ class AgentLoop(
                                 }
                                 ?: run { failed = true; "Error: Tool '${call.name}' not found" }
                         }
+                        // Tools signal a handled failure by returning an "Error: "-prefixed string
+                        // just as often as by throwing (every built-in tool's own validation follows
+                        // this convention) — count both the same way for loop-guard/reliability purposes.
+                        failed = failed || result.startsWith("Error: ")
                         onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
                         ToolCallOutcome(
                             call,

@@ -150,6 +150,60 @@ class AgentLoopStreamTest : FunSpec({
         finished.result shouldBe "Error: Tool 'delete_file' execution denied by confirmation policy"
     }
 
+    test("streamTurn() emits ConfirmationStarted/ConfirmationFinished around a confirm() call for a non-SAFE tool, before ToolCallStarted") {
+        val destructiveTool = object : Tool {
+            override val name = "delete_file"
+            override val description = ""
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "deleted"
+        }
+        val registry = ToolRegistry().register(destructiveTool)
+        val loop = AgentLoop(provider, registry, sessionManager, confirmationPolicy = ConfirmationPolicy.ALLOW_ALL)
+        val session = AgentSession(id = "s6")
+        var round = 0
+        every { provider.stream(any()) } answers {
+            round++
+            if (round == 1) flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "delete_file", "{}"))))
+            else flowOf(StreamEvent.Content("ok"))
+        }
+
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "delete it", config) { events.add(it) }
+
+        val startedIdx = events.indexOfFirst { it is TurnEvent.ConfirmationStarted }
+        val finishedIdx = events.indexOfFirst { it is TurnEvent.ConfirmationFinished }
+        val toolStartedIdx = events.indexOfFirst { it is TurnEvent.ToolCallStarted }
+        startedIdx shouldBe 0
+        (events[startedIdx] as TurnEvent.ConfirmationStarted).toolNames shouldBe listOf("delete_file")
+        (finishedIdx > startedIdx) shouldBe true
+        (toolStartedIdx > finishedIdx) shouldBe true
+    }
+
+    test("streamTurn() does not emit ConfirmationStarted/ConfirmationFinished for a SAFE tool call") {
+        val safeTool = object : Tool {
+            override val name = "read_file"
+            override val description = ""
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "contents"
+        }
+        val registry = ToolRegistry().register(safeTool)
+        val loop = AgentLoop(provider, registry, sessionManager)
+        val session = AgentSession(id = "s7")
+        var round = 0
+        every { provider.stream(any()) } answers {
+            round++
+            if (round == 1) flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "read_file", "{}"))))
+            else flowOf(StreamEvent.Content("ok"))
+        }
+
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "read it", config) { events.add(it) }
+
+        events.filterIsInstance<TurnEvent.ConfirmationStarted>() shouldBe emptyList()
+        events.filterIsInstance<TurnEvent.ConfirmationFinished>() shouldBe emptyList()
+    }
+
     test("streamTurn() throws IllegalStateException when maxToolRounds is exceeded and the loop guard always continues") {
         val tool = object : Tool {
             override val name = "loop_tool"

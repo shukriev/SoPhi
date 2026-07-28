@@ -200,6 +200,12 @@ class SlashCommandsTest : FunSpec({
         output shouldBe listOf("Learning is not enabled.")
     }
 
+    test("/calendar shows disabled message when no provider/calendarProvider was wired") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        handler.handle("/calendar list", AgentSession(id = "s1"))
+        output shouldBe listOf("Calendar is not enabled.")
+    }
+
     test("/feedback list shows 'No feedback records.' when empty") {
         val home = tempdir().toPath()
         val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"))

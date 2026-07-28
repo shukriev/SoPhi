@@ -7,6 +7,9 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.ConfirmationRequest
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.HookContext
@@ -17,14 +20,19 @@ import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import java.util.concurrent.atomic.AtomicInteger
 
 class TurnControllerTest : FunSpec({
     val provider = mockk<LLMProvider>()
@@ -123,6 +131,65 @@ class TurnControllerTest : FunSpec({
 
         result shouldBe session
         rendered shouldBe listOf(ResponseRenderer.renderText("partial") + " [interrupted]")
+    }
+
+    test("runTurn() pauses the live region's spinner while a confirmation is pending, resuming once it resolves") {
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "ran"
+        })
+        val releaseConfirmation = CompletableDeferred<Unit>()
+        val confirmationPolicy = ConfirmationPolicy { requests: List<ConfirmationRequest> ->
+            releaseConfirmation.await()
+            requests.associate { it.callId to true }
+        }
+        val loopWithConfirmation = AgentLoop(
+            provider, toolRegistry, sessionManager, confirmationPolicy = confirmationPolicy
+        )
+        var round = 0
+        every { provider.stream(any()) } answers {
+            round++
+            if (round == 1) flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "danger", "{}"))))
+            else flowOf(StreamEvent.Content("done"))
+        }
+        val appendCount = AtomicInteger(0)
+        val recordingAppendable = object : Appendable {
+            override fun append(csq: CharSequence?): Appendable { appendCount.incrementAndGet(); return this }
+            override fun append(csq: CharSequence?, start: Int, end: Int): Appendable { appendCount.incrementAndGet(); return this }
+            override fun append(c: Char): Appendable { appendCount.incrementAndGet(); return this }
+        }
+        val input = ScriptedInputSource(emptyList())
+        val rendered = mutableListOf<String>()
+        val controller = TurnController(
+            loopWithConfirmation, config, input, LiveRegion(recordingAppendable) { 80 }
+        ) { rendered.add(it) }
+
+        coroutineScope {
+            val turnJob = async { controller.runTurn(AgentSession(id = "s8"), "do it") }
+            // Long enough for the first LLM round to return and the confirmation gate to engage
+            // (animationJob's own 100ms cadence means the spinner would already have ticked at
+            // least once before this point, which is fine -- we only care about growth *after*).
+            delay(150)
+            val countWhilePending = appendCount.get()
+            // Several animation-job cadences (100ms each) while still blocked on
+            // releaseConfirmation -- if the spinner weren't paused, this window alone would
+            // produce multiple additional appends.
+            delay(350)
+            appendCount.get() shouldBe countWhilePending
+
+            releaseConfirmation.complete(Unit)
+            turnJob.await()
+        }
+
+        (appendCount.get() > 0).shouldBeTrue()
+        rendered shouldBe listOf(
+            ResponseRenderer.renderToolCall("danger", "{}", "ran"),
+            ResponseRenderer.renderText("done")
+        )
     }
 
     test("runTurn() surfaces a provider error as an output line instead of throwing") {
