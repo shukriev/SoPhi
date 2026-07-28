@@ -24,9 +24,9 @@ class SlashHandler(
     private val scheduleDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
     private val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
     private val memoryPlugin: MemoryPlugin? = null,
-    private val provider: LLMProvider,
-    private val calendarProvider: CalendarProvider,
-    private val confirmationPolicy: ConfirmationPolicy,
+    private val provider: LLMProvider? = null,
+    private val calendarProvider: CalendarProvider? = null,
+    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -132,23 +132,26 @@ class SlashHandler(
     }
 
     private suspend fun handleCalendar(arg: String?) {
+        val calProvider = calendarProvider
+        val llmProvider = provider
+        if (calProvider == null || llmProvider == null) { output("Calendar is not enabled."); return }
         val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
         val sub = parts[0].lowercase()
         val subArg = parts.getOrNull(1)?.trim()
         when (sub) {
-            "list" -> CalendarList(calendarProvider, subArg?.toIntOrNull() ?: 7, output).run()
+            "list" -> CalendarList(calProvider, subArg?.toIntOrNull() ?: 7, output).run()
             "get" -> {
                 if (subArg.isNullOrEmpty()) output("Usage: /calendar get <event-id> [calendar-id]")
-                else subArg.split(" ", limit = 2).let { CalendarGet(calendarProvider, it[0], it.getOrNull(1), output).run() }
+                else subArg.split(" ", limit = 2).let { CalendarGet(calProvider, it[0], it.getOrNull(1), output).run() }
             }
             "delete" -> {
                 if (subArg.isNullOrEmpty()) output("Usage: /calendar delete <event-id> [calendar-id]")
-                else subArg.split(" ", limit = 2).let { CalendarDelete(calendarProvider, it[0], it.getOrNull(1), output).run() }
+                else subArg.split(" ", limit = 2).let { CalendarDelete(calProvider, it[0], it.getOrNull(1), output).run() }
             }
-            "calendars" -> CalendarCalendars(calendarProvider, output).run()
+            "calendars" -> CalendarCalendars(calProvider, output).run()
             "create" -> {
                 if (subArg.isNullOrEmpty()) output("Usage: /calendar create <description>")
-                else CalendarCreate(provider, calendarProvider, sessionManager, confirmationPolicy, config, subArg, output).run()
+                else CalendarCreate(llmProvider, calProvider, sessionManager, confirmationPolicy, config, subArg, output).run()
             }
             else -> output("Unknown /calendar subcommand: $sub  Available: list get delete calendars create")
         }
