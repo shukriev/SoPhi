@@ -249,12 +249,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
-                "/schedule /feedback /lessons /memory\n"
+                "/schedule /calendar /feedback /lessons /memory\n"
         )
 
         val slashHandler = SlashHandler(
             sessionManager, compactor, config, learningPlugin,
-            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin
+            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
+            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)
