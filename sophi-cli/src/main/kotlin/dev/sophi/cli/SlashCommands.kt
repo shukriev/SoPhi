@@ -14,6 +14,7 @@ import dev.sophi.memory.MemoryPlugin
 import dev.sophi.memory.MemoryView
 import dev.sophi.memory.ProfileAction
 import dev.sophi.memory.jane.JanesPalace
+import dev.sophi.skills.SkillRegistry
 import java.nio.file.Path
 
 class SlashHandler(
@@ -24,6 +25,7 @@ class SlashHandler(
     private val scheduleDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
     private val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
     private val memoryPlugin: MemoryPlugin? = null,
+    private val skillRegistry: SkillRegistry = SkillRegistry(emptyMap()),
     private val provider: LLMProvider? = null,
     private val calendarProvider: CalendarProvider? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
@@ -104,10 +106,11 @@ class SlashHandler(
                 if (palace == null) output("Memory is not enabled.") else handleMemory(palace, arg)
                 session
             }
+            "skill" -> { handleSkill(arg, session); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory"
+                        "/schedule /calendar /feedback /lessons /memory /skill"
                 )
                 session
             }
@@ -178,6 +181,23 @@ class SlashHandler(
             "archive" -> if (subArg.isNullOrEmpty()) output("Usage: /lessons archive <id>")
                 else LessonsArchive(learningHome, subArg, output).run()
             else -> output("Unknown /lessons subcommand: $sub  Available: list archive")
+        }
+    }
+
+    private fun handleSkill(arg: String?, session: AgentSession) {
+        val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
+        val sub = parts[0]
+        if (sub == "list") {
+            if (skillRegistry.all().isEmpty()) output("No skills installed.")
+            else skillRegistry.all().forEach { (id, s) -> output("$id: ${s.metadata.description}") }
+            return
+        }
+        val skill = skillRegistry.get(sub)
+        if (skill == null) {
+            output("Unknown skill: $sub. Run /skill list to see available skills.")
+        } else {
+            session.append(EntryRole.TOOL_RESULT, skill.body)
+            output("Injected skill: $sub")
         }
     }
 
