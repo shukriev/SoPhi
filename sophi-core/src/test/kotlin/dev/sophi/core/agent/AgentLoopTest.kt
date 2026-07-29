@@ -279,6 +279,30 @@ class AgentLoopTest : FunSpec({
         coVerify(exactly = 3) { provider.stream(any()) }
     }
 
+    test("turn() stops early after 3 consecutive rounds where the tool returns an 'Error: ' string instead of throwing") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "validating"
+            override val description = "Returns a validation error instead of throwing"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String = "Error: 'start' and 'end' are required unless all_day=true"
+        })
+        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+
+        every { provider.stream(any()) } returns LLMResponse.ToolUse(
+            calls = listOf(dev.sophi.ai.api.ToolCall("c1", "validating", "{}")),
+            usage = TokenUsage(1, 0)
+        ).toStreamFlow()
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "3 consecutive"
+        coVerify(exactly = 3) { provider.stream(any()) }
+    }
+
     test("turn() keeps going past 3 consecutive failures when the loop guard says yes") {
         val session = AgentSession(id = "s1")
         val toolRegistry = ToolRegistry()

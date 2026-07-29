@@ -8,7 +8,7 @@
 | Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory, sophi-schedule |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
 | Designs approved, not yet implemented | Tiered tool confirmation & grants (ADR-016) — `RiskLevel` gains `CAUTION`; `Tool.riskLevel` becomes argument-aware; `ConfirmationPolicy` batches per round; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
-| Last updated | 2026-07-27 |
+| Last updated | 2026-07-29 |
 
 ---
 
@@ -79,7 +79,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 |--------|---------|--------|
 | `sophi-ai` | Spring AI thin wrapper — provider abstraction only | complete |
 | `sophi-core` | Agent loop, session (JSONL tree), tools, compaction, subagents | complete |
-| `sophi-skills` | Lazy-loaded Markdown skill packages | complete |
+| `sophi-skills` | Lazy-loaded Markdown skill packages; `SkillRegistry` merges global + project directories | complete |
 | `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | complete |
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
@@ -443,6 +443,57 @@ class SkillLoader {
 }
 ```
 
+`SkillRegistry` (also `dev.sophi.skills`, same no-`sophi-core`-dependency rule) merges a
+global (`~/.sophi/skills`) and a project-local (`./.sophi/skills`) directory into one
+id-keyed lookup — the id is the filename stem (`code-review.md` → `code-review`), and a
+project-local skill overrides a global one of the same id. Missing directories and
+individual malformed files are tolerated, not fatal.
+
+```kotlin
+class SkillRegistry(skills: Map<String, Skill>) {
+    fun get(id: String): Skill?
+    fun all(): List<Pair<String, Skill>>
+
+    companion object {
+        fun load(globalDir: Path, projectDir: Path, loader: SkillLoader = SkillLoader()): SkillRegistry
+    }
+}
+```
+
+`SkillInstaller` (also `dev.sophi.skills`, same no-`sophi-core`-dependency rule) installs
+Claude Code-shaped skills — `<name>/SKILL.md` with `name:`/`description:` frontmatter,
+optionally bundling extra files — from a local path or a shallow `git clone` of a repo
+URL, normalizing each into the flat `<id>.md`/`title:`/`description:` shape
+`SkillRegistry` reads. The id is the skill's containing folder name, not the frontmatter
+`name:` field. Bundled sibling files are copied to a sibling `<id>/` folder (invisible to
+`SkillRegistry`'s `*.md`-only glob) with a note line in the normalized body pointing at
+its absolute path, so the LLM can still reach them via its own `read_file`/`bash` tools.
+Already-installed ids are skipped, never overwritten.
+
+```kotlin
+data class InstallResult(val installed: List<String>, val skipped: List<String>, val notFound: List<String>)
+
+class SkillInstaller {
+    fun install(source: String, targetDir: Path, only: Set<String> = emptySet()): InstallResult
+}
+```
+
+Reachable two ways: `sophi skill install <source> [--only a,b] [--project]` (`SkillInstallCommand`),
+and the LLM-callable `install_skill` tool (`InstallSkillTool`, `DESTRUCTIVE`-tier — every
+call writes files, gated by the normal confirmation-policy path like `write_file`).
+
+`sophi-cli` is the module that actually consumes it — it sits at the intersection of
+`sophi-core` (for the `Tool` interface) and `sophi-skills`, which neither module can see
+on its own. `SkillTool` (`sophi-cli/.../SkillTool.kt`) wraps a `SkillRegistry` as a
+`SAFE` `Tool` named `skill`: its `description` lists every loaded skill's id and
+one-line description, and calling it with `{"name": "<id>"}` returns that skill's body
+as the tool result, which becomes context for the LLM's next step. The `/skill` slash
+command (`SlashHandler`, `SlashCommands.kt`) shares the same registry: `/skill` or
+`/skill list` prints the available ids, `/skill <id>` appends the skill's body to the
+session directly as a `TOOL_RESULT` entry — the same shape the tool call itself would
+produce — letting a user force a specific skill into context without waiting on the LLM
+to decide.
+
 ---
 
 ## Architecture Decision Records
@@ -478,6 +529,8 @@ class SkillLoader {
 | `sophi-core` (loop + tools) | M1 | complete | [article-06](articles/article-06.md) |
 | `sophi-cli` print mode | M1 | complete | [article-09](articles/article-09.md) |
 | `sophi-skills` | M3 | complete | [article-07](articles/article-07.md) |
+| `sophi-skills` invocation (`SkillRegistry`, `SkillTool`, `/skill`) | post-M7 | complete | [article-07](articles/article-07.md) |
+| `sophi-skills` installer (`SkillInstaller`, `sophi skill install`, `install_skill`) | post-M7 | complete | [article-07](articles/article-07.md) |
 | `sophi-extensions` | M3 | complete | [article-08](articles/article-08.md) |
 | `sophi-cli` full TUI | M2 | complete | [article-09](articles/article-09.md) |
 | `sophi-web` | M4 | complete | [article-10](articles/article-10.md) |

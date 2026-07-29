@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.async
 import org.jline.terminal.Terminal
 import org.jline.terminal.impl.DumbTerminal
@@ -66,5 +67,17 @@ class SophiTerminalTest : FunSpec({
         answer shouldBe true
         toggled shouldBe false
         controlKeysJob.cancel()
+    }
+
+    // printAbove routes through JLine's own out-of-band message API rather than a raw println,
+    // so a message arriving asynchronously (a fire-and-forget background job's warning, say)
+    // doesn't get glued onto whatever the active readLine() prompt already rendered.
+    test("printAbove() writes the given text to the terminal") {
+        val output = ByteArrayOutputStream()
+        val sophi = SophiTerminal(DumbTerminal(ByteArrayInputStream(ByteArray(0)), output))
+
+        sophi.printAbove("memory: encoder returned output that didn't match the expected schema")
+
+        output.toString() shouldContain "memory: encoder returned output that didn't match the expected schema"
     }
 })

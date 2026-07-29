@@ -1,16 +1,20 @@
 package dev.sophi.cli
 
+import dev.sophi.ai.api.LLMProvider
+import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.BrowseFilter
 import dev.sophi.memory.MemoryPlugin
 import dev.sophi.memory.MemoryView
 import dev.sophi.memory.ProfileAction
 import dev.sophi.memory.jane.JanesPalace
+import dev.sophi.skills.SkillRegistry
 import java.nio.file.Path
 
 class SlashHandler(
@@ -21,6 +25,10 @@ class SlashHandler(
     private val scheduleDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
     private val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
     private val memoryPlugin: MemoryPlugin? = null,
+    private val skillRegistry: SkillRegistry = SkillRegistry(emptyMap()),
+    private val provider: LLMProvider? = null,
+    private val calendarProvider: CalendarProvider? = null,
+    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -84,6 +92,7 @@ class SlashHandler(
                 }
             }
             "schedule" -> { handleSchedule(arg); session }
+            "calendar" -> { handleCalendar(arg); session }
             "feedback" -> {
                 if (learning == null) output("Learning is not enabled.") else handleFeedback(arg)
                 session
@@ -97,10 +106,11 @@ class SlashHandler(
                 if (palace == null) output("Memory is not enabled.") else handleMemory(palace, arg)
                 session
             }
+            "skill" -> { handleSkill(arg, session); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
-                        "/schedule /feedback /lessons /memory"
+                        "/schedule /calendar /feedback /lessons /memory /skill"
                 )
                 session
             }
@@ -121,6 +131,32 @@ class SlashHandler(
             "remove" -> if (subArg.isNullOrEmpty()) output("Usage: /schedule remove <task-id>")
                 else ScheduleRemove(scheduleDir, subArg, output).run()
             else -> output("Unknown /schedule subcommand: $sub  Available: list log pause resume remove")
+        }
+    }
+
+    private suspend fun handleCalendar(arg: String?) {
+        val calProvider = calendarProvider
+        val llmProvider = provider
+        if (calProvider == null || llmProvider == null) { output("Calendar is not enabled."); return }
+        val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
+        val sub = parts[0].lowercase()
+        val subArg = parts.getOrNull(1)?.trim()
+        when (sub) {
+            "list" -> CalendarList(calProvider, subArg?.toIntOrNull() ?: 7, output).run()
+            "get" -> {
+                if (subArg.isNullOrEmpty()) output("Usage: /calendar get <event-id> [calendar-id]")
+                else subArg.split(" ", limit = 2).let { CalendarGet(calProvider, it[0], it.getOrNull(1), output).run() }
+            }
+            "delete" -> {
+                if (subArg.isNullOrEmpty()) output("Usage: /calendar delete <event-id> [calendar-id]")
+                else subArg.split(" ", limit = 2).let { CalendarDelete(calProvider, it[0], it.getOrNull(1), output).run() }
+            }
+            "calendars" -> CalendarCalendars(calProvider, output).run()
+            "create" -> {
+                if (subArg.isNullOrEmpty()) output("Usage: /calendar create <description>")
+                else CalendarCreate(llmProvider, calProvider, sessionManager, confirmationPolicy, config, subArg, output).run()
+            }
+            else -> output("Unknown /calendar subcommand: $sub  Available: list get delete calendars create")
         }
     }
 
@@ -145,6 +181,23 @@ class SlashHandler(
             "archive" -> if (subArg.isNullOrEmpty()) output("Usage: /lessons archive <id>")
                 else LessonsArchive(learningHome, subArg, output).run()
             else -> output("Unknown /lessons subcommand: $sub  Available: list archive")
+        }
+    }
+
+    private fun handleSkill(arg: String?, session: AgentSession) {
+        val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
+        val sub = parts[0]
+        if (sub == "list") {
+            if (skillRegistry.all().isEmpty()) output("No skills installed.")
+            else skillRegistry.all().forEach { (id, s) -> output("$id: ${s.metadata.description}") }
+            return
+        }
+        val skill = skillRegistry.get(sub)
+        if (skill == null) {
+            output("Unknown skill: $sub. Run /skill list to see available skills.")
+        } else {
+            session.append(EntryRole.TOOL_RESULT, skill.body)
+            output("Injected skill: $sub")
         }
     }
 

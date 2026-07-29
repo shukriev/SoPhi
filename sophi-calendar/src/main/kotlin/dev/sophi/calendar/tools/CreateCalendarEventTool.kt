@@ -47,9 +47,11 @@ class CreateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "create_calendar_event"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.CAUTION
     override val description = "Create a calendar event (optionally recurring or all-day) on the native OS calendar. " +
-        "start/end (or start_date/end_date for all-day) are epoch millis / ISO dates you must compute yourself — " +
-        "if the request uses a relative date or time (\"tomorrow\", \"next Monday\", \"in an hour\"), call " +
-        "get_current_datetime first to establish the current date and timezone; never guess it."
+        "For a timed event, set 'start'/'end' to ISO-8601 local date-times (e.g. 2026-07-27T12:00:00) — never " +
+        "epoch milliseconds. For an all-day event, set \"all_day\": true and use 'start_date'/'end_date' " +
+        "(ISO YYYY-MM-DD, date only, no time-of-day). If the request uses a relative date or time " +
+        "(\"tomorrow\", \"next Monday\", \"in an hour\"), call get_current_datetime first to establish the " +
+        "current date and timezone; never guess it."
     override val parametersJson = """
         {"type":"object","properties":{
           "title":{"type":"string"},
@@ -77,22 +79,42 @@ class CreateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     private fun parseLocalDateTime(s: String): Long? =
         runCatching { LocalDateTime.parse(s).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() }.getOrNull()
 
+    private fun invalidDateTimeError(field: String, value: String): String {
+        val epochHint = if (value.toLongOrNull() != null) {
+            " — this looks like epoch milliseconds, not an ISO-8601 date-time; convert it to e.g. 2026-07-27T12:00:00"
+        } else ""
+        return "Error: invalid '$field' datetime '$value', expected ISO-8601 like 2026-07-27T12:00:00$epochHint"
+    }
+
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString(CreateEventArgs.serializer(), argumentsJson)
         val title = args.title ?: return "Error: 'title' is required"
         var startMs = 0L
         var endMs = 0L
         if (args.allDay) {
-            if (args.startDate == null || args.endDate == null) {
-                return "Error: 'start_date' and 'end_date' are required when all_day=true"
+            val startDateStr = args.startDate
+                ?: return "Error: 'start_date' and 'end_date' are required when all_day=true"
+            val endDateStr = args.endDate
+                ?: return "Error: 'start_date' and 'end_date' are required when all_day=true"
+            runCatching { java.time.LocalDate.parse(startDateStr) }.getOrElse {
+                return "Error: invalid 'start_date' '$startDateStr', expected ISO YYYY-MM-DD (date only, no time-of-day)"
+            }
+            runCatching { java.time.LocalDate.parse(endDateStr) }.getOrElse {
+                return "Error: invalid 'end_date' '$endDateStr', expected ISO YYYY-MM-DD (date only, no time-of-day)"
             }
         } else {
-            val startStr = args.start ?: return "Error: 'start' and 'end' are required unless all_day=true"
-            val endStr = args.end ?: return "Error: 'start' and 'end' are required unless all_day=true"
-            startMs = parseLocalDateTime(startStr)
-                ?: return "Error: invalid 'start' datetime '$startStr', expected ISO-8601 like 2026-07-27T12:00:00"
-            endMs = parseLocalDateTime(endStr)
-                ?: return "Error: invalid 'end' datetime '$endStr', expected ISO-8601 like 2026-07-27T12:00:00"
+            val startStr = args.start
+                ?: return "Error: 'start' and 'end' (ISO-8601 date-time) are required unless all_day=true" +
+                    if (args.startDate != null || args.endDate != null) {
+                        " — you supplied 'start_date'/'end_date' instead; if this should be an all-day event, add \"all_day\": true"
+                    } else ""
+            val endStr = args.end
+                ?: return "Error: 'start' and 'end' (ISO-8601 date-time) are required unless all_day=true" +
+                    if (args.startDate != null || args.endDate != null) {
+                        " — you supplied 'start_date'/'end_date' instead; if this should be an all-day event, add \"all_day\": true"
+                    } else ""
+            startMs = parseLocalDateTime(startStr) ?: return invalidDateTimeError("start", startStr)
+            endMs = parseLocalDateTime(endStr) ?: return invalidDateTimeError("end", endStr)
         }
 
         val event = CalendarEvent(

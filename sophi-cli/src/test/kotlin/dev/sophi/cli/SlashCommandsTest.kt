@@ -15,6 +15,7 @@ import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
 import dev.sophi.schedule.store.TaskStore
+import dev.sophi.skills.SkillRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
@@ -25,6 +26,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlin.io.path.writeText
 
 class SlashCommandsTest : FunSpec({
     val sessionManager = mockk<SessionManager>(relaxed = true)
@@ -200,6 +202,12 @@ class SlashCommandsTest : FunSpec({
         output shouldBe listOf("Learning is not enabled.")
     }
 
+    test("/calendar shows disabled message when no provider/calendarProvider was wired") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        handler.handle("/calendar list", AgentSession(id = "s1"))
+        output shouldBe listOf("Calendar is not enabled.")
+    }
+
     test("/feedback list shows 'No feedback records.' when empty") {
         val home = tempdir().toPath()
         val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"))
@@ -247,5 +255,46 @@ class SlashCommandsTest : FunSpec({
         val handler = SlashHandler(sessionManager, null, config, learning, learningHome = home) { output.add(it) }
         handler.handle("/lessons archive", AgentSession(id = "s1"))
         output shouldBe listOf("Usage: /lessons archive <id>")
+    }
+
+    test("/skill lists installed skills with descriptions") {
+        val dir = tempdir().toPath()
+        dir.resolve("code-review.md").writeText("---\ntitle: Code Review\ndescription: Reviews a diff\n---\n\nBody.")
+        val registry = SkillRegistry.load(dir.resolve("no-global"), dir)
+        val handler = SlashHandler(sessionManager, null, config, skillRegistry = registry) { output.add(it) }
+        handler.handle("/skill", AgentSession(id = "s1"))
+        output shouldBe listOf("code-review: Reviews a diff")
+    }
+
+    test("/skill list shows a message when no skills are installed") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        handler.handle("/skill list", AgentSession(id = "s1"))
+        output shouldBe listOf("No skills installed.")
+    }
+
+    test("/skill <id> injects the skill body as a TOOL_RESULT entry") {
+        val dir = tempdir().toPath()
+        dir.resolve("code-review.md").writeText("---\ntitle: Code Review\n---\n\nFollow these steps.")
+        val registry = SkillRegistry.load(dir.resolve("no-global"), dir)
+        val handler = SlashHandler(sessionManager, null, config, skillRegistry = registry) { output.add(it) }
+        val session = AgentSession(id = "s1")
+        handler.handle("/skill code-review", session)
+        session.tip?.role shouldBe EntryRole.TOOL_RESULT
+        session.tip?.content shouldBe "Follow these steps."
+        output shouldBe listOf("Injected skill: code-review")
+    }
+
+    test("/skill <unknown-id> reports an error without touching the session") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val session = AgentSession(id = "s1")
+        handler.handle("/skill nonexistent", session)
+        session.entries shouldHaveSize 0
+        output shouldBe listOf("Unknown skill: nonexistent. Run /skill list to see available skills.")
+    }
+
+    test("unknown command help text mentions /skill") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        handler.handle("/banana", AgentSession(id = "s1"))
+        output[0].contains("/skill") shouldBe true
     }
 })

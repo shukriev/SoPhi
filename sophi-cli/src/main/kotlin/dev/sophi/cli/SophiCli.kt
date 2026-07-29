@@ -40,6 +40,7 @@ import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
+import dev.sophi.skills.SkillRegistry
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
 import kotlinx.coroutines.runBlocking
@@ -175,7 +176,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                     val palace = dev.sophi.memory.jane.JanesPalace(
                         dev.sophi.memory.jane.JanesPalaceConfig(sessionModel = model),
                         provider, embProvider, embModel,
-                        onWarning = { msg -> mordantTerminal.println(TextColors.yellow(msg)) })
+                        // Encoding runs fire-and-forget on AFTER_TURN (MemoryPlugin), so this
+                        // warning can arrive at any time relative to the next readLine() prompt —
+                        // printAbove keeps it from landing glued onto that prompt's line.
+                        onWarning = { msg ->
+                            if (sophiTerminal.isInteractive) sophiTerminal.printAbove(TextColors.yellow(msg).toString())
+                            else mordantTerminal.println(TextColors.yellow(msg))
+                        })
                     dev.sophi.memory.MemoryPlugin(palace)
                 }
             }
@@ -198,6 +205,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
         val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
 
+        val skillRegistry = SkillRegistry.load(
+            globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
+            projectDir = Path.of(".sophi", "skills")
+        )
+
         val registry = ToolRegistry()
         buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
         registry.register(ScheduleTaskTool(
@@ -217,6 +229,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             val mcpConfig = McpConfigLoader().load(mcpConfigPath)
             mcpClientManager.connect(mcpConfig.servers).forEach { registry.register(it) }
         }
+        if (skillRegistry.all().isNotEmpty()) {
+            registry.register(SkillTool(skillRegistry))
+        }
+        registry.register(InstallSkillTool())
         if (agentDefinitions.isNotEmpty()) {
             registry.register(
                 SubagentTool(
@@ -243,12 +259,14 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
-                "/schedule /feedback /lessons /memory\n"
+                "/schedule /calendar /feedback /lessons /memory /skill\n"
         )
 
         val slashHandler = SlashHandler(
             sessionManager, compactor, config, learningPlugin,
-            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin
+            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
+            skillRegistry = skillRegistry,
+            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)

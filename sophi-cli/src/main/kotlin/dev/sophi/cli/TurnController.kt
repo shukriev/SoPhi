@@ -47,6 +47,11 @@ class TurnController(
         var currentPhase: StreamingPhase? = StreamingPhase.Generating()
         var tokenViewState = TokenViewToggleState()
         val animationTimer = AnimationTimer()
+        // Set while AgentLoop is blocked in confirmationPolicy.confirm() — a blocking, raw-mode
+        // y/N prompt is on screen at that point (TerminalConfirmationPolicy), and the animation
+        // job redrawing the spinner over it would garble the prompt and could clip the terminal's
+        // own tracking of how many lines to erase on its next redraw.
+        var confirmationPending = false
 
         fun render() {
             val phase = currentPhase ?: return
@@ -68,7 +73,7 @@ class TurnController(
         val animationJob = launch {
             while (isActive) {
                 delay(100)
-                render()
+                if (!confirmationPending) render()
             }
         }
 
@@ -92,6 +97,14 @@ class TurnController(
                             currentPhase = StreamingPhase.Generating(
                                 tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount, startTime = startTime
                             )
+                        }
+                        is TurnEvent.ConfirmationStarted -> {
+                            confirmationPending = true
+                            liveRegion.clear()
+                        }
+                        is TurnEvent.ConfirmationFinished -> {
+                            confirmationPending = false
+                            render()
                         }
                         is TurnEvent.ToolCallStarted -> {
                             pendingArgs[event.name] = event.argsJson
