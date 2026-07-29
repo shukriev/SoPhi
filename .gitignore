@@ -11,3 +11,5 @@ target/
 docs/superpowers/
 doc/articles/
 .worktrees/
+TODO_TASK.md
+TESTING_SCHEDULE.md
