@@ -18,16 +18,20 @@ data class Skill(
     val source: Path
 )
 
-internal fun parseFrontmatter(content: String): Pair<SkillMetadata, String> {
-    if (!content.startsWith("---\n")) {
-        return Pair(SkillMetadata(title = "Untitled"), content)
-    }
+internal fun splitFrontmatter(content: String): Pair<String, String> {
+    if (!content.startsWith("---\n")) return Pair("", content)
     val lines = content.lines()
     // lines[0] == "---"; find the next standalone "---" line
     val closeIdx = lines.drop(1).indexOfFirst { it == "---" }
-    if (closeIdx < 0) return Pair(SkillMetadata(title = "Untitled"), content)
+    if (closeIdx < 0) return Pair("", content)
     val yaml = lines.drop(1).take(closeIdx).joinToString("\n")
     val body = lines.drop(closeIdx + 2).joinToString("\n").trimStart('\n')
+    return Pair(yaml, body)
+}
+
+internal fun parseFrontmatter(content: String): Pair<SkillMetadata, String> {
+    val (yaml, body) = splitFrontmatter(content)
+    if (yaml.isEmpty()) return Pair(SkillMetadata(title = "Untitled"), content)
     val metadata = Yaml.default.decodeFromString(SkillMetadata.serializer(), yaml)
     return Pair(metadata, body)
 }
