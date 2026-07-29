@@ -232,6 +232,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         if (skillRegistry.all().isNotEmpty()) {
             registry.register(SkillTool(skillRegistry))
         }
+        registry.register(InstallSkillTool())
         if (agentDefinitions.isNotEmpty()) {
             registry.register(
                 SubagentTool(
