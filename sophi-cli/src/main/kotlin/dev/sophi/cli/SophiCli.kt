@@ -15,6 +15,7 @@ import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.EditTool
 import dev.sophi.core.tools.FetchUrlTool
@@ -23,7 +24,9 @@ import dev.sophi.core.tools.FileWriteTool
 import dev.sophi.core.tools.GetCurrentDateTimeTool
 import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
+import dev.sophi.core.tools.LlmRiskClassifier
 import dev.sophi.core.tools.Tool
+import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.extensions.HookContext
@@ -138,6 +141,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--auto-exit-token-view",
         help = "Automatically exit token view when LLM finishes (default: true)"
     ).flag(default = true)
+    private val autoMode: Boolean by option(
+        "--auto",
+        help = "Start with auto mode enabled: low-risk tool calls (per rule + LLM classifier) run " +
+            "without a confirmation prompt. Toggle anytime with /auto."
+    ).flag(default = false)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
@@ -199,7 +207,14 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
         val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
-        val confirmationPolicy = TerminalConfirmationPolicy(mordantTerminal, inputSource)
+        val registry = ToolRegistry()
+        val manualConfirmationPolicy = TerminalConfirmationPolicy(mordantTerminal, inputSource)
+        val autoModePolicy = AutoModeConfirmationPolicy(
+            registry, LlmRiskClassifier(provider, model), manualConfirmationPolicy
+        )
+        val confirmationPolicy = ToggleableConfirmationPolicy(
+            autoModePolicy, manualConfirmationPolicy, autoModeEnabled = autoMode
+        )
         val loopGuardPolicy = TerminalLoopGuardPolicy(mordantTerminal, inputSource)
 
         val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
@@ -210,7 +225,6 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             projectDir = Path.of(".sophi", "skills")
         )
 
-        val registry = ToolRegistry()
         buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
         registry.register(ScheduleTaskTool(
             TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")),
@@ -259,8 +273,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /auto\n"
         )
+        if (autoMode) {
+            mordantTerminal.println(
+                TextColors.cyan("Auto mode is on — low-risk tool calls run without asking. Toggle with /auto.")
+            )
+        }
 
         val slashHandler = SlashHandler(
             sessionManager, compactor, config, learningPlugin,
