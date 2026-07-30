@@ -19,6 +19,11 @@ fun interface RiskClassifier {
         tier: RiskLevel,
         argumentsJson: String
     ): RuleVerdict
+
+    companion object {
+        /** God mode: skips the LLM entirely, trusting only the tool's own ruleVerdict() rules. */
+        val ALWAYS_LOW_RISK: RiskClassifier = RiskClassifier { _, _, _, _ -> RuleVerdict.LOW_RISK }
+    }
 }
 
 /**

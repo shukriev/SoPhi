@@ -131,3 +131,14 @@ class LlmRiskClassifierTest : FunSpec({
         requestSlot.captured.maxTokens shouldBe 8192
     }
 })
+
+class RiskClassifierTest : FunSpec({
+    test("ALWAYS_LOW_RISK returns LOW_RISK unconditionally, without inspecting its arguments") {
+        val result = runBlocking {
+            RiskClassifier.ALWAYS_LOW_RISK.classify(
+                "bash", "Run a shell command", RiskLevel.DESTRUCTIVE, """{"command":"rm -rf /"}"""
+            )
+        }
+        result shouldBe RuleVerdict.LOW_RISK
+    }
+})
