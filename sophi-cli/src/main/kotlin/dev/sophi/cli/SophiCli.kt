@@ -49,6 +49,7 @@ import dev.sophi.schedule.tools.ScheduleTaskTool
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
+import kotlin.time.Duration.Companion.seconds
 import java.nio.file.Path
 
 class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness", invokeWithoutSubcommand = true) {
@@ -210,7 +211,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val registry = ToolRegistry()
         val manualConfirmationPolicy = TerminalConfirmationPolicy(mordantTerminal, inputSource)
         val autoModePolicy = AutoModeConfirmationPolicy(
-            registry, LlmRiskClassifier(provider, model), manualConfirmationPolicy
+            registry,
+            LlmRiskClassifier(provider, model, maxTokens = maxTokens, timeout = llmTimeoutSeconds.seconds),
+            manualConfirmationPolicy
         )
         val confirmationPolicy = ToggleableConfirmationPolicy(
             autoModePolicy, manualConfirmationPolicy, autoModeEnabled = autoMode

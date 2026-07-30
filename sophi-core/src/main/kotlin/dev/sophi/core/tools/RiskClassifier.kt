@@ -9,6 +9,9 @@ import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
+private const val DEFAULT_CLASSIFIER_MAX_TOKENS = 512
+private const val DEFAULT_CLASSIFIER_TIMEOUT_SECONDS = 30L
+
 fun interface RiskClassifier {
     suspend fun classify(
         toolName: String,
@@ -26,7 +29,8 @@ fun interface RiskClassifier {
 class LlmRiskClassifier(
     private val provider: LLMProvider,
     private val model: String,
-    private val timeout: Duration = 5.seconds
+    private val maxTokens: Int = DEFAULT_CLASSIFIER_MAX_TOKENS,
+    private val timeout: Duration = DEFAULT_CLASSIFIER_TIMEOUT_SECONDS.seconds
 ) : RiskClassifier {
 
     override suspend fun classify(
@@ -55,7 +59,7 @@ class LlmRiskClassifier(
                     )
                 ),
                 model = model,
-                maxTokens = 8,
+                maxTokens = maxTokens,
                 temperature = 0.0
             )
             when (val response = provider.complete(request)) {
@@ -65,9 +69,14 @@ class LlmRiskClassifier(
         }
     }.getOrElse { RuleVerdict.HIGH_RISK }
 
-    private fun parseVerdict(content: String): RuleVerdict =
-        when (content.trim().uppercase()) {
-            "LOW_RISK" -> RuleVerdict.LOW_RISK
-            else -> RuleVerdict.HIGH_RISK
-        }
+    // Reasoning models spend part of maxTokens on hidden chain-of-thought before the visible
+    // answer, and even compliant models rarely reply with the bare word requested — so this
+    // looks for the verdict as a substring rather than requiring an exact match. HIGH_RISK wins
+    // if both markers somehow appear, matching the "when unsure, answer HIGH_RISK" instruction.
+    private fun parseVerdict(content: String): RuleVerdict {
+        val normalized = content.trim().uppercase()
+        return if (normalized.contains("HIGH_RISK")) RuleVerdict.HIGH_RISK
+        else if (normalized.contains("LOW_RISK")) RuleVerdict.LOW_RISK
+        else RuleVerdict.HIGH_RISK
+    }
 }
