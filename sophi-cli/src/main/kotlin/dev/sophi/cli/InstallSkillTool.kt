@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
 import dev.sophi.skills.SkillInstaller
 import kotlinx.serialization.Serializable
@@ -35,6 +36,7 @@ class InstallSkillTool(
     private val json = Json { ignoreUnknownKeys = true }
 
     override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+    override fun ruleVerdict(argumentsJson: String) = RuleVerdict.HIGH_RISK
 
     override suspend fun execute(argumentsJson: String): String {
         val args = runCatching { json.decodeFromString(InstallSkillArgs.serializer(), argumentsJson) }
