@@ -8,6 +8,7 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.BrowseFilter
 import dev.sophi.memory.MemoryPlugin
@@ -29,6 +30,7 @@ class SlashHandler(
     private val provider: LLMProvider? = null,
     private val calendarProvider: CalendarProvider? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+    private val autoModeToggle: ToggleableConfirmationPolicy? = null,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -107,10 +109,11 @@ class SlashHandler(
                 session
             }
             "skill" -> { handleSkill(arg, session); session }
+            "auto" -> { handleAuto(); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill"
+                        "/schedule /calendar /feedback /lessons /memory /skill /auto"
                 )
                 session
             }
@@ -199,6 +202,16 @@ class SlashHandler(
             session.append(EntryRole.TOOL_RESULT, skill.body)
             output("Injected skill: $sub")
         }
+    }
+
+    private fun handleAuto() {
+        val toggle = autoModeToggle
+        if (toggle == null) {
+            output("Auto mode is not available in this session.")
+            return
+        }
+        toggle.autoModeEnabled = !toggle.autoModeEnabled
+        output("Auto mode: ${if (toggle.autoModeEnabled) "on" else "off"}")
     }
 
     private fun renderMemoryView(v: MemoryView): String {

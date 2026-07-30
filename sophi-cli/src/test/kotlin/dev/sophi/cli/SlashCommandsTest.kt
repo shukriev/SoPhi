@@ -5,6 +5,8 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.context.ContextCompactor
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
@@ -62,6 +64,25 @@ class SlashCommandsTest : FunSpec({
         every { sessionManager.list() } returns emptyList()
         handler.handle("/list", AgentSession(id = "x"))
         output shouldBe listOf("No saved sessions.")
+    }
+
+    test("/auto toggles auto mode on and off") {
+        val toggle = ToggleableConfirmationPolicy(ConfirmationPolicy.ALLOW_ALL, ConfirmationPolicy.DENY_ALL, autoModeEnabled = false)
+        val handler = SlashHandler(sessionManager, null, config, autoModeToggle = toggle) { output.add(it) }
+
+        handler.handle("/auto", AgentSession(id = "x"))
+        toggle.autoModeEnabled shouldBe true
+        output shouldBe listOf("Auto mode: on")
+
+        handler.handle("/auto", AgentSession(id = "x"))
+        toggle.autoModeEnabled shouldBe false
+        output shouldBe listOf("Auto mode: on", "Auto mode: off")
+    }
+
+    test("/auto reports unavailable when no toggle is configured") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        handler.handle("/auto", AgentSession(id = "x"))
+        output shouldBe listOf("Auto mode is not available in this session.")
     }
 
     test("/branch shows numbered entries with role and content preview") {
