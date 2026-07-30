@@ -179,6 +179,23 @@ class ScheduleTaskToolTest : FunSpec({
         tool.riskLevel("""{"action":"remove","task_id":"t1"}""") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
     }
 
+    test("ruleVerdict is LOW_RISK for create with no tool_grants") {
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.ruleVerdict("""{"action":"create","name":"t","prompt":"p","trigger_type":"manual","mode":"recurring"}""") shouldBe
+            dev.sophi.core.tools.RuleVerdict.LOW_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK for create with a non-empty tool_grants") {
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.ruleVerdict("""{"action":"create","name":"t","prompt":"p","trigger_type":"manual","mode":"recurring","tool_grants":["bash"]}""") shouldBe
+            dev.sophi.core.tools.RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK when arguments cannot be parsed") {
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.ruleVerdict("not json") shouldBe dev.sophi.core.tools.RuleVerdict.HIGH_RISK
+    }
+
     test("update using tool_grants persists it under the renamed field") {
         val s = store()
         val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
