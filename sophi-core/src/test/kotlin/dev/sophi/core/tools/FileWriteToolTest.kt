@@ -65,4 +65,20 @@ class FileWriteToolTest : FunSpec({
     test("riskLevel is DESTRUCTIVE") {
         tool.riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
     }
+
+    test("ruleVerdict is LOW_RISK for a path under scratch/") {
+        tool.ruleVerdict("""{"path":"scratch/notes.txt","content":"x"}""") shouldBe RuleVerdict.LOW_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK for a path containing .env") {
+        tool.ruleVerdict("""{"path":"config/.env","content":"x"}""") shouldBe RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK for a path that escapes the working directory") {
+        tool.ruleVerdict("""{"path":"../outside.txt","content":"x"}""") shouldBe RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is UNKNOWN for an ordinary in-project path") {
+        tool.ruleVerdict("""{"path":"notes/todo.md","content":"x"}""") shouldBe RuleVerdict.UNKNOWN
+    }
 })
