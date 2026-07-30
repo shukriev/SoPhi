@@ -23,6 +23,11 @@ class EditTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
     override val name = "edit_file"
     override val description = "Replace an exact string in a file within the working directory"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun ruleVerdict(argumentsJson: String): RuleVerdict {
+        val args = runCatching { json.decodeFromString<EditArgs>(argumentsJson) }.getOrNull()
+            ?: return RuleVerdict.HIGH_RISK
+        return classifyPathRisk(root, args.path)
+    }
     override val parametersJson = """
         {"type":"object","properties":{"path":{"type":"string","description":"Path to the file, relative to the working directory"},"old_string":{"type":"string","description":"Exact text to replace"},"new_string":{"type":"string","description":"Replacement text"},"replace_all":{"type":"boolean","description":"Replace every occurrence instead of requiring exactly one (default false)"}},"required":["path","old_string","new_string"]}
     """.trimIndent()

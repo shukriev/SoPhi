@@ -262,9 +262,16 @@ interface Tool {
     val description: String
     val parametersJson: String    // JSON Schema forwarded verbatim as ToolDefinition
     fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.SAFE
+    fun ruleVerdict(argumentsJson: String): RuleVerdict = RuleVerdict.UNKNOWN
     suspend fun execute(argumentsJson: String): String
 }
 ```
+
+`ruleVerdict()` is consulted only for calls that already need a confirmation decision (i.e.
+`riskLevel()` returned `CAUTION`/`DESTRUCTIVE`) — it's how auto mode (see below) decides which
+of those calls are still low-risk enough to skip the prompt. Default `UNKNOWN` means "no
+opinion," so a tool with no override degrades to the LLM classifier rather than silently
+auto-approving.
 
 ### ConfirmationPolicy + grants (`dev.sophi.core.tools`)
 
@@ -295,6 +302,29 @@ runs) treat it the same as `DESTRUCTIVE` — a grant or an explicit confirmation
 denied. `manage_scheduled_task`/`delegate_to_subagent` report `DESTRUCTIVE` themselves
 whenever the call would populate a grant, so proposing future or delegated power goes
 through this same mechanism instead of being a `SAFE` side door.
+
+### Auto mode (`dev.sophi.core.tools`, ADR-017)
+
+```kotlin
+fun interface RiskClassifier {
+    suspend fun classify(
+        toolName: String, toolDescription: String, tier: RiskLevel, argumentsJson: String
+    ): RuleVerdict
+}
+```
+
+Layers on top of the mechanism above without changing `AgentLoop` — it's still just one more
+`ConfirmationPolicy` implementation, swapped in for `TerminalConfirmationPolicy`:
+
+- **`AutoModeConfirmationPolicy`** — for each request, checks the tool's `ruleVerdict()` first;
+  `UNKNOWN` falls back to a `RiskClassifier` (`LlmRiskClassifier` in production, one non-streaming
+  `LLMProvider.complete()` call, fails safe to `HIGH_RISK` on any error/timeout/malformed
+  response). `LOW_RISK` auto-approves; everything else batches into one call to a wrapped
+  fallback `ConfirmationPolicy` (e.g. `TerminalConfirmationPolicy`), preserving the existing
+  grouped-prompt UX for whatever still needs a human.
+- **`ToggleableConfirmationPolicy`** — a `@Volatile var autoModeEnabled: Boolean` wrapper that
+  routes to either the auto or manual policy per call, letting the CLI's `--auto` flag and
+  `/auto` command flip auto mode without rebuilding `AgentLoop`.
 
 ### SophiPlugin + AgentHook (`dev.sophi.extensions`)
 
@@ -516,6 +546,7 @@ to decide.
 | [ADR-014](adr/ADR-014-scheduled-goal-tasks.md) | Scheduled & goal-based tasks | Trigger×Mode unification; local-only for v1; per-task destructive allowlist; OS-scheduler-first tick model |
 | [ADR-015](adr/ADR-015-native-os-calendar-integration.md) | Native OS calendar integration | `CalendarProvider` seam; per-action risk-gated tools; structured recurrence; macOS-only v1, Windows/Linux deferred |
 | [ADR-016](adr/ADR-016-tiered-tool-confirmation.md) | Tiered tool-call confirmation and grants | Three-tier argument-aware `RiskLevel`; batched `ConfirmationPolicy`; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
+| [ADR-017](adr/ADR-017-auto-mode-hybrid-risk-classifier.md) | Auto mode | New ConfirmationPolicy layering rule+LLM classification on top of existing tiered confirmation; fail-safe on any classifier error; CLI-only, runtime-toggleable |
 
 ---
 
@@ -545,3 +576,4 @@ to decide.
 | `sophi-schedule` — scheduled & goal-based tasks | post-M7 | complete | [article-19](articles/article-19.md) |
 | `sophi-calendar` — native OS calendar integration (macOS) | post-M7 | in progress | [article-21](articles/article-21.md) |
 | `sophi-core`/`sophi-schedule` — tiered tool confirmation & grants | post-M7 | design | [article-22](articles/article-22.md) |
+| `sophi-core` auto mode + hybrid risk classifier | post-M7 | complete | [article-23](articles/article-23.md) |

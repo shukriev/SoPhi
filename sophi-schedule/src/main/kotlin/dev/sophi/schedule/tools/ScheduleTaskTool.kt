@@ -1,6 +1,7 @@
 package dev.sophi.schedule.tools
 
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
 import dev.sophi.schedule.model.CronSchedules
 import dev.sophi.schedule.model.ScheduledTask
@@ -42,6 +43,12 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
             ?: return RiskLevel.SAFE
         val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
         return if (grantingPower) RiskLevel.DESTRUCTIVE else RiskLevel.SAFE
+    }
+    override fun ruleVerdict(argumentsJson: String): RuleVerdict {
+        val args = runCatching { json.decodeFromString(ManageTaskArgs.serializer(), argumentsJson) }.getOrNull()
+            ?: return RuleVerdict.HIGH_RISK
+        val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
+        return if (grantingPower) RuleVerdict.HIGH_RISK else RuleVerdict.LOW_RISK
     }
     override val description =
         "Create, list, update, pause, resume, or remove a scheduled or goal-based background task, " +

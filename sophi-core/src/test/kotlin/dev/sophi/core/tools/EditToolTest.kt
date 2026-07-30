@@ -74,4 +74,20 @@ class EditToolTest : FunSpec({
     test("riskLevel is DESTRUCTIVE") {
         tool.riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
     }
+
+    test("ruleVerdict is LOW_RISK for a path under scratch/") {
+        tool.ruleVerdict("""{"path":"scratch/a.txt","old_string":"x","new_string":"y"}""") shouldBe RuleVerdict.LOW_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK for a path containing credentials") {
+        tool.ruleVerdict("""{"path":"secrets/credentials.json","old_string":"x","new_string":"y"}""") shouldBe RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK for a path that escapes the working directory") {
+        tool.ruleVerdict("""{"path":"../outside.txt","old_string":"x","new_string":"y"}""") shouldBe RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is UNKNOWN for an ordinary in-project path") {
+        tool.ruleVerdict("""{"path":"src/Main.kt","old_string":"x","new_string":"y"}""") shouldBe RuleVerdict.UNKNOWN
+    }
 })
