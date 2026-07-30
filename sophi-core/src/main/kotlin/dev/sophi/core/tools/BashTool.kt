@@ -20,6 +20,13 @@ private val READ_ONLY_PREFIXES = listOf(
 )
 private val UNSAFE_SHELL_CHARS = charArrayOf(';', '&', '|', '>', '<', '`', '$')
 
+private val HIGH_RISK_BASH_SUBSTRINGS = listOf(
+    "rm -rf", "rm -fr", "sudo ", "dd if=", "mkfs", "git push --force", "git push -f",
+    "> /dev/", ":(){ :|:& };:", "curl | sh", "curl | bash", "wget | sh", "wget | bash"
+)
+private val SCRATCH_PATH_PREFIXES = listOf("/tmp/", "/private/tmp/", "./scratch/", "scratch/")
+private val SINGLE_FILE_RM = Regex("""^rm\s+(\S+)$""")
+
 @Serializable
 private data class BashArgs(val command: String, val timeoutSeconds: Long? = null)
 
@@ -34,6 +41,17 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val looksReadOnly = READ_ONLY_PREFIXES.any { trimmed.startsWith(it) } &&
             command.none { it in UNSAFE_SHELL_CHARS }
         return if (looksReadOnly) RiskLevel.CAUTION else RiskLevel.DESTRUCTIVE
+    }
+    override fun ruleVerdict(argumentsJson: String): RuleVerdict {
+        val command = runCatching { json.decodeFromString<BashArgs>(argumentsJson).command }
+            .getOrNull() ?: return RuleVerdict.HIGH_RISK
+        val trimmed = command.trim()
+        if (HIGH_RISK_BASH_SUBSTRINGS.any { trimmed.contains(it) }) return RuleVerdict.HIGH_RISK
+        SINGLE_FILE_RM.matchEntire(trimmed)?.let { match ->
+            val target = match.groupValues[1]
+            if (SCRATCH_PATH_PREFIXES.any { target.startsWith(it) }) return RuleVerdict.LOW_RISK
+        }
+        return RuleVerdict.UNKNOWN
     }
     override val parametersJson = """
         {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"}},"required":["command"]}

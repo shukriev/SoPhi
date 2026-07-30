@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.RuleVerdict
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
@@ -20,6 +21,11 @@ class InstallSkillToolTest : FunSpec({
     test("riskLevel is always DESTRUCTIVE") {
         val tool = InstallSkillTool()
         tool.riskLevel("""{"source":"anything"}""") shouldBe RiskLevel.DESTRUCTIVE
+    }
+
+    test("ruleVerdict is always HIGH_RISK") {
+        val tool = InstallSkillTool()
+        tool.ruleVerdict("""{"source":"anything"}""") shouldBe RuleVerdict.HIGH_RISK
     }
 
     test("execute installs skills into the resolved target directory and reports them") {
