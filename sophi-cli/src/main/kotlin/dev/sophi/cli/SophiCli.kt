@@ -17,6 +17,7 @@ import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.BashTool
+import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.EditTool
 import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.FileReadTool
@@ -25,6 +26,7 @@ import dev.sophi.core.tools.GetCurrentDateTimeTool
 import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.LlmRiskClassifier
+import dev.sophi.core.tools.RiskClassifier
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
@@ -147,6 +149,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         help = "Start with auto mode enabled: low-risk tool calls (per rule + LLM classifier) run " +
             "without a confirmation prompt. Toggle anytime with /auto."
     ).flag(default = false)
+    private val godMode: Boolean by option(
+        "--god-mode",
+        help = "Skip the LLM classifier entirely: trust only each tool's own rule checks. Prompts " +
+            "only for calls a rule explicitly flags HIGH_RISK; everything else (including anything " +
+            "a rule has no opinion on) runs unattended for the whole session. Fixed once set — no " +
+            "/auto toggle while in this mode. Overrides --auto if both are passed."
+    ).flag(default = false)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
@@ -210,14 +219,16 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
         val registry = ToolRegistry()
         val manualConfirmationPolicy = TerminalConfirmationPolicy(mordantTerminal, inputSource)
-        val autoModePolicy = AutoModeConfirmationPolicy(
-            registry,
-            LlmRiskClassifier(provider, model, maxTokens = maxTokens, timeout = llmTimeoutSeconds.seconds),
-            manualConfirmationPolicy
-        )
-        val confirmationPolicy = ToggleableConfirmationPolicy(
-            autoModePolicy, manualConfirmationPolicy, autoModeEnabled = autoMode
-        )
+        val toggleableConfirmationPolicy: ToggleableConfirmationPolicy? = if (godMode) null else {
+            val autoModePolicy = AutoModeConfirmationPolicy(
+                registry,
+                LlmRiskClassifier(provider, model, maxTokens = maxTokens, timeout = llmTimeoutSeconds.seconds),
+                manualConfirmationPolicy
+            )
+            ToggleableConfirmationPolicy(autoModePolicy, manualConfirmationPolicy, autoModeEnabled = autoMode)
+        }
+        val confirmationPolicy: ConfirmationPolicy = toggleableConfirmationPolicy
+            ?: AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, manualConfirmationPolicy)
         val loopGuardPolicy = TerminalLoopGuardPolicy(mordantTerminal, inputSource)
 
         val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
@@ -278,7 +289,19 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
                 "/schedule /calendar /feedback /lessons /memory /skill /auto\n"
         )
-        if (autoMode) {
+        if (godMode) {
+            if (autoMode) {
+                mordantTerminal.println(
+                    TextColors.yellow("--auto ignored: --god-mode is more permissive and already active")
+                )
+            }
+            mordantTerminal.println(
+                TextColors.red(
+                    "God mode is on — only rule-flagged HIGH_RISK calls will prompt. " +
+                        "Everything else runs unattended."
+                )
+            )
+        } else if (autoMode) {
             mordantTerminal.println(
                 TextColors.cyan("Auto mode is on — low-risk tool calls run without asking. Toggle with /auto.")
             )
@@ -289,7 +312,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
             skillRegistry = skillRegistry,
             provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
-            autoModeToggle = confirmationPolicy
+            autoModeToggle = toggleableConfirmationPolicy
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)
