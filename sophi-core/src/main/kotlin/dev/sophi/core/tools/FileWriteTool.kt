@@ -19,6 +19,11 @@ class FileWriteTool(private val root: Path = Paths.get("").toAbsolutePath()) : T
     override val name = "write_file"
     override val description = "Write UTF-8 text content to a file within the working directory, creating it (and parent directories) if needed"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun ruleVerdict(argumentsJson: String): RuleVerdict {
+        val args = runCatching { json.decodeFromString<FileWriteArgs>(argumentsJson) }.getOrNull()
+            ?: return RuleVerdict.HIGH_RISK
+        return classifyPathRisk(root, args.path)
+    }
     override val parametersJson = """
         {"type":"object","properties":{"path":{"type":"string","description":"Path to the file, relative to the working directory"},"content":{"type":"string","description":"UTF-8 text content to write"}},"required":["path","content"]}
     """.trimIndent()
