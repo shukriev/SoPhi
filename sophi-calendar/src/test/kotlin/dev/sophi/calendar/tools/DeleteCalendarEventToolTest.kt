@@ -1,5 +1,6 @@
 package dev.sophi.calendar.tools
 
+import dev.sophi.core.tools.RuleVerdict
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -8,6 +9,10 @@ import kotlinx.coroutines.runBlocking
 class DeleteCalendarEventToolTest : FunSpec({
     test("riskLevel is DESTRUCTIVE") {
         DeleteCalendarEventTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+    }
+
+    test("ruleVerdict is always HIGH_RISK") {
+        DeleteCalendarEventTool(FakeCalendarProvider()).ruleVerdict("{}") shouldBe RuleVerdict.HIGH_RISK
     }
 
     test("delete removes the event") {
