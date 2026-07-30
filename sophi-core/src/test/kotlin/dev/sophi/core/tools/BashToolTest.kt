@@ -72,4 +72,32 @@ class BashToolTest : FunSpec({
     test("riskLevel is DESTRUCTIVE when arguments cannot be parsed") {
         tool.riskLevel("not json") shouldBe RiskLevel.DESTRUCTIVE
     }
+
+    test("ruleVerdict is HIGH_RISK for rm -rf") {
+        tool.ruleVerdict("""{"command":"rm -rf /tmp/x"}""") shouldBe RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK for sudo") {
+        tool.ruleVerdict("""{"command":"sudo apt-get install foo"}""") shouldBe RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is HIGH_RISK for a forced git push") {
+        tool.ruleVerdict("""{"command":"git push --force origin main"}""") shouldBe RuleVerdict.HIGH_RISK
+    }
+
+    test("ruleVerdict is LOW_RISK for rm of a single file under a scratch path") {
+        tool.ruleVerdict("""{"command":"rm /tmp/scratch-file.txt"}""") shouldBe RuleVerdict.LOW_RISK
+    }
+
+    test("ruleVerdict is UNKNOWN for rm of a single file outside a scratch path") {
+        tool.ruleVerdict("""{"command":"rm important-file.txt"}""") shouldBe RuleVerdict.UNKNOWN
+    }
+
+    test("ruleVerdict is UNKNOWN for an ordinary command with no matching rule") {
+        tool.ruleVerdict("""{"command":"npm install"}""") shouldBe RuleVerdict.UNKNOWN
+    }
+
+    test("ruleVerdict is HIGH_RISK when arguments cannot be parsed") {
+        tool.ruleVerdict("not json") shouldBe RuleVerdict.HIGH_RISK
+    }
 })
