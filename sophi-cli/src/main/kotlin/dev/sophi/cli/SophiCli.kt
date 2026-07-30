@@ -285,7 +285,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             sessionManager, compactor, config, learningPlugin,
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
             skillRegistry = skillRegistry,
-            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy
+            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
+            autoModeToggle = confirmationPolicy
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)
