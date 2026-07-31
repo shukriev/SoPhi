@@ -30,7 +30,7 @@ app — same core, three ways to run it.
 | Module | What it gives you |
 |--------|--------------------|
 | ⚡ `sophi-ai` | Provider abstraction (`LLMProvider`) + Spring AI-backed `ClaudeProvider` / `OpenAICompatProvider` |
-| 🧠 `sophi-core` | The agent loop, session tree (JSONL, branch/checkout), tool dispatch, context compaction |
+| 🧠 `sophi-core` | The agent loop, session tree (JSONL, branch/checkout), tool dispatch, context compaction, explicit multi-step planning (`PlanRunner`) |
 | 📚 `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
 | 🔌 `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
 | 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
