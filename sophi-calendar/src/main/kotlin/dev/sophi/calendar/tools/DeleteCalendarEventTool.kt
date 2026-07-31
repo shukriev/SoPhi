@@ -2,6 +2,7 @@ package dev.sophi.calendar.tools
 
 import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -17,6 +18,7 @@ class DeleteCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "delete_calendar_event"
     override val description = "Delete a calendar event by id"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun ruleVerdict(argumentsJson: String) = RuleVerdict.HIGH_RISK
     override val parametersJson = """
         {"type":"object","properties":{
           "event_id":{"type":"string"},
