@@ -1,11 +1,11 @@
 package dev.sophi.schedule.tools
 
+import dev.sophi.core.agent.plan.StopCondition
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
 import dev.sophi.schedule.model.CronSchedules
 import dev.sophi.schedule.model.ScheduledTask
-import dev.sophi.schedule.model.StopCondition
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
 import dev.sophi.schedule.store.RunLog

@@ -4,6 +4,11 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinition
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.plan.LlmPlanner
+import dev.sophi.core.agent.plan.LlmStepCritic
+import dev.sophi.core.agent.plan.PlanFinalStatus
+import dev.sophi.core.agent.plan.PlanRunner
+import dev.sophi.core.agent.plan.PlanRunnerConfig
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.schedule.model.RunOutcome
@@ -79,9 +84,19 @@ class ScheduleEngine(
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
                     is TaskMode.Goal -> {
-                        val runner = GoalRunner(loop, provider, model)
-                        val result = runner.run(session, task.prompt, config, mode.stopCondition, mode.maxIterations)
-                        (if (result.met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to result.lastOutput
+                        val planner = LlmPlanner(provider, model)
+                        val critic = LlmStepCritic(provider, model)
+                        // Scheduled runs are always unattended (DENY_ALL + per-task grants above),
+                        // so overlapping confirmation prompts can never happen here — safe to
+                        // parallelize independent plan steps (ADR-018).
+                        val runnerConfig = PlanRunnerConfig(
+                            model = model, maxTokens = maxTokens,
+                            maxStepExecutions = mode.maxIterations, allowParallelSteps = true
+                        )
+                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig)
+                        val result = runner.run(session.id, task.prompt, mode.stopCondition)
+                        (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
+                            result.finalOutput
                     }
                 }
                 RunRecord(task.id, startedAtMs, System.currentTimeMillis(), outcome, summary)
