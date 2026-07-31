@@ -326,6 +326,12 @@ Layers on top of the mechanism above without changing `AgentLoop` — it's still
   routes to either the auto or manual policy per call, letting the CLI's `--auto` flag and
   `/auto` command flip auto mode without rebuilding `AgentLoop`.
 
+**God mode** (`--god-mode`, CLI-only, fixed for the session — no slash command) reuses this same
+`AutoModeConfirmationPolicy` with a different classifier: `RiskClassifier.ALWAYS_LOW_RISK` answers
+`LOW_RISK` unconditionally instead of calling an LLM, so every `UNKNOWN` rule verdict auto-approves
+too — only an explicit `HIGH_RISK` rule verdict still prompts. `--god-mode` takes precedence over
+`--auto` when both are passed.
+
 ### SophiPlugin + AgentHook (`dev.sophi.extensions`)
 
 Lifecycle hooks are the extension point for observability, logging, and side effects without
