@@ -117,6 +117,10 @@ in "entryIndex" and "retryOf" — do not invent indices.""")
             appendLine("\n## Mechanical facts")
             appendLine("turns=${mechanical.turns} toolCalls=${mechanical.toolCalls} " +
                 "toolErrors=${mechanical.toolErrors} ended=${mechanical.outcome}")
+            mechanical.planningNote?.let { note ->
+                appendLine("\n## Planning")
+                appendLine(note)
+            }
             appendLine("\n## Trajectory")
             appendLine(TrajectoryRenderer.render(entries, config.evaluatorInputBudget))
         }

@@ -43,6 +43,20 @@ class SessionEvaluatorTest : FunSpec({
     }
     val mechanical = SessionOutcome(1L, "/p", "s1", "completed", turns = 2)
 
+    test("buildPrompt includes a Planning section when the mechanical outcome carries a planningNote") {
+        val (eval, _, _) = fixture(LLMResponse.Text(verdict, TokenUsage(1, 1)))
+        val withPlanning = mechanical.copy(planningNote = "step 2 needed one replan: notification channel missing")
+        val prompt = eval.buildPrompt(emptyList(), withPlanning)
+        prompt shouldContain "## Planning"
+        prompt shouldContain "notification channel missing"
+    }
+
+    test("buildPrompt omits the Planning section when planningNote is null") {
+        val (eval, _, _) = fixture(LLMResponse.Text(verdict, TokenUsage(1, 1)))
+        val prompt = eval.buildPrompt(emptyList(), mechanical)
+        (prompt.contains("## Planning")) shouldBe false
+    }
+
     test("valid verdict stores lesson and appends judged outcome") {
         val (eval, lessons, outcomes) = fixture(LLMResponse.Text(verdict, TokenUsage(1, 1)))
         kotlinx.coroutines.runBlocking { eval.evaluate("s1", emptyList(), mechanical) }

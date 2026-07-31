@@ -24,7 +24,10 @@ data class SessionOutcome(
     val toolErrors: Int = 0,
     val model: String? = null,
     val judgment: String? = null,   // Phase 2: "success" | "partial" | "failure"
-    val reason: String? = null      // Phase 2
+    val reason: String? = null,     // Phase 2
+    val planningNote: String? = null // set when this session was plan-driven (ADR-018): which
+                                      // step(s) needed replanning and why, so the evaluator can
+                                      // emit "planning"-kind lessons, not just conversational ones
 )
 
 @Serializable
