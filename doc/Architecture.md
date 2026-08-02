@@ -387,6 +387,25 @@ through plain injected callbacks instead of direct SPI dependencies:
 `Planner`'s `contextProvider: suspend (String) -> List<String>` and `PlanRunner`'s
 `onPlanComplete: suspend (PlanOutcome) -> Unit`. See ADR-018.
 
+### PlanEvent + GoalController (`dev.sophi.core.agent.plan`, `dev.sophi.cli.goal`, ADR-019)
+
+`PlanRunner` had no progress surface at all until ADR-019 added `onPlanEvent: suspend
+(PlanEvent) -> Unit = {}` — a defaulted, additive constructor parameter, so `sophi-schedule`'s
+existing usage is unaffected. `PlanEvent` (`PlanReady`/`StepAttempt`/`StepTurn`/`Escalating`/
+`StepFinished`/`Replanned`) is the seam a UI drives off; `PlanRunner.run(...)` also gained
+`initialPlan: Plan? = null` so a caller can generate a plan, show it, and only pass it to
+`run()` after approval, without a new `PlanFinalStatus` value for "declined".
+
+`sophi-cli`'s `dev.sophi.cli.goal` package is the first (and, for v1, only) consumer:
+`GoalController.run(session, input, trigger: GoalTrigger)` — parses (or, for an autonomous
+trigger, treats the message as literal task text), plans, previews, runs the per-invocation
+`PlanRunner` under an ESC race, and settles — returning `GoalRunResult` (`Ran`/`Declined`).
+`GoalRenderer` consumes the `PlanEvent` stream: steps still execute in `PlanRunner`'s isolated
+child sessions, but the anchor session gets one `replay=false` entry per finished step plus one
+replayed summary entry, so `/branch` and a follow-up turn both see the episode without paying
+its full token cost. See ADR-019 for the full rationale, including why the plan-preview prompt
+uses `input.readLine()` rather than `input.awaitYesNo()`.
+
 ### SophiPlugin + AgentHook (`dev.sophi.extensions`)
 
 Lifecycle hooks are the extension point for observability, logging, and side effects without
@@ -609,6 +628,7 @@ to decide.
 | [ADR-016](adr/ADR-016-tiered-tool-confirmation.md) | Tiered tool-call confirmation and grants | Three-tier argument-aware `RiskLevel`; batched `ConfirmationPolicy`; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
 | [ADR-017](adr/ADR-017-auto-mode-hybrid-risk-classifier.md) | Auto mode | New ConfirmationPolicy layering rule+LLM classification on top of existing tiered confirmation; fail-safe on any classifier error; CLI-only, runtime-toggleable |
 | [ADR-018](adr/ADR-018-plan-and-execute.md) | Plan-and-Execute upgrade | General `sophi-core` capability (`agent/plan`) replaces `sophi-schedule`'s `GoalRunner`; diff-based replanning; explicit `allowParallelSteps` flag instead of `ConfirmationPolicy` introspection; memory/learning integration via injected callbacks, not direct dependencies |
+| [ADR-019](adr/ADR-019-interactive-goal-command.md) | Interactive `/goal` command | Hybrid session visibility (isolated step execution, structured anchor-session record); plan preview via `input.readLine()`, not `awaitYesNo()`; three additive `PlanRunner` seams (`onPlanEvent`, `initialPlan`, `systemPrompt`); `allowParallelSteps` stays `false`; CLI-only v1 |
 
 ---
 
@@ -640,3 +660,4 @@ to decide.
 | `sophi-core`/`sophi-schedule` — tiered tool confirmation & grants | post-M7 | design | [article-22](articles/article-22.md) |
 | `sophi-core` auto mode + hybrid risk classifier | post-M7 | complete | [article-23](articles/article-23.md) |
 | `sophi-core`/`sophi-schedule` — Plan-and-Execute upgrade | post-M7 | complete | [article-24](articles/article-24.md) |
+| `sophi-cli` — interactive `/goal` command | post-M7 | complete | — |

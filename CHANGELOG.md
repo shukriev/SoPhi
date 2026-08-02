@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Interactive `/goal [--check "<command>"] <task>` command: explicit multi-step planning
+  (`PlanRunner`) in a live chat session, with a plan preview, live per-step progress, and
+  replanning on failure. See ADR-019.
 
 ### Changed
 
