@@ -318,4 +318,18 @@ class SlashCommandsTest : FunSpec({
         handler.handle("/banana", AgentSession(id = "s1"))
         output[0].contains("/skill") shouldBe true
     }
+
+    test("/goal with no controller wired prints that goal mode is unavailable") {
+        val handler = SlashHandler(sessionManager, null, config, goalController = null) { output.add(it) }
+        val session = makeSession()
+        handler.handle("/goal do something", session)
+        output.any { it.contains("Goal mode is not available") } shouldBe true
+    }
+
+    test("unknown-command help text lists /goal") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val session = makeSession()
+        handler.handle("/bogus", session)
+        output.single() shouldContain "/goal"
+    }
 })

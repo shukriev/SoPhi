@@ -156,6 +156,12 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             "a rule has no opinion on) runs unattended for the whole session. Fixed once set — no " +
             "/auto toggle while in this mode. Overrides --auto if both are passed."
     ).flag(default = false)
+    private val goalEscalationModel: String? by option(
+        "--goal-escalation-model",
+        help = "Stronger model /goal escalates a plan step to when its confidence is below " +
+            "threshold. Omit to disable escalation (a low-confidence step just fails and " +
+            "replans instead)."
+    )
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
@@ -287,7 +293,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /auto\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /auto /goal\n"
         )
         if (godMode) {
             if (autoMode) {
@@ -307,13 +313,6 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             )
         }
 
-        val slashHandler = SlashHandler(
-            sessionManager, compactor, config, learningPlugin,
-            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
-            skillRegistry = skillRegistry,
-            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
-            autoModeToggle = toggleableConfirmationPolicy
-        ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)
         } else {
@@ -328,6 +327,41 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             mordantTerminal.println(TextColors.yellow(
                 "token view: --token-view-key must be a single character, got \"$tokenViewKey\" — using default 'T'"))
         }
+        val goalContextProvider: suspend (String) -> List<String> = { goalPrompt ->
+            runCatching { pluginRegistry.collectContext(session.id, goalPrompt) }.getOrDefault(emptyList())
+        }
+        // toAbsolutePath() first: a relative --sessions-dir resolves against the cwd, which
+        // always has a parent in practice, but fall back explicitly rather than risk an NPE on
+        // the rare input where it wouldn't (e.g. --sessions-dir set to a filesystem root).
+        val plansDir = Path.of(sessionsDirStr).toAbsolutePath().parent
+            ?: Path.of(System.getProperty("user.home"), ".sophi", "plans")
+        val goalController = dev.sophi.cli.goal.GoalController(
+            agentLoop = loop, sessionManager = sessionManager, provider = provider,
+            planner = dev.sophi.core.agent.plan.LlmPlanner(provider, model, contextProvider = goalContextProvider),
+            critic = dev.sophi.core.agent.plan.LlmStepCritic(provider, model),
+            runnerConfig = dev.sophi.core.agent.plan.PlanRunnerConfig(
+                model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt,
+                escalationModel = goalEscalationModel, allowParallelSteps = false
+            ),
+            planLog = dev.sophi.core.agent.plan.PlanLog(plansDir),
+            input = inputSource, liveRegion = liveRegion, interactive = sophiTerminal.isInteractive,
+            tokenViewKey = tokenViewKey.singleOrNull() ?: 'T', autoExitTokenView = autoExitTokenView,
+            learning = learningPlugin,
+            onTurnSettled = { userInput, assistantReply, error ->
+                runCatching {
+                    if (error != null) pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(session.id, error = error))
+                    else pluginRegistry.dispatch(HookPoint.AFTER_TURN,
+                        HookContext(session.id, userInput = userInput, assistantReply = assistantReply))
+                }
+            }
+        ) { mordantTerminal.println(it) }
+        val slashHandler = SlashHandler(
+            sessionManager, compactor, config, learningPlugin,
+            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
+            skillRegistry = skillRegistry,
+            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
+            autoModeToggle = toggleableConfirmationPolicy, goalController = goalController
+        ) { mordantTerminal.println(it) }
         val turnController = TurnController(
             loop, config, inputSource, liveRegion, onEvent = bridge,
             tokenViewKey = tokenViewKey.singleOrNull() ?: 'T',
