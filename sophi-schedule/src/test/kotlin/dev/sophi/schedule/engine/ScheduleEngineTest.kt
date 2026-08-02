@@ -5,11 +5,11 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.core.agent.plan.StopCondition
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.ScheduledTask
-import dev.sophi.schedule.model.StopCondition
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
 import dev.sophi.schedule.notify.NoopNotifier
@@ -158,7 +158,7 @@ class ScheduleEngineTest : FunSpec({
         (record.outcome is RunOutcome.Failed) shouldBe true
     }
 
-    test("a Goal-mode task runs via GoalRunner and records GoalMet") {
+    test("a Goal-mode task runs via PlanRunner and records GoalMet") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did the thing"))
         coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))

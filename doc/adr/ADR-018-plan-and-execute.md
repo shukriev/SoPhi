@@ -1,7 +1,7 @@
 # ADR-018: Plan-and-Execute upgrade to goal-driven runs
 
 **Date:** 2026-08-01
-**Status:** Accepted (design) — not yet implemented
+**Status:** Accepted — implemented
 
 ## Context
 
