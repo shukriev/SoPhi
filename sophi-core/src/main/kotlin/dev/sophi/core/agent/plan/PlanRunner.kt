@@ -19,7 +19,8 @@ data class PlanRunnerConfig(
     val escalationThreshold: Double = 0.5,
     val maxReplans: Int = 3,
     val maxStepExecutions: Int = 20,
-    val allowParallelSteps: Boolean = false
+    val allowParallelSteps: Boolean = false,
+    val systemPrompt: String? = null
 )
 
 /**
@@ -37,15 +38,17 @@ class PlanRunner(
     private val config: PlanRunnerConfig,
     private val judgeModel: String = config.model,
     private val shellRunner: (String) -> Int = { cmd -> ProcessBuilder("sh", "-c", cmd).start().waitFor() },
-    private val onPlanComplete: suspend (PlanOutcome) -> Unit = {}
+    private val onPlanComplete: suspend (PlanOutcome) -> Unit = {},
+    private val onPlanEvent: suspend (PlanEvent) -> Unit = {}
 ) {
     suspend fun run(
         parentSessionId: String,
         goalPrompt: String,
         stopCondition: StopCondition,
-        context: List<String> = emptyList()
+        context: List<String> = emptyList(),
+        initialPlan: Plan? = null
     ): PlanOutcome {
-        var plan = planner.plan(goalPrompt, context)
+        var plan = initialPlan ?: planner.plan(goalPrompt, context).also { onPlanEvent(PlanEvent.PlanReady(it)) }
         var stepExecutions = 0
         val replans = mutableListOf<ReplanEvent>()
         val stepOutputs = mutableMapOf<String, String>()
@@ -68,7 +71,9 @@ class PlanRunner(
                 val reason = failedStep?.let { "step ${it.id} failed" }
                     ?: "no step could make progress (unresolved dependency)"
                 plan = planner.replan(plan, anchor.id, reason, context)
-                replans.add(ReplanEvent(anchor.id, reason, plan.version))
+                val replanEvent = ReplanEvent(anchor.id, reason, plan.version)
+                replans.add(replanEvent)
+                onPlanEvent(PlanEvent.Replanned(replanEvent, plan))
                 continue
             }
 
@@ -83,7 +88,9 @@ class PlanRunner(
             val anchorId = plan.steps.last().id
             val reason = "stop condition not met after all steps completed"
             plan = planner.replan(plan, anchorId, reason, context)
-            replans.add(ReplanEvent(anchorId, reason, plan.version))
+            val replanEvent = ReplanEvent(anchorId, reason, plan.version)
+            replans.add(replanEvent)
+            onPlanEvent(PlanEvent.Replanned(replanEvent, plan))
         }
     }
 
@@ -120,10 +127,12 @@ class PlanRunner(
         step: PlanStep, plan: Plan, parentSessionId: String, stepOutputs: MutableMap<String, String>
     ): Pair<String, PlanStep> {
         val instruction = withDependencyContext(step, stepOutputs)
-        val (output, ok) = executeOnce(plan, step, instruction, step.modelOverride ?: config.model, parentSessionId)
+        val (output, ok) = executeOnce(plan, step, instruction, step.modelOverride ?: config.model, parentSessionId, attempt = 1)
         if (!ok) {
             stepOutputs[step.id] = output
-            return step.id to step.copy(status = StepStatus.Failed, confidence = 0.0)
+            val failed = step.copy(status = StepStatus.Failed, confidence = 0.0)
+            onPlanEvent(PlanEvent.StepFinished(failed, plan.version))
+            return step.id to failed
         }
 
         var confidence = critic.judge(step, output)
@@ -131,8 +140,9 @@ class PlanRunner(
         var usedModel = step.modelOverride
 
         if (confidence < config.escalationThreshold && step.modelOverride == null && config.escalationModel != null) {
+            onPlanEvent(PlanEvent.Escalating(step.id, confidence, config.escalationModel))
             val (escalatedOutput, escalatedOk) =
-                executeOnce(plan, step, instruction, config.escalationModel, parentSessionId)
+                executeOnce(plan, step, instruction, config.escalationModel, parentSessionId, attempt = 2)
             if (escalatedOk) {
                 confidence = critic.judge(step, escalatedOutput)
                 finalOutput = escalatedOutput
@@ -142,7 +152,9 @@ class PlanRunner(
 
         stepOutputs[step.id] = finalOutput
         val status = if (confidence >= config.escalationThreshold) StepStatus.Done else StepStatus.Failed
-        return step.id to step.copy(status = status, confidence = confidence, modelOverride = usedModel)
+        val finished = step.copy(status = status, confidence = confidence, modelOverride = usedModel)
+        onPlanEvent(PlanEvent.StepFinished(finished, plan.version))
+        return step.id to finished
     }
 
     private fun withDependencyContext(step: PlanStep, stepOutputs: Map<String, String>): String {
@@ -152,12 +164,13 @@ class PlanRunner(
     }
 
     private suspend fun executeOnce(
-        plan: Plan, step: PlanStep, instruction: String, model: String, parentSessionId: String
+        plan: Plan, step: PlanStep, instruction: String, model: String, parentSessionId: String, attempt: Int
     ): Pair<String, Boolean> {
         val stepSession = sessionManager.create(title = "plan:${plan.id}:step:${step.id}", parentSessionId = parentSessionId)
-        val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens)
+        onPlanEvent(PlanEvent.StepAttempt(step, plan.version, model, stepSession.id, attempt))
+        val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens, systemPrompt = config.systemPrompt)
         return try {
-            val result = agentLoop.turn(stepSession, instruction, agentConfig)
+            val result = agentLoop.turn(stepSession, instruction, agentConfig) { onPlanEvent(PlanEvent.StepTurn(step.id, it)) }
             (result.tip?.content ?: "") to true
         } catch (e: Exception) {
             (e.message ?: "step execution failed") to false

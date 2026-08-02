@@ -11,7 +11,9 @@ import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.delay
@@ -30,10 +32,11 @@ class PlanRunnerTest : FunSpec({
         critic: StepCritic = StepCritic { _, _ -> 1.0 },
         config: PlanRunnerConfig = PlanRunnerConfig(model = "m"),
         sm: SessionManager = sessionManager(),
-        onPlanComplete: suspend (PlanOutcome) -> Unit = {}
+        onPlanComplete: suspend (PlanOutcome) -> Unit = {},
+        onPlanEvent: suspend (PlanEvent) -> Unit = {}
     ): PlanRunner {
         val loop = AgentLoop(provider, ToolRegistry(), sm)
-        return PlanRunner(loop, sm, provider, planner, critic, config, onPlanComplete = onPlanComplete)
+        return PlanRunner(loop, sm, provider, planner, critic, config, onPlanComplete = onPlanComplete, onPlanEvent = onPlanEvent)
     }
 
     fun singleStepPlan(instruction: String = "do it") =
@@ -233,5 +236,104 @@ class PlanRunnerTest : FunSpec({
         val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
         outcome.finalStatus shouldBe PlanFinalStatus.Met
         outcome.planVersionCount shouldBe 2
+    }
+
+    test("onPlanEvent emits PlanReady, StepAttempt, StepTurn, then StepFinished in order for a single-step plan") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        val events = mutableListOf<PlanEvent>()
+
+        runBlocking { runner(provider, planner, onPlanEvent = { events.add(it) }).run("parent", "goal", StopCondition.LlmJudged) }
+
+        events[0].shouldBeInstanceOf<PlanEvent.PlanReady>()
+        events[1].shouldBeInstanceOf<PlanEvent.StepAttempt>()
+        (events[1] as PlanEvent.StepAttempt).attempt shouldBe 1
+        events[2].shouldBeInstanceOf<PlanEvent.StepTurn>()
+        events.last().shouldBeInstanceOf<PlanEvent.StepFinished>()
+    }
+
+    test("no PlanReady is emitted when initialPlan is supplied, and planner.plan is never called") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        val events = mutableListOf<PlanEvent>()
+
+        val outcome = runBlocking {
+            runner(provider, planner, onPlanEvent = { events.add(it) })
+                .run("parent", "goal", StopCondition.LlmJudged, initialPlan = singleStepPlan())
+        }
+
+        events.none { it is PlanEvent.PlanReady } shouldBe true
+        coVerify(exactly = 0) { planner.plan(any(), any()) }
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+    }
+
+    test("a low-confidence step emits Escalating then a second StepAttempt with attempt = 2 and the escalation model") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("attempt"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        var judgeCalls = 0
+        val critic = StepCritic { _, _ -> judgeCalls++; if (judgeCalls == 1) 0.2 else 0.9 }
+        val events = mutableListOf<PlanEvent>()
+
+        runBlocking {
+            runner(provider, planner, critic = critic,
+                config = PlanRunnerConfig(model = "cheap", escalationModel = "strong", escalationThreshold = 0.5),
+                onPlanEvent = { events.add(it) }
+            ).run("parent", "goal", StopCondition.LlmJudged)
+        }
+
+        val escalating = events.filterIsInstance<PlanEvent.Escalating>().single()
+        escalating.toModel shouldBe "strong"
+        val attempts = events.filterIsInstance<PlanEvent.StepAttempt>()
+        attempts.map { it.attempt } shouldBe listOf(1, 2)
+        attempts[1].model shouldBe "strong"
+    }
+
+    test("a failed step emits Replanned carrying the new plan's bumped version") {
+        val provider = mockk<LLMProvider>()
+        var streamCall = 0
+        every { provider.stream(any()) } answers {
+            streamCall++
+            if (streamCall == 1) throw RuntimeException("boom") else flowOf(StreamEvent.Content("recovered"))
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        val initialPlan = Plan(id = "plan_1", goalPrompt = "goal", steps = listOf(PlanStep(id = "s1", instruction = "x")))
+        coEvery { planner.plan(any(), any()) } returns initialPlan
+        coEvery { planner.replan(any(), "s1", any(), any()) } answers {
+            firstArg<Plan>().copy(steps = listOf(PlanStep(id = "s1b", instruction = "retry")), version = 2)
+        }
+        val events = mutableListOf<PlanEvent>()
+
+        runBlocking { runner(provider, planner, onPlanEvent = { events.add(it) }).run("parent", "goal", StopCondition.LlmJudged) }
+
+        val replanned = events.filterIsInstance<PlanEvent.Replanned>().single()
+        replanned.plan.version shouldBe 2
+        replanned.event.stepId shouldBe "s1"
+    }
+
+    test("PlanRunnerConfig.systemPrompt reaches the step's CompletionRequest") {
+        val provider = mockk<LLMProvider>()
+        val capturedSystemPrompts = mutableListOf<String?>()
+        every { provider.stream(any()) } answers {
+            capturedSystemPrompts.add(firstArg<CompletionRequest>().systemPrompt)
+            flowOf(StreamEvent.Content("done"))
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+
+        runBlocking {
+            runner(provider, planner, config = PlanRunnerConfig(model = "m", systemPrompt = "you are helpful"))
+                .run("parent", "goal", StopCondition.LlmJudged)
+        }
+        capturedSystemPrompts shouldBe listOf("you are helpful")
     }
 })
