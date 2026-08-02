@@ -1,5 +1,6 @@
 package dev.sophi.schedule.model
 
+import dev.sophi.core.agent.plan.StopCondition
 import kotlinx.serialization.Serializable
 
 @Serializable

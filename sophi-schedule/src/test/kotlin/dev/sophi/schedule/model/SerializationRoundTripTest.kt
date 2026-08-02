@@ -1,5 +1,6 @@
 package dev.sophi.schedule.model
 
+import dev.sophi.core.agent.plan.StopCondition
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import kotlinx.serialization.encodeToString

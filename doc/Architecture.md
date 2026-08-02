@@ -8,7 +8,7 @@
 | Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory, sophi-schedule |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
 | Designs approved, not yet implemented | Tiered tool confirmation & grants (ADR-016) — `RiskLevel` gains `CAUTION`; `Tool.riskLevel` becomes argument-aware; `ConfirmationPolicy` batches per round; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
-| Last updated | 2026-07-29 |
+| Last updated | 2026-08-01 |
 
 ---
 
@@ -41,7 +41,9 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
                        │ AgentSession API
 ┌──────────────────────▼───────────────────────────────────────┐
 │             sophi-core  (agent loop, written from scratch)   │
-│  session/  context/  tools/  agent/  prompt/                 │
+│  session/  context/  tools/  agent/  agent/plan/  prompt/     │
+│  agent/plan/: Plan · Planner · StepCritic · PlanRunner        │
+│  (ADR-018 — Plan-and-Execute, supersedes GoalRunner)          │
 └──────────────────────┬───────────────────────────────────────┘
           ┌────────────┼─────────────┐
           │            │             │
@@ -65,8 +67,9 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │     sophi-schedule  (recurring & goal-based task scheduler)  │
-│  ScheduleEngine (tickOnce/runNow) · GoalRunner · TaskStore /  │
-│  RunLog · Notifier · manage_scheduled_task Tool               │
+│  ScheduleEngine (tickOnce/runNow) · TaskStore / RunLog ·      │
+│  Notifier · manage_scheduled_task Tool · Goal mode now runs   │
+│  via sophi-core's PlanRunner (ADR-018 — GoalRunner retired)   │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │    sophi-calendar  (native OS calendar integration)          │
@@ -78,13 +81,13 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | Module | Purpose | Status |
 |--------|---------|--------|
 | `sophi-ai` | Spring AI thin wrapper — provider abstraction only | complete |
-| `sophi-core` | Agent loop, session (JSONL tree), tools, compaction, subagents | complete |
+| `sophi-core` | Agent loop, session (JSONL tree), tools, compaction, subagents, plan-and-execute (`agent/plan`) | complete |
 | `sophi-skills` | Lazy-loaded Markdown skill packages; `SkillRegistry` merges global + project directories | complete |
 | `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | complete |
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
 | `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn | complete |
-| `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `GoalRunner` (LLM-judged/shell-checked stop conditions), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven | complete |
+| `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired | complete |
 | `sophi-calendar` | Native OS calendar CRUD: `CalendarProvider` seam, `MacCalendarProvider` (AppleScript/Calendar.app) — Windows/Linux deferred; six create/read/update/delete/list Tools | in progress |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
@@ -95,6 +98,13 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 - `sophi-core` never imports from `sophi-web`, `sophi-cli`, `sophi-sdk`, or `sophi-infra`
 - `sophi-ai` never imports from `sophi-core`
 - `sophi-skills` has no dependency on `sophi-core`
+- `sophi-core` importing `sophi-ai` is allowed (established by ADR-017's `RiskClassifier`,
+  extended by ADR-018's `Planner`/`StepCritic`) — the one-directional rule above
+  (`sophi-ai` never imports `sophi-core`) is what actually holds, not "no dependency at all"
+- `sophi-core` never imports from `sophi-extensions` or `sophi-learning` — both depend on
+  `sophi-core`, not the reverse. Features in `sophi-core` that need their SPIs (memory
+  context, lesson feedback) take an injected callback instead (see `Planner`/`PlanRunner`
+  below)
 
 ---
 
@@ -332,6 +342,51 @@ Layers on top of the mechanism above without changing `AgentLoop` — it's still
 too — only an explicit `HIGH_RISK` rule verdict still prompts. `--god-mode` takes precedence over
 `--auto` when both are passed.
 
+### Plan + PlanRunner (`dev.sophi.core.agent.plan`, ADR-018)
+
+Sits above `AgentLoop` exactly where `sophi-schedule`'s `GoalRunner` sits today — `PlanRunner`
+calls `agentLoop.turn()` once per step, treating each step's instruction as that turn's
+`userInput`. `AgentLoop` itself needs no changes.
+
+```kotlin
+data class Plan(
+    val id: String, val goalPrompt: String, val steps: List<PlanStep>,
+    val version: Int = 1, val parentPlanId: String? = null
+)
+
+data class PlanStep(
+    val id: String, val instruction: String, val dependsOn: List<String> = emptyList(),
+    val status: StepStatus = StepStatus.Pending,
+    val confidence: Double? = null, val modelOverride: String? = null
+)
+
+enum class StepStatus { Pending, Running, Done, Failed }
+
+interface Planner {
+    suspend fun plan(goalPrompt: String, context: List<String> = emptyList()): Plan
+    suspend fun replan(current: Plan, anchorStepId: String, reason: String, context: List<String> = emptyList()): Plan
+}
+
+fun interface StepCritic {   // shaped like RiskClassifier (ADR-017), fails OPEN not closed
+    suspend fun judge(step: PlanStep, agentOutput: String): Double   // confidence [0.0, 1.0]
+}
+```
+
+`version`/`parentPlanId` make replanning diff-based: a replan carries every already-`Done`
+step over unchanged and only regenerates the failed/low-confidence tail, rather than mutating
+in place or discarding the whole plan — plan history is auditable (v1 → v2 → v3) and no
+completed work is redone. Independent steps (via `dependsOn`) run concurrently through the
+same `async`/`awaitAll` shape `AgentLoop` already uses for tool-call rounds, gated by an
+explicit `PlanRunnerConfig.allowParallelSteps` flag (default `false`) rather than introspecting
+whether the session's `ConfirmationPolicy` is interactive — `sophi-schedule`'s always-unattended
+`ScheduleEngine` sets it `true`.
+
+`sophi-core` cannot depend on `sophi-extensions` or `sophi-learning` (both depend on it, not
+the reverse), so memory-informed planning and the plan-to-lesson feedback loop are wired
+through plain injected callbacks instead of direct SPI dependencies:
+`Planner`'s `contextProvider: suspend (String) -> List<String>` and `PlanRunner`'s
+`onPlanComplete: suspend (PlanOutcome) -> Unit`. See ADR-018.
+
 ### SophiPlugin + AgentHook (`dev.sophi.extensions`)
 
 Lifecycle hooks are the extension point for observability, logging, and side effects without
@@ -553,6 +608,7 @@ to decide.
 | [ADR-015](adr/ADR-015-native-os-calendar-integration.md) | Native OS calendar integration | `CalendarProvider` seam; per-action risk-gated tools; structured recurrence; macOS-only v1, Windows/Linux deferred |
 | [ADR-016](adr/ADR-016-tiered-tool-confirmation.md) | Tiered tool-call confirmation and grants | Three-tier argument-aware `RiskLevel`; batched `ConfirmationPolicy`; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
 | [ADR-017](adr/ADR-017-auto-mode-hybrid-risk-classifier.md) | Auto mode | New ConfirmationPolicy layering rule+LLM classification on top of existing tiered confirmation; fail-safe on any classifier error; CLI-only, runtime-toggleable |
+| [ADR-018](adr/ADR-018-plan-and-execute.md) | Plan-and-Execute upgrade | General `sophi-core` capability (`agent/plan`) replaces `sophi-schedule`'s `GoalRunner`; diff-based replanning; explicit `allowParallelSteps` flag instead of `ConfirmationPolicy` introspection; memory/learning integration via injected callbacks, not direct dependencies |
 
 ---
 
@@ -583,3 +639,4 @@ to decide.
 | `sophi-calendar` — native OS calendar integration (macOS) | post-M7 | in progress | [article-21](articles/article-21.md) |
 | `sophi-core`/`sophi-schedule` — tiered tool confirmation & grants | post-M7 | design | [article-22](articles/article-22.md) |
 | `sophi-core` auto mode + hybrid risk classifier | post-M7 | complete | [article-23](articles/article-23.md) |
+| `sophi-core`/`sophi-schedule` — Plan-and-Execute upgrade | post-M7 | complete | [article-24](articles/article-24.md) |
