@@ -32,6 +32,7 @@ class LearningPlugin(
         val toolCalls = AtomicInteger(0)
         val toolErrors = AtomicInteger(0)
         @Volatile var errored: Boolean = false
+        val planningNotes = java.util.Collections.synchronizedList(mutableListOf<String>())
     }
     private val accs = ConcurrentHashMap<String, Acc>()
 
@@ -61,12 +62,19 @@ class LearningPlugin(
             ts = System.currentTimeMillis(), scope = config.scope, sessionId = sessionId,
             outcome = if (acc.errored) "error" else "completed",
             turns = acc.turns.get(), toolCalls = acc.toolCalls.get(), toolErrors = acc.toolErrors.get(),
-            model = model
+            model = model,
+            planningNote = acc.planningNotes.takeIf { it.isNotEmpty() }?.joinToString("\n")
         )
         runCatching { outcomes.append(json.encodeToString(SessionOutcome.serializer(), mechanical)) }
         val sm = sessionManager ?: return
         val eval = evaluator ?: return
         runCatching { eval.evaluate(sessionId, sm.load(sessionId).entries, mechanical) }
+    }
+
+    /** Records a plan-driven episode's outcome; folded into SessionOutcome.planningNote when
+     *  the session ends. Multiple /goal invocations in one session accumulate. */
+    fun recordPlanOutcome(sessionId: String, note: String) {
+        runCatching { accs.getOrPut(sessionId) { Acc() }.planningNotes.add(note) }
     }
 
     fun recordExplicitFeedback(sessionId: String, entryIndex: Int, polarity: String, reason: String?) {
