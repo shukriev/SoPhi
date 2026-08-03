@@ -262,7 +262,10 @@ The unit of capability the agent loop can invoke. Parameters and results are pla
 the loop handles error catching and forwards errors back to the LLM as `"Error: <message>"`.
 `riskLevel` is argument-aware (ADR-016) — most tools ignore the argument and return a
 constant, but `bash`/`manage_scheduled_task`/`delegate_to_subagent` inspect it to classify
-accurately rather than adopting one fixed worst-case tier.
+accurately rather than adopting one fixed worst-case tier. `invoke_claude_code`
+(`RunClaudeCodeTool`, ADR-019) is the deliberate exception in the other direction: it always
+returns `DESTRUCTIVE`/`HIGH_RISK`, never argument-dependent, because it spawns an entire
+autonomous coding session — no argument value makes that safe enough to classify down.
 
 ```kotlin
 enum class RiskLevel { SAFE, CAUTION, DESTRUCTIVE }
@@ -609,6 +612,7 @@ to decide.
 | [ADR-016](adr/ADR-016-tiered-tool-confirmation.md) | Tiered tool-call confirmation and grants | Three-tier argument-aware `RiskLevel`; batched `ConfirmationPolicy`; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
 | [ADR-017](adr/ADR-017-auto-mode-hybrid-risk-classifier.md) | Auto mode | New ConfirmationPolicy layering rule+LLM classification on top of existing tiered confirmation; fail-safe on any classifier error; CLI-only, runtime-toggleable |
 | [ADR-018](adr/ADR-018-plan-and-execute.md) | Plan-and-Execute upgrade | General `sophi-core` capability (`agent/plan`) replaces `sophi-schedule`'s `GoalRunner`; diff-based replanning; explicit `allowParallelSteps` flag instead of `ConfirmationPolicy` introspection; memory/learning integration via injected callbacks, not direct dependencies |
+| [ADR-019](adr/ADR-019-invoke-claude-code-tool.md) | `invoke_claude_code` tool | One new Tool in `sophi-core/tools/`, no new module; `riskLevel`/`ruleVerdict` hardcoded `DESTRUCTIVE`/`HIGH_RISK`, never argument-dependent; two independent gates (outer `toolGrants`, inner `--permission-mode auto`); no orchestration code — `PlanRunner` does per-ticket decomposition |
 
 ---
 
@@ -640,3 +644,4 @@ to decide.
 | `sophi-core`/`sophi-schedule` — tiered tool confirmation & grants | post-M7 | design | [article-22](articles/article-22.md) |
 | `sophi-core` auto mode + hybrid risk classifier | post-M7 | complete | [article-23](articles/article-23.md) |
 | `sophi-core`/`sophi-schedule` — Plan-and-Execute upgrade | post-M7 | complete | [article-24](articles/article-24.md) |
+| `sophi-core` — `invoke_claude_code` tool | post-M7 | complete | — |
