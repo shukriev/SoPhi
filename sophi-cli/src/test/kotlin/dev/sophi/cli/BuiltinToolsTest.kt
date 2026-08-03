@@ -8,4 +8,9 @@ class BuiltinToolsTest : FunSpec({
         val names = buildBuiltinTools(braveApiKeyOption = null).map { it.name }
         names shouldContain "get_current_datetime"
     }
+
+    test("buildBuiltinTools registers invoke_claude_code") {
+        val names = buildBuiltinTools(braveApiKeyOption = null).map { it.name }
+        names shouldContain "invoke_claude_code"
+    }
 })

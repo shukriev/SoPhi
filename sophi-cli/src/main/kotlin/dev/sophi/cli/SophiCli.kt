@@ -390,7 +390,7 @@ private class LegacyReadLineInputSource : InputSource {
 internal fun buildBuiltinTools(braveApiKeyOption: String?): List<Tool> {
     val tools = mutableListOf<Tool>(
         FileReadTool(), FileWriteTool(), GrepTool(), GlobTool(), EditTool(), BashTool(), FetchUrlTool(),
-        GetCurrentDateTimeTool()
+        GetCurrentDateTimeTool(), dev.sophi.core.tools.RunClaudeCodeTool()
     )
     val braveApiKey = braveApiKeyOption ?: System.getenv("BRAVE_SEARCH_API_KEY")
     if (braveApiKey != null) {
