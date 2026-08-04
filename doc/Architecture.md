@@ -42,7 +42,8 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 ┌──────────────────────▼───────────────────────────────────────┐
 │             sophi-core  (agent loop, written from scratch)   │
 │  session/  context/  tools/  agent/  agent/plan/  prompt/     │
-│  agent/plan/: Plan · Planner · StepCritic · PlanRunner        │
+│  agent/plan/: Plan · Planner · StepCritic · PlanRunner ·      │
+│              DecomposeGoalTool                                │
 │  (ADR-018 — Plan-and-Execute, supersedes GoalRunner)          │
 └──────────────────────┬───────────────────────────────────────┘
           ┌────────────┼─────────────┐
@@ -81,7 +82,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | Module | Purpose | Status |
 |--------|---------|--------|
 | `sophi-ai` | Spring AI thin wrapper — provider abstraction only | complete |
-| `sophi-core` | Agent loop, session (JSONL tree), tools, compaction, subagents, plan-and-execute (`agent/plan`) | complete |
+| `sophi-core` | Agent loop, session (JSONL tree), tools, compaction, subagents, plan-and-execute (`agent/plan`), recursive goal decomposition (task trees) with a tree-wide execution budget | complete |
 | `sophi-skills` | Lazy-loaded Markdown skill packages; `SkillRegistry` merges global + project directories | complete |
 | `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | complete |
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
@@ -613,6 +614,7 @@ to decide.
 | [ADR-017](adr/ADR-017-auto-mode-hybrid-risk-classifier.md) | Auto mode | New ConfirmationPolicy layering rule+LLM classification on top of existing tiered confirmation; fail-safe on any classifier error; CLI-only, runtime-toggleable |
 | [ADR-018](adr/ADR-018-plan-and-execute.md) | Plan-and-Execute upgrade | General `sophi-core` capability (`agent/plan`) replaces `sophi-schedule`'s `GoalRunner`; diff-based replanning; explicit `allowParallelSteps` flag instead of `ConfirmationPolicy` introspection; memory/learning integration via injected callbacks, not direct dependencies |
 | [ADR-019](adr/ADR-019-invoke-claude-code-tool.md) | `invoke_claude_code` tool | One new Tool in `sophi-core/tools/`, no new module; `riskLevel`/`ruleVerdict` hardcoded `DESTRUCTIVE`/`HIGH_RISK`, never argument-dependent; two independent gates (outer `toolGrants`, inner `--permission-mode auto`); no orchestration code — `PlanRunner` does per-task decomposition |
+| [ADR-020](adr/ADR-020-generalized-goal-decomposition.md) | Generalized goal decomposition | Recursion inside PlanRunner (no new module/type); two triggers over one decomposeStep seam; shared RunBudget; LlmJudged-only sub-plans; two entry points (decompose_goal tool + /plan) over one buildPlanRunner factory |
 
 ---
 
