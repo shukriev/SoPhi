@@ -9,6 +9,7 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
+import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.BrowseFilter
 import dev.sophi.memory.MemoryPlugin
@@ -31,6 +32,7 @@ class SlashHandler(
     private val calendarProvider: CalendarProvider? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val autoModeToggle: ToggleableConfirmationPolicy? = null,
+    private val toolRegistry: ToolRegistry? = null,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -109,11 +111,12 @@ class SlashHandler(
                 session
             }
             "skill" -> { handleSkill(arg, session); session }
+            "plan" -> handlePlan(arg, session)
             "auto" -> { handleAuto(); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /auto"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /auto"
                 )
                 session
             }
@@ -202,6 +205,21 @@ class SlashHandler(
             session.append(EntryRole.TOOL_RESULT, skill.body)
             output("Injected skill: $sub")
         }
+    }
+
+    private suspend fun handlePlan(arg: String?, session: AgentSession): AgentSession {
+        if (arg.isNullOrBlank()) {
+            output("Usage: /plan <goal>")
+            return session
+        }
+        val registry = toolRegistry
+        val llm = provider
+        if (registry == null || llm == null) {
+            output("Planning is not available (no tools configured).")
+            return session
+        }
+        return PlanCommand(llm, registry, sessionManager, config, confirmationPolicy, null, output)
+            .run(arg, session)
     }
 
     private fun handleAuto() {

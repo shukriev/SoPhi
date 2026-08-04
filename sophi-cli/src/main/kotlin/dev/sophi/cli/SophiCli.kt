@@ -274,6 +274,16 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 )
             )
         }
+        registry.register(
+            dev.sophi.core.agent.plan.DecomposeGoalTool(
+                provider = provider,
+                fullRegistry = registry,
+                sessionManager = sessionManager,
+                parentSessionId = session.id,
+                parentConfig = config,
+                confirmationPolicy = confirmationPolicy
+            )
+        )
 
         val loop = AgentLoop(
             provider,
@@ -287,7 +297,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /auto\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /auto\n"
         )
         if (godMode) {
             if (autoMode) {
@@ -312,7 +322,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
             skillRegistry = skillRegistry,
             provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
-            autoModeToggle = toggleableConfirmationPolicy
+            autoModeToggle = toggleableConfirmationPolicy,
+            toolRegistry = registry
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)

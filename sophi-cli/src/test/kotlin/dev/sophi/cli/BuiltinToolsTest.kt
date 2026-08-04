@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.shouldBe
 
 class BuiltinToolsTest : FunSpec({
     test("buildBuiltinTools registers get_current_datetime") {
@@ -12,5 +13,10 @@ class BuiltinToolsTest : FunSpec({
     test("buildBuiltinTools registers invoke_claude_code") {
         val names = buildBuiltinTools(braveApiKeyOption = null).map { it.name }
         names shouldContain "invoke_claude_code"
+    }
+
+    test("decompose_goal is a session-bound tool, so it is absent from the static builtin set") {
+        val names = buildBuiltinTools(braveApiKeyOption = null).map { it.name }
+        names.contains("decompose_goal") shouldBe false
     }
 })
