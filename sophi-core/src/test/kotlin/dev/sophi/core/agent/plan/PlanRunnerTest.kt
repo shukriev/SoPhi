@@ -10,7 +10,9 @@ import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -268,5 +270,124 @@ class PlanRunnerTest : FunSpec({
 
         val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
         outcome.planId shouldBe "plan_1"
+    }
+
+    test("a step marked decompose is expanded into a sub-plan instead of being executed") {
+        val provider = mockk<LLMProvider>()
+        val instructions = mutableListOf<String>()
+        every { provider.stream(any()) } answers {
+            instructions.add(firstArg<CompletionRequest>().messages.last().content)
+            flowOf(StreamEvent.Content("sub-step done"))
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan("goal", any()) } returns Plan(
+            id = "plan_1", goalPrompt = "goal",
+            steps = listOf(PlanStep(id = "s1", instruction = "process every ticket", decompose = true))
+        )
+        coEvery { planner.plan("process every ticket", any()) } returns Plan(
+            id = "plan_2", goalPrompt = "process every ticket",
+            steps = listOf(PlanStep(id = "c1", instruction = "ticket one"), PlanStep(id = "c2", instruction = "ticket two"))
+        )
+
+        val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
+
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+        instructions.none { it.contains("process every ticket") } shouldBe true
+        instructions shouldBe listOf("ticket one", "ticket two")
+        outcome.decompositions shouldHaveSize 1
+        outcome.decompositions.single().stepId shouldBe "s1"
+        outcome.decompositions.single().childPlanId shouldBe "plan_2"
+        outcome.decompositions.single().childStepCount shouldBe 2
+        outcome.decompositions.single().trigger shouldBe DecompositionTrigger.Declared
+    }
+
+    test("a sub-plan's output flows into the dependent step's instruction") {
+        val provider = mockk<LLMProvider>()
+        val instructions = mutableListOf<String>()
+        every { provider.stream(any()) } answers {
+            instructions.add(firstArg<CompletionRequest>().messages.last().content)
+            flowOf(StreamEvent.Content("SUBTREE-RESULT"))
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan("goal", any()) } returns Plan(
+            id = "plan_1", goalPrompt = "goal",
+            steps = listOf(
+                PlanStep(id = "s1", instruction = "big job", decompose = true),
+                PlanStep(id = "s2", instruction = "summarise", dependsOn = listOf("s1"))
+            )
+        )
+        coEvery { planner.plan("big job", any()) } returns Plan(
+            id = "plan_2", goalPrompt = "big job",
+            steps = listOf(PlanStep(id = "c1", instruction = "the only sub-step"))
+        )
+
+        runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
+        instructions.last() shouldContain "SUBTREE-RESULT"
+        instructions.last() shouldContain "summarise"
+    }
+
+    test("a sub-plan is planned with the parent goal and the step instruction as context") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        val capturedContext = mutableListOf<List<String>>()
+        coEvery { planner.plan("goal", any()) } returns Plan(
+            id = "plan_1", goalPrompt = "goal",
+            steps = listOf(PlanStep(id = "s1", instruction = "big job", decompose = true))
+        )
+        coEvery { planner.plan("big job", any()) } answers {
+            capturedContext.add(secondArg())
+            Plan(id = "plan_2", goalPrompt = "big job", steps = listOf(PlanStep(id = "c1", instruction = "sub")))
+        }
+
+        runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
+        capturedContext.single() shouldBe listOf("Parent goal: goal", "This sub-plan must satisfy: big job")
+    }
+
+    test("a decompose-marked step at the depth cap is executed normally instead of failing") {
+        val provider = mockk<LLMProvider>()
+        val instructions = mutableListOf<String>()
+        every { provider.stream(any()) } answers {
+            instructions.add(firstArg<CompletionRequest>().messages.last().content)
+            flowOf(StreamEvent.Content("done anyway"))
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns Plan(
+            id = "plan_1", goalPrompt = "goal",
+            steps = listOf(PlanStep(id = "s1", instruction = "big job", decompose = true))
+        )
+
+        val outcome = runBlocking {
+            runner(provider, planner, config = PlanRunnerConfig(model = "m", maxPlanDepth = 0))
+                .run("parent", "goal", StopCondition.LlmJudged)
+        }
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+        instructions shouldBe listOf("big job")
+        outcome.decompositions shouldHaveSize 0
+    }
+
+    test("onPlanComplete fires exactly once even when the run decomposes") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan("goal", any()) } returns Plan(
+            id = "plan_1", goalPrompt = "goal",
+            steps = listOf(PlanStep(id = "s1", instruction = "big job", decompose = true))
+        )
+        coEvery { planner.plan("big job", any()) } returns Plan(
+            id = "plan_2", goalPrompt = "big job", steps = listOf(PlanStep(id = "c1", instruction = "sub"))
+        )
+        val completions = AtomicInteger(0)
+
+        runBlocking {
+            runner(provider, planner, onPlanComplete = { completions.incrementAndGet() })
+                .run("parent", "goal", StopCondition.LlmJudged)
+        }
+        completions.get() shouldBe 1
     }
 })

@@ -143,6 +143,45 @@ class PlanRunner(
         return outcome
     }
 
+    private fun canDecompose(depth: Int, budget: RunBudget): Boolean =
+        depth < config.maxPlanDepth && budget.hasRoom()
+
+    /**
+     * The single seam both decomposition triggers use. Runs step.instruction as its own plan one
+     * level down, in a session parented to this plan's session so the session tree mirrors the
+     * plan tree. Always LlmJudged: a root ShellCheck asks "is the whole goal done", which is not
+     * the question being asked of one step.
+     */
+    private suspend fun decomposeStep(
+        step: PlanStep, plan: Plan, parentSessionId: String, stepOutputs: MutableMap<String, String>,
+        depth: Int, budget: RunBudget, decompositions: MutableList<DecompositionEvent>,
+        trigger: DecompositionTrigger
+    ): Pair<String, PlanStep> {
+        val subSession = sessionManager.create(
+            title = "plan:${plan.id}:step:${step.id}:subplan", parentSessionId = parentSessionId
+        )
+        val outcome = runPlan(
+            parentSessionId = subSession.id,
+            goalPrompt = step.instruction,
+            stopCondition = StopCondition.LlmJudged,
+            context = listOf("Parent goal: ${plan.goalPrompt}", "This sub-plan must satisfy: ${step.instruction}"),
+            depth = depth + 1,
+            parentStepId = step.id,
+            budget = budget,
+            decompositions = decompositions
+        )
+        val met = outcome.finalStatus == PlanFinalStatus.Met
+        decompositions.add(
+            DecompositionEvent(step.id, outcome.planId, outcome.totalSteps, outcome.finalStatus, trigger)
+        )
+        stepOutputs[step.id] = outcome.finalOutput
+        return step.id to step.copy(
+            status = if (met) StepStatus.Done else StepStatus.Failed,
+            confidence = if (met) 1.0 else 0.0,
+            childPlanId = outcome.planId
+        )
+    }
+
     private data class WaveResult(val plan: Plan, val executedCount: Int)
 
     private suspend fun executeReadyWave(
@@ -175,6 +214,13 @@ class PlanRunner(
         step: PlanStep, plan: Plan, parentSessionId: String, stepOutputs: MutableMap<String, String>,
         depth: Int, budget: RunBudget, decompositions: MutableList<DecompositionEvent>
     ): Pair<String, PlanStep> {
+        if (step.decompose && step.childPlanId == null && canDecompose(depth, budget)) {
+            return decomposeStep(
+                step, plan, parentSessionId, stepOutputs, depth, budget, decompositions,
+                DecompositionTrigger.Declared
+            )
+        }
+
         val instruction = withDependencyContext(step, stepOutputs)
         val (output, ok) = executeOnce(plan, step, instruction, step.modelOverride ?: config.model, parentSessionId, budget)
         if (!ok) {
