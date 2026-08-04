@@ -98,9 +98,21 @@ class PlanRunner(
                 if (replans.size >= config.maxReplans || !budget.hasRoom()) {
                     return finish(PlanFinalStatus.Exhausted, lastOutput, plan, replans, decompositions, depth)
                 }
+                if (failedStep != null && failedStep.childPlanId == null && canDecompose(depth, budget)) {
+                    val (stepId, updated) = decomposeStep(
+                        failedStep, plan, parentSessionId, stepOutputs, depth, budget, decompositions,
+                        DecompositionTrigger.Failure
+                    )
+                    plan = plan.copy(steps = plan.steps.map { if (it.id == stepId) updated else it })
+                    stepOutputs[stepId]?.let { lastOutput = it }
+                    continue
+                }
+
                 val anchor = failedStep ?: plan.steps.first { it.status != StepStatus.Done }
-                val reason = failedStep?.let { "step ${it.id} failed" }
-                    ?: "no step could make progress (unresolved dependency)"
+                val reason = failedStep?.let {
+                    if (it.childPlanId == null) "step ${it.id} failed"
+                    else "step ${it.id}'s sub-plan (${it.childPlanId}) was exhausted"
+                } ?: "no step could make progress (unresolved dependency)"
                 plan = planner.replan(plan, anchor.id, reason, context)
                     .copy(parentStepId = parentStepId, depth = depth)
                 replans.add(ReplanEvent(anchor.id, reason, plan.version))
