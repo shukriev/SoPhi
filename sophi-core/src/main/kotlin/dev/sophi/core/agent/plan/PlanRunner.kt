@@ -82,6 +82,7 @@ class PlanRunner(
         decompositions: MutableList<DecompositionEvent>
     ): PlanOutcome {
         var plan = planner.plan(goalPrompt, context).copy(parentStepId = parentStepId, depth = depth)
+        planLog?.append(plan)
         val replans = mutableListOf<ReplanEvent>()
         val stepOutputs = mutableMapOf<String, String>()
         var lastOutput = ""
@@ -115,6 +116,7 @@ class PlanRunner(
                 } ?: "no step could make progress (unresolved dependency)"
                 plan = planner.replan(plan, anchor.id, reason, context)
                     .copy(parentStepId = parentStepId, depth = depth)
+                planLog?.append(plan)
                 replans.add(ReplanEvent(anchor.id, reason, plan.version))
                 continue
             }
@@ -130,6 +132,7 @@ class PlanRunner(
             val anchorId = plan.steps.last().id
             val reason = "stop condition not met after all steps completed"
             plan = planner.replan(plan, anchorId, reason, context).copy(parentStepId = parentStepId, depth = depth)
+            planLog?.append(plan)
             replans.add(ReplanEvent(anchorId, reason, plan.version))
         }
     }

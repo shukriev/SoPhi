@@ -10,6 +10,7 @@ import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -530,5 +531,33 @@ class PlanRunnerTest : FunSpec({
 
         runBlocking { planRunner.run("parent", "goal", StopCondition.ShellCheck("true")) }
         shellCalls.get() shouldBe 1
+    }
+
+    test("every plan version, root and sub-plan alike, is appended to the plan log") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan("goal", any()) } returns Plan(
+            id = "plan_1", goalPrompt = "goal",
+            steps = listOf(PlanStep(id = "s1", instruction = "big job", decompose = true))
+        )
+        coEvery { planner.plan("big job", any()) } returns Plan(
+            id = "plan_2", goalPrompt = "big job", steps = listOf(PlanStep(id = "c1", instruction = "sub"))
+        )
+        val log = PlanLog(tempdir().toPath())
+        val sm = sessionManager()
+        val loop = AgentLoop(provider, ToolRegistry(), sm)
+        val planRunner = PlanRunner(
+            loop, sm, provider, planner, StepCritic { _, _ -> 1.0 }, PlanRunnerConfig(model = "m"),
+            planLog = log
+        )
+
+        runBlocking { planRunner.run("parent", "goal", StopCondition.LlmJudged) }
+
+        log.versions("plan_1") shouldHaveSize 1
+        val child = log.versions("plan_2").single()
+        child.parentStepId shouldBe "s1"
+        child.depth shouldBe 1
     }
 })
