@@ -234,4 +234,39 @@ class PlanRunnerTest : FunSpec({
         outcome.finalStatus shouldBe PlanFinalStatus.Met
         outcome.planVersionCount shouldBe 2
     }
+
+    test("the run budget caps total agent turns, counting model escalations too") {
+        val provider = mockk<LLMProvider>()
+        val turns = AtomicInteger(0)
+        every { provider.stream(any()) } answers {
+            turns.incrementAndGet()
+            flowOf(StreamEvent.Content("attempt"))
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("NO", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        coEvery { planner.replan(any(), any(), any(), any()) } answers {
+            val current = firstArg<Plan>()
+            current.copy(steps = listOf(PlanStep(id = "s1", instruction = "again")), version = current.version + 1)
+        }
+
+        val outcome = runBlocking {
+            runner(provider, planner,
+                config = PlanRunnerConfig(model = "m", maxReplans = 10, maxStepExecutions = 3))
+                .run("parent", "goal", StopCondition.LlmJudged)
+        }
+        outcome.finalStatus shouldBe PlanFinalStatus.Exhausted
+        (turns.get() <= 3) shouldBe true
+    }
+
+    test("the outcome reports the plan id of the plan that finished") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+
+        val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
+        outcome.planId shouldBe "plan_1"
+    }
 })
