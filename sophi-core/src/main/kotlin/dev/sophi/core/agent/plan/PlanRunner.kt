@@ -8,6 +8,8 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -302,4 +304,37 @@ class PlanRunner(
         )
         return (response as? LLMResponse.Text)?.content?.trim()?.uppercase()?.startsWith("YES") ?: false
     }
+}
+
+/**
+ * The one construction path for a PlanRunner outside sophi-schedule. Both entry points
+ * (DecomposeGoalTool and the CLI's /plan) call this so their wiring cannot drift apart.
+ * ScheduleEngine deliberately keeps its own inline construction — it already builds a scoped
+ * registry and a DENY_ALL policy for other reasons.
+ */
+fun buildPlanRunner(
+    provider: LLMProvider,
+    registry: ToolRegistry,
+    sessionManager: SessionManager,
+    config: PlanRunnerConfig,
+    confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+    grants: Set<String> = emptySet(),
+    planLog: PlanLog? = null,
+    contextProvider: suspend (String) -> List<String> = { emptyList() },
+    onPlanComplete: suspend (PlanOutcome) -> Unit = {}
+): PlanRunner {
+    val loop = AgentLoop(
+        provider, registry, sessionManager,
+        confirmationPolicy = confirmationPolicy, grants = grants
+    )
+    return PlanRunner(
+        agentLoop = loop,
+        sessionManager = sessionManager,
+        provider = provider,
+        planner = LlmPlanner(provider, config.model, contextProvider = contextProvider),
+        critic = LlmStepCritic(provider, config.model),
+        config = config,
+        onPlanComplete = onPlanComplete,
+        planLog = planLog
+    )
 }
