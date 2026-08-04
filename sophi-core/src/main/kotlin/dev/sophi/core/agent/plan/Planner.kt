@@ -14,7 +14,12 @@ interface Planner {
 }
 
 @Serializable
-private data class PlanStepJson(val id: String, val instruction: String, val dependsOn: List<String> = emptyList())
+private data class PlanStepJson(
+    val id: String,
+    val instruction: String,
+    val dependsOn: List<String> = emptyList(),
+    val decompose: Boolean = false
+)
 
 @Serializable
 private data class PlanJson(val steps: List<PlanStepJson>)
@@ -51,14 +56,18 @@ class LlmPlanner(
         )
     }
 
-    private fun PlanStepJson.toPlanStep() = PlanStep(id = id, instruction = instruction, dependsOn = dependsOn)
+    private fun PlanStepJson.toPlanStep() =
+        PlanStep(id = id, instruction = instruction, dependsOn = dependsOn, decompose = decompose)
 
     private fun buildPlanPrompt(goalPrompt: String, context: List<String>): String = buildString {
         appendLine("Break the following goal into an ordered list of concrete steps. Respond with ONLY a JSON object:")
-        appendLine("""{"steps":[{"id":"step_1","instruction":"...","dependsOn":[]}]}""")
+        appendLine("""{"steps":[{"id":"step_1","instruction":"...","dependsOn":[],"decompose":false}]}""")
         appendLine("Rules: each step needs a unique \"id\"; \"dependsOn\" lists ids of steps that must finish")
         appendLine("first (omit or leave empty for steps that can run independently/first). Keep the plan as")
         appendLine("short as the goal genuinely requires — a simple goal should produce one or two steps.")
+        appendLine("Set \"decompose\" to true only for a step that is a multi-step project in its own right —")
+        appendLine("it will be expanded into its own sub-plan rather than attempted in one go. A step a capable")
+        appendLine("agent could finish in a single sitting must leave it false. Most steps are false.")
         if (context.isNotEmpty()) {
             appendLine("\n## Relevant context")
             appendLine(context.joinToString("\n\n"))
@@ -70,7 +79,7 @@ class LlmPlanner(
     private fun buildReplanPrompt(current: Plan, anchorStepId: String, reason: String, context: List<String>): String =
         buildString {
             appendLine("An in-progress plan needs to change. Respond with ONLY a JSON object with the SAME")
-            appendLine("shape as before: {\"steps\":[{\"id\":\"...\",\"instruction\":\"...\",\"dependsOn\":[]}]}")
+            appendLine("shape as before: {\"steps\":[{\"id\":\"...\",\"instruction\":\"...\",\"dependsOn\":[],\"decompose\":false}]}")
             appendLine("Produce ONLY the steps needed from this point forward (do not repeat already-completed")
             appendLine("steps below) — reuse the anchor step's id if you're replacing it, or invent new ids for")
             appendLine("additional steps.")

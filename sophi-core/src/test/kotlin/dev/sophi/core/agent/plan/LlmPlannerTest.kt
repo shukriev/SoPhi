@@ -105,4 +105,40 @@ class LlmPlannerTest : FunSpec({
         replanned.steps.single().id shouldBe "s1"
         replanned.steps.single().instruction shouldBe "Retry: notify team"
     }
+
+    test("plan parses the decompose flag and defaults it to false when omitted") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s1","instruction":"process every ticket","decompose":true},""" +
+                """{"id":"s2","instruction":"post a summary"}]}""",
+            TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        val plan = runBlocking { planner.plan("clear the backlog") }
+        plan.steps[0].decompose shouldBe true
+        plan.steps[1].decompose shouldBe false
+    }
+
+    test("the plan prompt documents the decompose field and discourages over-marking") {
+        val provider = mockk<LLMProvider>()
+        val capturedPrompts = mutableListOf<String>()
+        coEvery { provider.complete(any()) } coAnswers {
+            capturedPrompts.add(firstArg<CompletionRequest>().messages.first().content)
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        }
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        runBlocking { planner.plan("goal") }
+        capturedPrompts.single() shouldContain "\"decompose\""
+        capturedPrompts.single() shouldContain "Most steps are false."
+    }
+
+    test("the unparseable-response fallback step is never marked for decomposition") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("nope", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        val plan = runBlocking { planner.plan("do the thing") }
+        plan.steps.single().decompose shouldBe false
+    }
 })
