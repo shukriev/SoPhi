@@ -92,6 +92,28 @@ class AgentLoop(
     private val grants: Set<String> = emptySet(),
     private val loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
 ) {
+    /**
+     * The one way a turn ends early. Emits the stop message as a token, persists this turn's
+     * user input and every round accumulated so far, records why it stopped, and saves.
+     * Every early-stop path (loop guard, tool-round ceiling, context exhaustion, compaction
+     * thrashing) goes through here so none of them can ever silently drop work again.
+     */
+    private suspend fun finishEarly(
+        session: AgentSession,
+        userInput: String,
+        pendingRounds: List<PendingEntry>,
+        reason: String,
+        onEvent: suspend (TurnEvent) -> Unit
+    ): AgentSession {
+        val stopMessage = "[Stopped early: $reason]"
+        onEvent(TurnEvent.Token(stopMessage))
+        session.append(EntryRole.USER, userInput)
+        pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
+        session.append(EntryRole.ASSISTANT, stopMessage)
+        sessionManager.save(session)
+        return session
+    }
+
     suspend fun turn(
         session: AgentSession,
         userInput: String,
@@ -152,7 +174,10 @@ class AgentLoop(
             }
 
             if (toolRound >= config.maxToolRounds) {
-                throw IllegalStateException("Max tool rounds (${config.maxToolRounds}) exceeded")
+                return finishEarly(
+                    session, userInput, pendingRounds,
+                    "reached the tool-round sanity ceiling (${config.maxToolRounds})", onEvent
+                )
             }
             messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = toolCalls))
             pendingRounds.add(PendingEntry(
@@ -232,13 +257,7 @@ class AgentLoop(
 
             val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
             if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
-                val stopMessage = "[Stopped early: $guardReason]"
-                onEvent(TurnEvent.Token(stopMessage))
-                session.append(EntryRole.USER, userInput)
-                pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
-                session.append(EntryRole.ASSISTANT, stopMessage)
-                sessionManager.save(session)
-                return session
+                return finishEarly(session, userInput, pendingRounds, guardReason, onEvent)
             }
         }
     }

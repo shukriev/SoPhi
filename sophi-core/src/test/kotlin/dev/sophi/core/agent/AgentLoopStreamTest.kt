@@ -204,7 +204,7 @@ class AgentLoopStreamTest : FunSpec({
         events.filterIsInstance<TurnEvent.ConfirmationFinished>() shouldBe emptyList()
     }
 
-    test("streamTurn() throws IllegalStateException when maxToolRounds is exceeded and the loop guard always continues") {
+    test("streamTurn() stops gracefully at the maxToolRounds ceiling instead of throwing") {
         val tool = object : Tool {
             override val name = "loop_tool"
             override val description = ""
@@ -213,18 +213,17 @@ class AgentLoopStreamTest : FunSpec({
         }
         val registry = ToolRegistry().register(tool)
         // ALWAYS_CONTINUE: see the equivalent AgentLoopTest.kt comment — the default guard would
-        // otherwise stop this early via its own round-budget trigger before the hard ceiling.
+        // otherwise stop this early via its own round-budget trigger before the ceiling.
         val loop = AgentLoop(provider, registry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
         val session = AgentSession(id = "s6")
         val limitedConfig = AgentConfig(model = "test-model", maxToolRounds = 1)
         every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "loop_tool", "{}"))))
 
-        try {
-            loop.streamTurn(session, "loop forever", limitedConfig) {}
-            error("expected IllegalStateException")
-        } catch (e: IllegalStateException) {
-            e.message shouldBe "Max tool rounds (1) exceeded"
-        }
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "loop forever", limitedConfig) { events.add(it) }
+
+        session.branch().last().content shouldBe "[Stopped early: reached the tool-round sanity ceiling (1)]"
+        events.last() shouldBe TurnEvent.Token("[Stopped early: reached the tool-round sanity ceiling (1)]")
     }
 
     test("streamTurn() propagates a stream failure as an error, with no fallback") {

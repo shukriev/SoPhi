@@ -246,7 +246,7 @@ class AgentLoopTest : FunSpec({
         toolResultMsg.content shouldBe "Error: disk full"
     }
 
-    test("turn() throws IllegalStateException when maxToolRounds exceeded and the loop guard always continues") {
+    test("turn() stops gracefully at the maxToolRounds ceiling, persisting the rounds done so far") {
         val session = AgentSession(id = "s1")
         val toolRegistry = ToolRegistry()
         toolRegistry.register(object : dev.sophi.core.tools.Tool {
@@ -257,7 +257,7 @@ class AgentLoopTest : FunSpec({
         })
         // ALWAYS_CONTINUE: the loop guard's own "approaching the round budget" trigger would
         // otherwise stop this early under the default NEVER_CONTINUE policy (see the dedicated
-        // loop-guard tests below) — this test is specifically about the hard ceiling underneath it.
+        // loop-guard tests below) — this test is specifically about the ceiling underneath it.
         val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
         val tightConfig = config.copy(maxToolRounds = 2)
 
@@ -265,8 +265,44 @@ class AgentLoopTest : FunSpec({
             calls = listOf(dev.sophi.ai.api.ToolCall("c1", "loop", "{}")),
             usage = TokenUsage(1, 0)
         ).toStreamFlow()
+        every { sessionManager.save(any()) } just Runs
 
-        shouldThrow<IllegalStateException> { loopWithTool.turn(session, "go", tightConfig) }
+        val result = loopWithTool.turn(session, "go", tightConfig)
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "tool-round sanity ceiling (2)"
+    }
+
+    test("turn() saves the rounds accumulated before the maxToolRounds ceiling instead of discarding them") {
+        // Regression test for the data-loss bug: the old code threw here, and session state was
+        // only ever appended on the natural-completion and loop-guard-stop paths.
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "loop"
+            override val description = "Always loops"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "still looping"
+        })
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+
+        every { provider.stream(any()) } returns LLMResponse.ToolUse(
+            calls = listOf(dev.sophi.ai.api.ToolCall("c1", "loop", "{}")),
+            usage = TokenUsage(1, 0)
+        ).toStreamFlow()
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 2))
+
+        // USER, (ASSISTANT tool-call + TOOL_RESULT) x 2 rounds, final ASSISTANT stop message
+        result.branch() shouldHaveSize 6
+        result.branch().map { it.role } shouldBe listOf(
+            EntryRole.USER,
+            EntryRole.ASSISTANT, EntryRole.TOOL_RESULT,
+            EntryRole.ASSISTANT, EntryRole.TOOL_RESULT,
+            EntryRole.ASSISTANT
+        )
+        verify(exactly = 1) { sessionManager.save(any()) }
     }
 
     // ── Loop guard ──────────────────────────────────────────────────────────
