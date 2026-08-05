@@ -31,6 +31,8 @@ class DecomposeGoalTool(
     private val sessionManager: SessionManager,
     private val parentSessionId: String,
     private val parentConfig: AgentConfig,
+    /** Total context window of `parentConfig.model`, in tokens — see AgentLoop. */
+    private val contextWindowTokens: Int,
     private val planLog: PlanLog? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val depth: Int = 0,
@@ -71,6 +73,7 @@ class DecomposeGoalTool(
                     sessionManager = sessionManager,
                     parentSessionId = parentSessionId,
                     parentConfig = parentConfig,
+                    contextWindowTokens = contextWindowTokens,
                     planLog = planLog,
                     confirmationPolicy = confirmationPolicy,
                     depth = depth + 1,
@@ -88,8 +91,7 @@ class DecomposeGoalTool(
                 maxTokens = parentConfig.maxTokens,
                 allowParallelSteps = false
             ),
-            // TODO(next task): threaded from the caller instead of assumed.
-            contextWindowTokens = 200_000,
+            contextWindowTokens = contextWindowTokens,
             confirmationPolicy = confirmationPolicy,
             grants = args.expectedTools?.toSet() ?: emptySet(),
             planLog = planLog

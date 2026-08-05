@@ -288,6 +288,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 sessionManager = sessionManager,
                 parentSessionId = session.id,
                 parentConfig = config,
+                contextWindowTokens = contextWindowTokens,
                 confirmationPolicy = confirmationPolicy
             )
         )
