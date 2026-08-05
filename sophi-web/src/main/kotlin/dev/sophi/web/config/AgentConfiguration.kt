@@ -119,5 +119,16 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         toolRegistry: ToolRegistry,
         sessionManager: SessionManager,
         confirmationPolicy: ConfirmationPolicy
-    ): AgentLoop = AgentLoop(llmProvider, toolRegistry, sessionManager, confirmationPolicy = confirmationPolicy)
+    ): AgentLoop {
+        val window = providerProperties.contextWindowTokens
+            ?: throw IllegalStateException(
+                "sophi.provider.context-window-tokens is required — set it to the total context " +
+                    "window (in tokens) of sophi.provider.model"
+            )
+        return AgentLoop(
+            llmProvider, toolRegistry, sessionManager,
+            confirmationPolicy = confirmationPolicy,
+            contextWindowTokens = window
+        )
+    }
 }

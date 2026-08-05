@@ -7,5 +7,9 @@ sophi:
   provider:
     type: claude                # or "openai-compat" for Ollama/vLLM
     model: claude-3-5-sonnet-20241022
+    # Total context window of `model`, in tokens. Sophi summarises the turn's earlier tool rounds
+    # once 80% of this is used, instead of capping the number of tool rounds. Change this whenever
+    # you change `model` — there is no per-model lookup table.
+    context-window-tokens: 200000
     # base-url: http://localhost:11434/v1   # required when type=openai-compat
     # api-key:                               # optional; blank/omitted = no-auth mode for local servers

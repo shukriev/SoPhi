@@ -1,12 +1,20 @@
 package dev.sophi.web.config
 
+import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.mcp.McpClientManager
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.types.shouldBeInstanceOf
+import io.mockk.mockk
 
 class AgentConfigurationTest : FunSpec({
     test("buildProviderFromProperties builds a claude provider when type=claude") {
@@ -75,5 +83,29 @@ class AgentConfigurationTest : FunSpec({
         val manager = config.mcpClientManager()
         val tools = kotlinx.coroutines.runBlocking { manager.connect(emptyList()) }
         tools.shouldBeEmpty()
+    }
+
+    test("agentLoop() fails fast with a clear message when the context window is not configured") {
+        val config = AgentConfiguration(ProviderProperties(type = "claude", apiKey = "sk-ant-test"))
+        val ex = shouldThrow<IllegalStateException> {
+            config.agentLoop(
+                mockk(), ToolRegistry(),
+                FileSessionManager(tempdir().toPath()),
+                ConfirmationPolicy.DENY_ALL
+            )
+        }
+        ex.message!! shouldContain "sophi.provider.context-window-tokens"
+    }
+
+    test("agentLoop() builds a loop when the context window is configured") {
+        val config = AgentConfiguration(
+            ProviderProperties(type = "claude", apiKey = "sk-ant-test", contextWindowTokens = 200_000)
+        )
+        val loop = config.agentLoop(
+            mockk(), ToolRegistry(),
+            FileSessionManager(tempdir().toPath()),
+            ConfirmationPolicy.DENY_ALL
+        )
+        loop.shouldBeInstanceOf<AgentLoop>()
     }
 })
