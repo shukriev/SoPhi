@@ -15,6 +15,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.Runs
 import io.mockk.clearMocks
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
@@ -698,5 +699,84 @@ class AgentLoopTest : FunSpec({
         loopWithGrant.turn(session, "go", config)
 
         executed shouldBe true
+    }
+
+    // ── Mid-loop compaction ─────────────────────────────────────────────────
+
+    /** A tool that always succeeds, so the loop guard never fires during compaction tests. */
+    fun loopingTool() = object : dev.sophi.core.tools.Tool {
+        override val name = "ok"
+        override val description = "Always succeeds"
+        override val parametersJson = "{}"
+        override suspend fun execute(argumentsJson: String) = "fine"
+    }
+
+    fun toolRound(id: String, inputTokens: Int) = LLMResponse.ToolUse(
+        calls = listOf(dev.sophi.ai.api.ToolCall(id, "ok", "{}")),
+        usage = TokenUsage(inputTokens, 0)
+    ).toStreamFlow()
+
+    test("turn() compacts this turn's earlier rounds once input tokens cross the threshold") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry().register(loopingTool())
+        // window 100_000 * threshold 0.8 => compact at 80_000 input tokens
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+
+        val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            capturedRequests.add(firstArg())
+            when (capturedRequests.size) {
+                1 -> toolRound("c1", 1_000)
+                2 -> toolRound("c2", 1_000)
+                3 -> toolRound("c3", 90_000)
+                else -> LLMResponse.Text("done", TokenUsage(1_000, 5)).toStreamFlow()
+            }
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("r1 looked at the config", TokenUsage(1, 1))
+        every { sessionManager.save(any()) } just Runs
+
+        loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        // Exactly one summarisation call happened.
+        coVerify(exactly = 1) { provider.complete(any()) }
+        // The 4th request replaced round 1 with a SYSTEM summary and kept the 2 most recent rounds.
+        val fourth = capturedRequests[3].messages
+        fourth shouldHaveSize 6
+        fourth[0].role shouldBe dev.sophi.ai.api.MessageRole.USER
+        fourth[1].role shouldBe dev.sophi.ai.api.MessageRole.SYSTEM
+        fourth[1].content shouldContain "Earlier steps this turn, summarised:"
+        fourth[1].content shouldContain "r1 looked at the config"
+    }
+
+    test("compaction never orphans a TOOL result from its ASSISTANT tool-call message") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry().register(loopingTool())
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+
+        val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            capturedRequests.add(firstArg())
+            when (capturedRequests.size) {
+                1 -> toolRound("c1", 1_000)
+                2 -> toolRound("c2", 1_000)
+                3 -> toolRound("c3", 90_000)
+                else -> LLMResponse.Text("done", TokenUsage(1_000, 5)).toStreamFlow()
+            }
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+        every { sessionManager.save(any()) } just Runs
+
+        loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        val messages = capturedRequests[3].messages
+        val advertisedCallIds = messages
+            .flatMap { it.toolCalls.orEmpty() }
+            .map { it.id }
+            .toSet()
+        val orphanedResults = messages
+            .filter { it.role == dev.sophi.ai.api.MessageRole.TOOL }
+            .filter { it.toolCallId !in advertisedCallIds }
+        orphanedResults shouldBe emptyList()
+        advertisedCallIds shouldBe setOf("c2", "c3")
     }
 })

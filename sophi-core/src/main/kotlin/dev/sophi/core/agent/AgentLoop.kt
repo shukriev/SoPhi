@@ -2,6 +2,7 @@ package dev.sophi.core.agent
 
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
@@ -36,6 +37,8 @@ private data class ToolCallOutcome(val call: ToolCall, val message: Message, val
 private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
 private const val LOOP_GUARD_FAILURE_THRESHOLD = 3
+/** Enough recent rounds for the model to stay coherent about what it was just doing. */
+private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
 private const val LOOP_GUARD_ROUND_BUDGET_MARGIN = 3
 private val SEARCH_TOOL_NAMES = setOf("glob", "grep")
 
@@ -121,6 +124,68 @@ class AgentLoop(
         return session
     }
 
+    /**
+     * Summarises this turn's older tool rounds in place, leaving the prior-session prefix and the
+     * most recent [keepRecentRounds] rounds untouched. Returns false when there is nothing left to
+     * compact (already at the floor) — the caller treats that as context exhaustion.
+     *
+     * Only ever called between rounds, never mid-round, and rounds are only ever appended whole
+     * (ASSISTANT+toolCalls, then its TOOL results), so a cut can never split a tool call from its
+     * results.
+     */
+    private suspend fun compactInPlace(
+        messages: MutableList<Message>,
+        turnStartIndex: Int,
+        config: AgentConfig,
+        keepRecentRounds: Int = COMPACTION_KEEP_RECENT_ROUNDS
+    ): Boolean {
+        val roundBoundaries = messages.indices
+            .filter { i ->
+                i >= turnStartIndex &&
+                    messages[i].role == MessageRole.ASSISTANT &&
+                    messages[i].toolCalls != null
+            }
+        if (roundBoundaries.size <= keepRecentRounds) return false
+
+        val cutIndex = roundBoundaries[roundBoundaries.size - keepRecentRounds]
+        val toCompact = messages.subList(turnStartIndex, cutIndex).toList()
+        if (toCompact.isEmpty()) return false
+
+        val summary = summarise(toCompact, config)
+        messages.subList(turnStartIndex, cutIndex).clear()
+        messages.add(
+            turnStartIndex,
+            Message(MessageRole.SYSTEM, "Earlier steps this turn, summarised:\n$summary")
+        )
+        return true
+    }
+
+    /** One provider.complete() call, same prompt shape ContextCompactor uses for cross-turn work. */
+    private suspend fun summarise(toCompact: List<Message>, config: AgentConfig): String {
+        val transcript = toCompact.joinToString("\n") { message ->
+            val calls = message.toolCalls?.joinToString(", ") { "${it.name}(${it.argumentsJson})" }
+            "${message.role.name}: ${message.content}" + (calls?.let { " [tool calls: $it]" } ?: "")
+        }
+        val request = CompletionRequest(
+            messages = listOf(
+                Message(
+                    MessageRole.SYSTEM,
+                    "Summarise the following steps of an agent's work concisely, preserving key " +
+                        "facts, findings and decisions. Do not invent anything."
+                ),
+                Message(MessageRole.USER, transcript)
+            ),
+            model = config.model,
+            maxTokens = 512,
+            temperature = 0.3
+        )
+        return when (val response = provider.complete(request)) {
+            is LLMResponse.Text -> response.content
+            // A failed summarisation must not abort the turn — degrade to a truncated transcript.
+            else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
+        }
+    }
+
     suspend fun turn(
         session: AgentSession,
         userInput: String,
@@ -141,6 +206,8 @@ class AgentLoop(
         // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
         val turnStartIndex = messages.size
 
+        val compactionTriggerTokens = (contextWindowTokens * compactionThreshold).toInt()
+        var compactionsWithoutRelief = 0
         var toolRound = 0
         val pendingRounds = mutableListOf<PendingEntry>()
         val loopGuardState = LoopGuardState(config.maxToolRounds)
@@ -270,6 +337,18 @@ class AgentLoop(
             val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
             if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
                 return finishEarly(session, userInput, pendingRounds, guardReason, onEvent)
+            }
+
+            if ((roundUsage?.inputTokens ?: 0) < compactionTriggerTokens) {
+                compactionsWithoutRelief = 0
+            } else if (!compactInPlace(messages, turnStartIndex, config)) {
+                return finishEarly(
+                    session, userInput, pendingRounds,
+                    "context budget exhausted — a single round's output exceeds the compaction floor",
+                    onEvent
+                )
+            } else {
+                compactionsWithoutRelief++
             }
         }
     }
