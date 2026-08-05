@@ -35,12 +35,17 @@ class ScheduleRunDueCommand : CliktCommand(
             "chain-of-thought counts against this budget, so a low value can exhaust it before " +
             "the model ever emits an answer or tool call."
     ).int().default(4096)
+    private val contextWindowTokens: Int by option(
+        "--context-window-tokens",
+        help = "Total context window of --model, in tokens. The turn's earlier tool rounds are " +
+            "summarised once 80% of this is used, instead of capping the number of rounds."
+    ).int().default(200_000)
 
     override fun run() = runBlocking {
         val engine = buildScheduleEngine(
             model, providerType, apiKeyOption, baseUrl,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
-            taskTimeoutSeconds, maxTokens
+            contextWindowTokens, taskTimeoutSeconds, maxTokens
         )
         engine.tickOnce()
     }

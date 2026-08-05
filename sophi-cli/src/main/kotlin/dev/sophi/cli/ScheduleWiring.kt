@@ -19,6 +19,7 @@ internal fun buildScheduleEngine(
     sessionsDir: Path,
     agentsDir: Path,
     braveApiKeyOption: String?,
+    contextWindowTokens: Int,
     taskTimeoutSeconds: Long = 300,
     maxTokens: Int = 4096
 ): ScheduleEngine {
@@ -42,6 +43,7 @@ internal fun buildScheduleEngine(
         sessionManager = sessionManager,
         notifier = notifier,
         model = model,
+        contextWindowTokens = contextWindowTokens,
         agentDefinitions = agentDefinitions,
         taskTimeoutMs = taskTimeoutSeconds * 1000,
         maxTokens = maxTokens

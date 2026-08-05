@@ -34,6 +34,11 @@ class ScheduleEngine(
     private val sessionManager: SessionManager,
     private val notifier: Notifier,
     private val model: String,
+    /**
+     * Total context window of [model], in tokens. Especially important for unattended runs:
+     * nobody is watching to notice a turn that has run itself out of context.
+     */
+    private val contextWindowTokens: Int,
     private val agentDefinitions: List<AgentDefinition> = emptyList(),
     private val maxConcurrentTasks: Int = 4,
     /**
@@ -74,7 +79,8 @@ class ScheduleEngine(
                 val loop = AgentLoop(
                     provider, scopedRegistry, sessionManager,
                     confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
-                    grants = task.toolGrants
+                    grants = task.toolGrants,
+                    contextWindowTokens = contextWindowTokens
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens)
 
