@@ -332,7 +332,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             skillRegistry = skillRegistry,
             provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
             autoModeToggle = toggleableConfirmationPolicy,
-            toolRegistry = registry
+            toolRegistry = registry,
+            contextWindowTokens = contextWindowTokens
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)

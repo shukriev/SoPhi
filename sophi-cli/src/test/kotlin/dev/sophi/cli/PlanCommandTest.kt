@@ -21,6 +21,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class PlanCommandTest : FunSpec({
     val output = mutableListOf<String>()
 
@@ -31,6 +33,7 @@ class PlanCommandTest : FunSpec({
         registry = ToolRegistry(),
         sessionManager = FileSessionManager(tempdir().toPath()),
         config = AgentConfig(model = "test-model"),
+        contextWindowTokens = TEST_CONTEXT_WINDOW,
         confirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
         planLog = null
     ) { output.add(it) }
@@ -85,6 +88,17 @@ class PlanCommandTest : FunSpec({
         val handler = SlashHandler(
             mockk(relaxed = true), null, AgentConfig(model = "test-model"),
             provider = mockk<LLMProvider>()
+        ) { output.add(it) }
+
+        runBlocking { handler.handle("/plan do a thing", AgentSession(id = "s1")) }
+
+        output.single() shouldBe "Planning is not available (no tools configured)."
+    }
+
+    test("/plan degrades gracefully when no context window is configured") {
+        val handler = SlashHandler(
+            mockk(relaxed = true), null, AgentConfig(model = "test-model"),
+            toolRegistry = ToolRegistry(), provider = mockk<LLMProvider>()
         ) { output.add(it) }
 
         runBlocking { handler.handle("/plan do a thing", AgentSession(id = "s1")) }

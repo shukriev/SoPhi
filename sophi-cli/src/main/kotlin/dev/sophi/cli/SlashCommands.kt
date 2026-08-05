@@ -33,6 +33,12 @@ class SlashHandler(
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val autoModeToggle: ToggleableConfirmationPolicy? = null,
     private val toolRegistry: ToolRegistry? = null,
+    /**
+     * Total context window of `config.model`, in tokens. Optional here for the same reason
+     * `provider` and `toolRegistry` are: a SlashHandler built without the full agent wiring
+     * simply reports the affected commands as unavailable rather than guessing a value.
+     */
+    private val contextWindowTokens: Int? = null,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -214,11 +220,12 @@ class SlashHandler(
         }
         val registry = toolRegistry
         val llm = provider
-        if (registry == null || llm == null) {
+        val window = contextWindowTokens
+        if (registry == null || llm == null || window == null) {
             output("Planning is not available (no tools configured).")
             return session
         }
-        return PlanCommand(llm, registry, sessionManager, config, confirmationPolicy, null, output)
+        return PlanCommand(llm, registry, sessionManager, config, window, confirmationPolicy, null, output)
             .run(arg, session)
     }
 
