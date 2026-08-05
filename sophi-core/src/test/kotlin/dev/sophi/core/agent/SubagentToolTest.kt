@@ -21,6 +21,8 @@ import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class SubagentToolTest : FunSpec({
 
     val explore = AgentDefinition(
@@ -63,6 +65,7 @@ class SubagentToolTest : FunSpec({
         sessionManager = FileSessionManager(sessionsDir),
         parentSessionId = "parent-1",
         parentConfig = AgentConfig(model = "parent-model"),
+        contextWindowTokens = TEST_CONTEXT_WINDOW,
         depth = depth
     )
 
@@ -117,7 +120,8 @@ class SubagentToolTest : FunSpec({
             fullRegistry = ToolRegistry().register(readTool),
             sessionManager = sessionManager,
             parentSessionId = "parent-42",
-            parentConfig = AgentConfig(model = "parent-model")
+            parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW
         )
 
         runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""") }
@@ -175,7 +179,8 @@ class SubagentToolTest : FunSpec({
             fullRegistry = fullRegistry,
             sessionManager = sessionManager,
             parentSessionId = "parent-1",
-            parentConfig = AgentConfig(model = "parent-model")
+            parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW
         )
         // Self-referential registration, exactly as SophiCli.kt wires it in production.
         fullRegistry.register(depth0Tool)
@@ -232,6 +237,7 @@ class SubagentToolTest : FunSpec({
             sessionManager = sessionManager,
             parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW,
             maxDelegationDepth = 1
         )
         fullRegistry.register(depth0Tool)
@@ -309,6 +315,7 @@ class SubagentToolTest : FunSpec({
             sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
             parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW,
             confirmationPolicy = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
         )
 
@@ -371,6 +378,7 @@ class SubagentToolTest : FunSpec({
             sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
             parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW,
             confirmationPolicy = ConfirmationPolicy { throw AssertionError("should not be consulted for a granted tool") }
         )
 

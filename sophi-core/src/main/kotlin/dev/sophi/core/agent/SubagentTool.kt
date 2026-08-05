@@ -27,6 +27,12 @@ class SubagentTool(
     private val sessionManager: SessionManager,
     private val parentSessionId: String,
     private val parentConfig: AgentConfig,
+    /**
+     * Total context window of the model the nested loop will use, in tokens. Threaded unchanged
+     * to every deeper level: a subagent runs on the same provider/model family as its parent
+     * unless its definition overrides `model`, and there is deliberately no per-model registry.
+     */
+    private val contextWindowTokens: Int,
     private val depth: Int = 0,
     private val maxDelegationDepth: Int = 3,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL
@@ -75,6 +81,7 @@ class SubagentTool(
                     sessionManager = sessionManager,
                     parentSessionId = parentSessionId,
                     parentConfig = parentConfig,
+                    contextWindowTokens = contextWindowTokens,
                     depth = depth + 1,
                     maxDelegationDepth = maxDelegationDepth,
                     confirmationPolicy = confirmationPolicy
@@ -85,7 +92,8 @@ class SubagentTool(
         val nestedLoop = AgentLoop(
             provider, scopedRegistry, sessionManager,
             confirmationPolicy = confirmationPolicy,
-            grants = args.expectedTools?.toSet() ?: emptySet()
+            grants = args.expectedTools?.toSet() ?: emptySet(),
+            contextWindowTokens = contextWindowTokens
         )
         val subSession = sessionManager.create(
             title = "subagent:${definition.name}",
