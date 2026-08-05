@@ -37,12 +37,14 @@ class AgentLoopTest : FunSpec({
         confirmationPolicy: dev.sophi.core.tools.ConfirmationPolicy =
             dev.sophi.core.tools.ConfirmationPolicy.ALLOW_ALL,
         grants: Set<String> = emptySet(),
-        loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
+        loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE,
+        contextWindowTokens: Int = TEST_CONTEXT_WINDOW
     ): AgentLoop = AgentLoop(
         provider, toolRegistry, sessionManager,
         confirmationPolicy = confirmationPolicy,
         grants = grants,
-        loopGuard = loopGuard
+        loopGuard = loopGuard,
+        contextWindowTokens = contextWindowTokens
     )
 
     beforeTest {
@@ -124,6 +126,21 @@ class AgentLoopTest : FunSpec({
         runCatching { loop.turn(session, "test", config) }
 
         session.entries.shouldHaveSize(0)  // session unchanged
+    }
+
+    test("turn() consumes a StreamEvent.Usage without surfacing it as a TurnEvent") {
+        val session = AgentSession(id = "s1")
+        every { provider.stream(any()) } returns flow {
+            emit(StreamEvent.Content("Hello!"))
+            emit(StreamEvent.Usage(TokenUsage(inputTokens = 12, outputTokens = 3)))
+        }
+        every { sessionManager.save(any()) } just Runs
+
+        val events = mutableListOf<TurnEvent>()
+        val result = loop.turn(session, "Hi", config) { events.add(it) }
+
+        events shouldBe listOf(TurnEvent.Token("Hello!"))
+        result.branch().last().content shouldBe "Hello!"
     }
 
     // ── Tool dispatch ──────────────────────────────────────────────────────────

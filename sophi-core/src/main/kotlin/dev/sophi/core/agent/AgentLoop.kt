@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
+import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.prompt.PromptBuilder
@@ -90,7 +91,13 @@ class AgentLoop(
     private val compactor: ContextCompactor? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val grants: Set<String> = emptySet(),
-    private val loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
+    private val loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE,
+    // TEMPORARY default — removed in the final wiring task, after every call site passes a real
+    // value. There is deliberately no per-model context-window registry: the caller who already
+    // picks `model` is the only one who can say what that model's window is.
+    private val contextWindowTokens: Int = 200_000,
+    /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
+    private val compactionThreshold: Double = 0.8
 ) {
     /**
      * The one way a turn ends early. Emits the stop message as a token, persists this turn's
@@ -129,6 +136,10 @@ class AgentLoop(
     ): AgentSession {
         val messages = PromptBuilder.build(session.branch()).toMutableList()
         messages.add(Message(MessageRole.USER, userInput))
+        // Everything from here on is this turn's own accumulated rounds — the only region
+        // mid-loop compaction is ever allowed to touch. The prior-session prefix in front of it
+        // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
+        val turnStartIndex = messages.size
 
         var toolRound = 0
         val pendingRounds = mutableListOf<PendingEntry>()
@@ -146,6 +157,7 @@ class AgentLoop(
 
             val contentBuf = StringBuilder()
             var pendingToolCalls: List<ToolCall>? = null
+            var roundUsage: TokenUsage? = null
             provider.stream(request).collect { event ->
                 when (event) {
                     is StreamEvent.Content -> {
@@ -154,8 +166,8 @@ class AgentLoop(
                     }
                     is StreamEvent.Reasoning -> onEvent(TurnEvent.ReasoningToken(event.text))
                     is StreamEvent.ToolCallsReady -> pendingToolCalls = event.calls
-                    // Consumed for real in the compaction task; ignored for now.
-                    is StreamEvent.Usage -> Unit
+                    // Cumulative for the whole prompt just sent, so the latest value IS the total.
+                    is StreamEvent.Usage -> roundUsage = event.usage
                 }
             }
 
