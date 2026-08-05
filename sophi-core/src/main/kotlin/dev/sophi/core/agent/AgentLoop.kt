@@ -101,10 +101,12 @@ class AgentLoop(
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val grants: Set<String> = emptySet(),
     private val loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE,
-    // TEMPORARY default — removed in the final wiring task, after every call site passes a real
-    // value. There is deliberately no per-model context-window registry: the caller who already
-    // picks `model` is the only one who can say what that model's window is.
-    private val contextWindowTokens: Int = 200_000,
+    /**
+     * Total context window of the model this loop will call, in tokens. Required: there is
+     * deliberately no per-model registry, because the caller who already picks `model` is the
+     * only one who can say what that model's window is, and guessing wrong is worse than asking.
+     */
+    private val contextWindowTokens: Int,
     /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
     private val compactionThreshold: Double = 0.8
 ) {
