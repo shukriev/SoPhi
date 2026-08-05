@@ -39,6 +39,8 @@ class PlanCommand(
                 maxTokens = config.maxTokens,
                 allowParallelSteps = false
             ),
+            // TODO(next task): threaded from the caller instead of assumed.
+            contextWindowTokens = 200_000,
             confirmationPolicy = confirmationPolicy,
             planLog = planLog
         )

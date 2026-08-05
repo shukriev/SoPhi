@@ -88,6 +88,8 @@ class DecomposeGoalTool(
                 maxTokens = parentConfig.maxTokens,
                 allowParallelSteps = false
             ),
+            // TODO(next task): threaded from the caller instead of assumed.
+            contextWindowTokens = 200_000,
             confirmationPolicy = confirmationPolicy,
             grants = args.expectedTools?.toSet() ?: emptySet(),
             planLog = planLog
