@@ -54,6 +54,25 @@ class ClaudeProviderTest : FunSpec({
         }
     }
 
+    fun streamChunk(text: String?, promptTokens: Int = 0, completionTokens: Int = 0): ChatResponse {
+        val chunkUsage = mockk<Usage> {
+            every { this@mockk.promptTokens } returns promptTokens
+            every { this@mockk.completionTokens } returns completionTokens
+        }
+        val chunkMeta = mockk<ChatResponseMetadata> {
+            every { this@mockk.usage } returns chunkUsage
+        }
+        return mockk<ChatResponse> {
+            every { result } returns mockk {
+                every { output } returns mockk<AssistantMessage> {
+                    every { this@mockk.text } returns text
+                    every { toolCalls } returns emptyList()
+                }
+            }
+            every { metadata } returns chunkMeta
+        }
+    }
+
     test("name defaults to 'claude'") {
         provider.name shouldBe "claude"
     }
@@ -165,35 +184,28 @@ class ClaudeProviderTest : FunSpec({
     }
 
     test("stream() emits StreamEvent.Content for non-empty text chunks from Flux") {
-        val chunk1 = mockk<ChatResponse> {
-            every { result } returns mockk {
-                every { output } returns mockk<AssistantMessage> {
-                    every { text } returns "hello"
-                    every { toolCalls } returns emptyList()
-                }
-            }
-        }
-        val chunk2 = mockk<ChatResponse> {
-            every { result } returns mockk {
-                every { output } returns mockk<AssistantMessage> {
-                    every { text } returns " world"
-                    every { toolCalls } returns emptyList()
-                }
-            }
-        }
-        val emptyChunk = mockk<ChatResponse> {
-            every { result } returns mockk {
-                every { output } returns mockk<AssistantMessage> {
-                    every { text } returns ""
-                    every { toolCalls } returns emptyList()
-                }
-            }
-        }
-        every { mockChatModel.stream(any<Prompt>()) } returns Flux.just(chunk1, emptyChunk, chunk2)
+        every { mockChatModel.stream(any<Prompt>()) } returns
+            Flux.just(streamChunk("hello"), streamChunk(""), streamChunk(" world"))
 
         val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
         val events = provider.stream(req).toList()
+
         events shouldBe listOf(StreamEvent.Content("hello"), StreamEvent.Content(" world"))
+    }
+
+    test("stream() emits a final StreamEvent.Usage carrying the accumulated token counts") {
+        // Spring AI accumulates usage across chunks, so the last chunk holds the totals.
+        every { mockChatModel.stream(any<Prompt>()) } returns
+            Flux.just(streamChunk("hi", promptTokens = 120, completionTokens = 10),
+                      streamChunk("", promptTokens = 120, completionTokens = 30))
+
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
+        val events = provider.stream(req).toList()
+
+        events shouldBe listOf(
+            StreamEvent.Content("hi"),
+            StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
+        )
     }
 
     test("complete() maps request.tools into AnthropicChatOptions.toolCallbacks") {
