@@ -24,6 +24,8 @@ import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class PlanRunnerTest : FunSpec({
     fun sessionManager(): SessionManager = FileSessionManager(createTempDirectory("plan-runner-test"))
 
@@ -35,7 +37,7 @@ class PlanRunnerTest : FunSpec({
         sm: SessionManager = sessionManager(),
         onPlanComplete: suspend (PlanOutcome) -> Unit = {}
     ): PlanRunner {
-        val loop = AgentLoop(provider, ToolRegistry(), sm)
+        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         return PlanRunner(loop, sm, provider, planner, critic, config, onPlanComplete = onPlanComplete)
     }
 
@@ -523,7 +525,7 @@ class PlanRunnerTest : FunSpec({
         )
         val shellCalls = AtomicInteger(0)
         val sm = sessionManager()
-        val loop = AgentLoop(provider, ToolRegistry(), sm)
+        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         val planRunner = PlanRunner(
             loop, sm, provider, planner, StepCritic { _, _ -> 1.0 }, PlanRunnerConfig(model = "m"),
             shellRunner = { shellCalls.incrementAndGet(); 0 }
@@ -547,7 +549,7 @@ class PlanRunnerTest : FunSpec({
         )
         val log = PlanLog(tempdir().toPath())
         val sm = sessionManager()
-        val loop = AgentLoop(provider, ToolRegistry(), sm)
+        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         val planRunner = PlanRunner(
             loop, sm, provider, planner, StepCritic { _, _ -> 1.0 }, PlanRunnerConfig(model = "m"),
             planLog = log
