@@ -27,11 +27,13 @@ private class NoopInput : InputSource {
     override suspend fun awaitYesNo(): Boolean = false
 }
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class TurnControllerContextTest : FunSpec({
     fun rig(provider: LLMProvider, contextProvider: suspend (dev.sophi.core.session.AgentSession, String) -> String?,
             onSettled: suspend (String, String, Throwable?) -> Unit = { _, _, _ -> }): TurnController {
         val sm = FileSessionManager(tempdir().toPath())
-        val loop = AgentLoop(provider, ToolRegistry(), sm)
+        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         return TurnController(
             loop, AgentConfig(model = "m", systemPrompt = "BASE"), NoopInput(),
             LiveRegion(StringBuilder()) { 80 },

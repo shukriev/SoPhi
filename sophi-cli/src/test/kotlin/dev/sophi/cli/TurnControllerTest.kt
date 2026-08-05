@@ -34,11 +34,13 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class TurnControllerTest : FunSpec({
     val provider = mockk<LLMProvider>()
     val sessionManager = mockk<SessionManager>(relaxed = true)
     val config = AgentConfig(model = "test-model")
-    val loop = AgentLoop(provider, ToolRegistry(), sessionManager)
+    val loop = AgentLoop(provider, ToolRegistry(), sessionManager, contextWindowTokens = TEST_CONTEXT_WINDOW)
 
     beforeTest { clearMocks(provider, sessionManager) }
 
@@ -72,7 +74,9 @@ class TurnControllerTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "pong"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = AgentLoop(
+            provider, toolRegistry, sessionManager, contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
         var round = 0
         every { provider.stream(any()) } answers {
             round++
@@ -148,7 +152,9 @@ class TurnControllerTest : FunSpec({
             requests.associate { it.callId to true }
         }
         val loopWithConfirmation = AgentLoop(
-            provider, toolRegistry, sessionManager, confirmationPolicy = confirmationPolicy
+            provider, toolRegistry, sessionManager,
+            confirmationPolicy = confirmationPolicy,
+            contextWindowTokens = TEST_CONTEXT_WINDOW
         )
         var round = 0
         every { provider.stream(any()) } answers {
