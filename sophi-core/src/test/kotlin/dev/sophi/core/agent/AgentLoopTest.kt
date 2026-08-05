@@ -22,6 +22,9 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.flow.flow
 
+/** A window large enough that no existing test's tiny TokenUsage values ever trip compaction. */
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class AgentLoopTest : FunSpec({
     val provider = mockk<LLMProvider>()
     val sessionManager = mockk<SessionManager>()
@@ -29,9 +32,22 @@ class AgentLoopTest : FunSpec({
     val config = AgentConfig(model = "test-model", systemPrompt = "You are helpful.")
     lateinit var loop: AgentLoop
 
+    fun newLoop(
+        toolRegistry: ToolRegistry = registry,
+        confirmationPolicy: dev.sophi.core.tools.ConfirmationPolicy =
+            dev.sophi.core.tools.ConfirmationPolicy.ALLOW_ALL,
+        grants: Set<String> = emptySet(),
+        loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
+    ): AgentLoop = AgentLoop(
+        provider, toolRegistry, sessionManager,
+        confirmationPolicy = confirmationPolicy,
+        grants = grants,
+        loopGuard = loopGuard
+    )
+
     beforeTest {
         clearMocks(provider, sessionManager)
-        loop = AgentLoop(provider, registry, sessionManager)
+        loop = newLoop()
     }
 
     // ── Text path ──────────────────────────────────────────────────────────────
@@ -121,7 +137,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "42"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
 
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
@@ -149,7 +165,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "pong"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
 
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
         every { provider.stream(any()) } answers {
@@ -178,7 +194,7 @@ class AgentLoopTest : FunSpec({
     test("turn() returns error string for unknown tool name") {
         val session = AgentSession(id = "s1")
         val emptyRegistry = ToolRegistry()
-        val loopNoTools = AgentLoop(provider, emptyRegistry, sessionManager)
+        val loopNoTools = newLoop(emptyRegistry)
 
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
         every { provider.stream(any()) } answers {
@@ -209,7 +225,7 @@ class AgentLoopTest : FunSpec({
             override suspend fun execute(argumentsJson: String): String =
                 throw RuntimeException("disk full")
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
 
         val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
         every { provider.stream(any()) } answers {
@@ -242,7 +258,7 @@ class AgentLoopTest : FunSpec({
         // ALWAYS_CONTINUE: the loop guard's own "approaching the round budget" trigger would
         // otherwise stop this early under the default NEVER_CONTINUE policy (see the dedicated
         // loop-guard tests below) — this test is specifically about the hard ceiling underneath it.
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
         val tightConfig = config.copy(maxToolRounds = 2)
 
         every { provider.stream(any()) } returns LLMResponse.ToolUse(
@@ -264,7 +280,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String): String = throw RuntimeException("nope")
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
 
         every { provider.stream(any()) } returns LLMResponse.ToolUse(
             calls = listOf(dev.sophi.ai.api.ToolCall("c1", "broken", "{}")),
@@ -288,7 +304,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String): String = "Error: 'start' and 'end' are required unless all_day=true"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
 
         every { provider.stream(any()) } returns LLMResponse.ToolUse(
             calls = listOf(dev.sophi.ai.api.ToolCall("c1", "validating", "{}")),
@@ -317,7 +333,7 @@ class AgentLoopTest : FunSpec({
                 return "finally"
             }
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
 
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c1", "flaky", "{}")), usage = TokenUsage(1, 0)).toStreamFlow(),
@@ -342,7 +358,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "no matches"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
 
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
@@ -372,7 +388,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "fine"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
 
         every { provider.stream(any()) } returns LLMResponse.ToolUse(
             calls = listOf(dev.sophi.ai.api.ToolCall("c1", "ok", "{}")),
@@ -410,7 +426,7 @@ class AgentLoopTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "42"
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("call-1", "calculator", "{}")),
@@ -440,7 +456,7 @@ class AgentLoopTest : FunSpec({
             override suspend fun execute(argumentsJson: String): String =
                 throw RuntimeException("disk full")
         })
-        val loopWithTool = AgentLoop(provider, toolRegistry, sessionManager)
+        val loopWithTool = newLoop(toolRegistry)
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c1", "broken", "{}")),
@@ -474,7 +490,7 @@ class AgentLoopTest : FunSpec({
         val policy = dev.sophi.core.tools.ConfirmationPolicy { _ ->
             throw AssertionError("should not be called for a SAFE tool")
         }
-        val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
+        val loopWithPolicy = newLoop(toolRegistry, confirmationPolicy = policy)
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c1", "safe-tool", "{}")),
@@ -503,8 +519,8 @@ class AgentLoopTest : FunSpec({
                 return "should not run"
             }
         })
-        val loopWithPolicy = AgentLoop(
-            provider, toolRegistry, sessionManager,
+        val loopWithPolicy = newLoop(
+            toolRegistry,
             confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { requests ->
                 requests.associate { it.callId to false }
             }
@@ -539,8 +555,8 @@ class AgentLoopTest : FunSpec({
             override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
             override suspend fun execute(argumentsJson: String) = "did the risky thing"
         })
-        val loopWithPolicy = AgentLoop(
-            provider, toolRegistry, sessionManager,
+        val loopWithPolicy = newLoop(
+            toolRegistry,
             confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy { requests ->
                 requests.associate { it.callId to true }
             }
@@ -583,7 +599,7 @@ class AgentLoopTest : FunSpec({
             requests.forEach { log.add("confirm:${it.toolName}") }
             requests.associate { it.callId to true }
         }
-        val loopWithPolicy = AgentLoop(provider, toolRegistry, sessionManager, confirmationPolicy = policy)
+        val loopWithPolicy = newLoop(toolRegistry, confirmationPolicy = policy)
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(
@@ -616,10 +632,7 @@ class AgentLoopTest : FunSpec({
         val policy = dev.sophi.core.tools.ConfirmationPolicy {
             throw AssertionError("should not be called for a granted tool")
         }
-        val loopWithGrant = AgentLoop(
-            provider, toolRegistry, sessionManager,
-            confirmationPolicy = policy, grants = setOf("danger")
-        )
+        val loopWithGrant = newLoop(toolRegistry, confirmationPolicy = policy, grants = setOf("danger"))
         every { provider.stream(any()) } returnsMany listOf(
             LLMResponse.ToolUse(
                 calls = listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}")),
