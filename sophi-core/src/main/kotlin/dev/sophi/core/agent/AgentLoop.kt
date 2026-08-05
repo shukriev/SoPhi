@@ -39,6 +39,12 @@ private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = tr
 private const val LOOP_GUARD_FAILURE_THRESHOLD = 3
 /** Enough recent rounds for the model to stay coherent about what it was just doing. */
 private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
+/**
+ * Compacting twice in a row without dropping back under the threshold means summarisation itself
+ * is no longer buying room — stop cleanly rather than loop on it. Mirrors Claude Code's own
+ * auto-compact behaviour.
+ */
+private const val MAX_COMPACTIONS_WITHOUT_RELIEF = 2
 private const val LOOP_GUARD_ROUND_BUDGET_MARGIN = 3
 private val SEARCH_TOOL_NAMES = setOf("glob", "grep")
 
@@ -340,15 +346,25 @@ class AgentLoop(
             }
 
             if ((roundUsage?.inputTokens ?: 0) < compactionTriggerTokens) {
+                // Relief can only ever be observed on a later round's usage, never on the same
+                // value that just triggered compaction — so the reset lives here, not inline.
                 compactionsWithoutRelief = 0
-            } else if (!compactInPlace(messages, turnStartIndex, config)) {
-                return finishEarly(
-                    session, userInput, pendingRounds,
-                    "context budget exhausted — a single round's output exceeds the compaction floor",
-                    onEvent
-                )
             } else {
+                if (!compactInPlace(messages, turnStartIndex, config)) {
+                    return finishEarly(
+                        session, userInput, pendingRounds,
+                        "context budget exhausted — a single round's output exceeds the compaction floor",
+                        onEvent
+                    )
+                }
                 compactionsWithoutRelief++
+                if (compactionsWithoutRelief >= MAX_COMPACTIONS_WITHOUT_RELIEF) {
+                    return finishEarly(
+                        session, userInput, pendingRounds,
+                        "compaction is thrashing — repeated summarisation isn't reducing context enough",
+                        onEvent
+                    )
+                }
             }
         }
     }

@@ -779,4 +779,73 @@ class AgentLoopTest : FunSpec({
         orphanedResults shouldBe emptyList()
         advertisedCallIds shouldBe setOf("c2", "c3")
     }
+
+    test("turn() stops with a clear reason when even the compaction floor cannot free enough context") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry().register(loopingTool())
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+
+        // Round 1 alone already exceeds the threshold; with only one round there is nothing
+        // older to summarise, so compaction cannot help.
+        every { provider.stream(any()) } returns toolRound("c1", 90_000)
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "context budget exhausted"
+        coVerify(exactly = 1) { provider.stream(any()) }
+        coVerify(exactly = 0) { provider.complete(any()) }
+    }
+
+    test("turn() stops when compaction runs twice in a row without bringing context back under the threshold") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry().register(loopingTool())
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+
+        val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            capturedRequests.add(firstArg())
+            when (capturedRequests.size) {
+                1 -> toolRound("c1", 1_000)
+                2 -> toolRound("c2", 1_000)
+                3 -> toolRound("c3", 90_000)   // compacts (relief counter -> 1)
+                else -> toolRound("c4", 90_000) // compacts again, still no relief -> stop
+            }
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "compaction is thrashing"
+        coVerify(exactly = 4) { provider.stream(any()) }
+        coVerify(exactly = 2) { provider.complete(any()) }
+    }
+
+    test("a round back under the threshold clears the thrashing counter") {
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry().register(loopingTool())
+        val loopWithTool = newLoop(toolRegistry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+
+        val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            capturedRequests.add(firstArg())
+            when (capturedRequests.size) {
+                1 -> toolRound("c1", 1_000)
+                2 -> toolRound("c2", 1_000)
+                3 -> toolRound("c3", 90_000)   // compacts (counter -> 1)
+                4 -> toolRound("c4", 1_000)    // relief: counter back to 0
+                5 -> toolRound("c5", 90_000)   // compacts again (counter -> 1), no stop
+                else -> LLMResponse.Text("finished", TokenUsage(1_000, 5)).toStreamFlow()
+            }
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldBe "finished"
+    }
 })
