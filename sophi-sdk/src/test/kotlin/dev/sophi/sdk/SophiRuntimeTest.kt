@@ -30,7 +30,10 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
+import io.kotest.matchers.string.shouldContain
 import kotlin.io.path.createTempDirectory
+
+private const val TEST_CONTEXT_WINDOW = 100_000
 
 class SophiRuntimeTest : FunSpec({
     val agentLoop = mockk<AgentLoop>()
@@ -95,6 +98,15 @@ class SophiRuntimeTest : FunSpec({
         shouldThrow<IllegalArgumentException> { RuntimeBuilder().build() }
     }
 
+    test("RuntimeBuilder build throws when no context window set") {
+        val builder = RuntimeBuilder()
+        builder.provider = mockk<LLMProvider>()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-test")
+
+        val ex = shouldThrow<IllegalArgumentException> { builder.build() }
+        ex.message!! shouldContain "contextWindowTokens"
+    }
+
     test("RuntimeBuilder wires confirmationPolicy through to the built AgentLoop, denying a DESTRUCTIVE tool") {
         val provider = mockk<LLMProvider>()
         val destructiveTool = object : Tool {
@@ -118,6 +130,7 @@ class SophiRuntimeTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
         val rt = builder
             .tool(destructiveTool)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .confirmationPolicy(ConfirmationPolicy { requests -> requests.associate { it.callId to false } })
             .build()
 
@@ -152,6 +165,7 @@ class SophiRuntimeTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
         val rt = builder
             .tool(destructiveTool)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .grants(setOf("danger"))
             .build()
 
@@ -170,6 +184,7 @@ class SophiRuntimeTest : FunSpec({
         val rt = RuntimeBuilder()
             .also { it.provider = provider }
             .also { it.sessionsDir = createTempDirectory("sophi-sdk-test") }
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .mcpClientManager(mcpManager)
             .build()
 
