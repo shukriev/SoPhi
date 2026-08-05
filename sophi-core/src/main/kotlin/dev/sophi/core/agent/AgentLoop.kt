@@ -132,6 +132,8 @@ class AgentLoop(
                     }
                     is StreamEvent.Reasoning -> onEvent(TurnEvent.ReasoningToken(event.text))
                     is StreamEvent.ToolCallsReady -> pendingToolCalls = event.calls
+                    // Consumed for real in the compaction task; ignored for now.
+                    is StreamEvent.Usage -> Unit
                 }
             }
 
