@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class DecomposeGoalToolTest : FunSpec({
     fun tool(
         provider: LLMProvider,
@@ -30,6 +32,7 @@ class DecomposeGoalToolTest : FunSpec({
         sessionManager = FileSessionManager(createTempDirectory("decompose-goal-tool-test")),
         parentSessionId = "parent",
         parentConfig = AgentConfig(model = "test-model"),
+        contextWindowTokens = TEST_CONTEXT_WINDOW,
         depth = depth
     )
 

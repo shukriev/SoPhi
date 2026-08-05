@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlin.io.path.createTempDirectory
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class ScheduleEngineTest : FunSpec({
     fun engine(
         provider: LLMProvider,
@@ -42,7 +44,8 @@ class ScheduleEngineTest : FunSpec({
         val engine = ScheduleEngine(
             taskStore, runLog, provider, registry,
             FileSessionManager(createTempDirectory("schedule-engine-test")),
-            notifier, model = "m", maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs
+            notifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs
         )
         return Triple(engine, taskStore, runLog)
     }
@@ -222,7 +225,7 @@ class ScheduleEngineTest : FunSpec({
         val engine = ScheduleEngine(
             taskStore, runLog, provider, ToolRegistry(),
             FileSessionManager(createTempDirectory("schedule-engine-maxtokens-test")),
-            NoopNotifier, model = "m", maxTokens = 8192
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW, maxTokens = 8192
         )
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
         kotlinx.coroutines.runBlocking { engine.runNow(task.id) }

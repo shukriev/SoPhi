@@ -19,6 +19,8 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 private class FixedTool(override val name: String, private val body: suspend () -> String) : Tool {
     override val description = "test"
     override val parametersJson = """{"type":"object","properties":{}}"""
@@ -35,7 +37,10 @@ class AgentLoopToolEventTest : FunSpec({
             LLMResponse.ToolUse(listOf(ToolCall("c1", tool.name, "{}")), TokenUsage(1, 1)).toStreamFlow(),
             LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         )
-        val loop = AgentLoop(provider, ToolRegistry().register(tool), sessionManager)
+        val loop = AgentLoop(
+            provider, ToolRegistry().register(tool), sessionManager,
+            contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
         val events = mutableListOf<TurnEvent>()
         loop.turn(AgentSession(id = "s1"), "go", config) { events.add(it) }
         return events
@@ -67,7 +72,10 @@ class AgentLoopToolEventTest : FunSpec({
             LLMResponse.ToolUse(listOf(ToolCall("c1", "ok", "{}")), TokenUsage(1, 1)).toStreamFlow(),
             LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
         )
-        val loop = AgentLoop(provider, ToolRegistry().register(FixedTool("ok") { "fine" }), sessionManager)
+        val loop = AgentLoop(
+            provider, ToolRegistry().register(FixedTool("ok") { "fine" }), sessionManager,
+            contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
         val session = loop.turn(AgentSession(id = "s2"), "go", config)
 
         val roles = session.branch().map { it.role }

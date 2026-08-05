@@ -17,12 +17,18 @@ class CalendarCreate(
     private val sessionManager: SessionManager,
     private val confirmationPolicy: ConfirmationPolicy,
     private val config: AgentConfig,
+    /** Total context window of `config.model`, in tokens — see AgentLoop. */
+    private val contextWindowTokens: Int,
     private val description: String,
     private val echo: (String) -> Unit
 ) {
     suspend fun run() {
         val scopedRegistry = ToolRegistry().register(CreateCalendarEventTool(calendarProvider))
-        val nestedLoop = AgentLoop(provider, scopedRegistry, sessionManager, confirmationPolicy = confirmationPolicy)
+        val nestedLoop = AgentLoop(
+            provider, scopedRegistry, sessionManager,
+            confirmationPolicy = confirmationPolicy,
+            contextWindowTokens = contextWindowTokens
+        )
         val now = ZonedDateTime.now()
         val systemPrompt = "You create exactly one calendar event from a short shorthand description using the " +
             "create_calendar_event tool. The current date/time is: epoch_ms=${now.toInstant().toEpochMilli()} " +

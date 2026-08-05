@@ -25,6 +25,8 @@ class PlanCommand(
     private val registry: ToolRegistry,
     private val sessionManager: SessionManager,
     private val config: AgentConfig,
+    /** Total context window of `config.model`, in tokens — see AgentLoop. */
+    private val contextWindowTokens: Int,
     private val confirmationPolicy: ConfirmationPolicy,
     private val planLog: PlanLog?,
     private val echo: (String) -> Unit
@@ -39,6 +41,7 @@ class PlanCommand(
                 maxTokens = config.maxTokens,
                 allowParallelSteps = false
             ),
+            contextWindowTokens = contextWindowTokens,
             confirmationPolicy = confirmationPolicy,
             planLog = planLog
         )

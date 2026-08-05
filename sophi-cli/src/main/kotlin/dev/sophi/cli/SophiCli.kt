@@ -64,6 +64,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--model", "-m",
         help = "LLM model name (for --provider openai-compat, always set this explicitly — e.g. qwen2.5:7b)"
     ).default("claude-3-5-sonnet-20241022")
+    private val contextWindowTokens: Int by option(
+        "--context-window-tokens",
+        help = "Total context window of --model, in tokens (e.g. 200000 for Claude Sonnet, or " +
+            "whatever your local model was built with). Sophi summarises this turn's earlier " +
+            "tool rounds once 80% of this is used, instead of capping the number of rounds. " +
+            "There is no per-model registry — you pick the model, so you say what its window is."
+    ).int().default(200_000)
     private val providerType: String by option(
         "--provider",
         help = "LLM provider: 'claude' (default) or 'openai-compat' (Ollama, vLLM, or any OpenAI-compatible server)"
@@ -270,6 +277,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                     sessionManager = sessionManager,
                     parentSessionId = session.id,
                     parentConfig = config,
+                    contextWindowTokens = contextWindowTokens,
                     confirmationPolicy = confirmationPolicy
                 )
             )
@@ -281,6 +289,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 sessionManager = sessionManager,
                 parentSessionId = session.id,
                 parentConfig = config,
+                contextWindowTokens = contextWindowTokens,
                 confirmationPolicy = confirmationPolicy
             )
         )
@@ -290,7 +299,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             registry,
             sessionManager,
             confirmationPolicy = confirmationPolicy,
-            loopGuard = loopGuardPolicy
+            loopGuard = loopGuardPolicy,
+            contextWindowTokens = contextWindowTokens
         )
         val compactor = ContextCompactor(provider)
 
@@ -323,7 +333,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             skillRegistry = skillRegistry,
             provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
             autoModeToggle = toggleableConfirmationPolicy,
-            toolRegistry = registry
+            toolRegistry = registry,
+            contextWindowTokens = contextWindowTokens
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)

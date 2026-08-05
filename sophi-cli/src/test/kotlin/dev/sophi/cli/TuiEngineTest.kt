@@ -15,11 +15,13 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.flow.flowOf
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class TuiEngineTest : FunSpec({
     val provider = mockk<LLMProvider>()
     val sessionManager = mockk<SessionManager>(relaxed = true)
     val config = AgentConfig(model = "test-model")
-    val loop = AgentLoop(provider, ToolRegistry(), sessionManager)
+    val loop = AgentLoop(provider, ToolRegistry(), sessionManager, contextWindowTokens = TEST_CONTEXT_WINDOW)
     val slashOutput = mutableListOf<String>()
     val slashHandler = SlashHandler(sessionManager, null, config) { slashOutput.add(it) }
 

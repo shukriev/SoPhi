@@ -317,6 +317,8 @@ fun buildPlanRunner(
     registry: ToolRegistry,
     sessionManager: SessionManager,
     config: PlanRunnerConfig,
+    /** Total context window of `config.model`, in tokens — see AgentLoop.contextWindowTokens. */
+    contextWindowTokens: Int,
     confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     grants: Set<String> = emptySet(),
     planLog: PlanLog? = null,
@@ -325,7 +327,8 @@ fun buildPlanRunner(
 ): PlanRunner {
     val loop = AgentLoop(
         provider, registry, sessionManager,
-        confirmationPolicy = confirmationPolicy, grants = grants
+        confirmationPolicy = confirmationPolicy, grants = grants,
+        contextWindowTokens = contextWindowTokens
     )
     return PlanRunner(
         agentLoop = loop,

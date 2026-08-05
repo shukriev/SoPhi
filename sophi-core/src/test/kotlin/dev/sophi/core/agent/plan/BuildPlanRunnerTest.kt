@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class BuildPlanRunnerTest : FunSpec({
     test("buildPlanRunner assembles a runner that plans and executes end to end") {
         val provider = mockk<LLMProvider>()
@@ -29,7 +31,8 @@ class BuildPlanRunnerTest : FunSpec({
             provider = provider,
             registry = ToolRegistry(),
             sessionManager = FileSessionManager(createTempDirectory("build-plan-runner-test")),
-            config = PlanRunnerConfig(model = "test-model")
+            config = PlanRunnerConfig(model = "test-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW
         )
         val outcome = runBlocking { runner.run("parent", "ship it", StopCondition.LlmJudged) }
 
@@ -55,6 +58,7 @@ class BuildPlanRunnerTest : FunSpec({
             registry = ToolRegistry(),
             sessionManager = FileSessionManager(createTempDirectory("build-plan-runner-ctx")),
             config = PlanRunnerConfig(model = "test-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW,
             contextProvider = { listOf("remember: the user hates long plans") }
         )
         runBlocking { runner.run("parent", "ship it", StopCondition.LlmJudged) }

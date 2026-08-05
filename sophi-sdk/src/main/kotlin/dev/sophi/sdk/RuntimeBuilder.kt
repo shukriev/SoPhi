@@ -33,6 +33,7 @@ class RuntimeBuilder {
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var learningConfig: LearningConfig? = null
     private var scheduleDir: Path? = null
+    private var contextWindowTokens: Int? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -42,9 +43,19 @@ class RuntimeBuilder {
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
     fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
     fun schedule(dir: Path): RuntimeBuilder = apply { scheduleDir = dir }
+    /**
+     * Total context window of [model], in tokens — required before [build]. Sophi compacts the
+     * turn's earlier tool rounds once 80% of this is used. There is deliberately no per-model
+     * lookup: you pick the model, so you state its window.
+     */
+    fun contextWindowTokens(tokens: Int): RuntimeBuilder = apply { contextWindowTokens = tokens }
 
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
+        val window = requireNotNull(contextWindowTokens) {
+            "contextWindowTokens must be set before calling build() — pass the total context " +
+                "window (in tokens) of the model you configured"
+        }
         val registry = ToolRegistry().also { r -> tools.forEach { r.register(it) } }
         scheduleDir?.let { dir ->
             registry.register(ScheduleTaskTool(
@@ -60,7 +71,11 @@ class RuntimeBuilder {
             maxTokens = maxTokens,
             systemPrompt = systemPrompt
         )
-        val loop = AgentLoop(p, registry, sm, confirmationPolicy = confirmationPolicy, grants = grants)
+        val loop = AgentLoop(
+            p, registry, sm,
+            confirmationPolicy = confirmationPolicy, grants = grants,
+            contextWindowTokens = window
+        )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
 
         val learningPlugin = learningConfig?.let { cfg ->
