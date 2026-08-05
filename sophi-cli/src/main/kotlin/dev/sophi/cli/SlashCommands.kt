@@ -149,7 +149,10 @@ class SlashHandler(
     private suspend fun handleCalendar(arg: String?) {
         val calProvider = calendarProvider
         val llmProvider = provider
-        if (calProvider == null || llmProvider == null) { output("Calendar is not enabled."); return }
+        val window = contextWindowTokens
+        if (calProvider == null || llmProvider == null || window == null) {
+            output("Calendar is not enabled."); return
+        }
         val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
         val sub = parts[0].lowercase()
         val subArg = parts.getOrNull(1)?.trim()
@@ -166,7 +169,10 @@ class SlashHandler(
             "calendars" -> CalendarCalendars(calProvider, output).run()
             "create" -> {
                 if (subArg.isNullOrEmpty()) output("Usage: /calendar create <description>")
-                else CalendarCreate(llmProvider, calProvider, sessionManager, confirmationPolicy, config, subArg, output).run()
+                else CalendarCreate(
+                    llmProvider, calProvider, sessionManager, confirmationPolicy, config,
+                    window, subArg, output
+                ).run()
             }
             else -> output("Unknown /calendar subcommand: $sub  Available: list get delete calendars create")
         }
