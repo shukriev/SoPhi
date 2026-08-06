@@ -18,8 +18,9 @@ import dev.sophi.schedule.notify.NativeNotifications
 import java.nio.file.Path
 
 private fun buildRuntime(settings: CompanionSettings, apiKey: String?): CompanionRuntime {
+    settings.validationError()?.let { error("Invalid ~/.sophi/companion.json: $it") }
     val provider = when (settings.providerType) {
-        "openai-compat" -> buildOpenAiCompatProvider(
+        ProviderTypes.OPENAI_COMPAT -> buildOpenAiCompatProvider(
             requireNotNull(settings.baseUrl) { "baseUrl is required for provider type openai-compat" },
             apiKey, settings.model
         )
@@ -28,6 +29,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
     val sophiRuntime = Sophi.runtime {
         this.provider = provider
         model = settings.model
+        maxTokens = settings.maxTokens
         contextWindowTokens(settings.contextWindowTokens)
         sessionsDir = Path.of(settings.sessionsDir)
         // Deliberately not calling .mcpConfig(path) here: Task 13 connects only the servers
@@ -58,7 +60,11 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
 
 fun main() = application {
     val settingsStore = remember { SettingsStore(Path.of(System.getProperty("user.home"), ".sophi", "companion.json")) }
-    var settings by remember { mutableStateOf(settingsStore.load()) }
+    // A file that exists but is unusable (e.g. written by an older build with a blank model) routes
+    // to the setup screen pre-filled, rather than dead-ending on a startup error with no way to fix it.
+    val storedSettings = remember { runCatching { settingsStore.load() }.getOrNull() }
+    val storedProblem = remember { storedSettings?.validationError() }
+    var settings by remember { mutableStateOf(storedSettings?.takeIf { storedProblem == null }) }
     var runtime by remember { mutableStateOf<CompanionRuntime?>(null) }
     var isWindowVisible by remember { mutableStateOf(false) }
     val trayState = rememberTrayState()
@@ -79,6 +85,8 @@ fun main() = application {
             val currentSettings = settings
             if (currentSettings == null) {
                 dev.sophi.companion.ui.FirstRunSettingsScreen(
+                    existing = storedSettings,
+                    problem = storedProblem,
                     onSaved = { newSettings ->
                         settingsStore.save(newSettings)
                         settings = newSettings

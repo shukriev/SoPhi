@@ -43,25 +43,61 @@ installed jar, not your working tree.
 
 ## Configuration
 
-On first launch the app collects a model and API key and writes
-`~/.sophi/companion.json`. Leave the key blank to fall back to the
-`ANTHROPIC_API_KEY` environment variable.
+On first launch the app shows a setup screen — pick **Claude** or **Local /
+OpenAI-compatible**, fill in the fields, and it writes `~/.sophi/companion.json`.
+The same screen reappears if the saved file is ever unusable, pre-filled and
+explaining what was wrong, so a broken config can be repaired in-app.
+
+| Field | Meaning |
+|---|---|
+| `providerType` | `claude` or `openai-compat` |
+| `model` | Model id — e.g. `claude-sonnet-4-5`, or `qwen3:8b` for Ollama |
+| `baseUrl` | Required for `openai-compat`; ignored for `claude` |
+| `apiKey` | Optional. `null` + `claude` falls back to `ANTHROPIC_API_KEY` |
+| `contextWindowTokens` | Your model's real context window (see below) |
+| `maxTokens` | Max tokens generated per response |
+| `sessionsDir` / `mcpConfigPath` | Default to the `sophi-cli` locations |
+
+**Claude:**
 
 ```json
 {
   "providerType": "claude",
   "model": "claude-sonnet-4-5",
   "contextWindowTokens": 200000,
-  "sessionsDir": "~/.sophi/sessions",
-  "mcpConfigPath": "~/.sophi/mcp.json"
+  "maxTokens": 4096
 }
 ```
 
-Set `providerType` to `openai-compat` and supply `baseUrl` for a local model
-(Ollama, vLLM). Sessions and MCP servers are shared with `sophi-cli` by default,
-so sessions you started in the terminal show up in the Sessions tab.
+**Local model via Ollama** (vLLM is the same with `http://localhost:8000/v1`):
 
-Settings are read once at startup — changing the file requires a restart.
+```json
+{
+  "providerType": "openai-compat",
+  "model": "qwen3:8b",
+  "baseUrl": "http://localhost:11434/v1",
+  "apiKey": null,
+  "contextWindowTokens": 32768,
+  "maxTokens": 8192
+}
+```
+
+Omitted keys fall back to defaults, so a partial file is valid.
+
+> **Set `contextWindowTokens` to your model's real window.** It defaults to
+> `200000`, a Claude-sized number. Sophi compacts a turn's earlier tool rounds at
+> 80% of this value, so leaving the default on a 32k local model means compaction
+> never fires and the model overflows its context instead. Check with
+> `ollama show <model>`.
+
+`ANTHROPIC_API_KEY` is only consulted for `providerType: "claude"` — a local
+Ollama/vLLM server won't receive an Anthropic key as its bearer token just because
+the variable is exported. Set `apiKey` explicitly if your vLLM server is behind auth.
+
+Sessions and MCP servers are shared with `sophi-cli` by default, so sessions you
+started in the terminal show up in the Sessions tab.
+
+Settings are read once at startup — editing the file requires a restart.
 
 ## 📦 Building the installer
 
