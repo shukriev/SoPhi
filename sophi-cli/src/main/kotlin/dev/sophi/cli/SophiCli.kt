@@ -328,16 +328,6 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             )
         }
 
-        val slashHandler = SlashHandler(
-            sessionManager, compactor, config, learningPlugin,
-            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
-            skillRegistry = skillRegistry,
-            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
-            autoModeToggle = toggleableConfirmationPolicy,
-            toolRegistry = registry,
-            contextWindowTokens = contextWindowTokens,
-            onEvent = bridge
-        ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)
         } else {
@@ -348,6 +338,17 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
+        val slashHandler = SlashHandler(
+            sessionManager, compactor, config, learningPlugin,
+            scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
+            skillRegistry = skillRegistry,
+            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
+            autoModeToggle = toggleableConfirmationPolicy,
+            toolRegistry = registry,
+            contextWindowTokens = contextWindowTokens,
+            liveRegion = liveRegion,
+            onEvent = bridge
+        ) { mordantTerminal.println(it) }
         if (tokenViewKey.length != 1) {
             mordantTerminal.println(TextColors.yellow(
                 "token view: --token-view-key must be a single character, got \"$tokenViewKey\" — using default 'T'"))

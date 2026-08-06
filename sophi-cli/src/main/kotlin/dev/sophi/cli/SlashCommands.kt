@@ -40,6 +40,7 @@ class SlashHandler(
      * simply reports the affected commands as unavailable rather than guessing a value.
      */
     private val contextWindowTokens: Int? = null,
+    private val liveRegion: LiveRegion = LiveRegion(StringBuilder()) { 80 },
     private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val output: (String) -> Unit
 ) {
@@ -233,7 +234,7 @@ class SlashHandler(
             output("Planning is not available (no tools configured).")
             return session
         }
-        return PlanCommand(llm, registry, sessionManager, config, window, confirmationPolicy, null, onEvent, output)
+        return PlanCommand(llm, registry, sessionManager, config, window, confirmationPolicy, null, onEvent, liveRegion, output)
             .run(arg, session)
     }
 

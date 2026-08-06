@@ -99,6 +99,30 @@ class PlanCommandTest : FunSpec({
         events.filterIsInstance<dev.sophi.core.agent.TurnEvent.ToolCallStarted>().map { it.name } shouldContain "some_tool"
     }
 
+    test("a step boundary is echoed live, ahead of the final summary") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("all done"))
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+        val cmd = PlanCommand(
+            provider = provider, registry = ToolRegistry(),
+            sessionManager = FileSessionManager(tempdir().toPath()),
+            config = AgentConfig(model = "test-model"), contextWindowTokens = TEST_CONTEXT_WINDOW,
+            confirmationPolicy = ConfirmationPolicy.ALLOW_ALL, planLog = null,
+            liveRegion = LiveRegion(StringBuilder()) { 80 }, echo = { output.add(it) }
+        )
+
+        runBlocking { cmd.run("ship the release", AgentSession(id = "s1")) }
+
+        output.size shouldBe 3
+        output[0] shouldContain "▶ [s1] do it"
+        output[1] shouldContain "[s1] Done"
+        output[2] shouldContain "Goal: ship the release"
+    }
+
     test("/plan with no goal prints usage and leaves the session untouched") {
         val handler = SlashHandler(
             mockk(relaxed = true), null, AgentConfig(model = "test-model"),

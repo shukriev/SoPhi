@@ -14,6 +14,8 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 /**
  * The user-invoked half of the planner (the model-invoked half is decompose_goal). Shares its
@@ -31,29 +33,38 @@ class PlanCommand(
     private val confirmationPolicy: ConfirmationPolicy,
     private val planLog: PlanLog?,
     private val onEvent: suspend (TurnEvent) -> Unit = {},
+    private val liveRegion: LiveRegion = LiveRegion(StringBuilder()) { 80 },
     private val echo: (String) -> Unit
 ) {
-    suspend fun run(goal: String, session: AgentSession): AgentSession {
-        val runner = buildPlanRunner(
-            provider = provider,
-            registry = registry,
-            sessionManager = sessionManager,
-            config = PlanRunnerConfig(
-                model = config.model,
-                maxTokens = config.maxTokens,
-                allowParallelSteps = false
-            ),
-            contextWindowTokens = contextWindowTokens,
-            confirmationPolicy = confirmationPolicy,
-            planLog = planLog,
-            onEvent = onEvent
-        )
-        val outcome = runner.run(session.id, goal, StopCondition.LlmJudged)
-        val summary = render(goal, outcome)
-        echo(summary)
-        session.append(EntryRole.ASSISTANT, summary)
-        sessionManager.save(session)
-        return session
+    suspend fun run(goal: String, session: AgentSession): AgentSession = coroutineScope {
+        val renderer = PlanProgressRenderer(liveRegion, echo)
+        val animationJob = launch { renderer.animate() }
+        try {
+            val runner = buildPlanRunner(
+                provider = provider,
+                registry = registry,
+                sessionManager = sessionManager,
+                config = PlanRunnerConfig(
+                    model = config.model,
+                    maxTokens = config.maxTokens,
+                    allowParallelSteps = false
+                ),
+                contextWindowTokens = contextWindowTokens,
+                confirmationPolicy = confirmationPolicy,
+                planLog = planLog,
+                onEvent = { event -> onEvent(event); renderer.onTurnEvent(event) },
+                onProgress = renderer::onProgress
+            )
+            val outcome = runner.run(session.id, goal, StopCondition.LlmJudged)
+            val summary = render(goal, outcome)
+            echo(summary)
+            session.append(EntryRole.ASSISTANT, summary)
+            sessionManager.save(session)
+            session
+        } finally {
+            animationJob.cancel()
+            liveRegion.clear()
+        }
     }
 
     private fun render(goal: String, outcome: PlanOutcome): String = buildString {

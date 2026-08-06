@@ -28,6 +28,20 @@ internal class RunBudget(private val max: Int) {
     fun used(): Int = consumed.get()
 }
 
+/**
+ * Live-progress counterpart to the batch results in PlanOutcome — fired as a run happens rather
+ * than returned once it finishes, so a caller (the CLI's /plan) can show something between the
+ * long silences of chained agentLoop.turn calls instead of only a summary at the very end.
+ */
+sealed class PlanProgressEvent {
+    data class StepStarted(val planId: String, val step: PlanStep) : PlanProgressEvent()
+    data class StepFinished(val planId: String, val step: PlanStep) : PlanProgressEvent()
+    data class Replanned(val planId: String, val stepId: String, val reason: String) : PlanProgressEvent()
+    data class Decomposed(
+        val stepId: String, val childPlanId: String, val trigger: DecompositionTrigger
+    ) : PlanProgressEvent()
+}
+
 data class PlanRunnerConfig(
     val model: String,
     val maxTokens: Int = 4096,
@@ -57,7 +71,8 @@ class PlanRunner(
     private val shellRunner: (String) -> Int = { cmd -> ProcessBuilder("sh", "-c", cmd).start().waitFor() },
     private val onPlanComplete: suspend (PlanOutcome) -> Unit = {},
     private val planLog: PlanLog? = null,
-    private val onEvent: suspend (TurnEvent) -> Unit = {}
+    private val onEvent: suspend (TurnEvent) -> Unit = {},
+    private val onProgress: suspend (PlanProgressEvent) -> Unit = {}
 ) {
     suspend fun run(
         parentSessionId: String,
@@ -122,6 +137,7 @@ class PlanRunner(
                     .copy(parentStepId = parentStepId, depth = depth)
                 planLog?.append(plan)
                 replans.add(ReplanEvent(anchor.id, reason, plan.version))
+                onProgress(PlanProgressEvent.Replanned(plan.id, anchor.id, reason))
                 continue
             }
 
@@ -138,6 +154,7 @@ class PlanRunner(
             plan = planner.replan(plan, anchorId, reason, context).copy(parentStepId = parentStepId, depth = depth)
             planLog?.append(plan)
             replans.add(ReplanEvent(anchorId, reason, plan.version))
+            onProgress(PlanProgressEvent.Replanned(plan.id, anchorId, reason))
         }
     }
 
@@ -193,6 +210,7 @@ class PlanRunner(
         decompositions.add(
             DecompositionEvent(step.id, outcome.planId, outcome.totalSteps, outcome.finalStatus, trigger)
         )
+        onProgress(PlanProgressEvent.Decomposed(step.id, outcome.planId, trigger))
         stepOutputs[step.id] = outcome.finalOutput
         return step.id to step.copy(
             status = if (met) StepStatus.Done else StepStatus.Failed,
@@ -230,6 +248,16 @@ class PlanRunner(
     }
 
     private suspend fun runStep(
+        step: PlanStep, plan: Plan, parentSessionId: String, stepOutputs: MutableMap<String, String>,
+        depth: Int, budget: RunBudget, decompositions: MutableList<DecompositionEvent>
+    ): Pair<String, PlanStep> {
+        onProgress(PlanProgressEvent.StepStarted(plan.id, step))
+        val result = runStepBody(step, plan, parentSessionId, stepOutputs, depth, budget, decompositions)
+        onProgress(PlanProgressEvent.StepFinished(plan.id, result.second))
+        return result
+    }
+
+    private suspend fun runStepBody(
         step: PlanStep, plan: Plan, parentSessionId: String, stepOutputs: MutableMap<String, String>,
         depth: Int, budget: RunBudget, decompositions: MutableList<DecompositionEvent>
     ): Pair<String, PlanStep> {
@@ -326,7 +354,8 @@ fun buildPlanRunner(
     planLog: PlanLog? = null,
     contextProvider: suspend (String) -> List<String> = { emptyList() },
     onPlanComplete: suspend (PlanOutcome) -> Unit = {},
-    onEvent: suspend (TurnEvent) -> Unit = {}
+    onEvent: suspend (TurnEvent) -> Unit = {},
+    onProgress: suspend (PlanProgressEvent) -> Unit = {}
 ): PlanRunner {
     val loop = AgentLoop(
         provider, registry, sessionManager,
@@ -342,6 +371,7 @@ fun buildPlanRunner(
         config = config,
         onPlanComplete = onPlanComplete,
         planLog = planLog,
-        onEvent = onEvent
+        onEvent = onEvent,
+        onProgress = onProgress
     )
 }
