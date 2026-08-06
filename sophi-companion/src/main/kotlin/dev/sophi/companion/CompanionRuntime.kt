@@ -19,8 +19,8 @@ class CompanionRuntime(
     private val sophiRuntime: SophiRuntime,
     val sessionManager: dev.sophi.core.session.SessionManager,
     private val mcpConfigPath: java.nio.file.Path,
-    taskStore: TaskStore,
-    runLog: RunLog,
+    private val taskStore: TaskStore,
+    private val runLog: RunLog,
     notifier: Notifier
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -62,6 +62,20 @@ class CompanionRuntime(
         mcpConfigWriter.write(mcpConfigPath, current.copy(servers = current.servers.map { if (it.name == name) updated else it }))
         if (enabled) sophiRuntime.connectMcpServer(updated) else sophiRuntime.disconnectMcpServer(name)
     }
+
+    fun tasks(): List<dev.sophi.schedule.model.ScheduledTask> = taskStore.list()
+
+    fun createTask(
+        name: String,
+        prompt: String,
+        mode: dev.sophi.schedule.model.TaskMode = dev.sophi.schedule.model.TaskMode.Recurring,
+        trigger: dev.sophi.schedule.model.Trigger = dev.sophi.schedule.model.Trigger.Manual
+    ): dev.sophi.schedule.model.ScheduledTask =
+        taskStore.add(dev.sophi.schedule.model.ScheduledTask(name = name, trigger = trigger, mode = mode, prompt = prompt))
+
+    fun runHistory(taskId: String): List<dev.sophi.schedule.model.RunRecord> = runLog.forTask(taskId)
+
+    suspend fun runTaskNow(taskId: String) { scheduleEngine.runNow(taskId) }
 
     private fun stateFlowFor(sessionId: String): MutableStateFlow<SessionState> =
         sessionStates.getOrPut(sessionId) { MutableStateFlow(SessionState.Idle) }
