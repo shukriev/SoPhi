@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 
 class CompanionRuntime(
     private val sophiRuntime: SophiRuntime,
+    val sessionManager: dev.sophi.core.session.SessionManager,
     taskStore: TaskStore,
     runLog: RunLog,
     notifier: Notifier

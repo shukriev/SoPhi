@@ -42,6 +42,7 @@ class CompanionRuntimeTest : FunSpec({
         }
         val runtime = CompanionRuntime(
             sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
             notifier = NoopNotifier
@@ -73,6 +74,7 @@ class CompanionRuntimeTest : FunSpec({
         }
         val runtime = CompanionRuntime(
             sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
             notifier = NoopNotifier
@@ -97,6 +99,7 @@ class CompanionRuntimeTest : FunSpec({
         }
         val runtime = CompanionRuntime(
             sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
             notifier = NoopNotifier
@@ -115,6 +118,7 @@ class CompanionRuntimeTest : FunSpec({
         }
         val runtime = CompanionRuntime(
             sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
             notifier = NoopNotifier

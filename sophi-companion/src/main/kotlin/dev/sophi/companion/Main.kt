@@ -46,6 +46,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
     val companionRuntime = CompanionRuntime(
         sophiRuntime = sophiRuntime,
+        sessionManager = dev.sophi.core.session.FileSessionManager(Path.of(settings.sessionsDir)),
         taskStore = dev.sophi.schedule.store.TaskStore(tasksDir.resolve("tasks.json")),
         runLog = dev.sophi.schedule.store.RunLog(tasksDir.resolve("runs.jsonl")),
         notifier = CrossPlatformNotifier()
