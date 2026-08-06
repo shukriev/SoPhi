@@ -33,6 +33,13 @@ tasks.test {
     useJUnitPlatform()
 }
 
+// Gradle 9.x's stricter task-output validation flags an implicit dependency that Compose
+// Multiplatform 1.9.0's Gradle plugin doesn't declare explicitly between the per-format
+// packaging tasks and the shared :packageAppImage output directory they all read from.
+listOf("packageDmg", "packageMsi", "packageDeb", "packageAppImageAsAppImage").forEach { taskName ->
+    tasks.findByName(taskName)?.dependsOn("packageAppImage")
+}
+
 compose.desktop {
     application {
         mainClass = "dev.sophi.companion.MainKt"
@@ -40,6 +47,17 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.AppImage, TargetFormat.Msi)
             packageName = "SophiCompanion"
             packageVersion = "1.0.0"
+            description = "Sophi's OS tray companion — chat, sessions, MCP, and goals, at a glance."
+            macOS {
+                iconFile.set(project.file("src/main/resources/icons/logo.icns"))
+                bundleID = "dev.sophi.companion"
+            }
+            windows {
+                iconFile.set(project.file("src/main/resources/icons/logo.ico"))
+            }
+            linux {
+                iconFile.set(project.file("src/main/resources/icons/logo.png"))
+            }
         }
     }
 }
