@@ -10,38 +10,47 @@ class McpClientManager(
     private val httpConnector: McpConnector = StreamableHttpMcpConnector()
 ) : AutoCloseable {
 
-    private val openSessions = mutableListOf<McpSession>()
+    private val sessions = mutableMapOf<String, McpSession>()
 
-    suspend fun connect(configs: List<McpServerConfig>): List<Tool> {
-        val tools = mutableListOf<Tool>()
-        for (config in configs) {
-            val connector = when (config.transport) {
-                McpTransport.STDIO -> stdioConnector
-                McpTransport.HTTP -> httpConnector
-            }
+    suspend fun connect(configs: List<McpServerConfig>): List<Tool> =
+        configs.flatMap { connectOne(it) }
+
+    suspend fun connectOne(config: McpServerConfig): List<Tool> {
+        val connector = when (config.transport) {
+            McpTransport.STDIO -> stdioConnector
+            McpTransport.HTTP -> httpConnector
+        }
+        return try {
+            val session = connector.connect(config)
+            sessions[config.name] = session
+            val safeTools = config.safeTools.toSet()
+            session.listTools().map { remoteTool -> McpTool(session, config.name, remoteTool, safeTools) }
+        } catch (e: Exception) {
+            System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun disconnect(serverName: String) {
+        sessions.remove(serverName)?.let { session ->
             try {
-                val session = connector.connect(config)
-                openSessions.add(session)
-                val safeTools = config.safeTools.toSet()
-                session.listTools().forEach { remoteTool ->
-                    tools.add(McpTool(session, config.name, remoteTool, safeTools))
-                }
+                session.close()
             } catch (e: Exception) {
-                System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: ${e.message}")
+                System.err.println("Warning: failed to close MCP session '$serverName': ${e.message}")
             }
         }
-        return tools
     }
 
     override fun close() {
         runBlocking {
-            openSessions.forEach { session ->
+            sessions.values.forEach { session ->
                 try {
                     session.close()
                 } catch (e: Exception) {
                     System.err.println("Warning: failed to close an MCP session: ${e.message}")
                 }
             }
+            sessions.clear()
         }
     }
 }

@@ -135,4 +135,71 @@ class McpClientManagerTest : FunSpec({
         coVerify { firstSession.close() }
         coVerify { secondSession.close() }
     }
+
+    test("connectOne registers namespaced tools for a single server, same as connect() for one config") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads a file", "{}"))
+        val stdioConnector = mockk<McpConnector>()
+        coEvery { stdioConnector.connect(any()) } returns session
+        val manager = McpClientManager(stdioConnector = stdioConnector, httpConnector = mockk())
+
+        val tools = runBlocking {
+            manager.connectOne(McpServerConfig(name = "filesystem", transport = McpTransport.STDIO, command = listOf("noop")))
+        }
+
+        tools.map { it.name } shouldBe listOf("filesystem__read_file")
+    }
+
+    test("disconnect closes and forgets a tracked server's session") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns listOf(RemoteToolInfo("ping", "pings", "{}"))
+        coJustRun { session.close() }
+        val stdioConnector = mockk<McpConnector>()
+        coEvery { stdioConnector.connect(any()) } returns session
+        val manager = McpClientManager(stdioConnector = stdioConnector, httpConnector = mockk())
+
+        runBlocking {
+            manager.connectOne(McpServerConfig(name = "s", transport = McpTransport.STDIO, command = listOf("z")))
+            manager.disconnect("s")
+        }
+
+        coVerify { session.close() }
+    }
+
+    test("disconnect on an unknown server name is a no-op, does not throw") {
+        val manager = McpClientManager(stdioConnector = mockk(), httpConnector = mockk())
+        runBlocking { manager.disconnect("never-connected") }
+    }
+
+    test("disconnect swallows an exception from the session's close()") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns emptyList()
+        coEvery { session.close() } throws RuntimeException("close boom")
+        val stdioConnector = mockk<McpConnector>()
+        coEvery { stdioConnector.connect(any()) } returns session
+        val manager = McpClientManager(stdioConnector = stdioConnector, httpConnector = mockk())
+
+        runBlocking {
+            manager.connectOne(McpServerConfig(name = "s", transport = McpTransport.STDIO, command = listOf("z")))
+            manager.disconnect("s")
+        }
+        // no assertion needed beyond "did not throw"
+    }
+
+    test("a disconnected server's session is not closed again by a later close()") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns emptyList()
+        coJustRun { session.close() }
+        val stdioConnector = mockk<McpConnector>()
+        coEvery { stdioConnector.connect(any()) } returns session
+        val manager = McpClientManager(stdioConnector = stdioConnector, httpConnector = mockk())
+
+        runBlocking {
+            manager.connectOne(McpServerConfig(name = "s", transport = McpTransport.STDIO, command = listOf("z")))
+            manager.disconnect("s")
+        }
+        manager.close()
+
+        coVerify(exactly = 1) { session.close() }
+    }
 })

@@ -108,4 +108,27 @@ class ToolRegistryTest : FunSpec({
 
         registry.subset(emptyList()).names().shouldBeEmpty()
     }
+
+    test("unregister removes a previously registered tool") {
+        val registry = ToolRegistry()
+        registry.register(echoTool("echo"))
+        registry.unregister("echo")
+        registry.getOrNull("echo") shouldBe null
+        registry.names().shouldBeEmpty()
+    }
+
+    test("unregister on an unknown name is a no-op, does not throw") {
+        val registry = ToolRegistry()
+        registry.register(echoTool("echo"))
+        registry.unregister("does-not-exist")
+        registry.names() shouldContainExactly listOf("echo")
+    }
+
+    test("unregister returns this for fluent chaining") {
+        val registry = ToolRegistry()
+        registry.register(echoTool("a")).register(echoTool("b"))
+        val result = registry.unregister("a")
+        result shouldBe registry
+        registry.names() shouldContainExactly listOf("b")
+    }
 })
