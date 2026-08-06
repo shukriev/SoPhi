@@ -9,6 +9,7 @@ target/
 .env
 
 docs/superpowers/
+docs/guides/
 doc/articles/
 .worktrees/
 TODO_TASK.md
