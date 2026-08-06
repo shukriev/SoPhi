@@ -47,6 +47,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
     val companionRuntime = CompanionRuntime(
         sophiRuntime = sophiRuntime,
         sessionManager = dev.sophi.core.session.FileSessionManager(Path.of(settings.sessionsDir)),
+        mcpConfigPath = Path.of(settings.mcpConfigPath),
         taskStore = dev.sophi.schedule.store.TaskStore(tasksDir.resolve("tasks.json")),
         runLog = dev.sophi.schedule.store.RunLog(tasksDir.resolve("runs.jsonl")),
         notifier = CrossPlatformNotifier()
