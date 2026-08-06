@@ -36,8 +36,14 @@ tasks.test {
 // Gradle 9.x's stricter task-output validation flags an implicit dependency that Compose
 // Multiplatform 1.9.0's Gradle plugin doesn't declare explicitly between the per-format
 // packaging tasks and the shared :packageAppImage output directory they all read from.
-listOf("packageDmg", "packageMsi", "packageDeb", "packageAppImageAsAppImage").forEach { taskName ->
-    tasks.findByName(taskName)?.dependsOn("packageAppImage")
+//
+// This MUST use lazy task configuration. An eager `tasks.findByName(name)?.dependsOn(...)`
+// here silently does nothing: the Compose plugin registers packageDmg/packageDeb/packageMsi
+// after this script is evaluated, so findByName returns null for every one of them and the
+// dependency is never wired. `matching { }.configureEach { }` applies to tasks registered later.
+val packageFormatTasks = setOf("packageDmg", "packageMsi", "packageDeb", "packageAppImageAsAppImage")
+tasks.matching { it.name in packageFormatTasks }.configureEach {
+    dependsOn("packageAppImage")
 }
 
 compose.desktop {
