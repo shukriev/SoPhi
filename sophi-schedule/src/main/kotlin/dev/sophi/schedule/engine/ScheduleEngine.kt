@@ -9,8 +9,11 @@ import dev.sophi.core.agent.plan.LlmStepCritic
 import dev.sophi.core.agent.plan.PlanFinalStatus
 import dev.sophi.core.agent.plan.PlanRunner
 import dev.sophi.core.agent.plan.PlanRunnerConfig
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.extensions.PluginRegistry
+import dev.sophi.extensions.turnEventBridge
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
@@ -52,7 +55,8 @@ class ScheduleEngine(
      * against this budget — too low and the model can hit finish_reason=length before
      * ever emitting an answer or tool call.
      */
-    private val maxTokens: Int = 4096
+    private val maxTokens: Int = 4096,
+    private val pluginRegistry: PluginRegistry? = null
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
         val due = taskStore.list().filter { it.enabled && it.nextRunAtMs != null && it.nextRunAtMs <= nowMs }
@@ -72,6 +76,7 @@ class ScheduleEngine(
         val record = try {
             withTimeout(taskTimeoutMs) {
                 val session = sessionManager.create(title = "schedule:${task.name}")
+                val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
                 val scopedRegistry = task.subagentType
                     ?.let { type -> agentDefinitions.find { it.name == type } }
                     ?.let { def -> fullRegistry.subset(def.allowedTools) }
@@ -86,7 +91,7 @@ class ScheduleEngine(
 
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
-                        val result = loop.turn(session, task.prompt, config)
+                        val result = loop.turn(session, task.prompt, config, bridge)
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
                     is TaskMode.Goal -> {
@@ -99,7 +104,7 @@ class ScheduleEngine(
                             model = model, maxTokens = maxTokens,
                             maxStepExecutions = mode.maxIterations, allowParallelSteps = true
                         )
-                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig)
+                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
                         val result = runner.run(session.id, task.prompt, mode.stopCondition)
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
                             result.finalOutput
