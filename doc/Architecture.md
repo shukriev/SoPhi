@@ -5,10 +5,10 @@
 | Field | Value |
 |-------|-------|
 | Current milestone | M7 — Jane's Theory memory (palace v1) complete |
-| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-infra, sophi-memory, sophi-schedule |
+| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-learning, sophi-web, sophi-sdk, sophi-companion, sophi-infra, sophi-memory, sophi-schedule |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
 | Designs approved, not yet implemented | Tiered tool confirmation & grants (ADR-016) — `RiskLevel` gains `CAUTION`; `Tool.riskLevel` becomes argument-aware; `ConfirmationPolicy` batches per round; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
-| Last updated | 2026-08-01 |
+| Last updated | 2026-08-07 |
 
 ---
 
@@ -33,6 +33,12 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
+│   sophi-companion  (Compose Multiplatform Desktop tray app)  │
+│   Chat · Sessions · MCP · Goals — native OS notifications    │
+│   (ADR-022 — standalone Gradle module, outside the reactor)  │
+└──────────────────────┬───────────────────────────────────────┘
+                       │ embeds sophi-sdk in-process (no HTTP hop)
+┌──────────────────────▼───────────────────────────────────────┐
 │                      Interfaces                              │
 │  sophi-cli   (Clikt + Mordant — terminal TUI)                │
 │  sophi-web   (Spring Boot WebSocket + SSE)                   │
@@ -93,6 +99,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
 | `sophi-sdk` | Embeddable library for Spring `@Service` beans | complete |
+| `sophi-companion` | OS tray/menu-bar desktop app (Compose Multiplatform Desktop) embedding `sophi-sdk` in-process: Chat/Sessions/MCP/Goals tabs, per-session `StateFlow` with one coroutine per turn, in-process `ScheduleEngine` poll loop, cross-platform native notifications, `jpackage` bundles. Standalone Gradle project — **not** in the root Maven `<modules>`; consumes `dev.sophi:sophi-sdk` via `mavenLocal()` (ADR-022) | complete |
 | `sophi-infra` | Auth, budget, observability | complete |
 
 **Dependency direction rules (never violate):**
@@ -615,6 +622,7 @@ to decide.
 | [ADR-018](adr/ADR-018-plan-and-execute.md) | Plan-and-Execute upgrade | General `sophi-core` capability (`agent/plan`) replaces `sophi-schedule`'s `GoalRunner`; diff-based replanning; explicit `allowParallelSteps` flag instead of `ConfirmationPolicy` introspection; memory/learning integration via injected callbacks, not direct dependencies |
 | [ADR-019](adr/ADR-019-invoke-claude-code-tool.md) | `invoke_claude_code` tool | One new Tool in `sophi-core/tools/`, no new module; `riskLevel`/`ruleVerdict` hardcoded `DESTRUCTIVE`/`HIGH_RISK`, never argument-dependent; two independent gates (outer `toolGrants`, inner `--permission-mode auto`); no orchestration code — `PlanRunner` does per-task decomposition |
 | [ADR-020](adr/ADR-020-generalized-goal-decomposition.md) | Generalized goal decomposition | Recursion inside PlanRunner (no new module/type); two triggers over one decomposeStep seam; shared RunBudget; LlmJudged-only sub-plans; two entry points (decompose_goal tool + /plan) over one buildPlanRunner factory |
+| [ADR-022](adr/ADR-022-sophi-companion.md) | `sophi-companion` OS tray app | Standalone Gradle module outside the Maven reactor (Compose Desktop is Gradle-only); embeds `sophi-sdk` in-process, HTTP via `sophi-web` rejected; five additive SDK/core/mcp gaps fixed rather than worked around (`ToolRegistry.unregister`, per-server MCP connect/disconnect, `McpConfigWriter` + `McpServerConfig.enabled`, `SessionManager.rename`/`delete` + title persistence, `SophiRuntime.scheduleEngine`); one coroutine + one `StateFlow` per session; confirmation ships notify-only (always-approve stub, blocked on ADR-016's session-id-less `confirm`); `jpackage` bundling in v1 because macOS notifications need a real `.app` |
 
 ---
 
@@ -647,3 +655,4 @@ to decide.
 | `sophi-core` auto mode + hybrid risk classifier | post-M7 | complete | [article-23](articles/article-23.md) |
 | `sophi-core`/`sophi-schedule` — Plan-and-Execute upgrade | post-M7 | complete | [article-24](articles/article-24.md) |
 | `sophi-core` — `invoke_claude_code` tool | post-M7 | complete | — |
+| `sophi-companion` — OS tray desktop app embedding `sophi-sdk` | post-M7 | complete | [article-25](articles/article-25.md) |

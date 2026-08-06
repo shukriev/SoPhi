@@ -39,6 +39,7 @@ app — same core, three ways to run it.
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
+| 🖥️ `sophi-companion` | OS tray / menu-bar desktop app (Compose Multiplatform) embedding `sophi-sdk` in-process — chat, sessions, MCP servers, goals |
 | 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `MetricsPlugin` |
 
 They all sit on the same core, so switching between them later is a
@@ -231,6 +232,53 @@ dashboard, batch job) without standing up a separate service.
 
 ---
 
+## 🖥️ Use case 4: Desktop tray companion (`sophi-companion`)
+
+A native menu-bar / system-tray app that embeds `sophi-sdk` **in-process** — no
+HTTP hop through `sophi-web`. Click the tray icon and you get four tabs: Chat,
+Sessions, MCP, and Goals. Multiple sessions run concurrently in the background,
+and finished turns and scheduled tasks post native OS notifications.
+
+`sophi-companion` is a standalone Gradle project (Compose Multiplatform Desktop),
+deliberately outside the Maven reactor — so install the reactor to `mavenLocal()`
+first, then run it:
+
+```bash
+mvn install -DskipTests            # from the repo root
+cd sophi-companion
+./gradlew run
+```
+
+On first launch it asks for a model and API key and writes
+`~/.sophi/companion.json`; leave the key blank to fall back to
+`ANTHROPIC_API_KEY`. It reuses your existing `~/.sophi/sessions` and
+`~/.sophi/mcp.json`, so sessions you started in `sophi-cli` show up in the
+Sessions tab, and MCP servers can be enabled/disabled live without a restart.
+
+Build a native bundle (`.dmg` on macOS, `.deb`/AppImage on Linux, `.msi` on
+Windows) with `jpackage`:
+
+```bash
+cd sophi-companion
+./gradlew packageDistributionForCurrentOS
+```
+
+On macOS a bundled `.app` is effectively required, not optional — a bare
+`java -jar` process can't reliably post to Notification Center.
+
+Two caveats worth knowing up front: tool confirmation is currently
+**always-approve** (the notification fires, but there's no per-session
+approve/deny UI yet — see ADR-022), and only the macOS bundle has actually been
+built and launched; the Linux and Windows targets are configured but unverified.
+
+Full setup, packaging details, build gotchas, and known limitations live in
+[`sophi-companion/README.md`](sophi-companion/README.md).
+
+**Good for:** keeping an agent one click away while you work — background goals,
+long-running sessions, and OS notifications, without a terminal or a browser tab.
+
+---
+
 ## 🧰 Cross-cutting: skills and plugins
 
 **Skills** (`sophi-skills`) are plain Markdown files with YAML frontmatter —
@@ -379,8 +427,9 @@ greps every file on disk to assert zero traces.
 | Poke at the agent yourself, or script one-off tasks | **`sophi-cli`** |
 | Let a frontend, bot, or service talk to the agent | **`sophi-web`** |
 | Add agent capability inside an existing JVM app | **`sophi-sdk`** |
+| Keep the agent in your menu bar, working in the background | **`sophi-companion`** |
 
-All three share the same `sophi-core` agent loop and session format, so
+They all share the same `sophi-core` agent loop and session format, so
 switching between them later doesn't change how sessions or tools work —
 start small, grow into the rest.
 
