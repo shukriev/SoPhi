@@ -16,7 +16,8 @@ data class McpServerConfig(
     val command: List<String> = emptyList(),
     val env: Map<String, String> = emptyMap(),
     val url: String? = null,
-    val safeTools: List<String> = emptyList()
+    val safeTools: List<String> = emptyList(),
+    val enabled: Boolean = true
 )
 
 @Serializable
