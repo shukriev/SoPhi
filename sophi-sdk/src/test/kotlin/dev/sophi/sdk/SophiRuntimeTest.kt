@@ -14,17 +14,28 @@ import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
+import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.AgentHook
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.McpConnector
+import dev.sophi.mcp.McpSession
+import dev.sophi.mcp.RemoteToolInfo
+import dev.sophi.mcp.config.McpServerConfig
+import dev.sophi.mcp.config.McpTransport
+import dev.sophi.schedule.notify.NoopNotifier
+import dev.sophi.schedule.store.RunLog
+import dev.sophi.schedule.store.TaskStore
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.coEvery
+import io.mockk.coJustRun
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -191,5 +202,72 @@ class SophiRuntimeTest : FunSpec({
         rt.close()
 
         verify { mcpManager.close() }
+    }
+
+    test("connectMcpServer registers the connected server's tools and returns their names") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads", "{}"))
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(any()) } returns session
+        val mcpManager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+        val toolRegistry = ToolRegistry()
+        val rt = SophiRuntime(
+            agentLoop, sessionManager, PluginRegistry(), config,
+            mcpClientManager = mcpManager, toolRegistry = toolRegistry
+        )
+
+        val names = rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
+
+        names shouldBe listOf("fs__read_file")
+        rt.toolNames() shouldBe listOf("fs__read_file")
+    }
+
+    test("disconnectMcpServer removes that server's tools from toolNames()") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads", "{}"))
+        coJustRun { session.close() }
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(any()) } returns session
+        val mcpManager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+        val rt = SophiRuntime(
+            agentLoop, sessionManager, PluginRegistry(), config,
+            mcpClientManager = mcpManager, toolRegistry = ToolRegistry()
+        )
+
+        rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
+        rt.disconnectMcpServer("fs")
+
+        rt.toolNames() shouldBe emptyList()
+    }
+
+    test("connectMcpServer throws when this runtime has no McpClientManager configured") {
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config)
+
+        shouldThrow<IllegalArgumentException> {
+            rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
+        }
+    }
+
+    test("scheduleEngine builds a non-null engine when provider and contextWindowTokens are set") {
+        val rt = SophiRuntime(
+            agentLoop, sessionManager, PluginRegistry(), config,
+            provider = mockk<LLMProvider>(), contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val dir = createTempDirectory("schedule-engine-test")
+
+        val engine = rt.scheduleEngine(
+            TaskStore(dir.resolve("tasks.json")), RunLog(dir.resolve("runs.jsonl")), NoopNotifier
+        )
+
+        engine.shouldNotBeNull()
+    }
+
+    test("scheduleEngine throws when this runtime has no provider configured") {
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config)
+        val dir = createTempDirectory("schedule-engine-test")
+
+        shouldThrow<IllegalArgumentException> {
+            rt.scheduleEngine(TaskStore(dir.resolve("tasks.json")), RunLog(dir.resolve("runs.jsonl")), NoopNotifier)
+        }
     }
 })
