@@ -12,6 +12,7 @@ import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -69,6 +70,33 @@ class PlanCommandTest : FunSpec({
         val appended = returned.branch().filter { it.role == EntryRole.ASSISTANT }
         appended shouldHaveSize 1
         appended.single().content shouldContain "all done"
+    }
+
+    test("a step's tool call is observable through PlanCommand's onEvent bridge") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            flowOf(dev.sophi.ai.api.StreamEvent.ToolCallsReady(
+                listOf(dev.sophi.ai.api.ToolCall("c1", "some_tool", "{}"))
+            )),
+            flowOf(StreamEvent.Content("done"))
+        )
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"call some_tool"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+        val events = mutableListOf<dev.sophi.core.agent.TurnEvent>()
+        val cmd = PlanCommand(
+            provider = provider, registry = ToolRegistry(),
+            sessionManager = FileSessionManager(tempdir().toPath()),
+            config = AgentConfig(model = "test-model"), contextWindowTokens = TEST_CONTEXT_WINDOW,
+            confirmationPolicy = ConfirmationPolicy.ALLOW_ALL, planLog = null,
+            onEvent = { events.add(it) }, echo = { output.add(it) }
+        )
+
+        runBlocking { cmd.run("call some_tool", AgentSession(id = "s1")) }
+
+        events.filterIsInstance<dev.sophi.core.agent.TurnEvent.ToolCallStarted>().map { it.name } shouldContain "some_tool"
     }
 
     test("/plan with no goal prints usage and leaves the session untouched") {

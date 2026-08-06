@@ -3,6 +3,7 @@ package dev.sophi.cli
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -39,6 +40,7 @@ class SlashHandler(
      * simply reports the affected commands as unavailable rather than guessing a value.
      */
     private val contextWindowTokens: Int? = null,
+    private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -231,7 +233,7 @@ class SlashHandler(
             output("Planning is not available (no tools configured).")
             return session
         }
-        return PlanCommand(llm, registry, sessionManager, config, window, confirmationPolicy, null, output)
+        return PlanCommand(llm, registry, sessionManager, config, window, confirmationPolicy, null, onEvent, output)
             .run(arg, session)
     }
 
