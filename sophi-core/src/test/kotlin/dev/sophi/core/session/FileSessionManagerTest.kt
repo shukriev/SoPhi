@@ -203,4 +203,63 @@ class FileSessionManagerTest : FunSpec({
         shouldThrow<IllegalArgumentException> { manager.readConfigSnapshot("../evil") }
         shouldThrow<IllegalArgumentException> { manager.saveConfigSnapshot("../evil", "m", null) }
     }
+
+    test("save() persists the title set at create() time, visible after load()") {
+        val session = manager.create(title = "My Chat")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.load(session.id).title shouldBe "My Chat"
+    }
+
+    test("list() includes title for sessions that have one") {
+        val session = manager.create(title = "My Chat")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.list().first { it.id == session.id }.title shouldBe "My Chat"
+    }
+
+    test("list() and load() return null title for sessions without one") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.load(session.id).title shouldBe null
+        manager.list().first { it.id == session.id }.title shouldBe null
+    }
+
+    test("rename() updates the title returned by load() and list()") {
+        val session = manager.create(title = "Old Name")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.rename(session.id, "New Name")
+
+        manager.load(session.id).title shouldBe "New Name"
+        manager.list().first { it.id == session.id }.title shouldBe "New Name"
+    }
+
+    test("rename() rejects session ids that could escape the sessions directory") {
+        shouldThrow<IllegalArgumentException> { manager.rename("../evil", "x") }
+    }
+
+    test("delete() removes both the jsonl and sidecar files") {
+        val session = manager.create(title = "Doomed")
+        session.append(EntryRole.USER, "hi")
+        manager.save(session)
+
+        manager.delete(session.id)
+
+        sessionsDir.listDirectoryEntries().shouldBeEmpty()
+        shouldThrow<IllegalArgumentException> { manager.load(session.id) }
+    }
+
+    test("delete() on a nonexistent session id is a no-op, does not throw") {
+        manager.delete("never-existed-but-valid-id")
+    }
+
+    test("delete() rejects session ids that could escape the sessions directory") {
+        shouldThrow<IllegalArgumentException> { manager.delete("../evil") }
+    }
 })

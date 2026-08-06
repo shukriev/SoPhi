@@ -10,6 +10,11 @@ class ToolRegistry {
         return this
     }
 
+    fun unregister(name: String): ToolRegistry {
+        tools.remove(name)
+        return this
+    }
+
     fun get(name: String): Tool =
         tools[name] ?: throw NoSuchElementException("Tool not found: $name")
 

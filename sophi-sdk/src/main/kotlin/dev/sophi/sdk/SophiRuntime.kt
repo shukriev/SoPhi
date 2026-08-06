@@ -1,5 +1,6 @@
 package dev.sophi.sdk
 
+import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.EntryRole
@@ -11,6 +12,11 @@ import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.config.McpServerConfig
+import dev.sophi.schedule.engine.ScheduleEngine
+import dev.sophi.schedule.notify.Notifier
+import dev.sophi.schedule.store.RunLog
+import dev.sophi.schedule.store.TaskStore
 
 class SophiRuntime internal constructor(
     internal val agentLoop: AgentLoop,
@@ -24,7 +30,9 @@ class SophiRuntime internal constructor(
      * closes; [SophiRuntime] itself has no per-session end signal, so [close] does not call it.
      */
     internal val learningPlugin: LearningPlugin? = null,
-    private val toolRegistry: ToolRegistry = ToolRegistry()
+    private val toolRegistry: ToolRegistry = ToolRegistry(),
+    private val provider: LLMProvider? = null,
+    private val contextWindowTokens: Int = 0
 ) {
     fun close() {
         mcpClientManager?.close()
@@ -49,5 +57,51 @@ class SophiRuntime internal constructor(
             pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = e))
             throw e
         }
+    }
+
+    suspend fun connectMcpServer(config: McpServerConfig): List<String> {
+        val manager = requireNotNull(mcpClientManager) {
+            "MCP not configured for this runtime — build it via RuntimeBuilder.mcpConfig(...)"
+        }
+        return manager.connectOne(config).map { tool ->
+            toolRegistry.register(tool)
+            tool.name
+        }
+    }
+
+    suspend fun disconnectMcpServer(serverName: String) {
+        val manager = requireNotNull(mcpClientManager) {
+            "MCP not configured for this runtime — build it via RuntimeBuilder.mcpConfig(...)"
+        }
+        manager.disconnect(serverName)
+        toolRegistry.names()
+            .filter { it.startsWith("${serverName}__") }
+            .forEach { toolRegistry.unregister(it) }
+    }
+
+    fun scheduleEngine(
+        taskStore: TaskStore,
+        runLog: RunLog,
+        notifier: Notifier,
+        maxConcurrentTasks: Int = 4
+    ): ScheduleEngine {
+        val p = requireNotNull(provider) {
+            "provider was not set on this SophiRuntime — build it via RuntimeBuilder"
+        }
+        require(contextWindowTokens > 0) {
+            "contextWindowTokens was not set on this SophiRuntime — build it via RuntimeBuilder"
+        }
+        return ScheduleEngine(
+            taskStore = taskStore,
+            runLog = runLog,
+            provider = p,
+            fullRegistry = toolRegistry,
+            sessionManager = sessionManager,
+            notifier = notifier,
+            model = config.model,
+            contextWindowTokens = contextWindowTokens,
+            maxConcurrentTasks = maxConcurrentTasks,
+            pluginRegistry = pluginRegistry
+        )
     }
 }

@@ -6,4 +6,6 @@ interface SessionManager {
     fun load(sessionId: String): AgentSession
     fun list(): List<SessionMeta>
     fun saveConfigSnapshot(sessionId: String, model: String, systemPrompt: String?) {}
+    fun rename(sessionId: String, title: String) {}
+    fun delete(sessionId: String) {}
 }

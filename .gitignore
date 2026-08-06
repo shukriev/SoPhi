@@ -1,12 +1,16 @@
 target/
 *.class
 *.jar
+!sophi-companion/gradle/wrapper/gradle-wrapper.jar
 *.war
 *.iml
 .idea/
 .DS_Store
 *.log
 .env
+
+sophi-companion/build/
+sophi-companion/.gradle/
 
 docs/superpowers/
 docs/guides/

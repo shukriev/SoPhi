@@ -92,6 +92,6 @@ class RuntimeBuilder {
             else agentConfig
         } ?: agentConfig
 
-        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry)
+        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window)
     }
 }
