@@ -7,6 +7,7 @@ import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
@@ -55,7 +56,8 @@ class PlanRunner(
     private val judgeModel: String = config.model,
     private val shellRunner: (String) -> Int = { cmd -> ProcessBuilder("sh", "-c", cmd).start().waitFor() },
     private val onPlanComplete: suspend (PlanOutcome) -> Unit = {},
-    private val planLog: PlanLog? = null
+    private val planLog: PlanLog? = null,
+    private val onEvent: suspend (TurnEvent) -> Unit = {}
 ) {
     suspend fun run(
         parentSessionId: String,
@@ -277,7 +279,7 @@ class PlanRunner(
         val stepSession = sessionManager.create(title = "plan:${plan.id}:step:${step.id}", parentSessionId = parentSessionId)
         val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens)
         return try {
-            val result = agentLoop.turn(stepSession, instruction, agentConfig)
+            val result = agentLoop.turn(stepSession, instruction, agentConfig, onEvent)
             (result.tip?.content ?: "") to true
         } catch (e: Exception) {
             (e.message ?: "step execution failed") to false
@@ -323,7 +325,8 @@ fun buildPlanRunner(
     grants: Set<String> = emptySet(),
     planLog: PlanLog? = null,
     contextProvider: suspend (String) -> List<String> = { emptyList() },
-    onPlanComplete: suspend (PlanOutcome) -> Unit = {}
+    onPlanComplete: suspend (PlanOutcome) -> Unit = {},
+    onEvent: suspend (TurnEvent) -> Unit = {}
 ): PlanRunner {
     val loop = AgentLoop(
         provider, registry, sessionManager,
@@ -338,6 +341,7 @@ fun buildPlanRunner(
         critic = LlmStepCritic(provider, config.model),
         config = config,
         onPlanComplete = onPlanComplete,
-        planLog = planLog
+        planLog = planLog,
+        onEvent = onEvent
     )
 }

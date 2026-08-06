@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "name": "browser",
+      "transport": "stdio",
+      "command": ["<the chosen browser-automation MCP server's launch command>"],
+      "safeTools": [
+        "<read-only tool names from this server's listTools() output — e.g. navigate, screenshot, snapshot/get-text, list-tabs>"
+      ]
+    }
+  ]
+}

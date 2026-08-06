@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.plan.PlanFinalStatus
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.agent.plan.PlanOutcome
@@ -29,6 +30,7 @@ class PlanCommand(
     private val contextWindowTokens: Int,
     private val confirmationPolicy: ConfirmationPolicy,
     private val planLog: PlanLog?,
+    private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val echo: (String) -> Unit
 ) {
     suspend fun run(goal: String, session: AgentSession): AgentSession {
@@ -43,7 +45,8 @@ class PlanCommand(
             ),
             contextWindowTokens = contextWindowTokens,
             confirmationPolicy = confirmationPolicy,
-            planLog = planLog
+            planLog = planLog,
+            onEvent = onEvent
         )
         val outcome = runner.run(session.id, goal, StopCondition.LlmJudged)
         val summary = render(goal, outcome)

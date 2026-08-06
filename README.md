@@ -259,6 +259,24 @@ Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 `PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery
 (`PluginRegistry().discover()`).
 
+### Browsing websites (browser-automation MCP + self-authored site skills)
+
+Sophi has no built-in browser — it connects to any browser-automation MCP server you
+configure in `.sophi/mcp.json`, the same way it connects to any other MCP server (see
+`docs/examples/mcp-browser-server.json` for the shape). Once configured:
+
+- Mark that server's **read-only** tools (navigate, screenshot, page snapshot / get
+  text, list tabs) as `safeTools` — everything else (click, type, select, submit)
+  stays `DESTRUCTIVE` and requires confirmation on every call, including in goal mode.
+- Install `docs/skills/browsing-sites.md` into `~/.sophi/skills/` once. It teaches
+  Sophi to recall a site it's seen before (via a skill it wrote itself last time,
+  through the `write_skill` tool) instead of re-exploring, and to record what it
+  learns after each visit.
+- **Trust boundary:** marking `navigate`/`screenshot` as safe means Sophi can navigate
+  to any URL — including `file://` paths or internal-network addresses — without
+  confirmation, since `safeTools` matches by tool name only, not by argument. If that's
+  not an acceptable default for your environment, leave `navigate` out of `safeTools`.
+
 ---
 
 ## 🎓 Cross-cutting: learning

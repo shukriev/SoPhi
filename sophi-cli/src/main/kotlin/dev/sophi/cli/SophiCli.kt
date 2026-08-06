@@ -268,6 +268,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             registry.register(SkillTool(skillRegistry))
         }
         registry.register(InstallSkillTool())
+        registry.register(WriteSkillTool())
         if (agentDefinitions.isNotEmpty()) {
             registry.register(
                 SubagentTool(
@@ -334,7 +335,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
             autoModeToggle = toggleableConfirmationPolicy,
             toolRegistry = registry,
-            contextWindowTokens = contextWindowTokens
+            contextWindowTokens = contextWindowTokens,
+            onEvent = bridge
         ) { mordantTerminal.println(it) }
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
             java.io.PrintWriter(System.out, true)

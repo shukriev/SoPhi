@@ -18,6 +18,7 @@ import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
@@ -48,6 +49,50 @@ class ScheduleEngineTest : FunSpec({
             maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs
         )
         return Triple(engine, taskStore, runLog)
+    }
+
+    test("a Goal-mode task's tool call is observable through a PluginRegistry-backed bridge") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            flowOf(StreamEvent.ToolCallsReady(
+                listOf(dev.sophi.ai.api.ToolCall("c1", "some_tool", "{}"))
+            )),
+            flowOf(StreamEvent.Content("done"))
+        )
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"call some_tool"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+        val events = mutableListOf<dev.sophi.extensions.HookContext>()
+        val plugin = object : dev.sophi.extensions.SophiPlugin {
+            override val name = "recorder"
+            override fun hooks(): List<dev.sophi.extensions.AgentHook> = listOf(
+                object : dev.sophi.extensions.AgentHook {
+                    override val point = dev.sophi.extensions.HookPoint.BEFORE_TOOL
+                    override suspend fun invoke(context: dev.sophi.extensions.HookContext) { events.add(context) }
+                }
+            )
+        }
+        val pluginRegistry = dev.sophi.extensions.PluginRegistry().register(plugin)
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-onevent-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            pluginRegistry = pluginRegistry
+        )
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(stopCondition = StopCondition.LlmJudged, maxIterations = 3),
+            prompt = "call some_tool"
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        events.map { it.toolName } shouldContain "some_tool"
     }
 
     test("tickOnce runs a due Recurring task and records a Succeeded run") {
