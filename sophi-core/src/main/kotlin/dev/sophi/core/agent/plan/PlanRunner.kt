@@ -45,6 +45,7 @@ sealed class PlanProgressEvent {
 data class PlanRunnerConfig(
     val model: String,
     val maxTokens: Int = 4096,
+    val systemPrompt: String? = null,
     val escalationModel: String? = null,
     val escalationThreshold: Double = 0.5,
     val maxReplans: Int = 3,
@@ -305,7 +306,7 @@ class PlanRunner(
     ): Pair<String, Boolean> {
         if (!budget.tryConsume()) return "step execution budget exhausted" to false
         val stepSession = sessionManager.create(title = "plan:${plan.id}:step:${step.id}", parentSessionId = parentSessionId)
-        val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens)
+        val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens, systemPrompt = config.systemPrompt)
         return try {
             val result = agentLoop.turn(stepSession, instruction, agentConfig, onEvent)
             (result.tip?.content ?: "") to true

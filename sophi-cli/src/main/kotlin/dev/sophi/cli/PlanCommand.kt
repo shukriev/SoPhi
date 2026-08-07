@@ -47,6 +47,7 @@ class PlanCommand(
                 config = PlanRunnerConfig(
                     model = config.model,
                     maxTokens = config.maxTokens,
+                    systemPrompt = config.systemPrompt,
                     allowParallelSteps = false
                 ),
                 contextWindowTokens = contextWindowTokens,

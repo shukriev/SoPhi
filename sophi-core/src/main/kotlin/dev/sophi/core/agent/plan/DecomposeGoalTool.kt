@@ -89,6 +89,7 @@ class DecomposeGoalTool(
             config = PlanRunnerConfig(
                 model = parentConfig.model,
                 maxTokens = parentConfig.maxTokens,
+                systemPrompt = parentConfig.systemPrompt,
                 allowParallelSteps = false
             ),
             contextWindowTokens = contextWindowTokens,

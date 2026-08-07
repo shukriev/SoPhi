@@ -62,6 +62,26 @@ class PlanRunnerTest : FunSpec({
         completedOutcome shouldBe outcome
     }
 
+    test("PlanRunnerConfig.systemPrompt is threaded into each step's CompletionRequest") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            requests.add(firstArg())
+            flowOf(StreamEvent.Content("done"))
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+
+        runBlocking {
+            runner(provider, planner, config = PlanRunnerConfig(model = "m", systemPrompt = "be concise"))
+                .run("parent", "goal", StopCondition.LlmJudged)
+        }
+
+        requests shouldHaveSize 1
+        requests.single().systemPrompt shouldBe "be concise"
+    }
+
     test("ShellCheck stop condition is wired through: a failing script keeps the plan Exhausted") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
