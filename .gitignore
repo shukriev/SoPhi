@@ -12,6 +12,8 @@ target/
 sophi-companion/build/
 sophi-companion/.gradle/
 
+.sophi/
+
 docs/superpowers/
 docs/guides/
 doc/articles/

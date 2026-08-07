@@ -12,6 +12,16 @@ tool name prefixed `browser__`) is available. Each step that touches a browser t
 runs this whole sequence itself — plan-mode steps are isolated from each other, so
 don't assume an earlier or later step already did part of it.
 
+**Never search for credentials.** The browser tool's session is assumed to already be
+authenticated — e.g. a CDP-connected browser you're already logged into on the target
+site. Never grep, read, or otherwise search local files, shell history, environment
+variables, config, or other Sophi sessions/skills for a password, token, or "the
+provided credentials" — none will be there, and looking is itself a privacy problem
+(other sessions may contain unrelated sensitive data). If a page actually shows a login
+form and you have no site skill covering it, that means the browser session is not
+authenticated: stop and tell the user to log in themselves in the browser this tool is
+attached to, rather than hunting for a way around it.
+
 ## 1. Recall
 
 Derive `site-<hostname>` from the task's target URL: lowercase the host, replace every
