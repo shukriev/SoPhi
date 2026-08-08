@@ -26,6 +26,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         )
         else -> buildClaudeProvider(requireNotNull(apiKey) { "apiKey is required for provider type claude" }, settings.model)
     }
+    lateinit var companionRuntime: CompanionRuntime
     val sophiRuntime = Sophi.runtime {
         this.provider = provider
         model = settings.model
@@ -37,16 +38,14 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         // RuntimeBuilder's own unconditional "connect everything in the file" behavior.
         confirmationPolicy(GuiConfirmationPolicy(
             notify = { t, b -> NativeNotifications.send(t, b) },
-            // Always-approve stub: a single GuiConfirmationPolicy is shared across every
-            // concurrent session, and ConfirmationPolicy.confirm() receives no session id to
-            // route an approve/deny prompt to the right session's Chat tab. Real per-session
-            // interactive approval is out of scope for this plan (the notification half of the
-            // spec's Confirmation Flow — alerting that a tool needs approval — does work).
-            onConfirmationNeeded = { _, requests -> requests.associate { it.callId to true } }
+            // Routed per session via SessionIdContext (see CompanionRuntime.sendMessage):
+            // awaitConfirmation sets that session's state to NeedsConfirmation and suspends
+            // until the matching Chat tab's Approve/Deny calls respondToConfirmation.
+            onConfirmationNeeded = { sessionId, requests -> companionRuntime.awaitConfirmation(sessionId, requests) }
         ))
     }
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
-    val companionRuntime = CompanionRuntime(
+    companionRuntime = CompanionRuntime(
         sophiRuntime = sophiRuntime,
         sessionManager = dev.sophi.core.session.FileSessionManager(Path.of(settings.sessionsDir)),
         mcpConfigPath = Path.of(settings.mcpConfigPath),
