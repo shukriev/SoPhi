@@ -42,6 +42,7 @@ class SlashHandler(
     private val contextWindowTokens: Int? = null,
     private val liveRegion: LiveRegion = LiveRegion(StringBuilder()) { 80 },
     private val onEvent: suspend (TurnEvent) -> Unit = {},
+    private val input: InputSource = NoOpInputSource,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -234,8 +235,11 @@ class SlashHandler(
             output("Planning is not available (no tools configured).")
             return session
         }
-        return PlanCommand(llm, registry, sessionManager, config, window, confirmationPolicy, null, onEvent, liveRegion, output)
-            .run(arg, session)
+        return PlanCommand(
+            provider = llm, registry = registry, sessionManager = sessionManager, config = config,
+            contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = null,
+            onEvent = onEvent, liveRegion = liveRegion, input = input, echo = output
+        ).run(arg, session)
     }
 
     private fun handleAuto() {

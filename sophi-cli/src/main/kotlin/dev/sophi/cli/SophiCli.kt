@@ -347,7 +347,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             toolRegistry = registry,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
-            onEvent = bridge
+            onEvent = bridge,
+            input = inputSource
         ) { mordantTerminal.println(it) }
         if (tokenViewKey.length != 1) {
             mordantTerminal.println(TextColors.yellow(
