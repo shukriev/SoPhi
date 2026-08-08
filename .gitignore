@@ -13,6 +13,7 @@ sophi-companion/build/
 sophi-companion/.gradle/
 
 .sophi/
+.playwright-mcp/
 
 docs/superpowers/
 docs/guides/
