@@ -3,8 +3,12 @@ package dev.sophi.companion
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.Tool
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.NoopNotifier
 import dev.sophi.schedule.store.RunLog
@@ -29,6 +33,34 @@ private class SlowFakeProvider(private val delayMs: Long) : LLMProvider {
         delay(delayMs)
         emit(StreamEvent.Content("done"))
     }
+}
+
+// AgentLoop.turn() delegates entirely to streamTurn(), which reads provider.stream(), not
+// complete() — complete() is unused by this path but still required to satisfy the interface.
+// stream() emits ToolCallsReady on the first call of a turn (no TOOL message in history yet)
+// and plain Content once the tool round has executed and produced a TOOL message — this makes
+// it correctly per-session/per-turn with no shared mutable counter, safe under concurrent
+// sessions.
+private class ConfirmingFakeProvider : LLMProvider {
+    override val name = "fake"
+    override suspend fun complete(request: CompletionRequest): LLMResponse =
+        LLMResponse.Text(content = "done", usage = TokenUsage(0, 0))
+
+    override fun stream(request: CompletionRequest): Flow<StreamEvent> = flow {
+        if (request.messages.any { it.role == MessageRole.TOOL }) {
+            emit(StreamEvent.Content("done"))
+        } else {
+            emit(StreamEvent.ToolCallsReady(listOf(ToolCall("call-1", "risky_tool", "{}"))))
+        }
+    }
+}
+
+private class RiskyFakeTool : Tool {
+    override val name = "risky_tool"
+    override val description = "a tool that always needs confirmation"
+    override val parametersJson = """{"type":"object","properties":{}}"""
+    override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+    override suspend fun execute(argumentsJson: String) = "executed"
 }
 
 class CompanionRuntimeTest : FunSpec({
@@ -136,6 +168,101 @@ class CompanionRuntimeTest : FunSpec({
 
         messagesRightAfterSend shouldBe listOf("you: hi")
         runtime.sessionMessages(sessionId).value shouldBe listOf("you: hi", "sophi: done")
+    }
+
+    test("a tool call that needs confirmation sets NeedsConfirmation, then resumes once respondToConfirmation is called") {
+        val dir = createTempDirectory("companion-runtime-test")
+        lateinit var runtime: CompanionRuntime
+        val sophiRuntime = Sophi.runtime {
+            provider = ConfirmingFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+            tool(RiskyFakeTool())
+            confirmationPolicy(GuiConfirmationPolicy(
+                notify = { _, _ -> },
+                onConfirmationNeeded = { sessionId, requests -> runtime.awaitConfirmation(sessionId, requests) }
+            ))
+        }
+        runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+
+        runtime.sendMessage(sessionId, "do the risky thing")
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value is SessionState.NeedsConfirmation } }
+        val pending = runtime.sessionState(sessionId).value as SessionState.NeedsConfirmation
+        pending.requests.map { it.toolName } shouldBe listOf("risky_tool")
+
+        runtime.respondToConfirmation(sessionId, true)
+
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
+        runtime.sessionMessages(sessionId).value.last() shouldBe "sophi: done"
+    }
+
+    test("respondToConfirmation is a no-op when nothing is pending for that session") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+
+        runtime.respondToConfirmation("never-had-a-pending-confirmation", true)  // must not throw
+    }
+
+    test("two sessions each awaiting confirmation resolve independently, no cross-talk") {
+        val dir = createTempDirectory("companion-runtime-test")
+        lateinit var runtime: CompanionRuntime
+        val sophiRuntime = Sophi.runtime {
+            provider = ConfirmingFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+            tool(RiskyFakeTool())
+            confirmationPolicy(GuiConfirmationPolicy(
+                notify = { _, _ -> },
+                onConfirmationNeeded = { sessionId, requests -> runtime.awaitConfirmation(sessionId, requests) }
+            ))
+        }
+        runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+        val sessionA = runBlocking { sophiRuntime.newSession() }
+        val sessionB = runBlocking { sophiRuntime.newSession() }
+
+        runtime.sendMessage(sessionA, "a")
+        runtime.sendMessage(sessionB, "b")
+        runBlocking {
+            waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionA).value is SessionState.NeedsConfirmation }
+            waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionB).value is SessionState.NeedsConfirmation }
+        }
+
+        runtime.respondToConfirmation(sessionA, false)
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionA).value == SessionState.Idle } }
+        (runtime.sessionState(sessionB).value is SessionState.NeedsConfirmation) shouldBe true
+
+        runtime.respondToConfirmation(sessionB, true)
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionB).value == SessionState.Idle } }
     }
 })
 
