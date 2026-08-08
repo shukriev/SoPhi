@@ -42,7 +42,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
             // route an approve/deny prompt to the right session's Chat tab. Real per-session
             // interactive approval is out of scope for this plan (the notification half of the
             // spec's Confirmation Flow — alerting that a tool needs approval — does work).
-            onConfirmationNeeded = { requests -> requests.associate { it.callId to true } }
+            onConfirmationNeeded = { _, requests -> requests.associate { it.callId to true } }
         ))
     }
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
