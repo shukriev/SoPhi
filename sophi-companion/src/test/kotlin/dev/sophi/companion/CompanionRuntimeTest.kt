@@ -264,6 +264,83 @@ class CompanionRuntimeTest : FunSpec({
         runtime.respondToConfirmation(sessionB, true)
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionB).value == SessionState.Idle } }
     }
+
+    test("pendingConfirmations includes a session's id while it needs confirmation, then removes it once resolved") {
+        val dir = createTempDirectory("companion-runtime-test")
+        lateinit var runtime: CompanionRuntime
+        val sophiRuntime = Sophi.runtime {
+            provider = ConfirmingFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+            tool(RiskyFakeTool())
+            confirmationPolicy(GuiConfirmationPolicy(
+                notify = { _, _ -> },
+                onConfirmationNeeded = { sessionId, requests -> runtime.awaitConfirmation(sessionId, requests) }
+            ))
+        }
+        runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+
+        runtime.pendingConfirmations.value shouldBe emptySet()
+
+        runtime.sendMessage(sessionId, "do the risky thing")
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value is SessionState.NeedsConfirmation } }
+        runtime.pendingConfirmations.value shouldBe setOf(sessionId)
+
+        runtime.respondToConfirmation(sessionId, true)
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
+        runtime.pendingConfirmations.value shouldBe emptySet()
+    }
+
+    test("pendingConfirmations tracks two sessions independently") {
+        val dir = createTempDirectory("companion-runtime-test")
+        lateinit var runtime: CompanionRuntime
+        val sophiRuntime = Sophi.runtime {
+            provider = ConfirmingFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+            tool(RiskyFakeTool())
+            confirmationPolicy(GuiConfirmationPolicy(
+                notify = { _, _ -> },
+                onConfirmationNeeded = { sessionId, requests -> runtime.awaitConfirmation(sessionId, requests) }
+            ))
+        }
+        runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+        val sessionA = runBlocking { sophiRuntime.newSession() }
+        val sessionB = runBlocking { sophiRuntime.newSession() }
+
+        runtime.sendMessage(sessionA, "a")
+        runtime.sendMessage(sessionB, "b")
+        runBlocking {
+            waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionA).value is SessionState.NeedsConfirmation }
+            waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionB).value is SessionState.NeedsConfirmation }
+        }
+        runtime.pendingConfirmations.value shouldBe setOf(sessionA, sessionB)
+
+        runtime.respondToConfirmation(sessionA, false)
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionA).value == SessionState.Idle } }
+        runtime.pendingConfirmations.value shouldBe setOf(sessionB)
+
+        runtime.respondToConfirmation(sessionB, true)
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionB).value == SessionState.Idle } }
+        runtime.pendingConfirmations.value shouldBe emptySet()
+    }
 })
 
 private suspend fun waitUntil(timeoutMs: Long, poll: () -> Boolean) {
