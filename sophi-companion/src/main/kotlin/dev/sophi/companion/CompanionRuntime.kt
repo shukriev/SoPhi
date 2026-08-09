@@ -1,9 +1,11 @@
 package dev.sophi.companion
 
+import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +29,7 @@ class CompanionRuntime(
     private val scheduleEngine = sophiRuntime.scheduleEngine(taskStore, runLog, notifier)
     private val sessionStates = mutableMapOf<String, MutableStateFlow<SessionState>>()
     private val sessionMessages = mutableMapOf<String, MutableStateFlow<List<String>>>()
+    private val pendingConfirmations = mutableMapOf<String, CompletableDeferred<Map<String, Boolean>>>()
     private var pollingJob: Job? = null
     private val mcpConfigLoader = dev.sophi.mcp.config.McpConfigLoader()
     private val mcpConfigWriter = dev.sophi.mcp.config.McpConfigWriter()
@@ -95,7 +98,7 @@ class CompanionRuntime(
         val messages = messagesFlowFor(sessionId)
         messages.value = messages.value + "you: $input"
         state.value = SessionState.Running
-        scope.launch {
+        scope.launch(SessionIdContext(sessionId)) {
             try {
                 val reply = sophiRuntime.turn(sessionId, input)
                 messages.value = messages.value + "sophi: $reply"
@@ -104,6 +107,21 @@ class CompanionRuntime(
                 state.value = SessionState.Error(e.message ?: "unknown error")
             }
         }
+    }
+
+    suspend fun awaitConfirmation(sessionId: String, requests: List<ConfirmationRequest>): Map<String, Boolean> {
+        val state = stateFlowFor(sessionId)
+        state.value = SessionState.NeedsConfirmation(requests)
+        val deferred = CompletableDeferred<Map<String, Boolean>>()
+        pendingConfirmations[sessionId] = deferred
+        val result = deferred.await()
+        state.value = SessionState.Running
+        return result
+    }
+
+    fun respondToConfirmation(sessionId: String, approved: Boolean) {
+        val requests = (stateFlowFor(sessionId).value as? SessionState.NeedsConfirmation)?.requests ?: return
+        pendingConfirmations.remove(sessionId)?.complete(requests.associate { it.callId to approved })
     }
 
     fun startSchedulePolling(intervalMs: Long = 30_000) {
