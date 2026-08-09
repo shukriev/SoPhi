@@ -4,6 +4,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -34,6 +35,7 @@ class SlashHandler(
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val autoModeToggle: ToggleableConfirmationPolicy? = null,
     private val toolRegistry: ToolRegistry? = null,
+    private val planLog: PlanLog? = null,
     /**
      * Total context window of `config.model`, in tokens. Optional here for the same reason
      * `provider` and `toolRegistry` are: a SlashHandler built without the full agent wiring
@@ -237,7 +239,7 @@ class SlashHandler(
         }
         return PlanCommand(
             provider = llm, registry = registry, sessionManager = sessionManager, config = config,
-            contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = null,
+            contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = planLog,
             onEvent = onEvent, liveRegion = liveRegion, input = input, echo = output
         ).run(arg, session)
     }

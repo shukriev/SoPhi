@@ -114,6 +114,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--schedule-dir",
         help = "Directory for scheduled/goal task definitions and run history"
     ).default("${System.getProperty("user.home")}/.sophi/schedule")
+    private val plansDirStr: String by option(
+        "--plans-dir",
+        help = "Directory for /plan and decompose_goal plan history (one JSONL file per plan id)"
+    ).default("${System.getProperty("user.home")}/.sophi/plans")
     private val systemPrompt: String? by option(
         "--system",
         help = "System prompt injected into every turn"
@@ -283,6 +287,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 )
             )
         }
+        val planLog = dev.sophi.core.agent.plan.PlanLog(Path.of(plansDirStr))
         registry.register(
             dev.sophi.core.agent.plan.DecomposeGoalTool(
                 provider = provider,
@@ -291,6 +296,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 parentSessionId = session.id,
                 parentConfig = config,
                 contextWindowTokens = contextWindowTokens,
+                planLog = planLog,
                 confirmationPolicy = confirmationPolicy
             )
         )
@@ -345,6 +351,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
             autoModeToggle = toggleableConfirmationPolicy,
             toolRegistry = registry,
+            planLog = planLog,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
             onEvent = bridge,
