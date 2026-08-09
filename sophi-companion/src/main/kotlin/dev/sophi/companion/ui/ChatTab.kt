@@ -25,28 +25,36 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String) {
     var input by remember { mutableStateOf("") }
     val state by runtime.sessionState(activeSessionId).collectAsState()
     val history by runtime.sessionMessages(activeSessionId).collectAsState()
+    val pending = state as? SessionState.NeedsConfirmation
 
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
         Text(
             when (state) {
                 SessionState.Idle -> "Idle"
                 SessionState.Running -> "Sophi is working…"
-                SessionState.NeedsConfirmation -> "Waiting for your confirmation…"
+                is SessionState.NeedsConfirmation -> "Waiting for your confirmation…"
                 is SessionState.Error -> "Error: ${(state as SessionState.Error).message}"
             }
         )
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(history) { line -> Text(line) }
         }
+        if (pending != null) {
+            Text("Sophi wants to run: " + pending.requests.joinToString(", ") { "${it.toolName} (${it.riskLevel})" })
+            Row {
+                Button(onClick = { runtime.respondToConfirmation(activeSessionId, true) }) { Text("Approve") }
+                Button(onClick = { runtime.respondToConfirmation(activeSessionId, false) }) { Text("Deny") }
+            }
+        }
         Row {
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
-                enabled = state != SessionState.Running
+                enabled = state != SessionState.Running && state !is SessionState.NeedsConfirmation
             )
             Button(
-                enabled = state != SessionState.Running && input.isNotBlank(),
+                enabled = state != SessionState.Running && state !is SessionState.NeedsConfirmation && input.isNotBlank(),
                 onClick = {
                     runtime.sendMessage(activeSessionId, input)
                     input = ""
