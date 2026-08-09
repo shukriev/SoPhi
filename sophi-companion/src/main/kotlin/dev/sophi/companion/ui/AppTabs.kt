@@ -38,6 +38,13 @@ fun AppTabs(runtime: CompanionRuntime) {
             }
         }
         val sessionId = activeSessionId
+        if (sessionId != null) {
+            PendingConfirmationsBanner(
+                runtime = runtime,
+                activeSessionId = sessionId,
+                onJump = { id -> activeSessionId = id; selected = AppTab.CHAT }
+            )
+        }
         when {
             sessionId == null -> Text("Starting…")
             selected == AppTab.CHAT -> ChatTab(runtime, sessionId)
