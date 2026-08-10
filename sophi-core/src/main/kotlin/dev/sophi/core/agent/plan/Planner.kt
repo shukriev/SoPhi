@@ -68,6 +68,10 @@ class LlmPlanner(
         appendLine("Set \"decompose\" to true only for a step that is a multi-step project in its own right —")
         appendLine("it will be expanded into its own sub-plan rather than attempted in one go. A step a capable")
         appendLine("agent could finish in a single sitting must leave it false. Most steps are false.")
+        appendLine("If the goal enumerates or implies many items whose exact count isn't known yet (\"each X\",")
+        appendLine("\"every X\", \"one per X\"), do not try to name every item as its own step up front —")
+        appendLine("produce a first step that discovers/lists the items, and set \"decompose\" true on it so")
+        appendLine("each item gets its own sub-plan (and its own context budget) once the count is known.")
         if (context.isNotEmpty()) {
             appendLine("\n## Relevant context")
             appendLine(context.joinToString("\n\n"))

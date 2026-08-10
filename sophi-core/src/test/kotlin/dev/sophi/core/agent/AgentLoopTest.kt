@@ -289,6 +289,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "tool-round sanity ceiling (2)"
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.ToolRoundCeiling.name
     }
 
     test("turn() saves the rounds accumulated before the maxToolRounds ceiling instead of discarding them") {
@@ -346,6 +347,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "3 consecutive"
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
         coVerify(exactly = 3) { provider.stream(any()) }
     }
 
@@ -794,6 +796,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "context budget exhausted"
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.ContextExhausted.name
         coVerify(exactly = 1) { provider.stream(any()) }
         coVerify(exactly = 0) { provider.complete(any()) }
     }
@@ -820,6 +823,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "compaction is thrashing"
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.CompactionThrashing.name
         coVerify(exactly = 4) { provider.stream(any()) }
         coVerify(exactly = 2) { provider.complete(any()) }
     }

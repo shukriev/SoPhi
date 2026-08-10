@@ -133,6 +133,21 @@ class LlmPlannerTest : FunSpec({
         capturedPrompts.single() shouldContain "Most steps are false."
     }
 
+    test("the plan prompt tells the model to discover-then-decompose for goals that enumerate many items") {
+        val provider = mockk<LLMProvider>()
+        val capturedPrompts = mutableListOf<String>()
+        coEvery { provider.complete(any()) } coAnswers {
+            capturedPrompts.add(firstArg<CompletionRequest>().messages.first().content)
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        }
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        runBlocking { planner.plan("goal") }
+        capturedPrompts.single() shouldContain "each X"
+        capturedPrompts.single() shouldContain "isn't known yet"
+        capturedPrompts.single() shouldContain "discovers"
+    }
+
     test("the unparseable-response fallback step is never marked for decomposition") {
         val provider = mockk<LLMProvider>()
         coEvery { provider.complete(any()) } returns LLMResponse.Text("nope", TokenUsage(1, 1))

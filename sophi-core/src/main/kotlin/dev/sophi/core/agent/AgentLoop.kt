@@ -49,6 +49,15 @@ private const val LOOP_GUARD_ROUND_BUDGET_MARGIN = 3
 private val SEARCH_TOOL_NAMES = setOf("glob", "grep")
 
 /**
+ * Why a turn ended via [AgentLoop.finishEarly] rather than a normal completion. Callers (e.g.
+ * PlanRunner) read this off the stopped-early entry's metadata to tell a capacity abort apart
+ * from genuine success — before this existed, finishEarly's result was indistinguishable from a
+ * normal turn at the call site, so a step cut short by e.g. compaction thrashing looked identical
+ * to one that actually finished.
+ */
+enum class TurnStopReason { ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing }
+
+/**
  * Tracks the state a LoopGuardPolicy check needs across rounds of a single turn: how many
  * fully-failed rounds happened in a row, the narrowest path a glob/grep call has scoped into so
  * far, and whether the round-budget warning already fired once. One instance per turn() /
@@ -121,13 +130,14 @@ class AgentLoop(
         userInput: String,
         pendingRounds: List<PendingEntry>,
         reason: String,
+        stopReason: TurnStopReason,
         onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
         val stopMessage = "[Stopped early: $reason]"
         onEvent(TurnEvent.Token(stopMessage))
         session.append(EntryRole.USER, userInput)
         pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
-        session.append(EntryRole.ASSISTANT, stopMessage)
+        session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to stopReason.name))
         sessionManager.save(session)
         return session
     }
@@ -263,7 +273,8 @@ class AgentLoop(
             if (toolRound >= config.maxToolRounds) {
                 return finishEarly(
                     session, userInput, pendingRounds,
-                    "reached the tool-round sanity ceiling (${config.maxToolRounds})", onEvent
+                    "reached the tool-round sanity ceiling (${config.maxToolRounds})",
+                    TurnStopReason.ToolRoundCeiling, onEvent
                 )
             }
             messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = toolCalls))
@@ -344,7 +355,7 @@ class AgentLoop(
 
             val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
             if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
-                return finishEarly(session, userInput, pendingRounds, guardReason, onEvent)
+                return finishEarly(session, userInput, pendingRounds, guardReason, TurnStopReason.LoopGuard, onEvent)
             }
 
             if ((roundUsage?.inputTokens ?: 0) < compactionTriggerTokens) {
@@ -356,7 +367,7 @@ class AgentLoop(
                     return finishEarly(
                         session, userInput, pendingRounds,
                         "context budget exhausted — a single round's output exceeds the compaction floor",
-                        onEvent
+                        TurnStopReason.ContextExhausted, onEvent
                     )
                 }
                 compactionsWithoutRelief++
@@ -364,7 +375,7 @@ class AgentLoop(
                     return finishEarly(
                         session, userInput, pendingRounds,
                         "compaction is thrashing — repeated summarisation isn't reducing context enough",
-                        onEvent
+                        TurnStopReason.CompactionThrashing, onEvent
                     )
                 }
             }

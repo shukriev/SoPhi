@@ -8,6 +8,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.TurnStopReason
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
@@ -49,7 +50,7 @@ data class PlanRunnerConfig(
     val escalationModel: String? = null,
     val escalationThreshold: Double = 0.5,
     val maxReplans: Int = 3,
-    val maxStepExecutions: Int = 20,
+    val maxStepExecutions: Int = 60,
     val allowParallelSteps: Boolean = false,
     /** 0 keeps plans flat; 2 allows a root plan plus two levels of sub-plans. */
     val maxPlanDepth: Int = 2
@@ -270,22 +271,35 @@ class PlanRunner(
         }
 
         val instruction = withDependencyContext(step, stepOutputs)
-        val (output, ok) = executeOnce(plan, step, instruction, step.modelOverride ?: config.model, parentSessionId, budget)
-        if (!ok) {
-            stepOutputs[step.id] = output
+        val execution = executeOnce(plan, step, instruction, step.modelOverride ?: config.model, parentSessionId, budget)
+        if (!execution.ok) {
+            stepOutputs[step.id] = execution.output
             return step.id to step.copy(status = StepStatus.Failed, confidence = 0.0)
         }
+        // A turn cut short by compaction thrashing still returns ok=true (it didn't throw) but
+        // its output is truncated mid-work — StepCritic fails OPEN on exactly this shape of
+        // malformed output (see StepCritic's doc comment), which would otherwise silently mark
+        // an incomplete step Done at full confidence. Decomposing gives the work a fresh
+        // per-sub-plan context budget instead of asking an already-fooled critic to judge it.
+        if (execution.stopReason == TurnStopReason.CompactionThrashing &&
+            step.childPlanId == null && canDecompose(depth, budget)
+        ) {
+            return decomposeStep(
+                step, plan, parentSessionId, stepOutputs, depth, budget, decompositions,
+                DecompositionTrigger.Oversized
+            )
+        }
 
-        var confidence = critic.judge(step, output)
-        var finalOutput = output
+        var confidence = critic.judge(step, execution.output)
+        var finalOutput = execution.output
         var usedModel = step.modelOverride
 
         if (confidence < config.escalationThreshold && step.modelOverride == null && config.escalationModel != null) {
-            val (escalatedOutput, escalatedOk) =
+            val escalated =
                 executeOnce(plan, step, instruction, config.escalationModel, parentSessionId, budget)
-            if (escalatedOk) {
-                confidence = critic.judge(step, escalatedOutput)
-                finalOutput = escalatedOutput
+            if (escalated.ok) {
+                confidence = critic.judge(step, escalated.output)
+                finalOutput = escalated.output
                 usedModel = config.escalationModel
             }
         }
@@ -301,17 +315,24 @@ class PlanRunner(
         else depContext.joinToString("\n\n") + "\n\nNow: ${step.instruction}"
     }
 
+    /** [stopReason] is only ever non-null when [ok] is true — it means the turn returned
+     *  normally (didn't throw) but ended early via AgentLoop.finishEarly rather than a genuine
+     *  completion. See the doc comment where this is consulted in [runStepBody]. */
+    private data class StepExecution(val output: String, val ok: Boolean, val stopReason: TurnStopReason? = null)
+
     private suspend fun executeOnce(
         plan: Plan, step: PlanStep, instruction: String, model: String, parentSessionId: String, budget: RunBudget
-    ): Pair<String, Boolean> {
-        if (!budget.tryConsume()) return "step execution budget exhausted" to false
+    ): StepExecution {
+        if (!budget.tryConsume()) return StepExecution("step execution budget exhausted", ok = false)
         val stepSession = sessionManager.create(title = "plan:${plan.id}:step:${step.id}", parentSessionId = parentSessionId)
         val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens, systemPrompt = config.systemPrompt)
         return try {
             val result = agentLoop.turn(stepSession, instruction, agentConfig, onEvent)
-            (result.tip?.content ?: "") to true
+            val stopReasonName = result.tip?.metadata?.get("stopReason")
+            val stopReason = stopReasonName?.let { name -> runCatching { TurnStopReason.valueOf(name) }.getOrNull() }
+            StepExecution(result.tip?.content ?: "", ok = true, stopReason = stopReason)
         } catch (e: Exception) {
-            (e.message ?: "step execution failed") to false
+            StepExecution(e.message ?: "step execution failed", ok = false)
         }
     }
 

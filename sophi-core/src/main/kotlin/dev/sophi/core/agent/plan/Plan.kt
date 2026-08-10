@@ -50,7 +50,10 @@ enum class PlanFinalStatus { Met, Exhausted }
 
 data class ReplanEvent(val stepId: String, val reason: String, val atVersion: Int)
 
-enum class DecompositionTrigger { Declared, Failure }
+/** Oversized: the step's own turn was cut short by AgentLoop's compaction-thrashing guard —
+ *  distinct from Failure so PlanLog/telemetry can tell "too big for one turn's context budget"
+ *  apart from a genuine tool/execution failure. */
+enum class DecompositionTrigger { Declared, Failure, Oversized }
 
 data class DecompositionEvent(
     val stepId: String,

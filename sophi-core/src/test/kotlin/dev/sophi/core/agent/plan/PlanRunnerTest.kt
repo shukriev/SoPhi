@@ -6,8 +6,10 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.toStreamFlow
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
@@ -35,9 +37,10 @@ class PlanRunnerTest : FunSpec({
         critic: StepCritic = StepCritic { _, _ -> 1.0 },
         config: PlanRunnerConfig = PlanRunnerConfig(model = "m"),
         sm: SessionManager = sessionManager(),
+        registry: ToolRegistry = ToolRegistry(),
         onPlanComplete: suspend (PlanOutcome) -> Unit = {}
     ): PlanRunner {
-        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
+        val loop = AgentLoop(provider, registry, sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         return PlanRunner(loop, sm, provider, planner, critic, config, onPlanComplete = onPlanComplete)
     }
 
@@ -60,6 +63,15 @@ class PlanRunnerTest : FunSpec({
         outcome.finalStatus shouldBe PlanFinalStatus.Met
         outcome.totalSteps shouldBe 1
         completedOutcome shouldBe outcome
+    }
+
+    test("PlanRunnerConfig.maxStepExecutions defaults high enough for a many-section decomposed goal") {
+        // The tree-wide budget is consumed by every sub-plan step too (RunBudget doc comment) —
+        // a goal that decomposes into "discover, then one sub-plan per section, then an
+        // orchestrator" can easily need 20-30 turns for a real multi-section site. The old
+        // default of 20 meant decomposition just moved the Exhausted failure one step later
+        // instead of fixing it, per the design discussion this default responds to.
+        PlanRunnerConfig(model = "m").maxStepExecutions shouldBe 60
     }
 
     test("PlanRunnerConfig.systemPrompt is threaded into each step's CompletionRequest") {
@@ -438,6 +450,54 @@ class PlanRunnerTest : FunSpec({
         outcome.finalStatus shouldBe PlanFinalStatus.Met
         outcome.replans shouldHaveSize 0
         outcome.decompositions.single().trigger shouldBe DecompositionTrigger.Failure
+    }
+
+    test("a step cut short by compaction thrashing is decomposed instead of marked Done by the fail-open critic") {
+        val provider = mockk<LLMProvider>()
+        val toolRegistry = ToolRegistry().register(object : Tool {
+            override val name = "ok"
+            override val description = "always succeeds"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "did it"
+        })
+        fun toolRound(id: String, inputTokens: Int) = LLMResponse.ToolUse(
+            calls = listOf(dev.sophi.ai.api.ToolCall(id, "ok", "{}")),
+            usage = TokenUsage(inputTokens, 0)
+        ).toStreamFlow()
+        var streamCall = 0
+        every { provider.stream(any()) } answers {
+            streamCall++
+            when (streamCall) {
+                // Mirrors AgentLoopTest's own "compaction runs twice without relief" sequence:
+                // rounds 1-2 are small, rounds 3-4 both exceed the threshold, so the second
+                // compaction attempt still can't get back under it and the turn aborts.
+                1 -> toolRound("c1", 1_000)
+                2 -> toolRound("c2", 1_000)
+                3 -> toolRound("c3", 90_000)
+                4 -> toolRound("c4", 90_000)
+                else -> flowOf(StreamEvent.Content("sub-step done"))
+            }
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan("goal", any()) } returns singleStepPlan("explore everything")
+        coEvery { planner.plan("explore everything", any()) } returns Plan(
+            id = "plan_2", goalPrompt = "explore everything",
+            steps = listOf(PlanStep(id = "c1", instruction = "explore part one"))
+        )
+        var criticCalls = 0
+        val critic = StepCritic { _, _ -> criticCalls++; 1.0 }
+
+        val outcome = runBlocking {
+            runner(provider, planner, critic = critic, registry = toolRegistry)
+                .run("parent", "goal", StopCondition.LlmJudged)
+        }
+
+        // The root step's own turn never reaches the critic — only the sub-plan's step does.
+        // If the old bug were still here, the root step would go straight to Done and this
+        // would be 0 decompositions / criticCalls == 1 from the root step alone instead.
+        outcome.decompositions.single().trigger shouldBe DecompositionTrigger.Oversized
+        criticCalls shouldBe 1
     }
 
     test("a step already decomposed once falls through to replanning rather than decomposing twice") {
