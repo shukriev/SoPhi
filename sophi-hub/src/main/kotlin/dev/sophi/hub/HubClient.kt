@@ -25,10 +25,15 @@ import kotlinx.serialization.json.Json
 class HubClient(private val port: Int, private val sessionId: String) {
     private val json = Json { ignoreUnknownKeys = true }
     private val httpClient = HttpClient(CIO) { install(WebSockets) }
-    private var session: DefaultClientWebSocketSession? = null
+    // Written from connect() and from the receive loop's completion (a different coroutine,
+    // possibly a different thread) — Volatile so isConnected always reads the latest value.
+    @Volatile private var session: DefaultClientWebSocketSession? = null
     private var receiveJob: Job? = null
     private val _commands = MutableSharedFlow<HubCommand>(replay = 0, extraBufferCapacity = 256)
     val commands: SharedFlow<HubCommand> = _commands.asSharedFlow()
+
+    /** True while a connection is live; false before [connect], after a failed attempt, or once the hub drops the connection. */
+    val isConnected: Boolean get() = session != null
 
     /** Attempts one connection; returns false (never throws) if the hub isn't reachable. */
     suspend fun connect(scope: CoroutineScope): Boolean = runCatching {
