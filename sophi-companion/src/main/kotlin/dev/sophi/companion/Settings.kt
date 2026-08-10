@@ -34,7 +34,9 @@ data class CompanionSettings(
     /** Max tokens the model may generate per response — the equivalent of `sophi --max-tokens`. */
     val maxTokens: Int = 4096,
     val sessionsDir: String = System.getProperty("user.home") + "/.sophi/sessions",
-    val mcpConfigPath: String = System.getProperty("user.home") + "/.sophi/mcp.json"
+    val mcpConfigPath: String = System.getProperty("user.home") + "/.sophi/mcp.json",
+    /** Port the embedded hub (ADR-023) listens on for CLI sessions to register with. */
+    val hubPort: Int = 8765
 )
 
 /**
