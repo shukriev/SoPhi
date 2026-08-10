@@ -3,11 +3,15 @@ package dev.sophi.companion.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.Button
-import androidx.compose.material.Text
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,18 +36,25 @@ fun McpTab(runtime: CompanionRuntime) {
     LaunchedEffect(Unit) { refresh() }
 
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        Text("MCP servers")
+        Text("MCP servers", style = MaterialTheme.typography.titleMedium)
         LazyColumn {
             items(servers) { server ->
-                Row(modifier = Modifier.padding(4.dp)) {
-                    Text("${server.name} (${server.transport}) — ${if (server.enabled) "enabled" else "disabled"}", modifier = Modifier.weight(1f))
-                    Button(onClick = { scope.launch { runtime.setMcpServerEnabled(server.name, !server.enabled); refresh() } }) {
-                        Text(if (server.enabled) "Disable" else "Enable")
-                    }
-                    Button(onClick = { scope.launch { runtime.removeMcpServer(server.name); refresh() } }) {
-                        Text("Remove")
-                    }
-                }
+                ListItem(
+                    headlineContent = { Text(server.name) },
+                    supportingContent = { Text("${server.transport}") },
+                    trailingContent = {
+                        Row {
+                            Switch(
+                                checked = server.enabled,
+                                onCheckedChange = { checked -> scope.launch { runtime.setMcpServerEnabled(server.name, checked); refresh() } }
+                            )
+                            TextButton(onClick = { scope.launch { runtime.removeMcpServer(server.name); refresh() } }) {
+                                Text("Remove")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }

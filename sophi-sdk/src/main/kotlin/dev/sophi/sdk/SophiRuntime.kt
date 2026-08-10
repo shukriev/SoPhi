@@ -3,6 +3,7 @@ package dev.sophi.sdk
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
@@ -46,11 +47,17 @@ class SophiRuntime internal constructor(
             runCatching { sessionManager.saveConfigSnapshot(id, config.model, config.systemPrompt) }
         }
 
-    suspend fun turn(sessionId: String, input: String): String {
+    suspend fun turn(sessionId: String, input: String): String = streamTurn(sessionId, input) { }
+
+    suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String {
         val session = sessionManager.load(sessionId)
         pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(sessionId, userInput = input))
+        val bridge = pluginRegistry.turnEventBridge(sessionId)
         return try {
-            val updated = agentLoop.turn(session, input, config, pluginRegistry.turnEventBridge(sessionId))
+            val updated = agentLoop.streamTurn(session, input, config) { event ->
+                bridge(event)
+                onEvent(event)
+            }
             pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(sessionId))
             updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
         } catch (e: Exception) {

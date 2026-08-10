@@ -5,13 +5,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
+import androidx.compose.ui.window.rememberWindowState
 import dev.sophi.ai.providers.buildClaudeProvider
 import dev.sophi.ai.providers.buildOpenAiCompatProvider
-import dev.sophi.companion.ui.AppTabs
+import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.CrossPlatformNotifier
 import dev.sophi.schedule.notify.NativeNotifications
@@ -80,21 +83,28 @@ fun main() = application {
     )
 
     if (isWindowVisible) {
-        Window(onCloseRequest = { isWindowVisible = false }, title = "Sophi Companion") {
-            val currentSettings = settings
-            if (currentSettings == null) {
-                dev.sophi.companion.ui.FirstRunSettingsScreen(
-                    existing = storedSettings,
-                    problem = storedProblem,
-                    onSaved = { newSettings ->
-                        settingsStore.save(newSettings)
-                        settings = newSettings
-                        runtime = buildRuntime(newSettings, settingsStore.resolveApiKey(newSettings))
-                    }
-                )
-            } else {
-                val current = runtime ?: buildRuntime(currentSettings, settingsStore.resolveApiKey(currentSettings)).also { runtime = it }
-                AppTabs(current)
+        Window(
+            onCloseRequest = { isWindowVisible = false },
+            title = "Sophi Companion",
+            state = rememberWindowState(size = DpSize(900.dp, 600.dp)),
+        ) {
+            window.minimumSize = java.awt.Dimension(700, 450)
+            dev.sophi.companion.ui.SophiTheme {
+                val currentSettings = settings
+                if (currentSettings == null) {
+                    dev.sophi.companion.ui.FirstRunSettingsScreen(
+                        existing = storedSettings,
+                        problem = storedProblem,
+                        onSaved = { newSettings ->
+                            settingsStore.save(newSettings)
+                            settings = newSettings
+                            runtime = buildRuntime(newSettings, settingsStore.resolveApiKey(newSettings))
+                        }
+                    )
+                } else {
+                    val current = runtime ?: buildRuntime(currentSettings, settingsStore.resolveApiKey(currentSettings)).also { runtime = it }
+                    AppShell(current)
+                }
             }
         }
     }

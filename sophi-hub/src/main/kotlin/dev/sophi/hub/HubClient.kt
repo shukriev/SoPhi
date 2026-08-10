@@ -23,7 +23,11 @@ import kotlinx.serialization.json.Json
  * without a companion running.
  */
 class HubClient(private val port: Int, private val sessionId: String) {
-    private val json = Json { ignoreUnknownKeys = true }
+    // encodeDefaults = true: HubEvent.timestamp has a default value (System.currentTimeMillis()),
+    // and Json's own default (encodeDefaults = false) omits fields that used their default
+    // parameter — the receiving side would then evaluate a *fresh* default at decode time
+    // instead of reading the value that was actually sent.
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val httpClient = HttpClient(CIO) { install(WebSockets) }
     // Written from connect() and from the receive loop's completion (a different coroutine,
     // possibly a different thread) — Volatile so isConnected always reads the latest value.

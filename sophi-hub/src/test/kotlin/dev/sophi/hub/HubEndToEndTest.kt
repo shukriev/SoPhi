@@ -27,8 +27,9 @@ class HubEndToEndTest : FunSpec({
                     // event: CLI -> hub -> "companion" (server.events, read in-process)
                     val eventReceived = async { server.events.first { it is HubEvent.Token } }
                     delay(50)
-                    client.publish(HubEvent.Token("s1", "hi"))
-                    eventReceived.await() shouldBe HubEvent.Token("s1", "hi")
+                    val tokenEvent = HubEvent.Token("s1", "hi")
+                    client.publish(tokenEvent)
+                    eventReceived.await() shouldBe tokenEvent
 
                     // command: "companion" (server.sendCommand) -> hub -> CLI
                     val commandReceived = async { client.commands.first() }

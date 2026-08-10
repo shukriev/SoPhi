@@ -38,6 +38,23 @@ private class SlowFakeProvider(private val delayMs: Long) : LLMProvider {
     }
 }
 
+// Emits multiple StreamEvent chunks per turn, so AgentLoop.streamTurn's per-chunk TurnEvent.Token/
+// ReasoningToken emission is actually exercised — SlowFakeProvider/ConfirmingFakeProvider each emit
+// exactly one chunk, which isn't enough to distinguish "streamed incrementally" from "atomic".
+private class ChunkedStreamingFakeProvider : LLMProvider {
+    override val name = "fake"
+
+    override suspend fun complete(request: CompletionRequest): LLMResponse =
+        LLMResponse.Text(content = "done", usage = TokenUsage(0, 0))
+
+    override fun stream(request: CompletionRequest): Flow<StreamEvent> = flow {
+        emit(StreamEvent.Reasoning("thinking"))
+        emit(StreamEvent.Reasoning("..."))
+        emit(StreamEvent.Content("Hel"))
+        emit(StreamEvent.Content("lo!"))
+    }
+}
+
 // AgentLoop.turn() delegates entirely to streamTurn(), which reads provider.stream(), not
 // complete() — complete() is unused by this path but still required to satisfy the interface.
 // stream() emits ToolCallsReady on the first call of a turn (no TOOL message in history yet)
@@ -171,6 +188,34 @@ class CompanionRuntimeTest : FunSpec({
 
         messagesRightAfterSend shouldBe listOf("you: hi")
         runtime.sessionMessages(sessionId).value shouldBe listOf("you: hi", "sophi: done")
+    }
+
+    test("sendMessage streams reasoning and answer tokens incrementally, not as one atomic jump") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = ChunkedStreamingFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+
+        runtime.sendMessage(sessionId, "hi")
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
+
+        runtime.sessionMessages(sessionId).value shouldBe listOf(
+            "you: hi",
+            "sophi (thinking): thinking...",
+            "sophi: Hello!"
+        )
     }
 
     test("a tool call that needs confirmation sets NeedsConfirmation, then resumes once respondToConfirmation is called") {

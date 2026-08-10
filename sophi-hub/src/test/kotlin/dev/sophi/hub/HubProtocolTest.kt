@@ -6,7 +6,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import kotlinx.serialization.json.Json
 
-private val json = Json { ignoreUnknownKeys = true }
+// encodeDefaults = true — HubEvent.timestamp has a default value; without this, Json omits it
+// when unset, and round-tripping would evaluate a fresh (different) default on decode.
+private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
 class HubProtocolTest : FunSpec({
     test("every HubEvent case round-trips through JSON via the sealed base type") {

@@ -5,14 +5,15 @@ Desktop. It embeds `sophi-sdk` **in-process** — no HTTP hop through `sophi-web
 and is the first real consumer of the SDK as an embeddable library (see
 [ADR-022](../doc/adr/ADR-022-sophi-companion.md)).
 
-Click the tray icon and you get four tabs:
+Click the tray icon to open the window: a left sidebar lists every session (local and
+any `sophi-cli` sessions registered via the embedded hub) with a live status dot —
+Idle (gray), Running (green), Needs confirmation (orange), Error (red) — sorted so
+anything needing attention floats to the top, then by most recently active. Below the
+session list, fixed nav items open **MCP** (configured servers — enable/disable, remove)
+and **Goals** (scheduled tasks — create, run now). Selecting a session opens its chat in
+the main panel.
 
-| Tab | What it does |
-|---|---|
-| **Chat** | Talk to the active session; per-session status (`Idle` / `Running` / `Error`) |
-| **Sessions** | List, open, create, rename, delete — backed by `~/.sophi/sessions` |
-| **MCP** | List configured servers, enable/disable/remove, reconnecting live without a restart |
-| **Goals** | List and create scheduled tasks, run one now, see last-run time |
+Local sessions stream live, token by token — same as CLI sessions.
 
 Multiple sessions run concurrently — each turn gets its own coroutine and its own
 `StateFlow`, so sending a message in one session never blocks the UI or another
@@ -207,7 +208,6 @@ tasks.matching { it.name in packageFormatTasks }.configureEach {
 - **The MCP tab has no add/edit form.** `CompanionRuntime.addOrUpdateMcpServer`
   exists and is tested, but only list/enable/disable/remove are wired to the UI.
   Add servers by editing `~/.sophi/mcp.json`.
-- **Sessions tab rename writes a fixed placeholder title** rather than prompting.
 - **No automated UI tests.** Every non-UI class has a Kotest suite
   (`./gradlew test`); the Compose UI is verified manually.
 - No auto-update, no state syncing between installed copies.

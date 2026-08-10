@@ -23,8 +23,9 @@ class HubClientTest : FunSpec({
                     val connected = client.connect(this)
                     connected shouldBe true
 
-                    client.publish(HubEvent.SessionRegistered("s1", "t", 1L, "/repo"))
-                    server.events.first() shouldBe HubEvent.SessionRegistered("s1", "t", 1L, "/repo")
+                    val registeredEvent = HubEvent.SessionRegistered("s1", "t", 1L, "/repo")
+                    client.publish(registeredEvent)
+                    server.events.first() shouldBe registeredEvent
 
                     client.close()
                 }

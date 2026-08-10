@@ -23,7 +23,9 @@ import java.util.concurrent.ConcurrentHashMap
  * in-process (see CompanionRuntime) — there is no companion-side WebSocket hop.
  */
 class HubServer(private val port: Int) {
-    private val json = Json { ignoreUnknownKeys = true }
+    // encodeDefaults = true — see HubClient's identical Json config for why (HubEvent.timestamp
+    // is a defaulted field; without this, its value can silently change across the wire).
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val cliSessions = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
     private val _events = MutableSharedFlow<HubEvent>(replay = 0, extraBufferCapacity = 256)
     val events: SharedFlow<HubEvent> = _events.asSharedFlow()

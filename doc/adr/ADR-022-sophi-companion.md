@@ -202,14 +202,18 @@ noticed.
   spec's testing strategy. Every non-UI class (`CompanionRuntime`, `SettingsStore`,
   `GuiConfirmationPolicy`, and all five existing-module additions) has a Kotest
   suite.
+- The UI moved from a four-tab (`TabRow`) layout to a sidebar shell (`AppShell`) —
+  every session's status is now visible in a persistent sidebar instead of on one tab
+  among four. See `docs/superpowers/specs/2026-08-11-companion-ui-redesign-design.md`.
+  The architectural decisions in this ADR (in-process SDK embedding, the embedded hub,
+  etc.) are unaffected — this was a `ui/`-package-only change.
 - Explicitly out of scope: Kotlin/Native or mobile/web targets (`sophi-sdk` is
   JVM/Spring-based; "multiplatform" here means one desktop codebase producing three
   native packages); auto-update; state syncing between installed copies; live reload
   of `~/.sophi/companion.json` without a restart; MCP config validation beyond what
   `McpConfigLoader` already does. The MCP tab surfaces list/enable/disable/remove —
   `CompanionRuntime.addOrUpdateMcpServer` exists and is tested, but no add/edit form
-  is wired to it yet — and the Sessions tab's rename writes a fixed placeholder
-  title rather than prompting for one.
+  is wired to it yet.
 
 ## References
 

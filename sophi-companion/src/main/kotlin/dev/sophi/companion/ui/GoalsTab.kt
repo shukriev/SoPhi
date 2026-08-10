@@ -1,14 +1,17 @@
 package dev.sophi.companion.ui
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.Button
-import androidx.compose.material.OutlinedTextField
-import androidx.compose.material.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,9 +38,19 @@ fun GoalsTab(runtime: CompanionRuntime) {
     LaunchedEffect(Unit) { refresh() }
 
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        Text("Goals / Tasks")
-        OutlinedTextField(value = newTaskName, onValueChange = { newTaskName = it }, label = { Text("Task name") })
-        OutlinedTextField(value = newTaskPrompt, onValueChange = { newTaskPrompt = it }, label = { Text("Prompt") })
+        Text("Goals / Tasks", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = newTaskName,
+            onValueChange = { newTaskName = it },
+            label = { Text("Task name") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = newTaskPrompt,
+            onValueChange = { newTaskPrompt = it },
+            label = { Text("Prompt") },
+            modifier = Modifier.fillMaxWidth()
+        )
         Button(onClick = {
             runtime.createTask(newTaskName, newTaskPrompt)
             newTaskName = ""
@@ -47,10 +60,14 @@ fun GoalsTab(runtime: CompanionRuntime) {
 
         LazyColumn {
             items(tasks) { task ->
-                Row(modifier = Modifier.padding(4.dp)) {
-                    Text("${task.name} — last run: ${task.lastRunAtMs ?: "never"}", modifier = Modifier.weight(1f))
-                    Button(onClick = { scope.launch { runtime.runTaskNow(task.id); refresh() } }) { Text("Run now") }
-                }
+                ListItem(
+                    headlineContent = { Text(task.name) },
+                    supportingContent = { Text("Last run: ${task.lastRunAtMs ?: "never"}") },
+                    trailingContent = {
+                        TextButton(onClick = { scope.launch { runtime.runTaskNow(task.id); refresh() } }) { Text("Run now") }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }

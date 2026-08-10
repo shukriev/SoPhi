@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
@@ -40,6 +41,7 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
+import io.mockk.slot
 import io.mockk.verify
 import io.kotest.matchers.string.shouldContain
 import kotlin.io.path.createTempDirectory
@@ -78,7 +80,7 @@ class SophiRuntimeTest : FunSpec({
             )
         )
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config, any()) } returns updated
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
         runtime.turn("s1", "hi") shouldBe "hello!"
     }
 
@@ -99,10 +101,54 @@ class SophiRuntimeTest : FunSpec({
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(errorPlugin), config)
         val session = AgentSession("s1")
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config, any()) } throws RuntimeException("LLM error")
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } throws RuntimeException("LLM error")
 
         shouldThrow<RuntimeException> { rt.turn("s1", "hi") }
         log shouldBe listOf(HookPoint.ON_ERROR)
+    }
+
+    test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {
+        val log = mutableListOf<HookPoint>()
+        val hookPlugin = object : SophiPlugin {
+            override val name = "hook-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.BEFORE_TOOL
+                    override suspend fun invoke(context: HookContext) { log.add(HookPoint.BEFORE_TOOL) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TOOL
+                    override suspend fun invoke(context: HookContext) { log.add(HookPoint.AFTER_TOOL) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(hookPlugin), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        val fakeEvents = listOf(
+            TurnEvent.Token("Hel"),
+            TurnEvent.Token("lo!"),
+            TurnEvent.ToolCallStarted("read_file", "{}"),
+            TurnEvent.ToolCallFinished("read_file", "contents", isError = false)
+        )
+        val onEventSlot = slot<suspend (TurnEvent) -> Unit>()
+        coEvery { agentLoop.streamTurn(session, "hi", config, capture(onEventSlot)) } coAnswers {
+            fakeEvents.forEach { onEventSlot.captured(it) }
+            updated
+        }
+
+        val received = mutableListOf<TurnEvent>()
+        val reply = rt.streamTurn("s1", "hi") { event -> received.add(event) }
+
+        reply shouldBe "hello!"
+        received shouldBe fakeEvents
+        log shouldBe listOf(HookPoint.BEFORE_TOOL, HookPoint.AFTER_TOOL)
     }
 
     test("RuntimeBuilder build throws when no provider set") {

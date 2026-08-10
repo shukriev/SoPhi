@@ -8,11 +8,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.Button
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.OutlinedTextField
-import androidx.compose.material.RadioButton
-import androidx.compose.material.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,10 +86,10 @@ fun FirstRunSettingsScreen(
     ) {
         Text(
             if (problem == null) "Welcome to Sophi Companion" else "Fix your Sophi Companion settings",
-            style = MaterialTheme.typography.h6
+            style = MaterialTheme.typography.titleLarge
         )
         if (problem != null) {
-            Text("Your saved settings can't be used: $problem", color = MaterialTheme.colors.error)
+            Text("Your saved settings can't be used: $problem", color = MaterialTheme.colorScheme.error)
         }
         Text("Set up the model you want Sophi to use. You can change this later in ~/.sophi/companion.json.")
         Spacer(Modifier.height(12.dp))
@@ -126,7 +126,7 @@ fun FirstRunSettingsScreen(
             )
             Text(
                 "Ollama: $OLLAMA_BASE_URL   ·   vLLM: http://localhost:8000/v1",
-                style = MaterialTheme.typography.caption
+                style = MaterialTheme.typography.bodySmall
             )
         }
 
@@ -151,7 +151,7 @@ fun FirstRunSettingsScreen(
         Text(
             "Your model's real context window. Sophi compacts at 80% of this — setting it larger " +
                 "than the model actually supports means it never compacts and overflows instead.",
-            style = MaterialTheme.typography.caption
+            style = MaterialTheme.typography.bodySmall
         )
 
         OutlinedTextField(
@@ -163,7 +163,7 @@ fun FirstRunSettingsScreen(
 
         Spacer(Modifier.height(12.dp))
         if (error != null) {
-            Text(error, color = MaterialTheme.colors.error)
+            Text(error, color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(8.dp))
         }
         Button(

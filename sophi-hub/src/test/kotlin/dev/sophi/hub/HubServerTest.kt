@@ -17,7 +17,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import java.net.ServerSocket
 
-private val json = Json { ignoreUnknownKeys = true }
+// encodeDefaults = true — see HubClient's identical Json config for why.
+private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
 private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
@@ -33,8 +34,9 @@ class HubServerTest : FunSpec({
                     val session = client.webSocketSession(host = "127.0.0.1", port = port, path = "/hub/cli")
                     val collected = async { server.events.first() }
                     delay(100) // let the collector above actually subscribe before we emit
-                    session.send(Frame.Text(json.encodeToString(HubEvent.serializer(), HubEvent.SessionRegistered("s1", "t", 1L, "/repo"))))
-                    collected.await() shouldBe HubEvent.SessionRegistered("s1", "t", 1L, "/repo")
+                    val registeredEvent = HubEvent.SessionRegistered("s1", "t", 1L, "/repo")
+                    session.send(Frame.Text(json.encodeToString(HubEvent.serializer(), registeredEvent)))
+                    collected.await() shouldBe registeredEvent
                     session.close()
                     client.close()
                 }

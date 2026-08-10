@@ -1,5 +1,6 @@
 package dev.sophi.companion
 
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.schedule.notify.Notifier
@@ -30,7 +31,7 @@ class CompanionRuntime(
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val scheduleEngine = sophiRuntime.scheduleEngine(taskStore, runLog, notifier)
     private val sessionStates = mutableMapOf<String, MutableStateFlow<SessionState>>()
-    private val sessionMessages = mutableMapOf<String, MutableStateFlow<List<String>>>()
+    private val transcriptBuilders = mutableMapOf<String, SessionTranscriptBuilder>()
     private val confirmationDeferreds = mutableMapOf<String, CompletableDeferred<Map<String, Boolean>>>()
     private val pendingConfirmationSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private var pollingJob: Job? = null
@@ -108,13 +109,13 @@ class CompanionRuntime(
     private fun stateFlowFor(sessionId: String): MutableStateFlow<SessionState> =
         sessionStates.getOrPut(sessionId) { MutableStateFlow(SessionState.Idle) }
 
-    private fun messagesFlowFor(sessionId: String): MutableStateFlow<List<String>> =
-        sessionMessages.getOrPut(sessionId) { MutableStateFlow(emptyList()) }
+    private fun transcriptBuilderFor(sessionId: String): SessionTranscriptBuilder =
+        transcriptBuilders.getOrPut(sessionId) { SessionTranscriptBuilder() }
 
     fun sessionState(sessionId: String): StateFlow<SessionState> = stateFlowFor(sessionId)
 
-    /** Chat lines for a session, in order — each is prefixed "you: " or "sophi: ". */
-    fun sessionMessages(sessionId: String): StateFlow<List<String>> = messagesFlowFor(sessionId)
+    /** Chat lines for a session, in order — each is prefixed "you: " or "sophi: " (or "sophi (thinking): " / "sophi (tool)..."). */
+    fun sessionMessages(sessionId: String): StateFlow<List<String>> = transcriptBuilderFor(sessionId).transcript
 
     /** Ids of sessions currently awaiting confirmation, across all sessions. */
     val pendingConfirmations: StateFlow<Set<String>> = pendingConfirmationSessionIds
@@ -123,15 +124,24 @@ class CompanionRuntime(
 
     fun sendMessage(sessionId: String, input: String) {
         val state = stateFlowFor(sessionId)
-        val messages = messagesFlowFor(sessionId)
-        messages.value = messages.value + "you: $input"
+        val builder = transcriptBuilderFor(sessionId)
+        builder.startTurn(input)
         state.value = SessionState.Running
         scope.launch(SessionIdContext(sessionId)) {
             try {
-                val reply = sophiRuntime.turn(sessionId, input)
-                messages.value = messages.value + "sophi: $reply"
+                sophiRuntime.streamTurn(sessionId, input) { event ->
+                    when (event) {
+                        is TurnEvent.Token -> builder.onToken(event.text)
+                        is TurnEvent.ReasoningToken -> builder.onReasoningToken(event.text)
+                        is TurnEvent.ToolCallStarted -> builder.onToolCallStarted(event.name, event.argsJson)
+                        is TurnEvent.ToolCallFinished -> builder.onToolCallFinished(event.name, event.result, event.isError)
+                        else -> Unit // ConfirmationStarted/Finished — confirmation flow is unrelated, unchanged
+                    }
+                }
+                builder.endTurn()
                 state.value = SessionState.Idle
             } catch (e: Exception) {
+                builder.endTurn()
                 state.value = SessionState.Error(e.message ?: "unknown error")
             }
         }

@@ -46,4 +46,51 @@ class RemoteSessionRegistryTest : FunSpec({
         registry.stateFlowFor("never-seen").value shouldBe SessionState.Idle
         registry.remoteSessionIds() shouldBe emptySet()
     }
+
+    test("TurnStarted delegates to the session's SessionTranscriptBuilder.startTurn") {
+        val registry = RemoteSessionRegistry()
+        registry.onEvent(HubEvent.SessionRegistered("s1", null, 1L, "/repo"))
+        registry.onEvent(HubEvent.TurnStarted("s1", "hello there"))
+        registry.transcriptFor("s1").value shouldBe listOf("you: hello there")
+    }
+
+    test("Token, ReasoningToken, ToolCallStarted, ToolCallFinished all delegate to the builder") {
+        val registry = RemoteSessionRegistry()
+        registry.onEvent(HubEvent.SessionRegistered("s1", null, 1L, "/repo"))
+        registry.onEvent(HubEvent.TurnStarted("s1", "hi"))
+        registry.onEvent(HubEvent.ReasoningToken("s1", "thinking"))
+        registry.onEvent(HubEvent.Token("s1", "answer"))
+        registry.onEvent(HubEvent.ToolCallStarted("s1", "bash", "{}"))
+        registry.onEvent(HubEvent.ToolCallFinished("s1", "bash", "ok", isError = false))
+
+        registry.transcriptFor("s1").value shouldBe listOf(
+            "you: hi",
+            "sophi (thinking): thinking",
+            "sophi: answer",
+            "sophi (tool): bash({})",
+            "sophi (tool result): bash -> ok"
+        )
+    }
+
+    test("transcriptFor an unknown session defaults to an empty list without registering it") {
+        val registry = RemoteSessionRegistry()
+        registry.transcriptFor("never-seen").value shouldBe emptyList()
+        registry.remoteSessionIds() shouldBe emptySet()
+    }
+
+    test("lastActiveMillisFor reflects the most recent event's timestamp, not just the first") {
+        val registry = RemoteSessionRegistry()
+        registry.onEvent(HubEvent.SessionRegistered("s1", null, 1L, "/repo", timestamp = 100L))
+        registry.lastActiveMillisFor("s1") shouldBe 100L
+
+        registry.onEvent(HubEvent.TurnStarted("s1", "hi", timestamp = 200L))
+        registry.lastActiveMillisFor("s1") shouldBe 200L
+
+        registry.onEvent(HubEvent.Token("s1", "hello", timestamp = 300L))
+        registry.lastActiveMillisFor("s1") shouldBe 300L
+    }
+
+    test("lastActiveMillisFor an unknown session defaults to 0") {
+        RemoteSessionRegistry().lastActiveMillisFor("never-seen") shouldBe 0L
+    }
 })
