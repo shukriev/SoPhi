@@ -69,7 +69,63 @@ class HubClientTest : FunSpec({
                     delay(100)
                     server.sendCommand(HubCommand.SendMessage("s1", "hi from companion"))
 
-                    received.await() shouldBe HubCommand.SendMessage("s1", "hi from companion")
+        received.await() shouldBe HubCommand.SendMessage("s1", "hi from companion")
+                    client.close()
+                }
+            }
+        } finally {
+            server.stop()
+        }
+    }
+
+    test("isConnected is false before connect() and after a failed connect()") {
+        val port = freePort() // nothing bound here
+        runBlocking {
+            val client = HubClient(port, sessionId = "s1")
+            client.isConnected shouldBe false
+            client.connect(this)
+            client.isConnected shouldBe false
+            client.close()
+        }
+    }
+
+    test("isConnected is true after a successful connect()") {
+        val port = freePort()
+        val server = HubServer(port)
+        server.start()
+        try {
+            runBlocking {
+                withTimeout(5000) {
+                    val client = HubClient(port, sessionId = "s1")
+                    client.connect(this) shouldBe true
+                    client.isConnected shouldBe true
+                    client.close()
+                }
+            }
+        } finally {
+            server.stop()
+        }
+    }
+
+    test("isConnected becomes false again once the server closes the connection") {
+        val port = freePort()
+        val server = HubServer(port)
+        server.start()
+        try {
+            runBlocking {
+                withTimeout(5000) {
+                    val client = HubClient(port, sessionId = "s1")
+                    client.connect(this)
+                    client.isConnected shouldBe true
+
+                    server.stop()
+                    // Give the client's receive loop a moment to observe the closed socket.
+                    var attempts = 0
+                    while (client.isConnected && attempts < 50) {
+                        delay(50)
+                        attempts++
+                    }
+                    client.isConnected shouldBe false
                     client.close()
                 }
             }

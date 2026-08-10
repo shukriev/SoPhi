@@ -18,12 +18,17 @@ process with no channel for the companion to see a turn in progress or act on it
    splitting server/client across `sophi-companion`/`sophi-cli` directly (no shared build
    system between them today); putting it in `sophi-core` (no reason for every embedder to
    gain a Ktor dependency).
-2. **Companion owns the hub's lifecycle; CLI registration is on by default, best-effort.**
-   `CompanionRuntime` starts/stops `HubServer` with its own lifecycle. `sophi-cli` attempts one
-   connection on startup, unconditionally; unreachable is silent, not an error — a CLI session
-   must behave identically with or without a companion running. Rejected: an opt-in flag
-   (adds a step to remember for no safety benefit, since failure is already silent); a
-   standalone `sophi hub` daemon (no consumer but the companion itself).
+2. **Companion owns the hub's lifecycle; CLI registration is on by default, best-effort,
+   retried on a timer.** `CompanionRuntime` starts/stops `HubServer` with its own lifecycle.
+   `sophi-cli` runs `maintainHubConnection` in a background coroutine for the life of the
+   session: it retries `HubClient.connect()` every 5s while disconnected and re-registers on
+   each successful (re)connection; unreachable is silent, not an error — a CLI session must
+   behave identically with or without a companion running. (v1 shipped with a single connect
+   attempt at startup only; that meant a companion opened *after* an already-running CLI
+   session could never discover it, since the CLI had already given up for good — see
+   Consequences.) Rejected: an opt-in flag (adds a step to remember for no safety benefit,
+   since failure is already silent); a standalone `sophi hub` daemon (no consumer but the
+   companion itself).
 3. **Protocol reuses `TurnEvent` and `ConfirmationPolicy` shapes; no new `AgentHook` points.**
    `HubEvent`'s per-token/tool-call cases mirror `sophi-core`'s existing `TurnEvent`; the CLI
    forwards them via a second `onEvent` consumer alongside the one already driving terminal
@@ -57,6 +62,12 @@ process with no channel for the companion to see a turn in progress or act on it
   concurrently could silently drop one session's id. The extra background coroutines this
   design adds per `CompanionRuntime` instance made the race reproduce consistently; fixed with
   `MutableStateFlow.update { }` instead.
+- Fixed (post-merge): the v1 single-attempt-at-startup connect meant starting `sophi-cli`
+  before `sophi-companion` produced a session the companion could never see, even after it
+  started — the CLI process had already permanently given up on the one connection attempt it
+  ever made. `maintainHubConnection` (`sophi-cli`) now retries on a timer and `HubClient` gained
+  an `isConnected` property so the retry loop only opens a new connection when actually
+  disconnected, rather than reconnecting on top of a live one every tick.
 - Streamed token content for a remote CLI session is not yet accumulated into the companion's
   chat transcript (`sessionMessages`) — only status (idle/running/needs confirmation) is live;
   the transcript still updates once the session's file is flushed to disk at turn end. Wiring

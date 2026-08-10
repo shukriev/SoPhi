@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+- `sophi-cli`: a session started before `sophi-companion` never appeared in the companion's Sessions tab, even after the companion started — `HubClient.connect()` was only attempted once, at CLI startup. The CLI now retries the hub connection on a timer for the life of the session (ADR-023)
 
 ### Deprecated
 
