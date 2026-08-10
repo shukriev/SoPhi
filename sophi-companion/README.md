@@ -18,6 +18,17 @@ Multiple sessions run concurrently — each turn gets its own coroutine and its 
 `StateFlow`, so sending a message in one session never blocks the UI or another
 session.
 
+## Remote CLI sessions
+
+The companion embeds a local hub (`sophi-hub`, ADR-023) automatically — no setup. Any `sophi`
+CLI session started while the companion is running registers with it and appears in the
+Sessions tab with a live status badge (`Idle`/`Running`/`Needs confirmation`), tagged `(CLI)`.
+Opening it in the Chat tab lets you send it a message or answer its confirmation prompts —
+whichever side answers first wins, there's no hand-off/lock to manage. The hub binds
+`127.0.0.1` only. Configure the port via `hubPort` in `~/.sophi/companion.json` (default
+`8765`) if it collides with something else on your machine — pass the same value to `sophi-cli`
+via `--hub-port`.
+
 > **Not part of the Maven reactor.** `sophi-companion` is a standalone Gradle
 > project (Compose Desktop is Gradle-only). It resolves `dev.sophi:sophi-sdk`
 > from `mavenLocal()`, which is why the `mvn install` step below is mandatory
@@ -38,7 +49,7 @@ cd sophi-companion
 ```
 
 Re-run `mvn install -DskipTests` after any change to `sophi-core`, `sophi-ai`,
-`sophi-mcp`, `sophi-schedule`, or `sophi-sdk` — the Gradle build reads the
+`sophi-mcp`, `sophi-hub`, `sophi-schedule`, or `sophi-sdk` — the Gradle build reads the
 installed jar, not your working tree.
 
 ## Configuration
@@ -57,6 +68,7 @@ explaining what was wrong, so a broken config can be repaired in-app.
 | `contextWindowTokens` | Your model's real context window (see below) |
 | `maxTokens` | Max tokens generated per response |
 | `sessionsDir` / `mcpConfigPath` | Default to the `sophi-cli` locations |
+| `hubPort` | Port the embedded hub listens on for CLI sessions to register with (default `8765`) |
 
 **Claude:**
 
