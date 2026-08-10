@@ -23,6 +23,7 @@ repositories {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation("dev.sophi:sophi-sdk:1.0.0-SNAPSHOT")
+    implementation("dev.sophi:sophi-hub:1.0.0-SNAPSHOT")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation(kotlin("test"))
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")

@@ -14,6 +14,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -23,7 +24,8 @@ class CompanionRuntime(
     private val mcpConfigPath: java.nio.file.Path,
     private val taskStore: TaskStore,
     private val runLog: RunLog,
-    notifier: Notifier
+    notifier: Notifier,
+    hubPort: Int = 8765
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val scheduleEngine = sophiRuntime.scheduleEngine(taskStore, runLog, notifier)
@@ -34,13 +36,35 @@ class CompanionRuntime(
     private var pollingJob: Job? = null
     private val mcpConfigLoader = dev.sophi.mcp.config.McpConfigLoader()
     private val mcpConfigWriter = dev.sophi.mcp.config.McpConfigWriter()
+    private val hubServer = dev.sophi.hub.HubServer(hubPort)
+    val remoteSessions = RemoteSessionRegistry()
 
     init {
+        // Scope note (narrower than connecting as a client to an existing hub for a stale
+        // previous instance): a second companion instance must not crash on a bind conflict,
+        // but becoming a client of someone else's hub duplicates this feature's plumbing for an
+        // edge case. v1 degrades safely instead — local sessions keep working, remote CLI
+        // monitoring is just unavailable for this instance.
+        runCatching { hubServer.start() }
+            .onFailure { System.err.println("sophi-companion: hub unavailable (${it.message}) — remote CLI sessions will not appear") }
+        scope.launch {
+            hubServer.events.collect { event -> remoteSessions.onEvent(event) }
+        }
         scope.launch {
             mcpServers().filter { it.enabled }.forEach { config ->
                 runCatching { sophiRuntime.connectMcpServer(config) }
             }
         }
+    }
+
+    fun isRemote(sessionId: String): Boolean = sessionId in remoteSessions.remoteSessionIds()
+
+    suspend fun sendRemoteMessage(sessionId: String, text: String) {
+        hubServer.sendCommand(dev.sophi.hub.HubCommand.SendMessage(sessionId, text))
+    }
+
+    suspend fun respondToRemoteConfirmation(sessionId: String, callId: String, approved: Boolean) {
+        hubServer.sendCommand(dev.sophi.hub.HubCommand.ConfirmationResponse(sessionId, callId, approved))
     }
 
     fun mcpServers(): List<dev.sophi.mcp.config.McpServerConfig> = mcpConfigLoader.load(mcpConfigPath).servers
@@ -115,8 +139,14 @@ class CompanionRuntime(
 
     suspend fun awaitConfirmation(sessionId: String, requests: List<ConfirmationRequest>): Map<String, Boolean> {
         val state = stateFlowFor(sessionId)
+        // .update{} (atomic read-modify-write) rather than .value = .value + x — concurrent
+        // sessions each awaiting confirmation race on this same StateFlow, and a plain
+        // read-then-write is a lost-update: two sessions can both read the same base set before
+        // either write lands, so the second write silently clobbers the first session's id.
+        // Updated before state.value so a poller observing NeedsConfirmation also sees this
+        // session's id already present in pendingConfirmations.
+        pendingConfirmationSessionIds.update { it + sessionId }
         state.value = SessionState.NeedsConfirmation(requests)
-        pendingConfirmationSessionIds.value = pendingConfirmationSessionIds.value + sessionId
         val deferred = CompletableDeferred<Map<String, Boolean>>()
         confirmationDeferreds[sessionId] = deferred
         val result = deferred.await()
@@ -126,7 +156,7 @@ class CompanionRuntime(
 
     fun respondToConfirmation(sessionId: String, approved: Boolean) {
         val requests = (stateFlowFor(sessionId).value as? SessionState.NeedsConfirmation)?.requests ?: return
-        pendingConfirmationSessionIds.value = pendingConfirmationSessionIds.value - sessionId
+        pendingConfirmationSessionIds.update { it - sessionId }
         confirmationDeferreds.remove(sessionId)?.complete(requests.associate { it.callId to approved })
     }
 
@@ -142,6 +172,7 @@ class CompanionRuntime(
 
     fun close() {
         pollingJob?.cancel()
+        hubServer.stop()
         scope.cancel()
         sophiRuntime.close()
     }

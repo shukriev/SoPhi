@@ -15,9 +15,12 @@ import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
 
@@ -341,7 +344,84 @@ class CompanionRuntimeTest : FunSpec({
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionB).value == SessionState.Idle } }
         runtime.pendingConfirmations.value shouldBe emptySet()
     }
+
+    test("a CLI session registered via the hub appears in remoteSessions and can receive a message") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val hubPort = freePort()
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            hubPort = hubPort
+        )
+        runBlocking {
+            withTimeout(5000) {
+                val client = dev.sophi.hub.HubClient(hubPort, sessionId = "cli-1")
+                client.connect(this)
+                client.publish(dev.sophi.hub.HubEvent.SessionRegistered("cli-1", "remote", 1L, "/repo"))
+                waitUntil(timeoutMs = 2000) { runtime.remoteSessions.remoteSessionIds() == setOf("cli-1") }
+
+                runtime.isRemote("cli-1") shouldBe true
+                runtime.isRemote("some-local-id") shouldBe false
+
+                val received = async { client.commands.first() }
+                delay(100)
+                runtime.sendRemoteMessage("cli-1", "hello from companion")
+                received.await() shouldBe dev.sophi.hub.HubCommand.SendMessage("cli-1", "hello from companion")
+
+                client.close()
+            }
+        }
+        runtime.close()
+    }
+
+    test("respondToRemoteConfirmation publishes a ConfirmationResponse for the right session and callId") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val hubPort = freePort()
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            hubPort = hubPort
+        )
+        runBlocking {
+            withTimeout(5000) {
+                val client = dev.sophi.hub.HubClient(hubPort, sessionId = "cli-1")
+                client.connect(this)
+                client.publish(dev.sophi.hub.HubEvent.SessionRegistered("cli-1", null, 1L, "/repo"))
+                delay(200)
+
+                val received = async { client.commands.first() }
+                delay(100)
+                runtime.respondToRemoteConfirmation("cli-1", callId = "c1", approved = true)
+                received.await() shouldBe dev.sophi.hub.HubCommand.ConfirmationResponse("cli-1", "c1", true)
+
+                client.close()
+            }
+        }
+        runtime.close()
+    }
 })
+
+private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 
 private suspend fun waitUntil(timeoutMs: Long, poll: () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs

@@ -137,4 +137,15 @@ class SettingsTest : FunSpec({
 
         settings.validationError() shouldContain "must not exceed"
     }
+
+    test("hubPort defaults to 8765") {
+        CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m").hubPort shouldBe 8765
+    }
+
+    test("hubPort round-trips through SettingsStore save/load") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        store.save(CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m", hubPort = 9999))
+        store.load()?.hubPort shouldBe 9999
+    }
 })

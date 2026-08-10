@@ -33,6 +33,10 @@ import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
+import dev.sophi.hub.HubClient
+import dev.sophi.hub.HubCommand
+import dev.sophi.hub.HubEvent
+import dev.sophi.hub.toHubEvent
 import dev.sophi.calendar.tools.CreateCalendarEventTool
 import dev.sophi.calendar.tools.DeleteCalendarEventTool
 import dev.sophi.calendar.tools.GetCalendarEventTool
@@ -48,6 +52,8 @@ import dev.sophi.mcp.config.McpConfigLoader
 import dev.sophi.skills.SkillRegistry
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
@@ -167,12 +173,35 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             "a rule has no opinion on) runs unattended for the whole session. Fixed once set — no " +
             "/auto toggle while in this mode. Overrides --auto if both are passed."
     ).flag(default = false)
+    private val hubPort: Int by option(
+        "--hub-port",
+        help = "Port a running sophi-companion's hub listens on. This session registers with " +
+            "it automatically if reachable; unreachable is silent, not an error."
+    ).int().default(8765)
+    private val noRemote: Boolean by option(
+        "--no-remote",
+        help = "Do not register this session with a running companion's hub — stays fully " +
+            "local, same as every sophi-cli release before this flag existed."
+    ).flag(default = false)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model, llmTimeoutSeconds, llmMaxRetries)
         val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
         val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
+        val hubClient: HubClient? = if (noRemote) null else HubClient(hubPort, session.id)
+        val hubConnected = hubClient?.connect(this) ?: false
+        if (hubConnected) {
+            hubClient?.publish(
+                HubEvent.SessionRegistered(
+                    sessionId = session.id,
+                    title = session.title,
+                    pid = ProcessHandle.current().pid(),
+                    cwd = System.getProperty("user.dir")
+                )
+            )
+        }
+        val effectiveHubClient = hubClient.takeIf { hubConnected }
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
         val inputSource: InputSource =
@@ -229,7 +258,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt)
         runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
         val registry = ToolRegistry()
-        val manualConfirmationPolicy = TerminalConfirmationPolicy(mordantTerminal, inputSource)
+        val manualConfirmationPolicy: ConfirmationPolicy = RemoteAwareConfirmationPolicy(
+            TerminalConfirmationPolicy(mordantTerminal, inputSource),
+            effectiveHubClient,
+            session.id
+        )
         val toggleableConfirmationPolicy: ToggleableConfirmationPolicy? = if (godMode) null else {
             val autoModePolicy = AutoModeConfirmationPolicy(
                 registry,
@@ -344,6 +377,10 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
+        val onEvent: suspend (dev.sophi.core.agent.TurnEvent) -> Unit = { event ->
+            bridge(event)
+            event.toHubEvent(session.id)?.let { effectiveHubClient?.publish(it) }
+        }
         val slashHandler = SlashHandler(
             sessionManager, compactor, config, learningPlugin,
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
@@ -354,7 +391,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             planLog = planLog,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
-            onEvent = bridge,
+            onEvent = onEvent,
             input = inputSource
         ) { mordantTerminal.println(it) }
         if (tokenViewKey.length != 1) {
@@ -362,7 +399,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 "token view: --token-view-key must be a single character, got \"$tokenViewKey\" — using default 'T'"))
         }
         val turnController = TurnController(
-            loop, config, inputSource, liveRegion, onEvent = bridge,
+            loop, config, inputSource, liveRegion, onEvent = onEvent,
             tokenViewKey = tokenViewKey.singleOrNull() ?: 'T',
             autoExitTokenView = autoExitTokenView,
             contextProvider = { sess, input ->
@@ -382,13 +419,25 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         ) {
             mordantTerminal.println(it)
         }
-        val engine = TuiEngine(turnController, slashHandler, inputSource)
+        val hubMessages = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        if (effectiveHubClient != null) {
+            launch {
+                effectiveHubClient.commands
+                    .filterIsInstance<HubCommand.SendMessage>()
+                    .collect { hubMessages.trySend(it.text) }
+            }
+        }
+        val engine = TuiEngine(turnController, slashHandler, inputSource, hubMessages.takeIf { effectiveHubClient != null })
 
         try {
             engine.run(session)
         } finally {
             // TuiEngine.run returns on both exit paths (exit/quit and EOF); record the outcome once.
             runCatching { learningPlugin.recordSessionEnd(session.id) }
+            runCatching {
+                if (hubConnected) effectiveHubClient?.publish(HubEvent.SessionClosed(session.id))
+                hubClient?.close()
+            }
             runCatching {
                 memoryPlugin?.let { mp ->
                     mp.consolidateIfDue()?.let { report ->

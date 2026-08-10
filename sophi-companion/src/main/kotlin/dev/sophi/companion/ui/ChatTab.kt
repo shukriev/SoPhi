@@ -19,11 +19,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
 import dev.sophi.companion.SessionState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @Composable
 fun ChatTab(runtime: CompanionRuntime, activeSessionId: String) {
     var input by remember { mutableStateOf("") }
-    val state by runtime.sessionState(activeSessionId).collectAsState()
+    val scope = remember { CoroutineScope(Dispatchers.Default) }
+    val isRemote = runtime.isRemote(activeSessionId)
+    val state by (if (isRemote) runtime.remoteSessions.stateFlowFor(activeSessionId) else runtime.sessionState(activeSessionId))
+        .collectAsState()
     val history by runtime.sessionMessages(activeSessionId).collectAsState()
     val pending = state as? SessionState.NeedsConfirmation
 
@@ -42,8 +48,20 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String) {
         if (pending != null) {
             Text("Sophi wants to run: " + pending.requests.joinToString(", ") { "${it.toolName} (${it.riskLevel})" })
             Row {
-                Button(onClick = { runtime.respondToConfirmation(activeSessionId, true) }) { Text("Approve") }
-                Button(onClick = { runtime.respondToConfirmation(activeSessionId, false) }) { Text("Deny") }
+                Button(onClick = {
+                    if (isRemote) {
+                        scope.launch { pending.requests.forEach { runtime.respondToRemoteConfirmation(activeSessionId, it.callId, true) } }
+                    } else {
+                        runtime.respondToConfirmation(activeSessionId, true)
+                    }
+                }) { Text("Approve") }
+                Button(onClick = {
+                    if (isRemote) {
+                        scope.launch { pending.requests.forEach { runtime.respondToRemoteConfirmation(activeSessionId, it.callId, false) } }
+                    } else {
+                        runtime.respondToConfirmation(activeSessionId, false)
+                    }
+                }) { Text("Deny") }
             }
         }
         Row {
@@ -56,7 +74,11 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String) {
             Button(
                 enabled = state != SessionState.Running && state !is SessionState.NeedsConfirmation && input.isNotBlank(),
                 onClick = {
-                    runtime.sendMessage(activeSessionId, input)
+                    if (isRemote) {
+                        scope.launch { runtime.sendRemoteMessage(activeSessionId, input) }
+                    } else {
+                        runtime.sendMessage(activeSessionId, input)
+                    }
                     input = ""
                 }
             ) { Text("Send") }

@@ -13,7 +13,10 @@ import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withTimeout
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
@@ -67,5 +70,35 @@ class TuiEngineTest : FunSpec({
     test("run() stops when the input source is exhausted (EOF)") {
         buildEngine(emptyList()).run(AgentSession(id = "s1"))
         verify(exactly = 0) { provider.stream(any()) }
+    }
+
+    test("run() processes a hub-originated message the same way as a typed line") {
+        val input = object : InputSource {
+            // Never returns — simulates the user not typing anything, so the hub message must
+            // be what actually drives the loop forward.
+            override suspend fun readLine(): String? { delay(Long.MAX_VALUE); return null }
+            override suspend fun awaitEsc() { delay(Long.MAX_VALUE) }
+            override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) { delay(Long.MAX_VALUE) }
+            override suspend fun awaitYesNo(): Boolean = false
+        }
+        val turnController = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) {}
+        val hubMessages = Channel<String>(Channel.UNLIMITED)
+        val engine = TuiEngine(turnController, slashHandler, input, hubMessages)
+
+        hubMessages.trySend("hello from companion")
+        hubMessages.trySend("exit")
+
+        withTimeout(5000) { engine.run(AgentSession(id = "s1")) }
+        verify(exactly = 1) { provider.stream(any()) }
+    }
+
+    test("run() still responds to a typed line when a hub channel is present but empty") {
+        val hubMessages = Channel<String>(Channel.UNLIMITED)
+        val input = ScriptedInputSource(listOf("hello", "exit"))
+        val turnController = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) {}
+        val engine = TuiEngine(turnController, slashHandler, input, hubMessages)
+
+        withTimeout(5000) { engine.run(AgentSession(id = "s1")) }
+        verify(exactly = 1) { provider.stream(any()) }
     }
 })

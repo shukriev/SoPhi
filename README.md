@@ -36,6 +36,7 @@ app — same core, three ways to run it.
 | 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
 | 🏛️ `sophi-memory` | Long-term memory (Jane's Theory): a memory-palace store behind a technique-agnostic `MemoryTechnique` SPI |
 | 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
+| 📡 `sophi-hub` | Local WebSocket hub (`HubServer`/`HubClient`) — lets `sophi-companion` monitor and remote-control running `sophi-cli` sessions |
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
@@ -84,6 +85,8 @@ sophi --memory                # enable long-term memory (see "Cross-cutting: mem
 sophi --embedding-model <m>   # embedding model for --memory, e.g. nomic-embed-text
 sophi --embedding-base-url <url>   # embeddings endpoint (defaults to --base-url)
 sophi --embedding-dimensions <n>   # vector size (768 nomic-embed-text, 1536 OpenAI; default 1536)
+sophi --hub-port <port>       # port a running companion's hub listens on (default: 8765)
+sophi --no-remote             # don't register with a running companion's hub for this session
 ```
 
 Examples with local models:
@@ -137,6 +140,11 @@ concisely. You cannot modify any files.
 The frontmatter's `name` and `description` are what the main agent sees when
 choosing which subagent to delegate to; the Markdown body becomes that
 subagent's system prompt. Delegation nests up to 3 levels deep by default.
+
+**Remote monitoring:** if `sophi-companion` is running, every `sophi-cli` session registers
+with its embedded hub automatically — the companion's Sessions tab shows it live, and you can
+send it a message or answer its confirmation prompts from there. No companion running, or
+`--no-remote` passed: behaves exactly as before, no difference. See ADR-023.
 
 **Good for:** local dev-tool style usage, exploring the agent loop, quick
 one-off tasks — same category as a REPL.
@@ -254,6 +262,13 @@ On first launch it asks for a model and API key and writes
 `ANTHROPIC_API_KEY`. It reuses your existing `~/.sophi/sessions` and
 `~/.sophi/mcp.json`, so sessions you started in `sophi-cli` show up in the
 Sessions tab, and MCP servers can be enabled/disabled live without a restart.
+It also embeds a small local hub (ADR-023): any `sophi-cli` session you run
+while the companion is open registers with it automatically (no setup, no
+flag) and streams its live status, tokens, and confirmation prompts into the
+same Sessions/Chat tabs — you can send it a message or approve/deny its
+confirmation prompts from the companion, same as a session you started
+there. Pass `--no-remote` to a `sophi-cli` invocation to keep it fully local
+instead.
 
 Build a native bundle (`.dmg` on macOS, `.deb`/AppImage on Linux, `.msi` on
 Windows) with `jpackage`:

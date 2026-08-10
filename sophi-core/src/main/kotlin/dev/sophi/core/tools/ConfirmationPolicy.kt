@@ -1,5 +1,6 @@
 package dev.sophi.core.tools
 
+@kotlinx.serialization.Serializable
 data class ConfirmationRequest(
     val callId: String,
     val toolName: String,
