@@ -48,8 +48,20 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String) {
         if (pending != null) {
             Text("Sophi wants to run: " + pending.requests.joinToString(", ") { "${it.toolName} (${it.riskLevel})" })
             Row {
-                Button(onClick = { runtime.respondToConfirmation(activeSessionId, true) }) { Text("Approve") }
-                Button(onClick = { runtime.respondToConfirmation(activeSessionId, false) }) { Text("Deny") }
+                Button(onClick = {
+                    if (isRemote) {
+                        scope.launch { pending.requests.forEach { runtime.respondToRemoteConfirmation(activeSessionId, it.callId, true) } }
+                    } else {
+                        runtime.respondToConfirmation(activeSessionId, true)
+                    }
+                }) { Text("Approve") }
+                Button(onClick = {
+                    if (isRemote) {
+                        scope.launch { pending.requests.forEach { runtime.respondToRemoteConfirmation(activeSessionId, it.callId, false) } }
+                    } else {
+                        runtime.respondToConfirmation(activeSessionId, false)
+                    }
+                }) { Text("Deny") }
             }
         }
         Row {

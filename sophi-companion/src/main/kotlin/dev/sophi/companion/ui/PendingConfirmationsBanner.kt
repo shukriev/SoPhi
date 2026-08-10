@@ -12,15 +12,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
+import dev.sophi.companion.SessionState
 
 @Composable
 fun PendingConfirmationsBanner(runtime: CompanionRuntime, activeSessionId: String, onJump: (String) -> Unit) {
     val pending by runtime.pendingConfirmations.collectAsState()
-    val otherPending = (pending - activeSessionId).toList()
+    val remotePending = runtime.remoteSessions.remoteSessionIds()
+        .filter { runtime.remoteSessions.stateFlowFor(it).value is SessionState.NeedsConfirmation }
+    val otherPending = ((pending + remotePending) - activeSessionId).toList()
     if (otherPending.isEmpty()) return
 
     val titleById = remember(otherPending) {
-        runtime.sessionManager.list().associate { it.id to (it.title ?: it.id) }
+        val local = runtime.sessionManager.list().associate { it.id to (it.title ?: it.id) }
+        val remote = runtime.remoteSessions.remoteSessionIds()
+            .associateWith { runtime.remoteSessions.titleFor(it) ?: it }
+        local + remote
     }
 
     Column {
