@@ -40,6 +40,10 @@
         </dependency>
         <dependency>
             <groupId>dev.sophi</groupId>
+            <artifactId>sophi-hub</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.sophi</groupId>
             <artifactId>sophi-schedule</artifactId>
         </dependency>
         <dependency>
