@@ -447,4 +447,24 @@ class SophiRuntimeTest : FunSpec({
 
         rt.removeSkill("ghost") shouldBe false
     }
+
+    test("setting RuntimeBuilder.mcpConfigPath (not calling .mcpConfig()) stores the path but does not trigger build()'s auto-connect") {
+        val dir = createTempDirectory("sophi-sdk-mcp-test")
+        val path = dir.resolve("mcp.json")
+        McpConfigWriter().write(path, McpConfig(servers = listOf(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x"), enabled = true))))
+        val mcpManager = mockk<McpClientManager>()
+        coEvery { mcpManager.connect(any()) } returns emptyList()
+
+        val builder = RuntimeBuilder()
+        builder.provider = mockk<LLMProvider>()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-test")
+        builder.mcpConfigPath = path
+        val rt = builder
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .mcpClientManager(mcpManager)
+            .build()
+
+        rt.mcpServers().map { it.name } shouldBe listOf("fs")
+        coVerify(exactly = 1) { mcpManager.connect(emptyList()) }
+    }
 })
