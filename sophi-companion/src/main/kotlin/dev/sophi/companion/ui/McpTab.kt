@@ -1,5 +1,6 @@
 package dev.sophi.companion.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
@@ -26,9 +28,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+private sealed class McpEditingState {
+    object New : McpEditingState()
+    data class Existing(val config: McpServerConfig) : McpEditingState()
+}
+
 @Composable
 fun McpTab(runtime: CompanionRuntime) {
     var servers by remember { mutableStateOf(listOf<McpServerConfig>()) }
+    var editing by remember { mutableStateOf<McpEditingState?>(null) }
     val scope = remember { CoroutineScope(Dispatchers.Default) }
 
     fun refresh() { servers = runtime.mcpServers() }
@@ -36,7 +44,10 @@ fun McpTab(runtime: CompanionRuntime) {
     LaunchedEffect(Unit) { refresh() }
 
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        Text("MCP servers", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("MCP servers", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { editing = McpEditingState.New }) { Text("+ Add server") }
+        }
         LazyColumn {
             items(servers) { server ->
                 ListItem(
@@ -53,9 +64,21 @@ fun McpTab(runtime: CompanionRuntime) {
                             }
                         }
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().clickable { editing = McpEditingState.Existing(server) }
                 )
             }
         }
+    }
+
+    editing?.let { state ->
+        AddEditMcpServerDialog(
+            existing = (state as? McpEditingState.Existing)?.config,
+            existingNames = servers.map { it.name }.toSet(),
+            onSave = { config ->
+                scope.launch { runtime.addOrUpdateMcpServer(config); refresh() }
+                editing = null
+            },
+            onDismiss = { editing = null }
+        )
     }
 }
