@@ -24,6 +24,7 @@ class RuntimeBuilder {
     var maxTokens: Int = 4096
     var systemPrompt: String? = null
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
+    var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
 
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
@@ -92,6 +93,6 @@ class RuntimeBuilder {
             else agentConfig
         } ?: agentConfig
 
-        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window)
+        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir)
     }
 }

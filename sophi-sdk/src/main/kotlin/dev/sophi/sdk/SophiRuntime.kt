@@ -18,6 +18,11 @@ import dev.sophi.schedule.engine.ScheduleEngine
 import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import dev.sophi.skills.InstallResult
+import dev.sophi.skills.Skill
+import dev.sophi.skills.SkillInstaller
+import dev.sophi.skills.SkillRegistry
+import java.nio.file.Path
 
 class SophiRuntime internal constructor(
     internal val agentLoop: AgentLoop,
@@ -33,13 +38,20 @@ class SophiRuntime internal constructor(
     internal val learningPlugin: LearningPlugin? = null,
     private val toolRegistry: ToolRegistry = ToolRegistry(),
     private val provider: LLMProvider? = null,
-    private val contextWindowTokens: Int = 0
+    private val contextWindowTokens: Int = 0,
+    private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
 ) {
+    private val skillInstaller = SkillInstaller()
+
     fun close() {
         mcpClientManager?.close()
     }
 
     fun toolNames(): List<String> = toolRegistry.names()
+
+    fun skills(): List<Pair<String, Skill>> = SkillRegistry.load(skillsDir, skillsDir).all()
+    fun installSkill(source: String): InstallResult = skillInstaller.install(source, skillsDir)
+    fun removeSkill(id: String): Boolean = skillInstaller.remove(skillsDir, id)
 
     suspend fun newSession(title: String? = null): String =
         sessionManager.create(title).also { sessionManager.save(it) }.id.also { id ->
