@@ -64,7 +64,7 @@ class RuntimeBuilder {
                 dev.sophi.schedule.store.RunLog(dir.resolve("runs.jsonl"))
             ))
         }
-        val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers } ?: emptyList()
+        val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers.filter { server -> server.enabled } } ?: emptyList()
         runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
