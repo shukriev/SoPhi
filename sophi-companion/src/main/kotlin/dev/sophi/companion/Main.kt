@@ -36,9 +36,13 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         maxTokens = settings.maxTokens
         contextWindowTokens(settings.contextWindowTokens)
         sessionsDir = Path.of(settings.sessionsDir)
-        // Deliberately not calling .mcpConfig(path) here: Task 13 connects only the servers
-        // marked enabled in .sophi/mcp.json, via SophiRuntime.connectMcpServer, instead of
-        // RuntimeBuilder's own unconditional "connect everything in the file" behavior.
+        // The plain mcpConfigPath var (not .mcpConfig(path)) — side-effect-free, just lets
+        // SophiRuntime's mcpServers()/addOrUpdateMcpServer()/etc. find the file later.
+        // .mcpConfig(path) would additionally trigger build()'s synchronous, blocking
+        // connect-every-enabled-server step, which would freeze this composable's first
+        // render; CompanionRuntime.init{} connects enabled servers itself, asynchronously,
+        // once the runtime exists — see the scope.launch block there.
+        mcpConfigPath = Path.of(settings.mcpConfigPath)
         confirmationPolicy(GuiConfirmationPolicy(
             notify = { t, b -> NativeNotifications.send(t, b) },
             // Routed per session via SessionIdContext (see CompanionRuntime.sendMessage):
