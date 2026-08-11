@@ -9,9 +9,10 @@ Click the tray icon to open the window: a left sidebar lists every session (loca
 any `sophi-cli` sessions registered via the embedded hub) with a live status dot —
 Idle (gray), Running (green), Needs confirmation (orange), Error (red) — sorted so
 anything needing attention floats to the top, then by most recently active. Below the
-session list, fixed nav items open **MCP** (configured servers — enable/disable, remove)
-and **Goals** (scheduled tasks — create, run now). Selecting a session opens its chat in
-the main panel.
+session list, fixed nav items open **MCP** (configured servers — enable/disable, remove),
+**Goals** (scheduled tasks — create, run now), and **Skills** (installed skills — add
+from a local path or git URL, remove). Selecting a session opens its chat in the main
+panel.
 
 Local sessions stream live, token by token — same as CLI sessions.
 
