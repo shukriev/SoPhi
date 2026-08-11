@@ -61,6 +61,7 @@ private sealed class Selection {
     data class Session(val sessionId: String) : Selection()
     object Mcp : Selection()
     object Goals : Selection()
+    object Skills : Selection()
 }
 
 private data class SidebarSource(val id: String, val title: String, val isRemote: Boolean, val lastActiveMillis: Long)
@@ -109,6 +110,7 @@ fun AppShell(runtime: CompanionRuntime) {
             onSelectSession = { selected = Selection.Session(it) },
             onSelectMcp = { selected = Selection.Mcp },
             onSelectGoals = { selected = Selection.Goals },
+            onSelectSkills = { selected = Selection.Skills },
             onNewSession = {
                 scope.launch {
                     val id = runtime.newSession()
@@ -145,6 +147,7 @@ fun AppShell(runtime: CompanionRuntime) {
                 }
                 Selection.Mcp -> McpTab(runtime)
                 Selection.Goals -> GoalsTab(runtime)
+                Selection.Skills -> SkillsTab(runtime)
                 null -> Text("Starting…")
             }
         }
@@ -158,6 +161,7 @@ private fun Sidebar(
     onSelectSession: (String) -> Unit,
     onSelectMcp: () -> Unit,
     onSelectGoals: () -> Unit,
+    onSelectSkills: () -> Unit,
     onNewSession: () -> Unit,
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
@@ -192,6 +196,7 @@ private fun Sidebar(
 
         NavRow(label = "MCP", selected = selected == Selection.Mcp, onClick = onSelectMcp)
         NavRow(label = "Goals", selected = selected == Selection.Goals, onClick = onSelectGoals)
+        NavRow(label = "Skills", selected = selected == Selection.Skills, onClick = onSelectSkills)
     }
 }
 
