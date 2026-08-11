@@ -3,6 +3,8 @@ package dev.sophi.companion
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.sdk.SophiRuntime
+import dev.sophi.skills.InstallResult
+import dev.sophi.skills.Skill
 import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
@@ -69,6 +71,10 @@ class CompanionRuntime(
     }
 
     fun mcpServers(): List<dev.sophi.mcp.config.McpServerConfig> = mcpConfigLoader.load(mcpConfigPath).servers
+
+    fun skills(): List<Pair<String, Skill>> = sophiRuntime.skills()
+    fun installSkill(source: String): InstallResult = sophiRuntime.installSkill(source)
+    fun removeSkill(id: String): Boolean = sophiRuntime.removeSkill(id)
 
     suspend fun addOrUpdateMcpServer(config: dev.sophi.mcp.config.McpServerConfig) {
         val current = mcpConfigLoader.load(mcpConfigPath)
