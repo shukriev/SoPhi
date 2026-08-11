@@ -205,9 +205,6 @@ tasks.matching { it.name in packageFormatTasks }.configureEach {
   `SystemTray` icon opens its context menu instead of firing `onAction` — use
   "Open Sophi" from the menu. Linux and Windows are expected to fire `onAction`
   on click.
-- **The MCP tab has no add/edit form.** `CompanionRuntime.addOrUpdateMcpServer`
-  exists and is tested, but only list/enable/disable/remove are wired to the UI.
-  Add servers by editing `~/.sophi/mcp.json`.
 - **No automated UI tests.** Every non-UI class has a Kotest suite
   (`./gradlew test`); the Compose UI is verified manually.
 - No auto-update, no state syncing between installed copies.
