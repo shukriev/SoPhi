@@ -8,6 +8,7 @@ import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
+import kotlin.io.path.isDirectory
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
@@ -162,6 +163,64 @@ class SkillInstallerTest : FunSpec({
                 installer.install("https://example.invalid/does-not-exist.git", target)
             }
             ex.message shouldContain "git clone failed"
+        } finally {
+            target.toFile().deleteRecursively()
+        }
+    }
+
+    test("remove deletes a single-file skill and returns true") {
+        val target = createTempDirectory("target")
+        try {
+            target.resolve("solo.md").writeText("---\ntitle: Solo\n---\n\nBody.")
+            val removed = installer.remove(target, "solo")
+            removed shouldBe true
+            target.resolve("solo.md").exists() shouldBe false
+        } finally {
+            target.toFile().deleteRecursively()
+        }
+    }
+
+    test("remove also deletes the bundle directory for a multi-file skill") {
+        val source = createTempDirectory("source")
+        val target = createTempDirectory("target")
+        try {
+            writeSkill(
+                source, "with-assets", "name: With Assets\ndescription: has a helper",
+                "Run helper.sh.", extraFile = "helper.sh" to "echo hi"
+            )
+            installer.install(source.toString(), target)
+            target.resolve("with-assets").isDirectory() shouldBe true
+
+            val removed = installer.remove(target, "with-assets")
+
+            removed shouldBe true
+            target.resolve("with-assets.md").exists() shouldBe false
+            target.resolve("with-assets").exists() shouldBe false
+        } finally {
+            source.toFile().deleteRecursively()
+            target.toFile().deleteRecursively()
+        }
+    }
+
+    test("remove returns false, does not throw, for an id that doesn't exist") {
+        val target = createTempDirectory("target")
+        try {
+            installer.remove(target, "ghost") shouldBe false
+        } finally {
+            target.toFile().deleteRecursively()
+        }
+    }
+
+    test("remove leaves other skills in the same directory untouched") {
+        val target = createTempDirectory("target")
+        try {
+            target.resolve("keep.md").writeText("---\ntitle: Keep\n---\n\nStays.")
+            target.resolve("gone.md").writeText("---\ntitle: Gone\n---\n\nGoes.")
+
+            installer.remove(target, "gone")
+
+            target.resolve("gone.md").exists() shouldBe false
+            target.resolve("keep.md").readText() shouldContain "Stays."
         } finally {
             target.toFile().deleteRecursively()
         }
