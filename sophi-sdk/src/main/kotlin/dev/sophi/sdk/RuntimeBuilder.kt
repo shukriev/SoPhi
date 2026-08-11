@@ -25,16 +25,12 @@ class RuntimeBuilder {
     var systemPrompt: String? = null
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
-    /** Remembered on the built SophiRuntime for mcpServers()/addOrUpdateMcpServer()/etc. —
-     *  setting this alone has no side effect; it does not trigger build()'s auto-connect
-     *  (see mcpConfig(path) for that). */
-    var mcpConfigPath: Path? = null
 
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
     private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
     private var grants: Set<String> = emptySet()
-    private var autoConnectMcpConfigPath: Path? = null
+    private var mcpConfigPath: Path? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var learningConfig: LearningConfig? = null
     private var scheduleDir: Path? = null
@@ -44,7 +40,7 @@ class RuntimeBuilder {
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
     fun grants(names: Set<String>): RuntimeBuilder = apply { grants = names }
-    fun mcpConfig(path: Path): RuntimeBuilder = apply { autoConnectMcpConfigPath = path }
+    fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
     fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
     fun schedule(dir: Path): RuntimeBuilder = apply { scheduleDir = dir }
@@ -68,10 +64,8 @@ class RuntimeBuilder {
                 dev.sophi.schedule.store.RunLog(dir.resolve("runs.jsonl"))
             ))
         }
-        val mcpServersToAutoConnect = autoConnectMcpConfigPath
-            ?.let { McpConfigLoader().load(it).servers.filter { server -> server.enabled } }
-            ?: emptyList()
-        runBlocking { mcpClientManager.connect(mcpServersToAutoConnect) }.forEach { registry.register(it) }
+        val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers } ?: emptyList()
+        runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
             model = model,
@@ -99,6 +93,6 @@ class RuntimeBuilder {
             else agentConfig
         } ?: agentConfig
 
-        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, mcpConfigPath)
+        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir)
     }
 }

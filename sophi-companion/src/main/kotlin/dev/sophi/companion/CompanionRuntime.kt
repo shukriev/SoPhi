@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 class CompanionRuntime(
     private val sophiRuntime: SophiRuntime,
     val sessionManager: dev.sophi.core.session.SessionManager,
+    private val mcpConfigPath: java.nio.file.Path,
     private val taskStore: TaskStore,
     private val runLog: RunLog,
     notifier: Notifier,
@@ -36,6 +37,8 @@ class CompanionRuntime(
     private val confirmationDeferreds = mutableMapOf<String, CompletableDeferred<Map<String, Boolean>>>()
     private val pendingConfirmationSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private var pollingJob: Job? = null
+    private val mcpConfigLoader = dev.sophi.mcp.config.McpConfigLoader()
+    private val mcpConfigWriter = dev.sophi.mcp.config.McpConfigWriter()
     private val hubServer = dev.sophi.hub.HubServer(hubPort)
     val remoteSessions = RemoteSessionRegistry()
 
@@ -67,15 +70,33 @@ class CompanionRuntime(
         hubServer.sendCommand(dev.sophi.hub.HubCommand.ConfirmationResponse(sessionId, callId, approved))
     }
 
-    fun mcpServers(): List<dev.sophi.mcp.config.McpServerConfig> = sophiRuntime.mcpServers()
+    fun mcpServers(): List<dev.sophi.mcp.config.McpServerConfig> = mcpConfigLoader.load(mcpConfigPath).servers
 
     fun skills(): List<Pair<String, Skill>> = sophiRuntime.skills()
     fun installSkill(source: String): InstallResult = sophiRuntime.installSkill(source)
     fun removeSkill(id: String): Boolean = sophiRuntime.removeSkill(id)
 
-    suspend fun addOrUpdateMcpServer(config: dev.sophi.mcp.config.McpServerConfig) = sophiRuntime.addOrUpdateMcpServer(config)
-    suspend fun removeMcpServer(name: String) = sophiRuntime.removeMcpServer(name)
-    suspend fun setMcpServerEnabled(name: String, enabled: Boolean) = sophiRuntime.setMcpServerEnabled(name, enabled)
+    suspend fun addOrUpdateMcpServer(config: dev.sophi.mcp.config.McpServerConfig) {
+        val current = mcpConfigLoader.load(mcpConfigPath)
+        val updated = current.servers.filterNot { it.name == config.name } + config
+        mcpConfigWriter.write(mcpConfigPath, current.copy(servers = updated))
+        sophiRuntime.disconnectMcpServer(config.name)
+        if (config.enabled) sophiRuntime.connectMcpServer(config)
+    }
+
+    suspend fun removeMcpServer(name: String) {
+        val current = mcpConfigLoader.load(mcpConfigPath)
+        mcpConfigWriter.write(mcpConfigPath, current.copy(servers = current.servers.filterNot { it.name == name }))
+        sophiRuntime.disconnectMcpServer(name)
+    }
+
+    suspend fun setMcpServerEnabled(name: String, enabled: Boolean) {
+        val current = mcpConfigLoader.load(mcpConfigPath)
+        val config = current.servers.find { it.name == name } ?: return
+        val updated = config.copy(enabled = enabled)
+        mcpConfigWriter.write(mcpConfigPath, current.copy(servers = current.servers.map { if (it.name == name) updated else it }))
+        if (enabled) sophiRuntime.connectMcpServer(updated) else sophiRuntime.disconnectMcpServer(name)
+    }
 
     fun tasks(): List<dev.sophi.schedule.model.ScheduledTask> = taskStore.list()
 

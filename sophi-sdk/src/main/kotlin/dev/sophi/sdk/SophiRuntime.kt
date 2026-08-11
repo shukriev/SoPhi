@@ -13,8 +13,6 @@ import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
-import dev.sophi.mcp.config.McpConfigLoader
-import dev.sophi.mcp.config.McpConfigWriter
 import dev.sophi.mcp.config.McpServerConfig
 import dev.sophi.schedule.engine.ScheduleEngine
 import dev.sophi.schedule.notify.Notifier
@@ -41,12 +39,9 @@ class SophiRuntime internal constructor(
     private val toolRegistry: ToolRegistry = ToolRegistry(),
     private val provider: LLMProvider? = null,
     private val contextWindowTokens: Int = 0,
-    private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
-    private val mcpConfigPath: Path? = null
+    private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
 ) {
     private val skillInstaller = SkillInstaller()
-    private val mcpConfigLoader = McpConfigLoader()
-    private val mcpConfigWriter = McpConfigWriter()
 
     fun close() {
         mcpClientManager?.close()
@@ -81,40 +76,6 @@ class SophiRuntime internal constructor(
             pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = e))
             throw e
         }
-    }
-
-    fun mcpServers(): List<McpServerConfig> {
-        val path = requireMcpConfigPath()
-        return mcpConfigLoader.load(path).servers
-    }
-
-    suspend fun addOrUpdateMcpServer(config: McpServerConfig) {
-        val path = requireMcpConfigPath()
-        val current = mcpConfigLoader.load(path)
-        val updated = current.servers.filterNot { it.name == config.name } + config
-        mcpConfigWriter.write(path, current.copy(servers = updated))
-        disconnectMcpServer(config.name)
-        if (config.enabled) connectMcpServer(config)
-    }
-
-    suspend fun removeMcpServer(name: String) {
-        val path = requireMcpConfigPath()
-        val current = mcpConfigLoader.load(path)
-        mcpConfigWriter.write(path, current.copy(servers = current.servers.filterNot { it.name == name }))
-        disconnectMcpServer(name)
-    }
-
-    suspend fun setMcpServerEnabled(name: String, enabled: Boolean) {
-        val path = requireMcpConfigPath()
-        val current = mcpConfigLoader.load(path)
-        val config = current.servers.find { it.name == name } ?: return
-        val updated = config.copy(enabled = enabled)
-        mcpConfigWriter.write(path, current.copy(servers = current.servers.map { if (it.name == name) updated else it }))
-        if (enabled) connectMcpServer(updated) else disconnectMcpServer(name)
-    }
-
-    private fun requireMcpConfigPath(): Path = requireNotNull(mcpConfigPath) {
-        "mcpConfigPath was not set on this SophiRuntime — set RuntimeBuilder.mcpConfigPath before build()"
     }
 
     suspend fun connectMcpServer(config: McpServerConfig): List<String> {

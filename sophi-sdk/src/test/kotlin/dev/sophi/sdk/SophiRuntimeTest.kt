@@ -25,8 +25,6 @@ import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.McpConnector
 import dev.sophi.mcp.McpSession
 import dev.sophi.mcp.RemoteToolInfo
-import dev.sophi.mcp.config.McpConfig
-import dev.sophi.mcp.config.McpConfigWriter
 import dev.sophi.mcp.config.McpServerConfig
 import dev.sophi.mcp.config.McpTransport
 import dev.sophi.schedule.notify.NoopNotifier
@@ -39,7 +37,6 @@ import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coJustRun
-import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -299,90 +296,6 @@ class SophiRuntimeTest : FunSpec({
         }
     }
 
-    test("mcpServers reads what's actually on disk at mcpConfigPath") {
-        val dir = createTempDirectory("sophi-sdk-mcp-test")
-        val path = dir.resolve("mcp.json")
-        McpConfigWriter().write(path, McpConfig(servers = listOf(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))))
-        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, mcpConfigPath = path)
-
-        rt.mcpServers().map { it.name } shouldBe listOf("fs")
-    }
-
-    test("mcpServers throws a clear message when mcpConfigPath was never set") {
-        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config)
-
-        val ex = shouldThrow<IllegalArgumentException> { rt.mcpServers() }
-        ex.message!! shouldContain "mcpConfigPath"
-    }
-
-    test("addOrUpdateMcpServer writes a new server and connects it") {
-        val dir = createTempDirectory("sophi-sdk-mcp-test")
-        val path = dir.resolve("mcp.json")
-        val session = mockk<McpSession>()
-        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads", "{}"))
-        coJustRun { session.close() }
-        val connector = mockk<McpConnector>()
-        coEvery { connector.connect(any()) } returns session
-        val mcpManager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
-        val rt = SophiRuntime(
-            agentLoop, sessionManager, PluginRegistry(), config,
-            mcpClientManager = mcpManager, mcpConfigPath = path
-        )
-
-        val newServer = McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x"), enabled = true)
-        rt.addOrUpdateMcpServer(newServer)
-
-        rt.mcpServers() shouldBe listOf(newServer)
-        rt.toolNames() shouldBe listOf("fs__read_file")
-    }
-
-    test("removeMcpServer deletes the entry and disconnects it") {
-        val dir = createTempDirectory("sophi-sdk-mcp-test")
-        val path = dir.resolve("mcp.json")
-        McpConfigWriter().write(path, McpConfig(servers = listOf(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))))
-        val session = mockk<McpSession>()
-        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads", "{}"))
-        coJustRun { session.close() }
-        val connector = mockk<McpConnector>()
-        coEvery { connector.connect(any()) } returns session
-        val mcpManager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
-        val rt = SophiRuntime(
-            agentLoop, sessionManager, PluginRegistry(), config,
-            mcpClientManager = mcpManager, mcpConfigPath = path
-        )
-        rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
-
-        rt.removeMcpServer("fs")
-
-        rt.mcpServers() shouldBe emptyList()
-        rt.toolNames() shouldBe emptyList()
-    }
-
-    test("setMcpServerEnabled(false) disconnects; setMcpServerEnabled(true) reconnects") {
-        val dir = createTempDirectory("sophi-sdk-mcp-test")
-        val path = dir.resolve("mcp.json")
-        McpConfigWriter().write(path, McpConfig(servers = listOf(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x"), enabled = true))))
-        val session = mockk<McpSession>()
-        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads", "{}"))
-        coJustRun { session.close() }
-        val connector = mockk<McpConnector>()
-        coEvery { connector.connect(any()) } returns session
-        val mcpManager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
-        val rt = SophiRuntime(
-            agentLoop, sessionManager, PluginRegistry(), config,
-            mcpClientManager = mcpManager, mcpConfigPath = path
-        )
-        rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
-
-        rt.setMcpServerEnabled("fs", false)
-        rt.mcpServers().single().enabled shouldBe false
-        rt.toolNames() shouldBe emptyList()
-
-        rt.setMcpServerEnabled("fs", true)
-        rt.mcpServers().single().enabled shouldBe true
-        rt.toolNames() shouldBe listOf("fs__read_file")
-    }
-
     test("scheduleEngine builds a non-null engine when provider and contextWindowTokens are set") {
         val rt = SophiRuntime(
             agentLoop, sessionManager, PluginRegistry(), config,
@@ -446,25 +359,5 @@ class SophiRuntimeTest : FunSpec({
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
 
         rt.removeSkill("ghost") shouldBe false
-    }
-
-    test("setting RuntimeBuilder.mcpConfigPath (not calling .mcpConfig()) stores the path but does not trigger build()'s auto-connect") {
-        val dir = createTempDirectory("sophi-sdk-mcp-test")
-        val path = dir.resolve("mcp.json")
-        McpConfigWriter().write(path, McpConfig(servers = listOf(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x"), enabled = true))))
-        val mcpManager = mockk<McpClientManager>()
-        coEvery { mcpManager.connect(any()) } returns emptyList()
-
-        val builder = RuntimeBuilder()
-        builder.provider = mockk<LLMProvider>()
-        builder.sessionsDir = createTempDirectory("sophi-sdk-test")
-        builder.mcpConfigPath = path
-        val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
-            .mcpClientManager(mcpManager)
-            .build()
-
-        rt.mcpServers().map { it.name } shouldBe listOf("fs")
-        coVerify(exactly = 1) { mcpManager.connect(emptyList()) }
     }
 })
