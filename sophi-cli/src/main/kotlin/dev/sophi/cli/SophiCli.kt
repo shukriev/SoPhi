@@ -213,7 +213,6 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 baseUrl = baseUrl,
                 apiKey = apiKeyOption,
                 llmTimeoutSeconds = llmTimeoutSeconds,
-                llmMaxRetries = llmMaxRetries,
                 hubPort = hubPort,
                 noRemote = noRemote,
                 sessionIdToResume = sessionId
@@ -231,16 +230,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         )
         val session = cli.session
         val hubClient = cli.hubClient
-        val learningPlugin = cli.learningPlugin
+        val learningPlugin = cli.runtime.learningPlugin
         val memoryPlugin = cli.memoryPlugin
-        val config = cli.config
-        val registry = cli.registry
-        val confirmationPolicy = cli.confirmationPolicy
-        val toggleableConfirmationPolicy = cli.autoModeToggle
-        val skillRegistry = cli.skillRegistry
-        val planLog = cli.planLog
-        val calendarProvider = cli.calendarProvider
-        val sessionManager = cli.sessionManager
 
         // Retries connect() on a timer rather than once at startup: a companion opened after
         // this CLI session already started must still be able to pick it up (and a companion
@@ -302,13 +293,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             event.toHubEvent(session.id)?.let { hubClient?.publish(it) }
         }
         val slashHandler = SlashHandler(
-            sessionManager, compactor, config, learningPlugin,
+            cli.runtime.sessionManager, compactor, cli.runtime.config, learningPlugin,
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
-            skillRegistry = skillRegistry,
-            provider = provider, calendarProvider = calendarProvider, confirmationPolicy = confirmationPolicy,
-            autoModeToggle = toggleableConfirmationPolicy,
-            toolRegistry = registry,
-            planLog = planLog,
+            skillRegistry = cli.skillRegistry,
+            provider = provider, calendarProvider = cli.calendarProvider, confirmationPolicy = cli.confirmationPolicy,
+            autoModeToggle = cli.autoModeToggle,
+            toolRegistry = cli.registry,
+            planLog = cli.planLog,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
             onEvent = onEvent,

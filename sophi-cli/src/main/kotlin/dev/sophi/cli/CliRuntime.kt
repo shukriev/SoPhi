@@ -9,7 +9,6 @@ import dev.sophi.calendar.tools.GetCalendarEventTool
 import dev.sophi.calendar.tools.ListCalendarEventsTool
 import dev.sophi.calendar.tools.ListCalendarsTool
 import dev.sophi.calendar.tools.UpdateCalendarEventTool
-import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
@@ -19,7 +18,6 @@ import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.AgentSession
 import dev.sophi.sdk.Sophi
 import dev.sophi.sdk.SophiRuntime
-import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.LlmRiskClassifier
@@ -29,7 +27,6 @@ import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.hub.HubClient
 import dev.sophi.learning.LearningConfig
-import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.MemoryPlugin
 import dev.sophi.skills.SkillRegistry
 import java.nio.file.Path
@@ -52,11 +49,7 @@ data class CliOptions(
     val scheduleDir: String,
     val plansDir: String,
     val mcpConfigPath: String,
-    /**
-     * Where learning writes its outcome/lesson logs. Defaults to [LearningConfig]'s own default,
-     * so behavior is unchanged; it is settable so a test can point it at a temp directory instead
-     * of the developer's real ~/.sophi/learning.
-     */
+    /** Overridable so tests don't write to the real ~/.sophi/learning. */
     val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
     val braveApiKey: String? = null,
     val autoMode: Boolean = false,
@@ -68,7 +61,6 @@ data class CliOptions(
     val baseUrl: String? = null,
     val apiKey: String? = null,
     val llmTimeoutSeconds: Long = 60,
-    val llmMaxRetries: Int = 2,
     val hubPort: Int = 8765,
     val noRemote: Boolean = false,
     val sessionIdToResume: String? = null
@@ -89,12 +81,7 @@ class CliRuntime(
     val calendarProvider: CalendarProvider,
     val session: AgentSession,
     val hubClient: HubClient?
-) {
-    /** Session store the runtime built from `sessionsDir` — the CLI never makes a second one. */
-    val sessionManager: SessionManager get() = runtime.sessionManager
-    val config: AgentConfig get() = runtime.config
-    val learningPlugin: LearningPlugin? get() = runtime.learningPlugin
-}
+)
 
 /**
  * Builds the whole agent runtime for an interactive `sophi` session.
@@ -186,13 +173,8 @@ internal suspend fun buildCliRuntime(
         memoryPlugin?.let { plugin(it) }
     }
 
-    session = opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
-        ?: runtime.sessionManager.create()
-    val currentSession = session!!
-    // Retries connect() on a timer rather than once at startup: a companion opened after
-    // this CLI session already started must still be able to pick it up (and a companion
-    // that restarts mid-session must be reconnected to), not just one whose hub was already
-    // listening at the moment this process launched.
+    val currentSession = (opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
+        ?: runtime.sessionManager.create()).also { session = it }
     hubClient = if (opts.noRemote) null else HubClient(opts.hubPort, currentSession.id)
     runCatching {
         runtime.sessionManager.saveConfigSnapshot(

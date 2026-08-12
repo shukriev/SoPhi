@@ -23,6 +23,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
+private fun AgentSession.lastAssistantReply(): String =
+    branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
+
 class SophiRuntime internal constructor(
     internal val agentLoop: AgentLoop,
     val sessionManager: SessionManager,
@@ -53,10 +56,8 @@ class SophiRuntime internal constructor(
 
     suspend fun turn(sessionId: String, input: String): String = streamTurn(sessionId, input) { }
 
-    suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String {
-        val updated = runTurn(sessionManager.load(sessionId), input, onEvent)
-        return updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
-    }
+    suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String =
+        streamTurn(sessionManager.load(sessionId), input, onEvent).lastAssistantReply()
 
     /**
      * Runs a turn against an already-loaded [session] and returns the updated one. Prefer this
@@ -64,12 +65,6 @@ class SophiRuntime internal constructor(
      * not reload from disk.
      */
     suspend fun streamTurn(
-        session: AgentSession,
-        input: String,
-        onEvent: suspend (TurnEvent) -> Unit
-    ): AgentSession = runTurn(session, input, onEvent)
-
-    private suspend fun runTurn(
         session: AgentSession,
         input: String,
         onEvent: suspend (TurnEvent) -> Unit
@@ -92,10 +87,7 @@ class SophiRuntime internal constructor(
                 bridge(event)
                 onEvent(event)
             }
-            settle(
-                session.id, input,
-                updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
-            )
+            settle(session.id, input, updated.lastAssistantReply())
             updated
         } catch (e: CancellationException) {
             // An interrupt is not a failure. Dispatching ON_ERROR here would make LearningPlugin

@@ -17,12 +17,9 @@ import kotlinx.coroutines.selects.select
  * first response wins — matches how a shared tmux session behaves, no lock/hand-off state
  * machine. If [hubClient] is null (--no-remote, or the hub was never reachable), this is a thin
  * pass-through to [terminal].
- */
-/**
- * [hubClient] and [sessionId] are suppliers, not values: both are only read once a confirmation
- * is actually requested, which is long after construction. That matters because the session — and
- * therefore the hub client keyed to it — cannot exist until the runtime that owns the
- * SessionManager has been built, and building that runtime requires this policy.
+ *
+ * [hubClient] and [sessionId] are suppliers, not values — both are read only once a confirmation
+ * is requested, long after construction; see the cycle note in [buildCliRuntime] for why.
  */
 class RemoteAwareConfirmationPolicy(
     private val terminal: ConfirmationPolicy,

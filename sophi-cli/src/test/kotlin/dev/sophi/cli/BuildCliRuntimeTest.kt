@@ -19,35 +19,38 @@ import kotlin.io.path.writeText
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
+/** Shared by BuildCliRuntimeTest and TuiEngineTest's end-to-end tests. */
+internal fun optionsFor(
+    dir: Path,
+    autoMode: Boolean = false,
+    godMode: Boolean = false,
+    mcpConfigPath: Path = dir.resolve("mcp.json")
+) = CliOptions(
+    model = "test-model",
+    maxTokens = 4096,
+    contextWindowTokens = TEST_CONTEXT_WINDOW,
+    systemPrompt = null,
+    sessionsDir = dir.resolve("sessions").toString(),
+    agentsDir = dir.resolve("agents").toString(),
+    scheduleDir = dir.resolve("schedule").toString(),
+    plansDir = dir.resolve("plans").toString(),
+    mcpConfigPath = mcpConfigPath.toString(),
+    // Points learning at the test's own directory; LearningConfig otherwise defaults to the
+    // developer's real ~/.sophi/learning.
+    learningHome = dir.resolve("learning"),
+    braveApiKey = null,
+    autoMode = autoMode,
+    godMode = godMode,
+    // The hub is a live socket; these tests are about wiring, so stay local.
+    noRemote = true
+)
+
 /**
  * Characterization tests for the CLI's wiring: they assert *what gets registered and chosen*,
  * not how. Written against the hand-wired implementation so the SDK migration can be checked
  * against them without editing the assertions.
  */
 class BuildCliRuntimeTest : FunSpec({
-
-    fun optionsFor(
-        dir: Path,
-        autoMode: Boolean = false,
-        godMode: Boolean = false,
-        mcpConfigPath: Path = dir.resolve("mcp.json")
-    ) = CliOptions(
-        model = "test-model",
-        maxTokens = 4096,
-        contextWindowTokens = TEST_CONTEXT_WINDOW,
-        systemPrompt = null,
-        sessionsDir = dir.resolve("sessions").toString(),
-        agentsDir = dir.resolve("agents").toString(),
-        scheduleDir = dir.resolve("schedule").toString(),
-        plansDir = dir.resolve("plans").toString(),
-        mcpConfigPath = mcpConfigPath.toString(),
-        learningHome = dir.resolve("learning"),
-        braveApiKey = null,
-        autoMode = autoMode,
-        godMode = godMode,
-        // The hub is a live socket; these tests are about wiring, so stay local.
-        noRemote = true
-    )
 
     suspend fun build(
         autoMode: Boolean = false,
@@ -65,17 +68,15 @@ class BuildCliRuntimeTest : FunSpec({
         )
     }
 
-    test("registers the builtin, calendar and schedule tools") {
+    test("registers the builtin, calendar, schedule and goal-decomposition tools") {
         build().registry.names() shouldContainAll listOf(
             "read_file", "write_file", "grep", "glob", "edit_file", "bash", "fetch_url",
             "get_current_datetime", "manage_scheduled_task",
             "create_calendar_event", "list_calendar_events", "get_calendar_event",
-            "update_calendar_event", "delete_calendar_event", "list_calendars"
+            "update_calendar_event", "delete_calendar_event", "list_calendars",
+            // Registered post-build() because it needs the registry it is registered into.
+            "decompose_goal"
         )
-    }
-
-    test("registers the goal-decomposition tool, which needs the registry it is registered into") {
-        build().registry.names() shouldContainAll listOf("decompose_goal")
     }
 
     test("a missing mcp.json neither throws nor registers MCP tools") {
@@ -107,25 +108,25 @@ class BuildCliRuntimeTest : FunSpec({
             terminal = Terminal(),
             input = ScriptedInputSource(emptyList())
         )
-        cli.config.systemPrompt.shouldNotBeNull() shouldContain "BASE PROMPT"
+        cli.runtime.config.systemPrompt.shouldNotBeNull() shouldContain "BASE PROMPT"
     }
 
     test("model and maxTokens flow through to the agent config") {
         val cli = build()
-        cli.config.model shouldBe "test-model"
-        cli.config.maxTokens shouldBe 4096
+        cli.runtime.config.model shouldBe "test-model"
+        cli.runtime.config.maxTokens shouldBe 4096
     }
 
     // A fresh learning home has no distilled lessons yet, so promptSections contributes nothing
     // and the prompt stays null when --system was not passed. Pinning this so the migration
     // cannot quietly start injecting something here.
     test("with no --system and an empty learning home the system prompt stays null") {
-        build().config.systemPrompt shouldBe null
+        build().runtime.config.systemPrompt shouldBe null
     }
 
     test("a new session is created with an id but is not persisted until a turn saves it") {
         val cli = build()
         cli.session.id.isNotBlank() shouldBe true
-        shouldThrow<IllegalArgumentException> { cli.sessionManager.load(cli.session.id) }
+        shouldThrow<IllegalArgumentException> { cli.runtime.sessionManager.load(cli.session.id) }
     }
 })

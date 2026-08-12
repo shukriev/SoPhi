@@ -56,28 +56,11 @@ class TuiEngineTest : FunSpec({
 
     // ---- End-to-end: the real migrated stack, assembled by buildCliRuntime ----
 
-    fun e2eOptions(dir: java.nio.file.Path) = CliOptions(
-        model = "test-model",
-        maxTokens = 4096,
-        contextWindowTokens = TEST_CONTEXT_WINDOW,
-        systemPrompt = null,
-        sessionsDir = dir.resolve("sessions").toString(),
-        agentsDir = dir.resolve("agents").toString(),
-        scheduleDir = dir.resolve("schedule").toString(),
-        plansDir = dir.resolve("plans").toString(),
-        mcpConfigPath = dir.resolve("mcp.json").toString(),
-        // Points learning at the test's own directory; LearningConfig otherwise defaults to the
-        // developer's real ~/.sophi/learning, which would make the outcome assertion below read
-        // whatever happens to be on that machine.
-        learningHome = dir.resolve("learning"),
-        noRemote = true
-    )
-
     test("a turn driven through the migrated stack persists the assistant reply to the session") {
         val dir = tempdir().toPath()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("hello!"))
         val cli = buildCliRuntime(
-            opts = e2eOptions(dir), provider = provider,
+            opts = optionsFor(dir), provider = provider,
             terminal = com.github.ajalt.mordant.terminal.Terminal(),
             input = ScriptedInputSource(emptyList())
         )
@@ -98,7 +81,7 @@ class TuiEngineTest : FunSpec({
             delay(Long.MAX_VALUE)
         }
         val cli = buildCliRuntime(
-            opts = e2eOptions(dir), provider = provider,
+            opts = optionsFor(dir), provider = provider,
             terminal = com.github.ajalt.mordant.terminal.Terminal(),
             input = ScriptedInputSource(emptyList())
         )
