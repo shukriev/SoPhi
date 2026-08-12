@@ -127,6 +127,11 @@
             </dependency>
             <dependency>
                 <groupId>dev.sophi</groupId>
+                <artifactId>sophi-sdk</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.sophi</groupId>
                 <artifactId>sophi-infra</artifactId>
                 <version>${project.version}</version>
             </dependency>

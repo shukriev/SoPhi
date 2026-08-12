@@ -211,9 +211,9 @@ noticed.
   JVM/Spring-based; "multiplatform" here means one desktop codebase producing three
   native packages); auto-update; state syncing between installed copies; live reload
   of `~/.sophi/companion.json` without a restart; MCP config validation beyond what
-  `McpConfigLoader` already does. The MCP tab surfaces list/enable/disable/remove —
-  `CompanionRuntime.addOrUpdateMcpServer` exists and is tested, but no add/edit form
-  is wired to it yet.
+  `McpConfigLoader` already does; editing a server's `env`/`safeTools` fields through
+  the UI (the add/edit form covers name/transport/command/url/enabled — `env` and
+  `safeTools` still require a manual `~/.sophi/mcp.json` edit).
 
 ## References
 
