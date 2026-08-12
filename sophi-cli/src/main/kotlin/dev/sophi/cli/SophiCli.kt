@@ -187,13 +187,68 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model, llmTimeoutSeconds, llmMaxRetries)
-        val sessionManager = FileSessionManager(Path.of(sessionsDirStr))
-        val session = sessionId?.let { sessionManager.load(it) } ?: sessionManager.create()
+        val mordantTerminal = Terminal()
+        val sophiTerminal = SophiTerminal.create()
+        val inputSource: InputSource =
+            if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
+
+        val cli = buildCliRuntime(
+            opts = CliOptions(
+                model = model,
+                maxTokens = maxTokens,
+                contextWindowTokens = contextWindowTokens,
+                systemPrompt = systemPrompt,
+                sessionsDir = sessionsDirStr,
+                agentsDir = agentsDirStr,
+                scheduleDir = scheduleDirStr,
+                plansDir = plansDirStr,
+                mcpConfigPath = mcpConfigPathStr,
+                braveApiKey = braveApiKeyOption,
+                autoMode = autoMode,
+                godMode = godMode,
+                memoryEnabled = memoryEnabled,
+                embeddingModel = embeddingModel,
+                embeddingBaseUrl = embeddingBaseUrl,
+                embeddingDimensions = embeddingDimensions,
+                baseUrl = baseUrl,
+                apiKey = apiKeyOption,
+                llmTimeoutSeconds = llmTimeoutSeconds,
+                llmMaxRetries = llmMaxRetries,
+                hubPort = hubPort,
+                noRemote = noRemote,
+                sessionIdToResume = sessionId
+            ),
+            provider = provider,
+            terminal = mordantTerminal,
+            input = inputSource,
+            // Encoding runs fire-and-forget on AFTER_TURN (MemoryPlugin), so this warning can
+            // arrive at any time relative to the next readLine() prompt — printAbove keeps it
+            // from landing glued onto that prompt's line.
+            onWarning = { msg ->
+                if (sophiTerminal.isInteractive) sophiTerminal.printAbove(TextColors.yellow(msg).toString())
+                else mordantTerminal.println(TextColors.yellow(msg))
+            }
+        )
+        val session = cli.session
+        val hubClient = cli.hubClient
+        val learningPlugin = cli.learningPlugin
+        val memoryPlugin = cli.memoryPlugin
+        val pluginRegistry = cli.pluginRegistry
+        val config = cli.config
+        val registry = cli.registry
+        val confirmationPolicy = cli.confirmationPolicy
+        val toggleableConfirmationPolicy = cli.autoModeToggle
+        val skillRegistry = cli.skillRegistry
+        val planLog = cli.planLog
+        val calendarProvider = cli.calendarProvider
+        val sessionManager = cli.sessionManager
+        val mcpClientManager = cli.mcpClientManager
+        val loop = cli.agentLoop
+
         // Retries connect() on a timer rather than once at startup: a companion opened after
         // this CLI session already started must still be able to pick it up (and a companion
         // that restarts mid-session must be reconnected to), not just one whose hub was already
         // listening at the moment this process launched.
-        val hubClient: HubClient? = if (noRemote) null else HubClient(hubPort, session.id)
         if (hubClient != null) {
             launch {
                 maintainHubConnection(hubClient, this) {
@@ -208,146 +263,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 }
             }
         }
-        val mordantTerminal = Terminal()
-        val sophiTerminal = SophiTerminal.create()
-        val inputSource: InputSource =
-            if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
-
-        // Learning: capture tool outcomes and inject reliability + lessons sections into the system prompt.
-        val learningConfig = LearningConfig(sessionModel = model)
-        val learningPlugin = LearningPlugin(learningConfig, model = model, provider = provider, sessionManager = sessionManager)
-        val pluginRegistry = PluginRegistry().register(learningPlugin)
-
-        // Memory (Jane's Theory): per-turn recall via ContextContributor, async encoding on AFTER_TURN.
-        val memoryPlugin: dev.sophi.memory.MemoryPlugin? = if (memoryEnabled) {
-            val embBase = embeddingBaseUrl ?: baseUrl
-            val embModel = embeddingModel
-            if (embBase == null || embModel == null) {
-                mordantTerminal.println(TextColors.yellow(
-                    "memory: disabled — --memory needs --embedding-model and --embedding-base-url (or --base-url)"))
-                null
-            } else {
-                val embProvider = dev.sophi.ai.providers.buildOpenAiCompatEmbeddingProvider(
-                    embBase, apiKeyOption, embModel, embeddingDimensions)
-                // Spec §6: memory must never fail silently (cognitive-prosthetic honesty).
-                val probeResult = dev.sophi.ai.api.probeEmbeddingProvider(embProvider)
-                if (probeResult.isFailure) {
-                    val error = probeResult.exceptionOrNull()?.message ?: "unknown error"
-                    mordantTerminal.println(TextColors.yellow(
-                        "memory: disabled — embeddings endpoint unreachable at $embBase ($embModel): $error"))
-                    null
-                } else {
-                    val palace = dev.sophi.memory.jane.JanesPalace(
-                        dev.sophi.memory.jane.JanesPalaceConfig(sessionModel = model),
-                        provider, embProvider, embModel,
-                        // Encoding runs fire-and-forget on AFTER_TURN (MemoryPlugin), so this
-                        // warning can arrive at any time relative to the next readLine() prompt —
-                        // printAbove keeps it from landing glued onto that prompt's line.
-                        onWarning = { msg ->
-                            if (sophiTerminal.isInteractive) sophiTerminal.printAbove(TextColors.yellow(msg).toString())
-                            else mordantTerminal.println(TextColors.yellow(msg))
-                        })
-                    dev.sophi.memory.MemoryPlugin(palace)
-                }
-            }
-        } else null
-        memoryPlugin?.let { pluginRegistry.register(it) }
 
         val bridge = pluginRegistry.turnEventBridge(session.id)
-        val effectiveSystemPrompt =
-            listOfNotNull(
-                systemPrompt,
-                learningPlugin.promptSections(learningConfig.scope),
-                if (memoryPlugin != null) dev.sophi.memory.MemoryPromptSection.TEXT else null
-            ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
-
-        val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = effectiveSystemPrompt)
-        runCatching { sessionManager.saveConfigSnapshot(session.id, model, config.systemPrompt) }
-        val registry = ToolRegistry()
-        val manualConfirmationPolicy: ConfirmationPolicy = RemoteAwareConfirmationPolicy(
-            TerminalConfirmationPolicy(mordantTerminal, inputSource),
-            hubClient,
-            session.id
-        )
-        val toggleableConfirmationPolicy: ToggleableConfirmationPolicy? = if (godMode) null else {
-            val autoModePolicy = AutoModeConfirmationPolicy(
-                registry,
-                LlmRiskClassifier(provider, model, maxTokens = maxTokens, timeout = llmTimeoutSeconds.seconds),
-                manualConfirmationPolicy
-            )
-            ToggleableConfirmationPolicy(autoModePolicy, manualConfirmationPolicy, autoModeEnabled = autoMode)
-        }
-        val confirmationPolicy: ConfirmationPolicy = toggleableConfirmationPolicy
-            ?: AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, manualConfirmationPolicy)
-        val loopGuardPolicy = TerminalLoopGuardPolicy(mordantTerminal, inputSource)
-
-        val agentsDir = Path.of(agentsDirStr).also { it.createDirectories() }
-        val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
-
-        val skillRegistry = SkillRegistry.load(
-            globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
-            projectDir = Path.of(".sophi", "skills")
-        )
-
-        buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
-        registry.register(ScheduleTaskTool(
-            TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")),
-            dev.sophi.schedule.store.RunLog(Path.of(scheduleDirStr).resolve("runs.jsonl"))
-        ))
-        val calendarProvider = buildCalendarProvider()
-        registry.register(CreateCalendarEventTool(calendarProvider))
-        registry.register(ListCalendarEventsTool(calendarProvider))
-        registry.register(GetCalendarEventTool(calendarProvider))
-        registry.register(UpdateCalendarEventTool(calendarProvider))
-        registry.register(DeleteCalendarEventTool(calendarProvider))
-        registry.register(ListCalendarsTool(calendarProvider))
-        val mcpClientManager = McpClientManager()
-        val mcpConfigPath = Path.of(mcpConfigPathStr)
-        if (mcpConfigPath.exists()) {
-            val mcpConfig = McpConfigLoader().load(mcpConfigPath)
-            mcpClientManager.connect(mcpConfig.servers).forEach { registry.register(it) }
-        }
-        if (skillRegistry.all().isNotEmpty()) {
-            registry.register(SkillTool(skillRegistry))
-        }
-        registry.register(InstallSkillTool())
-        registry.register(WriteSkillTool())
-        if (agentDefinitions.isNotEmpty()) {
-            registry.register(
-                SubagentTool(
-                    definitions = agentDefinitions,
-                    provider = provider,
-                    fullRegistry = registry,
-                    sessionManager = sessionManager,
-                    parentSessionId = session.id,
-                    parentConfig = config,
-                    contextWindowTokens = contextWindowTokens,
-                    confirmationPolicy = confirmationPolicy
-                )
-            )
-        }
-        val planLog = dev.sophi.core.agent.plan.PlanLog(Path.of(plansDirStr))
-        registry.register(
-            dev.sophi.core.agent.plan.DecomposeGoalTool(
-                provider = provider,
-                fullRegistry = registry,
-                sessionManager = sessionManager,
-                parentSessionId = session.id,
-                parentConfig = config,
-                contextWindowTokens = contextWindowTokens,
-                planLog = planLog,
-                confirmationPolicy = confirmationPolicy
-            )
-        )
-
-        val loop = AgentLoop(
-            provider,
-            registry,
-            sessionManager,
-            confirmationPolicy = confirmationPolicy,
-            loopGuard = loopGuardPolicy,
-            contextWindowTokens = contextWindowTokens
-        )
         val compactor = ContextCompactor(provider)
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
