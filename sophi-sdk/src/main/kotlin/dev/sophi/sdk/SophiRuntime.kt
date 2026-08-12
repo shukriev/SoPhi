@@ -55,13 +55,19 @@ class SophiRuntime internal constructor(
     suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String {
         val session = sessionManager.load(sessionId)
         pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(sessionId, userInput = input))
+        // BEFORE_TURN fires first so a plugin can prime state that its own contribute() then reads.
+        // The merged prompt is scoped to this call only — config stays the base prompt.
+        val extra = pluginRegistry.collectContext(sessionId, input)
+            .takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+        val turnConfig = if (extra == null) config
+            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
         val bridge = pluginRegistry.turnEventBridge(sessionId)
         // Buffered here, not only in the caller's UI layer: an interrupted turn still has to
         // report what the assistant managed to say, or AFTER_TURN fires with a null
         // assistantReply and the hooks that encode the exchange drop the turn.
         val partial = StringBuilder()
         return try {
-            val updated = agentLoop.streamTurn(session, input, config) { event ->
+            val updated = agentLoop.streamTurn(session, input, turnConfig) { event ->
                 if (event is TurnEvent.Token) partial.append(event.text)
                 bridge(event)
                 onEvent(event)

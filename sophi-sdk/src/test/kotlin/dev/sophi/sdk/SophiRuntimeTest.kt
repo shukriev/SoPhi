@@ -17,6 +17,7 @@ import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.AgentHook
+import dev.sophi.extensions.ContextContributor
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
@@ -202,6 +203,32 @@ class SophiRuntimeTest : FunSpec({
         shouldThrow<RuntimeException> { rt.streamTurn("s1", "hi") { } }
 
         seen shouldBe listOf(HookPoint.ON_ERROR)
+    }
+
+    test("ContextContributor output is appended to the turn's system prompt and the runtime's base config is untouched") {
+        val contributor = object : SophiPlugin, ContextContributor {
+            override val name = "ctx"
+            override fun hooks(): List<AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String): String = "RECALLED: prior turn"
+        }
+        val base = AgentConfig(model = "test-model", systemPrompt = "BASE")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(contributor), base)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "ok", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        val configSlot = slot<AgentConfig>()
+        coEvery { agentLoop.streamTurn(session, "hi", capture(configSlot), any()) } returns updated
+
+        rt.streamTurn("s1", "hi") { }
+
+        configSlot.captured.systemPrompt shouldBe "BASE\n\nRECALLED: prior turn"
+        base.systemPrompt shouldBe "BASE"
+        rt.config.systemPrompt shouldBe "BASE"
     }
 
     test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {
