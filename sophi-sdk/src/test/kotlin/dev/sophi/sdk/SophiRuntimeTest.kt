@@ -33,6 +33,7 @@ import dev.sophi.schedule.store.TaskStore
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.coEvery
@@ -105,6 +106,33 @@ class SophiRuntimeTest : FunSpec({
 
         shouldThrow<RuntimeException> { rt.turn("s1", "hi") }
         log shouldBe listOf(HookPoint.ON_ERROR)
+    }
+
+    test("AFTER_TURN carries userInput and assistantReply so ContextContributor plugins can encode the turn") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "after-turn-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
+
+        rt.streamTurn("s1", "hi") { }
+
+        seen shouldHaveSize 1
+        seen[0].userInput shouldBe "hi"
+        seen[0].assistantReply shouldBe "hello!"
     }
 
     test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {

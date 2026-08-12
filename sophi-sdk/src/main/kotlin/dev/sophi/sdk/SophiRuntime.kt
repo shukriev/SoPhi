@@ -58,8 +58,14 @@ class SophiRuntime internal constructor(
                 bridge(event)
                 onEvent(event)
             }
-            pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(sessionId))
-            updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
+            val reply = updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
+            // Both fields matter: AFTER_TURN hooks that encode the exchange (MemoryPlugin) bail
+            // out on a null userInput or assistantReply, so an empty context silently drops the turn.
+            pluginRegistry.dispatch(
+                HookPoint.AFTER_TURN,
+                HookContext(sessionId, userInput = input, assistantReply = reply)
+            )
+            reply
         } catch (e: Exception) {
             pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = e))
             throw e
