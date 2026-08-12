@@ -261,6 +261,34 @@ class SophiRuntimeTest : FunSpec({
         rt.toolNames() shouldBe listOf("after_build", "before_build")
     }
 
+    test("the AgentSession overload returns the updated session and shares the id-based overload's choreography") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "overload-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
+
+        val result = rt.streamTurn(session, "hi") { }
+
+        result shouldBe updated
+        seen shouldHaveSize 1
+        seen[0].assistantReply shouldBe "hello!"
+        // The overload takes the session directly — it must not reload it from disk.
+        verify(exactly = 0) { sessionManager.load(any()) }
+    }
+
     // Smoke test only. loopGuard is a one-line pass-through into AgentLoop, whose guard behavior
     // is already covered by AgentLoopTest and only triggers after AgentConfig.maxToolRounds
     // (default 200) rounds — not worth driving from here. This exists to catch the knob being
