@@ -5,8 +5,7 @@ import dev.sophi.cli.streaming.StreamingIndicator
 import dev.sophi.cli.streaming.StreamingPhase
 import dev.sophi.cli.streaming.TokenStreamFormatter
 import dev.sophi.cli.streaming.TokenViewToggleState
-import dev.sophi.core.agent.AgentConfig
-import dev.sophi.core.agent.AgentLoop
+import dev.sophi.sdk.SophiRuntime
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.AgentSession
 import kotlinx.coroutines.async
@@ -18,18 +17,12 @@ import kotlinx.coroutines.selects.select
 import java.time.Instant
 
 class TurnController(
-    private val loop: AgentLoop,
-    private val config: AgentConfig,
+    // Per-turn plugin context injection and the BEFORE/AFTER_TURN hook dispatch both live inside
+    // SophiRuntime.streamTurn now, including on the interrupt path — this class only renders.
+    private val runtime: SophiRuntime,
     private val input: InputSource,
     private val liveRegion: LiveRegion,
     private val onEvent: suspend (TurnEvent) -> Unit = {},
-    // Per-turn context injection (memory etc.): non-null result is appended to the system
-    // prompt for THIS turn only. Failures are swallowed — context must never break a turn.
-    private val contextProvider: suspend (AgentSession, String) -> String? = { _, _ -> null },
-    // Fired once per turn after it settles, now carrying both sides of the exchange so
-    // AFTER_TURN hooks (learning outcome, memory encoding) can see the full turn.
-    private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit =
-        { _, _, _ -> },
     // Keyboard shortcut that toggles the live region between the spinner+stats view and the
     // raw token stream. Default view is the spinner; press again to switch back.
     private val tokenViewKey: Char = 'T',
@@ -64,10 +57,6 @@ class TurnController(
         }
         render()
 
-        val extraContext = runCatching { contextProvider(session, userInput) }.getOrNull()
-        val turnConfig = if (extraContext.isNullOrBlank()) config
-            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extraContext).joinToString("\n\n"))
-
         // Sole writer to liveRegion while a phase is active: ticks on a fixed cadence instead of
         // once per token, so a fast token stream doesn't repaint the terminal hundreds of times.
         val animationJob = launch {
@@ -79,7 +68,7 @@ class TurnController(
 
         val turnDeferred = async {
             try {
-                loop.streamTurn(session, userInput, turnConfig) { event ->
+                runtime.streamTurn(session, userInput) { event ->
                     onEvent(event)
                     when (event) {
                         is TurnEvent.Token -> {
@@ -143,11 +132,9 @@ class TurnController(
                 outputReasoningIfAny()
                 if (error != null) {
                     output(ResponseRenderer.renderText(buffer.toString()) + " [error: ${error.message}]")
-                    onTurnSettled(userInput, buffer.toString(), error)
                     session
                 } else {
                     output(ResponseRenderer.renderText(buffer.toString()))
-                    onTurnSettled(userInput, buffer.toString(), null)
                     result
                 }
             }
@@ -156,8 +143,9 @@ class TurnController(
                 turnDeferred.cancel()
                 liveRegion.clear()
                 outputReasoningIfAny()
+                // No hook dispatch here: cancelling turnDeferred makes SophiRuntime.streamTurn
+                // settle the turn itself, under NonCancellable, with the partial reply.
                 output(ResponseRenderer.renderText(buffer.toString()) + " [interrupted]")
-                onTurnSettled(userInput, buffer.toString(), null)
                 session
             }
         }

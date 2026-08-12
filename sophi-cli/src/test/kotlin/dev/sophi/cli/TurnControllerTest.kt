@@ -3,21 +3,17 @@ package dev.sophi.cli
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.ToolCall
-import dev.sophi.core.agent.AgentConfig
-import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.AgentSession
-import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.extensions.HookContext
-import dev.sophi.extensions.HookPoint
-import dev.sophi.extensions.PluginRegistry
+import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.JsonlLog
+import dev.sophi.sdk.Sophi
+import dev.sophi.sdk.SophiRuntime
 import dev.sophi.learning.LearningConfig
-import dev.sophi.learning.LearningPlugin
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.booleans.shouldBeTrue
@@ -38,17 +34,34 @@ private const val TEST_CONTEXT_WINDOW = 100_000
 
 class TurnControllerTest : FunSpec({
     val provider = mockk<LLMProvider>()
-    val sessionManager = mockk<SessionManager>(relaxed = true)
-    val config = AgentConfig(model = "test-model")
-    val loop = AgentLoop(provider, ToolRegistry(), sessionManager, contextWindowTokens = TEST_CONTEXT_WINDOW)
 
-    beforeTest { clearMocks(provider, sessionManager) }
+    // Built through the public builder rather than by constructing a SophiRuntime directly:
+    // its constructor is internal to sophi-sdk, and going through Sophi.runtime {} is exactly
+    // the path sophi-cli itself now takes. ALLOW_ALL is explicit because RuntimeBuilder defaults
+    // to DENY_ALL where a bare AgentLoop defaulted to ALLOW_ALL.
+    fun runtimeFor(
+        registry: ToolRegistry = ToolRegistry(),
+        policy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+        extraPlugin: SophiPlugin? = null,
+        learningConfig: LearningConfig? = null
+    ): SophiRuntime = Sophi.runtime {
+        this.provider = provider
+        model = "test-model"
+        contextWindowTokens(TEST_CONTEXT_WINDOW)
+        sessionsDir = tempdir().toPath()
+        toolRegistry(registry)
+        confirmationPolicy(policy)
+        extraPlugin?.let { plugin(it) }
+        learningConfig?.let { learning(it) }
+    }
+
+    beforeTest { clearMocks(provider) }
 
     test("runTurn() streams tokens and renders the final response to output") {
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Hello"), StreamEvent.Content(" "), StreamEvent.Content("World"))
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
-        val controller = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+        val controller = TurnController(runtimeFor(), input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
 
         controller.runTurn(AgentSession(id = "s1"), "hi")
 
@@ -59,7 +72,7 @@ class TurnControllerTest : FunSpec({
         every { provider.stream(any()) } returns flowOf(StreamEvent.Reasoning("thinking..."), StreamEvent.Content("done"))
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
-        val controller = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+        val controller = TurnController(runtimeFor(), input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
 
         controller.runTurn(AgentSession(id = "s1"), "hi")
 
@@ -74,9 +87,6 @@ class TurnControllerTest : FunSpec({
             override val parametersJson = "{}"
             override suspend fun execute(argumentsJson: String) = "pong"
         })
-        val loopWithTool = AgentLoop(
-            provider, toolRegistry, sessionManager, contextWindowTokens = TEST_CONTEXT_WINDOW
-        )
         var round = 0
         every { provider.stream(any()) } answers {
             round++
@@ -88,7 +98,7 @@ class TurnControllerTest : FunSpec({
         }
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
-        val controller = TurnController(loopWithTool, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+        val controller = TurnController(runtimeFor(registry = toolRegistry), input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
 
         controller.runTurn(AgentSession(id = "s1"), "ping")
 
@@ -98,20 +108,15 @@ class TurnControllerTest : FunSpec({
         )
     }
 
-    test("runTurn() dispatches AFTER_TURN via onTurnSettled so a registry-backed plugin records it") {
+    // The CLI no longer dispatches AFTER_TURN itself — SophiRuntime.streamTurn does — so this
+    // now verifies the real path: a plugin registered on the runtime records the turn.
+    test("a turn dispatches AFTER_TURN so a runtime-registered plugin records it") {
         val home = tempdir().toPath()
-        val learning = LearningPlugin(LearningConfig(home = home, scope = "/proj"), model = "test-model")
-        val registry = PluginRegistry().register(learning)
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Hello"))
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
-        val controller = TurnController(
-            loop, config, input, LiveRegion(StringBuilder()) { 80 },
-            onTurnSettled = { userInput, assistantReply, error ->
-                if (error != null) registry.dispatch(HookPoint.ON_ERROR, HookContext("s1", error = error))
-                else registry.dispatch(HookPoint.AFTER_TURN, HookContext("s1", userInput = userInput, assistantReply = assistantReply))
-            }
-        ) { rendered.add(it) }
+        val runtime = runtimeFor(learningConfig = LearningConfig(home = home, scope = "/proj"))
+        val controller = TurnController(runtime, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
 
         controller.runTurn(AgentSession(id = "s1"), "hi")
 
@@ -128,7 +133,7 @@ class TurnControllerTest : FunSpec({
             delay(Long.MAX_VALUE)
         }
         val rendered = mutableListOf<String>()
-        val controller = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+        val controller = TurnController(runtimeFor(), input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
         val session = AgentSession(id = "s1")
 
         val result = controller.runTurn(session, "hi")
@@ -151,11 +156,6 @@ class TurnControllerTest : FunSpec({
             releaseConfirmation.await()
             requests.associate { it.callId to true }
         }
-        val loopWithConfirmation = AgentLoop(
-            provider, toolRegistry, sessionManager,
-            confirmationPolicy = confirmationPolicy,
-            contextWindowTokens = TEST_CONTEXT_WINDOW
-        )
         var round = 0
         every { provider.stream(any()) } answers {
             round++
@@ -171,7 +171,8 @@ class TurnControllerTest : FunSpec({
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
         val controller = TurnController(
-            loopWithConfirmation, config, input, LiveRegion(recordingAppendable) { 80 }
+            runtimeFor(registry = toolRegistry, policy = confirmationPolicy),
+            input, LiveRegion(recordingAppendable) { 80 }
         ) { rendered.add(it) }
 
         coroutineScope {
@@ -202,7 +203,7 @@ class TurnControllerTest : FunSpec({
         every { provider.stream(any()) } returns flow { throw RuntimeException("stream error") }
         val input = ScriptedInputSource(emptyList())
         val rendered = mutableListOf<String>()
-        val controller = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+        val controller = TurnController(runtimeFor(), input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
         val session = AgentSession(id = "s1")
 
         val result = controller.runTurn(session, "hi")

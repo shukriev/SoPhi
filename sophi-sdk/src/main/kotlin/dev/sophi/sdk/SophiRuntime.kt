@@ -4,6 +4,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
@@ -18,19 +19,25 @@ import dev.sophi.schedule.engine.ScheduleEngine
 import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+
+private fun AgentSession.lastAssistantReply(): String =
+    branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
 
 class SophiRuntime internal constructor(
     internal val agentLoop: AgentLoop,
-    internal val sessionManager: SessionManager,
+    val sessionManager: SessionManager,
     internal val pluginRegistry: PluginRegistry,
-    internal val config: AgentConfig,
+    val config: AgentConfig,
     private val mcpClientManager: McpClientManager? = null,
     /**
      * The learning plugin registered via [RuntimeBuilder.learning], if any. Exposed so embedders
      * that track session lifecycles can call [LearningPlugin.recordSessionEnd] when a session
      * closes; [SophiRuntime] itself has no per-session end signal, so [close] does not call it.
      */
-    internal val learningPlugin: LearningPlugin? = null,
+    val learningPlugin: LearningPlugin? = null,
     private val toolRegistry: ToolRegistry = ToolRegistry(),
     private val provider: LLMProvider? = null,
     private val contextWindowTokens: Int = 0
@@ -49,20 +56,64 @@ class SophiRuntime internal constructor(
 
     suspend fun turn(sessionId: String, input: String): String = streamTurn(sessionId, input) { }
 
-    suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String {
-        val session = sessionManager.load(sessionId)
-        pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(sessionId, userInput = input))
-        val bridge = pluginRegistry.turnEventBridge(sessionId)
+    suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String =
+        streamTurn(sessionManager.load(sessionId), input, onEvent).lastAssistantReply()
+
+    /**
+     * Runs a turn against an already-loaded [session] and returns the updated one. Prefer this
+     * over the id-based overload when you are already threading the session yourself — it does
+     * not reload from disk.
+     */
+    suspend fun streamTurn(
+        session: AgentSession,
+        input: String,
+        onEvent: suspend (TurnEvent) -> Unit
+    ): AgentSession {
+        pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(session.id, userInput = input))
+        // BEFORE_TURN fires first so a plugin can prime state that its own contribute() then reads.
+        // The merged prompt is scoped to this call only — config stays the base prompt.
+        val extra = pluginRegistry.collectContext(session.id, input)
+            .takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+        val turnConfig = if (extra == null) config
+            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
+        val bridge = pluginRegistry.turnEventBridge(session.id)
+        // Buffered here, not only in the caller's UI layer: an interrupted turn still has to
+        // report what the assistant managed to say, or AFTER_TURN fires with a null
+        // assistantReply and the hooks that encode the exchange drop the turn.
+        val partial = StringBuilder()
         return try {
-            val updated = agentLoop.streamTurn(session, input, config) { event ->
+            val updated = agentLoop.streamTurn(session, input, turnConfig) { event ->
+                if (event is TurnEvent.Token) partial.append(event.text)
                 bridge(event)
                 onEvent(event)
             }
-            pluginRegistry.dispatch(HookPoint.AFTER_TURN, HookContext(sessionId))
-            updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
-        } catch (e: Exception) {
-            pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = e))
+            settle(session.id, input, updated.lastAssistantReply())
+            updated
+        } catch (e: CancellationException) {
+            // An interrupt is not a failure. Dispatching ON_ERROR here would make LearningPlugin
+            // mark the session errored, so recordSessionEnd would write outcome=error for a turn
+            // the user simply stopped.
+            settle(session.id, input, partial.toString())
             throw e
+        } catch (e: Exception) {
+            pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(session.id, error = e))
+            throw e
+        }
+    }
+
+    /**
+     * Dispatches AFTER_TURN under [NonCancellable] so an interrupted turn is still recorded —
+     * the caller cancelling us must not also erase the turn from learning and memory.
+     *
+     * Both fields are populated: AFTER_TURN hooks that encode the exchange (MemoryPlugin) bail
+     * out on a null userInput or assistantReply, so an empty context silently drops the turn.
+     */
+    private suspend fun settle(sessionId: String, input: String, reply: String) {
+        withContext(NonCancellable) {
+            pluginRegistry.dispatch(
+                HookPoint.AFTER_TURN,
+                HookContext(sessionId, userInput = input, assistantReply = reply)
+            )
         }
     }
 

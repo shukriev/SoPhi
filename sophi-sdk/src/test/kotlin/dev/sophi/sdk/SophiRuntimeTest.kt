@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
@@ -17,6 +18,7 @@ import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.AgentHook
+import dev.sophi.extensions.ContextContributor
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
@@ -33,6 +35,7 @@ import dev.sophi.schedule.store.TaskStore
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.coEvery
@@ -44,6 +47,11 @@ import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.io.path.createTempDirectory
 
 private const val TEST_CONTEXT_WINDOW = 100_000
@@ -105,6 +113,194 @@ class SophiRuntimeTest : FunSpec({
 
         shouldThrow<RuntimeException> { rt.turn("s1", "hi") }
         log shouldBe listOf(HookPoint.ON_ERROR)
+    }
+
+    test("AFTER_TURN carries userInput and assistantReply so ContextContributor plugins can encode the turn") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "after-turn-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
+
+        rt.streamTurn("s1", "hi") { }
+
+        seen shouldHaveSize 1
+        seen[0].userInput shouldBe "hi"
+        seen[0].assistantReply shouldBe "hello!"
+    }
+
+    test("a cancelled turn dispatches AFTER_TURN with the partial reply and never dispatches ON_ERROR") {
+        val seen = mutableListOf<Pair<HookPoint, HookContext>>()
+        val spy = object : SophiPlugin {
+            override val name = "cancel-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN to context) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR to context) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        every { sessionManager.load("s1") } returns session
+
+        val started = CompletableDeferred<Unit>()
+        val onEventSlot = slot<suspend (TurnEvent) -> Unit>()
+        coEvery { agentLoop.streamTurn(session, "hi", config, capture(onEventSlot)) } coAnswers {
+            onEventSlot.captured(TurnEvent.Token("par"))
+            onEventSlot.captured(TurnEvent.Token("tial"))
+            started.complete(Unit)
+            awaitCancellation()
+        }
+
+        coroutineScope {
+            val job = launch { runCatching { rt.streamTurn("s1", "hi") { } } }
+            started.await()
+            job.cancelAndJoin()
+        }
+
+        seen.map { it.first } shouldBe listOf(HookPoint.AFTER_TURN)
+        seen[0].second.userInput shouldBe "hi"
+        seen[0].second.assistantReply shouldBe "partial"
+    }
+
+    test("a failed turn dispatches ON_ERROR only, never AFTER_TURN") {
+        val seen = mutableListOf<HookPoint>()
+        val spy = object : SophiPlugin {
+            override val name = "error-only-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        every { sessionManager.load("s1") } returns session
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } throws RuntimeException("boom")
+
+        shouldThrow<RuntimeException> { rt.streamTurn("s1", "hi") { } }
+
+        seen shouldBe listOf(HookPoint.ON_ERROR)
+    }
+
+    test("ContextContributor output is appended to the turn's system prompt and the runtime's base config is untouched") {
+        val contributor = object : SophiPlugin, ContextContributor {
+            override val name = "ctx"
+            override fun hooks(): List<AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String): String = "RECALLED: prior turn"
+        }
+        val base = AgentConfig(model = "test-model", systemPrompt = "BASE")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(contributor), base)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "ok", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        val configSlot = slot<AgentConfig>()
+        coEvery { agentLoop.streamTurn(session, "hi", capture(configSlot), any()) } returns updated
+
+        rt.streamTurn("s1", "hi") { }
+
+        configSlot.captured.systemPrompt shouldBe "BASE\n\nRECALLED: prior turn"
+        base.systemPrompt shouldBe "BASE"
+        rt.config.systemPrompt shouldBe "BASE"
+    }
+
+    test("RuntimeBuilder.toolRegistry uses the caller's registry, so tools registered before and after build are both visible") {
+        val registry = ToolRegistry()
+        val beforeBuild = object : Tool {
+            override val name = "before_build"
+            override val description = "registered by the caller before build()"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String): String = "ok"
+        }
+        registry.register(beforeBuild)
+
+        val rt = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            toolRegistry(registry)
+        }.build()
+
+        rt.toolNames() shouldBe listOf("before_build")
+
+        val afterBuild = object : Tool {
+            override val name = "after_build"
+            override val description = "registered by the caller after build()"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String): String = "ok"
+        }
+        registry.register(afterBuild)
+
+        rt.toolNames() shouldBe listOf("after_build", "before_build")
+    }
+
+    test("the AgentSession overload returns the updated session and shares the id-based overload's choreography") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "overload-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
+
+        val result = rt.streamTurn(session, "hi") { }
+
+        result shouldBe updated
+        seen shouldHaveSize 1
+        seen[0].assistantReply shouldBe "hello!"
+        // The overload takes the session directly — it must not reload it from disk.
+        verify(exactly = 0) { sessionManager.load(any()) }
+    }
+
+    // Smoke test only. loopGuard is a one-line pass-through into AgentLoop, whose guard behavior
+    // is already covered by AgentLoopTest and only triggers after AgentConfig.maxToolRounds
+    // (default 200) rounds — not worth driving from here. This exists to catch the knob being
+    // dropped or failing to compile.
+    test("RuntimeBuilder.loopGuard accepts a policy and still builds") {
+        val rt = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            loopGuard(LoopGuardPolicy.ALWAYS_CONTINUE)
+        }.build()
+
+        rt.toolNames() shouldBe emptyList()
     }
 
     test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {

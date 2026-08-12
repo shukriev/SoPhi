@@ -31,7 +31,7 @@ private class ControllableTerminalPolicy : ConfirmationPolicy {
 class RemoteAwareConfirmationPolicyTest : FunSpec({
     test("falls through to the terminal policy when hubClient is null") {
         val terminal = ControllableTerminalPolicy()
-        val policy = RemoteAwareConfirmationPolicy(terminal, hubClient = null, sessionId = "s1")
+        val policy = RemoteAwareConfirmationPolicy(terminal, hubClient = { null }, sessionId = { "s1" })
         runBlocking {
             val result = async { policy.confirm(listOf(bashRequest)) }
             delay(50)
@@ -44,7 +44,7 @@ class RemoteAwareConfirmationPolicyTest : FunSpec({
         val terminal = ControllableTerminalPolicy()
         runBlocking {
             withTimeout(5000) {
-                val policy = RemoteAwareConfirmationPolicy(terminal, hubClient = null, sessionId = "s1")
+                val policy = RemoteAwareConfirmationPolicy(terminal, hubClient = { null }, sessionId = { "s1" })
                 val result = async { policy.confirm(listOf(bashRequest)) }
                 delay(50)
                 terminal.release(mapOf("c1" to true))
@@ -66,7 +66,7 @@ class RemoteAwareConfirmationPolicyTest : FunSpec({
                     delay(200) // let the server record the registration
 
                     val terminal = ControllableTerminalPolicy() // never released in this test
-                    val policy = RemoteAwareConfirmationPolicy(terminal, hubClient, sessionId = "s1")
+                    val policy = RemoteAwareConfirmationPolicy(terminal, { hubClient }, sessionId = { "s1" })
                     val result = async { policy.confirm(listOf(bashRequest)) }
                     delay(200) // let confirm() publish ConfirmationRequested and subscribe
 
