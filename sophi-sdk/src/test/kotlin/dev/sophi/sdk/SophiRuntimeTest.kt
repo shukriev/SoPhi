@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
@@ -229,6 +230,49 @@ class SophiRuntimeTest : FunSpec({
         configSlot.captured.systemPrompt shouldBe "BASE\n\nRECALLED: prior turn"
         base.systemPrompt shouldBe "BASE"
         rt.config.systemPrompt shouldBe "BASE"
+    }
+
+    test("RuntimeBuilder.toolRegistry uses the caller's registry, so tools registered before and after build are both visible") {
+        val registry = ToolRegistry()
+        val beforeBuild = object : Tool {
+            override val name = "before_build"
+            override val description = "registered by the caller before build()"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String): String = "ok"
+        }
+        registry.register(beforeBuild)
+
+        val rt = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            toolRegistry(registry)
+        }.build()
+
+        rt.toolNames() shouldBe listOf("before_build")
+
+        val afterBuild = object : Tool {
+            override val name = "after_build"
+            override val description = "registered by the caller after build()"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String): String = "ok"
+        }
+        registry.register(afterBuild)
+
+        rt.toolNames() shouldBe listOf("after_build", "before_build")
+    }
+
+    // Smoke test only. loopGuard is a one-line pass-through into AgentLoop, whose guard behavior
+    // is already covered by AgentLoopTest and only triggers after AgentConfig.maxToolRounds
+    // (default 200) rounds — not worth driving from here. This exists to catch the knob being
+    // dropped or failing to compile.
+    test("RuntimeBuilder.loopGuard accepts a policy and still builds") {
+        val rt = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            loopGuard(LoopGuardPolicy.ALWAYS_CONTINUE)
+        }.build()
+
+        rt.toolNames() shouldBe emptyList()
     }
 
     test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {
