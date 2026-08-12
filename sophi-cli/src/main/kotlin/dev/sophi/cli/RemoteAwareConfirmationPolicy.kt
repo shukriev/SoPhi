@@ -18,13 +18,20 @@ import kotlinx.coroutines.selects.select
  * machine. If [hubClient] is null (--no-remote, or the hub was never reachable), this is a thin
  * pass-through to [terminal].
  */
+/**
+ * [hubClient] and [sessionId] are suppliers, not values: both are only read once a confirmation
+ * is actually requested, which is long after construction. That matters because the session — and
+ * therefore the hub client keyed to it — cannot exist until the runtime that owns the
+ * SessionManager has been built, and building that runtime requires this policy.
+ */
 class RemoteAwareConfirmationPolicy(
     private val terminal: ConfirmationPolicy,
-    private val hubClient: HubClient?,
-    private val sessionId: String
+    private val hubClient: () -> HubClient?,
+    private val sessionId: () -> String
 ) : ConfirmationPolicy {
     override suspend fun confirm(requests: List<ConfirmationRequest>): Map<String, Boolean> {
-        val client = hubClient ?: return terminal.confirm(requests)
+        val client = hubClient() ?: return terminal.confirm(requests)
+        val sessionId = sessionId()
         val callIds = requests.map { it.callId }.toSet()
         client.publish(HubEvent.ConfirmationRequested(sessionId, requests))
         try {

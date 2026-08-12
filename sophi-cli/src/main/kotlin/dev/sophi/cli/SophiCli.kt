@@ -233,7 +233,6 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val hubClient = cli.hubClient
         val learningPlugin = cli.learningPlugin
         val memoryPlugin = cli.memoryPlugin
-        val pluginRegistry = cli.pluginRegistry
         val config = cli.config
         val registry = cli.registry
         val confirmationPolicy = cli.confirmationPolicy
@@ -242,8 +241,6 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val planLog = cli.planLog
         val calendarProvider = cli.calendarProvider
         val sessionManager = cli.sessionManager
-        val mcpClientManager = cli.mcpClientManager
-        val loop = cli.agentLoop
 
         // Retries connect() on a timer rather than once at startup: a companion opened after
         // this CLI session already started must still be able to pick it up (and a companion
@@ -264,7 +261,6 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
 
-        val bridge = pluginRegistry.turnEventBridge(session.id)
         val compactor = ContextCompactor(provider)
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
@@ -300,8 +296,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
+        // The plugin-hook bridge now lives inside SophiRuntime.streamTurn, so this only has to
+        // mirror events out to a connected companion.
         val onEvent: suspend (dev.sophi.core.agent.TurnEvent) -> Unit = { event ->
-            bridge(event)
             event.toHubEvent(session.id)?.let { hubClient?.publish(it) }
         }
         val slashHandler = SlashHandler(
@@ -322,23 +319,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 "token view: --token-view-key must be a single character, got \"$tokenViewKey\" — using default 'T'"))
         }
         val turnController = TurnController(
-            loop, config, inputSource, liveRegion, onEvent = onEvent,
+            cli.runtime, inputSource, liveRegion, onEvent = onEvent,
             tokenViewKey = tokenViewKey.singleOrNull() ?: 'T',
-            autoExitTokenView = autoExitTokenView,
-            contextProvider = { sess, input ->
-                pluginRegistry.collectContext(sess.id, input).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
-            },
-            onTurnSettled = { userInput, assistantReply, error ->
-                // Learning/memory must never break a turn: dispatch is best-effort.
-                runCatching {
-                    if (error != null) {
-                        pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(session.id, error = error))
-                    } else {
-                        pluginRegistry.dispatch(HookPoint.AFTER_TURN,
-                            HookContext(session.id, userInput = userInput, assistantReply = assistantReply))
-                    }
-                }
-            }
+            autoExitTokenView = autoExitTokenView
         ) {
             mordantTerminal.println(it)
         }
@@ -356,7 +339,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             engine.run(session)
         } finally {
             // TuiEngine.run returns on both exit paths (exit/quit and EOF); record the outcome once.
-            runCatching { learningPlugin.recordSessionEnd(session.id) }
+            runCatching { learningPlugin?.recordSessionEnd(session.id) }
             runCatching {
                 hubClient?.publish(HubEvent.SessionClosed(session.id)) // no-op if never connected
                 hubClient?.close()
@@ -372,7 +355,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 }
             }
             sophiTerminal.close()
-            mcpClientManager.close()
+            cli.runtime.close()
         }
         mordantTerminal.println(TextColors.cyan("\nSession ${session.id} ended."))
     }

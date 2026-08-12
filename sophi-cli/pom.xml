@@ -55,6 +55,10 @@
             <artifactId>sophi-skills</artifactId>
         </dependency>
         <dependency>
+            <groupId>dev.sophi</groupId>
+            <artifactId>sophi-sdk</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-stdlib</artifactId>
             <version>${kotlin.version}</version>

@@ -3,11 +3,12 @@ package dev.sophi.cli
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.core.agent.AgentConfig
-import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionManager
-import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.sdk.Sophi
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.every
@@ -24,7 +25,16 @@ class TuiEngineTest : FunSpec({
     val provider = mockk<LLMProvider>()
     val sessionManager = mockk<SessionManager>(relaxed = true)
     val config = AgentConfig(model = "test-model")
-    val loop = AgentLoop(provider, ToolRegistry(), sessionManager, contextWindowTokens = TEST_CONTEXT_WINDOW)
+    // Built through the public builder: SophiRuntime's constructor is internal to sophi-sdk,
+    // and this is the same path sophi-cli takes. ALLOW_ALL is explicit because RuntimeBuilder
+    // defaults to DENY_ALL where a bare AgentLoop defaulted to ALLOW_ALL.
+    val runtime = Sophi.runtime {
+        this.provider = provider
+        model = "test-model"
+        contextWindowTokens(TEST_CONTEXT_WINDOW)
+        sessionsDir = tempdir().toPath()
+        confirmationPolicy(ConfirmationPolicy.ALLOW_ALL)
+    }
     val slashOutput = mutableListOf<String>()
     val slashHandler = SlashHandler(sessionManager, null, config) { slashOutput.add(it) }
 
@@ -36,7 +46,7 @@ class TuiEngineTest : FunSpec({
 
     fun buildEngine(lines: List<String>): TuiEngine {
         val input = ScriptedInputSource(lines)
-        val turnController = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) {}
+        val turnController = TurnController(runtime, input, LiveRegion(StringBuilder()) { 80 }) {}
         return TuiEngine(turnController, slashHandler, input)
     }
 
@@ -81,7 +91,7 @@ class TuiEngineTest : FunSpec({
             override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) { delay(Long.MAX_VALUE) }
             override suspend fun awaitYesNo(): Boolean = false
         }
-        val turnController = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) {}
+        val turnController = TurnController(runtime, input, LiveRegion(StringBuilder()) { 80 }) {}
         val hubMessages = Channel<String>(Channel.UNLIMITED)
         val engine = TuiEngine(turnController, slashHandler, input, hubMessages)
 
@@ -95,7 +105,7 @@ class TuiEngineTest : FunSpec({
     test("run() still responds to a typed line when a hub channel is present but empty") {
         val hubMessages = Channel<String>(Channel.UNLIMITED)
         val input = ScriptedInputSource(listOf("hello", "exit"))
-        val turnController = TurnController(loop, config, input, LiveRegion(StringBuilder()) { 80 }) {}
+        val turnController = TurnController(runtime, input, LiveRegion(StringBuilder()) { 80 }) {}
         val engine = TuiEngine(turnController, slashHandler, input, hubMessages)
 
         withTimeout(5000) { engine.run(AgentSession(id = "s1")) }

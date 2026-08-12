@@ -17,7 +17,8 @@ import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.AgentSession
-import dev.sophi.core.session.FileSessionManager
+import dev.sophi.sdk.Sophi
+import dev.sophi.sdk.SophiRuntime
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationPolicy
@@ -29,12 +30,7 @@ import dev.sophi.extensions.PluginRegistry
 import dev.sophi.hub.HubClient
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
-import dev.sophi.mcp.McpClientManager
-import dev.sophi.mcp.config.McpConfigLoader
 import dev.sophi.memory.MemoryPlugin
-import dev.sophi.schedule.store.RunLog
-import dev.sophi.schedule.store.TaskStore
-import dev.sophi.schedule.tools.ScheduleTaskTool
 import dev.sophi.skills.SkillRegistry
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
@@ -83,6 +79,7 @@ data class CliOptions(
  * still need directly.
  */
 class CliRuntime(
+    val runtime: SophiRuntime,
     val registry: ToolRegistry,
     val confirmationPolicy: ConfirmationPolicy,
     val autoModeToggle: ToggleableConfirmationPolicy?,
@@ -90,15 +87,14 @@ class CliRuntime(
     val memoryPlugin: MemoryPlugin?,
     val planLog: PlanLog,
     val calendarProvider: CalendarProvider,
-    val sessionManager: SessionManager,
     val session: AgentSession,
-    val hubClient: HubClient?,
-    val learningPlugin: LearningPlugin,
-    val pluginRegistry: PluginRegistry,
-    val config: AgentConfig,
-    val agentLoop: AgentLoop,
-    val mcpClientManager: McpClientManager
-)
+    val hubClient: HubClient?
+) {
+    /** Session store the runtime built from `sessionsDir` — the CLI never makes a second one. */
+    val sessionManager: SessionManager get() = runtime.sessionManager
+    val config: AgentConfig get() = runtime.config
+    val learningPlugin: LearningPlugin? get() = runtime.learningPlugin
+}
 
 /**
  * Builds the whole agent runtime for an interactive `sophi` session.
@@ -113,39 +109,17 @@ internal suspend fun buildCliRuntime(
     input: InputSource,
     onWarning: (String) -> Unit = {}
 ): CliRuntime {
-    val sessionManager = FileSessionManager(Path.of(opts.sessionsDir))
-    val session = opts.sessionIdToResume?.let { sessionManager.load(it) } ?: sessionManager.create()
-    // Retries connect() on a timer rather than once at startup: a companion opened after
-    // this CLI session already started must still be able to pick it up (and a companion
-    // that restarts mid-session must be reconnected to), not just one whose hub was already
-    // listening at the moment this process launched.
-    val hubClient: HubClient? = if (opts.noRemote) null else HubClient(opts.hubPort, session.id)
-
-    // Learning: capture tool outcomes and inject reliability + lessons sections into the system prompt.
-    val learningConfig = LearningConfig(home = opts.learningHome, sessionModel = opts.model)
-    val learningPlugin = LearningPlugin(
-        learningConfig, model = opts.model, provider = provider, sessionManager = sessionManager
-    )
-    val pluginRegistry = PluginRegistry().register(learningPlugin)
-
-    val memoryPlugin = buildMemoryPlugin(opts, provider, onWarning)
-    memoryPlugin?.let { pluginRegistry.register(it) }
-
-    val effectiveSystemPrompt =
-        listOfNotNull(
-            opts.systemPrompt,
-            learningPlugin.promptSections(learningConfig.scope),
-            if (memoryPlugin != null) dev.sophi.memory.MemoryPromptSection.TEXT else null
-        ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
-
-    val config = AgentConfig(
-        model = opts.model, maxTokens = opts.maxTokens, systemPrompt = effectiveSystemPrompt
-    )
-    runCatching { sessionManager.saveConfigSnapshot(session.id, opts.model, config.systemPrompt) }
+    // Assigned once the runtime exists (below). The confirmation policy reads them lazily, which
+    // is what breaks the cycle: the policy must exist before the runtime that owns the
+    // SessionManager, but the session — and the hub client keyed to it — cannot exist before that.
+    var session: AgentSession? = null
+    var hubClient: HubClient? = null
 
     val registry = ToolRegistry()
     val manualConfirmationPolicy: ConfirmationPolicy = RemoteAwareConfirmationPolicy(
-        TerminalConfirmationPolicy(terminal, input), hubClient, session.id
+        TerminalConfirmationPolicy(terminal, input),
+        { hubClient },
+        { requireNotNull(session) { "confirmation requested before the session was created" }.id }
     )
     val toggleableConfirmationPolicy: ToggleableConfirmationPolicy? = if (opts.godMode) null else {
         val autoModePolicy = AutoModeConfirmationPolicy(
@@ -173,12 +147,7 @@ internal suspend fun buildCliRuntime(
     )
 
     buildBuiltinTools(opts.braveApiKey).forEach { registry.register(it) }
-    registry.register(
-        ScheduleTaskTool(
-            TaskStore(Path.of(opts.scheduleDir).resolve("tasks.json")),
-            RunLog(Path.of(opts.scheduleDir).resolve("runs.jsonl"))
-        )
-    )
+    // The schedule tool is registered by the builder's schedule(dir) below, into this same registry.
     val calendarProvider = buildCalendarProvider()
     registry.register(CreateCalendarEventTool(calendarProvider))
     registry.register(ListCalendarEventsTool(calendarProvider))
@@ -187,26 +156,62 @@ internal suspend fun buildCliRuntime(
     registry.register(DeleteCalendarEventTool(calendarProvider))
     registry.register(ListCalendarsTool(calendarProvider))
 
-    val mcpClientManager = McpClientManager()
-    val mcpConfigPath = Path.of(opts.mcpConfigPath)
-    if (mcpConfigPath.exists()) {
-        val mcpConfig = McpConfigLoader().load(mcpConfigPath)
-        mcpClientManager.connect(mcpConfig.servers).forEach { registry.register(it) }
-    }
     if (skillRegistry.all().isNotEmpty()) {
         registry.register(SkillTool(skillRegistry))
     }
     registry.register(InstallSkillTool())
     registry.register(WriteSkillTool())
+
+    val memoryPlugin = buildMemoryPlugin(opts, provider, onWarning)
+    val mcpConfigPath = Path.of(opts.mcpConfigPath)
+
+    val runtime = Sophi.runtime {
+        this.provider = provider
+        model = opts.model
+        maxTokens = opts.maxTokens
+        contextWindowTokens(opts.contextWindowTokens)
+        sessionsDir = Path.of(opts.sessionsDir)
+        // The learning section is appended by the builder; only the caller's own sections go here.
+        systemPrompt = listOfNotNull(
+            opts.systemPrompt,
+            if (memoryPlugin != null) dev.sophi.memory.MemoryPromptSection.TEXT else null
+        ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+        toolRegistry(registry)
+        loopGuard(loopGuardPolicy)
+        confirmationPolicy(confirmationPolicy)
+        learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))
+        schedule(Path.of(opts.scheduleDir))
+        // mcpConfig throws on a missing file; sophi-web guards identically today.
+        if (mcpConfigPath.exists()) mcpConfig(mcpConfigPath)
+        memoryPlugin?.let { plugin(it) }
+    }
+
+    session = opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
+        ?: runtime.sessionManager.create()
+    val currentSession = session!!
+    // Retries connect() on a timer rather than once at startup: a companion opened after
+    // this CLI session already started must still be able to pick it up (and a companion
+    // that restarts mid-session must be reconnected to), not just one whose hub was already
+    // listening at the moment this process launched.
+    hubClient = if (opts.noRemote) null else HubClient(opts.hubPort, currentSession.id)
+    runCatching {
+        runtime.sessionManager.saveConfigSnapshot(
+            currentSession.id, opts.model, runtime.config.systemPrompt
+        )
+    }
+
+    // Registered after build() because both need the session id and the runtime's final config.
+    // AgentLoop reads registry.definitions() per round, so tools added now are live from the
+    // next turn — the same mechanism SophiRuntime.connectMcpServer relies on.
     if (agentDefinitions.isNotEmpty()) {
         registry.register(
             SubagentTool(
                 definitions = agentDefinitions,
                 provider = provider,
                 fullRegistry = registry,
-                sessionManager = sessionManager,
-                parentSessionId = session.id,
-                parentConfig = config,
+                sessionManager = runtime.sessionManager,
+                parentSessionId = currentSession.id,
+                parentConfig = runtime.config,
                 contextWindowTokens = opts.contextWindowTokens,
                 confirmationPolicy = confirmationPolicy
             )
@@ -217,25 +222,17 @@ internal suspend fun buildCliRuntime(
         DecomposeGoalTool(
             provider = provider,
             fullRegistry = registry,
-            sessionManager = sessionManager,
-            parentSessionId = session.id,
-            parentConfig = config,
+            sessionManager = runtime.sessionManager,
+            parentSessionId = currentSession.id,
+            parentConfig = runtime.config,
             contextWindowTokens = opts.contextWindowTokens,
             planLog = planLog,
             confirmationPolicy = confirmationPolicy
         )
     )
 
-    val loop = AgentLoop(
-        provider,
-        registry,
-        sessionManager,
-        confirmationPolicy = confirmationPolicy,
-        loopGuard = loopGuardPolicy,
-        contextWindowTokens = opts.contextWindowTokens
-    )
-
     return CliRuntime(
+        runtime = runtime,
         registry = registry,
         confirmationPolicy = confirmationPolicy,
         autoModeToggle = toggleableConfirmationPolicy,
@@ -243,14 +240,8 @@ internal suspend fun buildCliRuntime(
         memoryPlugin = memoryPlugin,
         planLog = planLog,
         calendarProvider = calendarProvider,
-        sessionManager = sessionManager,
-        session = session,
-        hubClient = hubClient,
-        learningPlugin = learningPlugin,
-        pluginRegistry = pluginRegistry,
-        config = config,
-        agentLoop = loop,
-        mcpClientManager = mcpClientManager
+        session = currentSession,
+        hubClient = hubClient
     )
 }
 
