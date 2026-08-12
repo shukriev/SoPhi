@@ -18,6 +18,9 @@ import dev.sophi.schedule.engine.ScheduleEngine
 import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 class SophiRuntime internal constructor(
     internal val agentLoop: AgentLoop,
@@ -53,22 +56,44 @@ class SophiRuntime internal constructor(
         val session = sessionManager.load(sessionId)
         pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(sessionId, userInput = input))
         val bridge = pluginRegistry.turnEventBridge(sessionId)
+        // Buffered here, not only in the caller's UI layer: an interrupted turn still has to
+        // report what the assistant managed to say, or AFTER_TURN fires with a null
+        // assistantReply and the hooks that encode the exchange drop the turn.
+        val partial = StringBuilder()
         return try {
             val updated = agentLoop.streamTurn(session, input, config) { event ->
+                if (event is TurnEvent.Token) partial.append(event.text)
                 bridge(event)
                 onEvent(event)
             }
             val reply = updated.branch().lastOrNull { it.role == EntryRole.ASSISTANT }?.content ?: ""
-            // Both fields matter: AFTER_TURN hooks that encode the exchange (MemoryPlugin) bail
-            // out on a null userInput or assistantReply, so an empty context silently drops the turn.
+            settle(sessionId, input, reply)
+            reply
+        } catch (e: CancellationException) {
+            // An interrupt is not a failure. Dispatching ON_ERROR here would make LearningPlugin
+            // mark the session errored, so recordSessionEnd would write outcome=error for a turn
+            // the user simply stopped.
+            settle(sessionId, input, partial.toString())
+            throw e
+        } catch (e: Exception) {
+            pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = e))
+            throw e
+        }
+    }
+
+    /**
+     * Dispatches AFTER_TURN under [NonCancellable] so an interrupted turn is still recorded —
+     * the caller cancelling us must not also erase the turn from learning and memory.
+     *
+     * Both fields are populated: AFTER_TURN hooks that encode the exchange (MemoryPlugin) bail
+     * out on a null userInput or assistantReply, so an empty context silently drops the turn.
+     */
+    private suspend fun settle(sessionId: String, input: String, reply: String) {
+        withContext(NonCancellable) {
             pluginRegistry.dispatch(
                 HookPoint.AFTER_TURN,
                 HookContext(sessionId, userInput = input, assistantReply = reply)
             )
-            reply
-        } catch (e: Exception) {
-            pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = e))
-            throw e
         }
     }
 

@@ -45,6 +45,11 @@ import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.io.path.createTempDirectory
 
 private const val TEST_CONTEXT_WINDOW = 100_000
@@ -133,6 +138,70 @@ class SophiRuntimeTest : FunSpec({
         seen shouldHaveSize 1
         seen[0].userInput shouldBe "hi"
         seen[0].assistantReply shouldBe "hello!"
+    }
+
+    test("a cancelled turn dispatches AFTER_TURN with the partial reply and never dispatches ON_ERROR") {
+        val seen = mutableListOf<Pair<HookPoint, HookContext>>()
+        val spy = object : SophiPlugin {
+            override val name = "cancel-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN to context) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR to context) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        every { sessionManager.load("s1") } returns session
+
+        val started = CompletableDeferred<Unit>()
+        val onEventSlot = slot<suspend (TurnEvent) -> Unit>()
+        coEvery { agentLoop.streamTurn(session, "hi", config, capture(onEventSlot)) } coAnswers {
+            onEventSlot.captured(TurnEvent.Token("par"))
+            onEventSlot.captured(TurnEvent.Token("tial"))
+            started.complete(Unit)
+            awaitCancellation()
+        }
+
+        coroutineScope {
+            val job = launch { runCatching { rt.streamTurn("s1", "hi") { } } }
+            started.await()
+            job.cancelAndJoin()
+        }
+
+        seen.map { it.first } shouldBe listOf(HookPoint.AFTER_TURN)
+        seen[0].second.userInput shouldBe "hi"
+        seen[0].second.assistantReply shouldBe "partial"
+    }
+
+    test("a failed turn dispatches ON_ERROR only, never AFTER_TURN") {
+        val seen = mutableListOf<HookPoint>()
+        val spy = object : SophiPlugin {
+            override val name = "error-only-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        every { sessionManager.load("s1") } returns session
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } throws RuntimeException("boom")
+
+        shouldThrow<RuntimeException> { rt.streamTurn("s1", "hi") { } }
+
+        seen shouldBe listOf(HookPoint.ON_ERROR)
     }
 
     test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {
