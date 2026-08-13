@@ -197,6 +197,7 @@ class CompanionRuntime(
         pollingJob = scope.launch {
             while (isActive) {
                 scheduleEngine.tickOnce()
+                sophiRuntime.memoryPlugin?.consolidateIfDue()
                 delay(intervalMs)
             }
         }
