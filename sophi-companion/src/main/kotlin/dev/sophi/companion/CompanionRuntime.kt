@@ -116,7 +116,12 @@ class CompanionRuntime(
         sessionStates.getOrPut(sessionId) { MutableStateFlow(SessionState.Idle) }
 
     private fun transcriptBuilderFor(sessionId: String): SessionTranscriptBuilder =
-        transcriptBuilders.getOrPut(sessionId) { SessionTranscriptBuilder() }
+        transcriptBuilders.getOrPut(sessionId) {
+            SessionTranscriptBuilder().also { builder ->
+                runCatching { sessionManager.load(sessionId) }
+                    .onSuccess { builder.seed(SessionTranscriptBuilder.linesFor(it.entries)) }
+            }
+        }
 
     fun sessionState(sessionId: String): StateFlow<SessionState> = stateFlowFor(sessionId)
 

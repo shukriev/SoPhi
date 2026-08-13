@@ -390,6 +390,48 @@ class CompanionRuntimeTest : FunSpec({
         runtime.pendingConfirmations.value shouldBe emptySet()
     }
 
+    test("sessionMessages replays a persisted session's prior turns without sending anything") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sessionsDir = dir.resolve("sessions")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            this.sessionsDir = sessionsDir
+        }
+        val firstRuntime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(sessionsDir),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+        firstRuntime.sendMessage(sessionId, "hi")
+        runBlocking { waitUntil(timeoutMs = 2000) { firstRuntime.sessionState(sessionId).value == SessionState.Idle } }
+        firstRuntime.close()
+
+        // A fresh runtime/companion window over the same sessions dir — nothing sent yet on this
+        // instance, but the session already has turns on disk from before.
+        val reopenedSophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            this.sessionsDir = sessionsDir
+        }
+        val reopenedRuntime = CompanionRuntime(
+            sophiRuntime = reopenedSophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(sessionsDir),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+
+        reopenedRuntime.sessionMessages(sessionId).value shouldBe listOf("you: hi", "sophi: done")
+    }
+
     test("a CLI session registered via the hub appears in remoteSessions and can receive a message") {
         val dir = createTempDirectory("companion-runtime-test")
         val hubPort = freePort()

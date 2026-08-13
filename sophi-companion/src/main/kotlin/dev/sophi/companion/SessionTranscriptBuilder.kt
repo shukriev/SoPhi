@@ -1,7 +1,13 @@
 package dev.sophi.companion
 
+import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Builds a live, human-readable transcript from a turn's streaming events — shared by
@@ -11,8 +17,42 @@ import kotlinx.coroutines.flow.StateFlow
  * reasoning/answer segment, so the next tokens after a tool call start a fresh line.
  */
 class SessionTranscriptBuilder {
+    companion object {
+        /**
+         * Same line shapes as the live streaming path, rebuilt from a session's persisted
+         * entries (AgentLoop.kt: ASSISTANT entries with a "toolCalls" metadata JSON array carry
+         * no content of their own, TOOL_RESULT entries carry a "toolName"). Reasoning tokens
+         * aren't persisted at all, so replayed turns never show a "(thinking)" line.
+         */
+        fun linesFor(entries: List<SessionEntry>): List<String> = entries.flatMap { entry ->
+            when (entry.role) {
+                EntryRole.USER -> listOf("you: ${entry.content}")
+                EntryRole.ASSISTANT -> {
+                    val toolCallsJson = entry.metadata["toolCalls"]
+                    when {
+                        toolCallsJson != null -> Json.parseToJsonElement(toolCallsJson).jsonArray.map { call ->
+                            val obj = call.jsonObject
+                            val name = obj["name"]?.jsonPrimitive?.content ?: "?"
+                            val args = obj["argumentsJson"]?.jsonPrimitive?.content ?: "{}"
+                            "sophi (tool): $name($args)"
+                        }
+                        entry.content.isNotEmpty() -> listOf("sophi: ${entry.content}")
+                        else -> emptyList()
+                    }
+                }
+                EntryRole.TOOL_RESULT -> listOf("sophi (tool result): ${entry.metadata["toolName"] ?: "?"} -> ${entry.content}")
+                EntryRole.SYSTEM -> emptyList()
+            }
+        }
+    }
+
     private val state = MutableStateFlow<List<String>>(emptyList())
     val transcript: StateFlow<List<String>> = state
+
+    /** Prepends persisted history ahead of any live turns. No-op once the transcript is non-empty. */
+    fun seed(lines: List<String>) {
+        if (state.value.isEmpty()) state.value = lines
+    }
 
     private var reasoningBuffer: StringBuilder? = null
     private var answerBuffer: StringBuilder? = null
