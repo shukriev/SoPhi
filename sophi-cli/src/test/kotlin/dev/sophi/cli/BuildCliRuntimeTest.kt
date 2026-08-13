@@ -111,6 +111,37 @@ class BuildCliRuntimeTest : FunSpec({
         cli.runtime.config.systemPrompt.shouldNotBeNull() shouldContain "BASE PROMPT"
     }
 
+    test("memory enabled without an embedding model warns and leaves memory off") {
+        val dir = tempdir().toPath()
+        val warnings = mutableListOf<String>()
+        val cli = buildCliRuntime(
+            opts = optionsFor(dir).copy(memoryEnabled = true, embeddingModel = null),
+            provider = mockk<LLMProvider>(relaxed = true),
+            terminal = Terminal(),
+            input = ScriptedInputSource(emptyList()),
+            onWarning = { warnings.add(it) }
+        )
+        cli.memoryPlugin shouldBe null
+        warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
+    }
+
+    test("memory enabled without an embedding base URL or --base-url warns and leaves memory off") {
+        val dir = tempdir().toPath()
+        val warnings = mutableListOf<String>()
+        val cli = buildCliRuntime(
+            opts = optionsFor(dir).copy(
+                memoryEnabled = true, embeddingModel = "nomic-embed-text",
+                embeddingBaseUrl = null, baseUrl = null
+            ),
+            provider = mockk<LLMProvider>(relaxed = true),
+            terminal = Terminal(),
+            input = ScriptedInputSource(emptyList()),
+            onWarning = { warnings.add(it) }
+        )
+        cli.memoryPlugin shouldBe null
+        warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
+    }
+
     test("model and maxTokens flow through to the agent config") {
         val cli = build()
         cli.runtime.config.model shouldBe "test-model"

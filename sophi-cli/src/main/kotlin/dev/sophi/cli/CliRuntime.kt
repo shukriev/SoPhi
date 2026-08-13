@@ -149,7 +149,6 @@ internal suspend fun buildCliRuntime(
     registry.register(InstallSkillTool())
     registry.register(WriteSkillTool())
 
-    val memoryPlugin = buildMemoryPlugin(opts, provider, onWarning)
     val mcpConfigPath = Path.of(opts.mcpConfigPath)
 
     val runtime = Sophi.runtime {
@@ -158,11 +157,9 @@ internal suspend fun buildCliRuntime(
         maxTokens = opts.maxTokens
         contextWindowTokens(opts.contextWindowTokens)
         sessionsDir = Path.of(opts.sessionsDir)
-        // The learning section is appended by the builder; only the caller's own sections go here.
-        systemPrompt = listOfNotNull(
-            opts.systemPrompt,
-            if (memoryPlugin != null) dev.sophi.memory.MemoryPromptSection.TEXT else null
-        ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+        // The learning and memory prompt sections are both appended by the builder; only the
+        // caller's own system prompt goes here.
+        systemPrompt = opts.systemPrompt
         toolRegistry(registry)
         loopGuard(loopGuardPolicy)
         confirmationPolicy(confirmationPolicy)
@@ -170,8 +167,20 @@ internal suspend fun buildCliRuntime(
         schedule(Path.of(opts.scheduleDir))
         // mcpConfig throws on a missing file; sophi-web guards identically today.
         if (mcpConfigPath.exists()) mcpConfig(mcpConfigPath)
-        memoryPlugin?.let { plugin(it) }
+        // Memory (Jane's Theory, experimental): resolve --memory's dependent flags here, but
+        // delegate building/probing the embedding provider and JanesPalace to the shared
+        // RuntimeBuilder.memory(), which sophi-companion also calls.
+        if (opts.memoryEnabled) {
+            val embBase = opts.embeddingBaseUrl ?: opts.baseUrl
+            val embModel = opts.embeddingModel
+            if (embBase == null || embModel == null) {
+                onWarning("memory: disabled — --memory needs --embedding-model and --embedding-base-url (or --base-url)")
+            } else {
+                memory(embModel, embBase, opts.apiKey, opts.embeddingDimensions, onWarning)
+            }
+        }
     }
+    val memoryPlugin = runtime.memoryPlugin
 
     val currentSession = (opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
         ?: runtime.sessionManager.create()).also { session = it }
@@ -225,39 +234,4 @@ internal suspend fun buildCliRuntime(
         session = currentSession,
         hubClient = hubClient
     )
-}
-
-/**
- * Memory (Jane's Theory): per-turn recall via ContextContributor, async encoding on AFTER_TURN.
- * Returns null — with a warning — whenever memory was asked for but cannot be honored, rather
- * than failing the session or silently pretending it is on.
- */
-private suspend fun buildMemoryPlugin(
-    opts: CliOptions,
-    provider: LLMProvider,
-    onWarning: (String) -> Unit
-): MemoryPlugin? {
-    if (!opts.memoryEnabled) return null
-    val embBase = opts.embeddingBaseUrl ?: opts.baseUrl
-    val embModel = opts.embeddingModel
-    if (embBase == null || embModel == null) {
-        onWarning("memory: disabled — --memory needs --embedding-model and --embedding-base-url (or --base-url)")
-        return null
-    }
-    val embProvider = dev.sophi.ai.providers.buildOpenAiCompatEmbeddingProvider(
-        embBase, opts.apiKey, embModel, opts.embeddingDimensions
-    )
-    // Spec §6: memory must never fail silently (cognitive-prosthetic honesty).
-    val probeResult = dev.sophi.ai.api.probeEmbeddingProvider(embProvider)
-    if (probeResult.isFailure) {
-        val error = probeResult.exceptionOrNull()?.message ?: "unknown error"
-        onWarning("memory: disabled — embeddings endpoint unreachable at $embBase ($embModel): $error")
-        return null
-    }
-    val palace = dev.sophi.memory.jane.JanesPalace(
-        dev.sophi.memory.jane.JanesPalaceConfig(sessionModel = opts.model),
-        provider, embProvider, embModel,
-        onWarning = onWarning
-    )
-    return MemoryPlugin(palace)
 }
