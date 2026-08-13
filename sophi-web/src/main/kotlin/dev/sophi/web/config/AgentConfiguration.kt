@@ -2,8 +2,8 @@ package dev.sophi.web.config
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.providers.BraveSearchProvider
-import dev.sophi.ai.providers.buildClaudeProvider
-import dev.sophi.ai.providers.buildOpenAiCompatProvider
+import dev.sophi.ai.providers.ProviderConfigException
+import dev.sophi.ai.providers.buildProviderFromType
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.session.FileSessionManager
@@ -30,23 +30,16 @@ import org.springframework.context.annotation.Configuration
 import java.nio.file.Path
 import kotlin.io.path.exists
 
-internal fun buildProviderFromProperties(props: ProviderProperties): LLMProvider = when (props.type.lowercase()) {
-    "claude" -> {
-        val apiKey = props.apiKey ?: System.getenv("ANTHROPIC_API_KEY")
-            ?: throw IllegalStateException(
-                "sophi.provider.api-key is required when sophi.provider.type=claude " +
-                    "(neither sophi.provider.api-key nor ANTHROPIC_API_KEY was set)"
-            )
-        buildClaudeProvider(apiKey, props.model)
-    }
-    "openai-compat" -> {
-        val baseUrl = props.baseUrl
-            ?: throw IllegalStateException("sophi.provider.base-url is required when sophi.provider.type=openai-compat")
-        buildOpenAiCompatProvider(baseUrl, props.apiKey, props.model, name = "openai-compat")
-    }
-    else -> throw IllegalStateException(
-        "Unknown sophi.provider.type: ${props.type} (expected 'claude' or 'openai-compat')"
+internal fun buildProviderFromProperties(props: ProviderProperties): LLMProvider = try {
+    buildProviderFromType(
+        props.type, props.apiKey, props.baseUrl, props.model,
+        missingApiKeyMessage = "sophi.provider.api-key is required when sophi.provider.type=claude " +
+            "(neither sophi.provider.api-key nor ANTHROPIC_API_KEY was set)",
+        missingBaseUrlMessage = "sophi.provider.base-url is required when sophi.provider.type=openai-compat",
+        unknownTypeMessage = "Unknown sophi.provider.type: ${props.type} (expected 'claude' or 'openai-compat')"
     )
+} catch (e: ProviderConfigException) {
+    throw IllegalStateException(e.message, e)
 }
 
 @Configuration

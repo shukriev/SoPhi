@@ -73,3 +73,28 @@ fun buildOpenAiCompatProvider(
         .build()
     return OpenAICompatProvider(chatModel, client, name = name)
 }
+
+class ProviderConfigException(message: String) : IllegalArgumentException(message)
+
+fun buildProviderFromType(
+    type: String,
+    apiKey: String?,
+    baseUrl: String?,
+    model: String,
+    requestTimeout: Duration = Duration.ofSeconds(60),
+    maxRetries: Int = 2,
+    missingApiKeyMessage: String = "API key required for provider type 'claude' (pass apiKey or set ANTHROPIC_API_KEY)",
+    missingBaseUrlMessage: String = "baseUrl is required for provider type 'openai-compat'",
+    unknownTypeMessage: String = "Unknown provider type: $type (expected 'claude' or 'openai-compat')"
+): LLMProvider = when (type.lowercase()) {
+    "claude" -> {
+        val key = apiKey ?: System.getenv("ANTHROPIC_API_KEY")
+            ?: throw ProviderConfigException(missingApiKeyMessage)
+        buildClaudeProvider(key, model)
+    }
+    "openai-compat" -> {
+        val url = baseUrl ?: throw ProviderConfigException(missingBaseUrlMessage)
+        buildOpenAiCompatProvider(url, apiKey, model, requestTimeout = requestTimeout, maxRetries = maxRetries)
+    }
+    else -> throw ProviderConfigException(unknownTypeMessage)
+}
