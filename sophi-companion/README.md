@@ -202,6 +202,12 @@ tasks.matching { it.name in packageFormatTasks }.configureEach {
   shared across all concurrent sessions, so there's no way to route an
   approve/deny prompt to the right Chat tab. Not a safe place to run destructive
   tools unattended. See ADR-022 decision 7.
+- **Concurrent same-named tool calls can show the wrong result in the live Chat view.**
+  `TurnEvent.ToolCallStarted`/`ToolCallFinished` (sophi-core) carry a tool name but no call id,
+  so when two calls to the *same* tool are in flight at once, their finish events are matched to
+  the oldest still-unfinished call of that name (FIFO), not necessarily the one that actually
+  produced that result. Different-named concurrent calls are unaffected. A session reloaded from
+  disk does not have this problem — its persisted `toolCallId` gives an exact match.
 - **Tray click behavior differs by OS.** On macOS, left-clicking an AWT
   `SystemTray` icon opens its context menu instead of firing `onAction` — use
   "Open Sophi" from the menu. Linux and Windows are expected to fire `onAction`
