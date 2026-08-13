@@ -3,6 +3,7 @@ package dev.sophi.sdk
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
@@ -32,6 +33,8 @@ class RuntimeBuilder {
     private var grants: Set<String> = emptySet()
     private var mcpConfigPath: Path? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
+    private var providedRegistry: ToolRegistry? = null
+    private var loopGuardPolicy: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
     private var learningConfig: LearningConfig? = null
     private var scheduleDir: Path? = null
     private var contextWindowTokens: Int? = null
@@ -42,6 +45,16 @@ class RuntimeBuilder {
     fun grants(names: Set<String>): RuntimeBuilder = apply { grants = names }
     fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
+
+    /**
+     * Use [registry] instead of a privately created one. Pass your own when something built
+     * *before* the runtime needs the same registry — a confirmation policy that inspects tools,
+     * or a tool that dispatches to its siblings. Tools registered after [build] are picked up on
+     * the next turn, the same way MCP tools connected at runtime are.
+     */
+    fun toolRegistry(registry: ToolRegistry): RuntimeBuilder = apply { providedRegistry = registry }
+
+    fun loopGuard(policy: LoopGuardPolicy): RuntimeBuilder = apply { loopGuardPolicy = policy }
     fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
     fun schedule(dir: Path): RuntimeBuilder = apply { scheduleDir = dir }
     /**
@@ -57,7 +70,7 @@ class RuntimeBuilder {
             "contextWindowTokens must be set before calling build() — pass the total context " +
                 "window (in tokens) of the model you configured"
         }
-        val registry = ToolRegistry().also { r -> tools.forEach { r.register(it) } }
+        val registry = (providedRegistry ?: ToolRegistry()).also { r -> tools.forEach { r.register(it) } }
         scheduleDir?.let { dir ->
             registry.register(ScheduleTaskTool(
                 TaskStore(dir.resolve("tasks.json")),
@@ -75,6 +88,7 @@ class RuntimeBuilder {
         val loop = AgentLoop(
             p, registry, sm,
             confirmationPolicy = confirmationPolicy, grants = grants,
+            loopGuard = loopGuardPolicy,
             contextWindowTokens = window
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
