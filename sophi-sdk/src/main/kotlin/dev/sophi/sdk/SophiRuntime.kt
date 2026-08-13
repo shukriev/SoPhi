@@ -13,6 +13,7 @@ import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningPlugin
+import dev.sophi.memory.MemoryPlugin
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpServerConfig
 import dev.sophi.schedule.engine.ScheduleEngine
@@ -46,12 +47,14 @@ class SophiRuntime internal constructor(
     private val toolRegistry: ToolRegistry = ToolRegistry(),
     private val provider: LLMProvider? = null,
     private val contextWindowTokens: Int = 0,
-    private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
+    private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
+    val memoryPlugin: MemoryPlugin? = null
 ) {
     private val skillInstaller = SkillInstaller()
 
     fun close() {
         mcpClientManager?.close()
+        memoryPlugin?.close()
     }
 
     fun toolNames(): List<String> = toolRegistry.names()
