@@ -61,7 +61,7 @@ class RemoteSessionRegistry {
     }
 
     fun stateFlowFor(sessionId: String): StateFlow<SessionState> = stateFlow(sessionId)
-    fun transcriptFor(sessionId: String): StateFlow<List<String>> = transcriptBuilderFor(sessionId).transcript
+    fun transcriptFor(sessionId: String): StateFlow<List<TranscriptEntry>> = transcriptBuilderFor(sessionId).transcript
     fun remoteSessionIds(): Set<String> = registered.toSet()
     fun titleFor(sessionId: String): String? = titles[sessionId]
     fun lastActiveMillisFor(sessionId: String): Long = lastActiveMillis[sessionId] ?: 0L
