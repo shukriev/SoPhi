@@ -186,8 +186,11 @@ class CompanionRuntimeTest : FunSpec({
 
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
 
-        messagesRightAfterSend shouldBe listOf("you: hi")
-        runtime.sessionMessages(sessionId).value shouldBe listOf("you: hi", "sophi: done")
+        messagesRightAfterSend shouldBe listOf(TranscriptEntry.UserMessage(0, "hi"))
+        runtime.sessionMessages(sessionId).value shouldBe listOf(
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Answer(1, "done")
+        )
     }
 
     test("sendMessage streams reasoning and answer tokens incrementally, not as one atomic jump") {
@@ -212,9 +215,9 @@ class CompanionRuntimeTest : FunSpec({
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
 
         runtime.sessionMessages(sessionId).value shouldBe listOf(
-            "you: hi",
-            "sophi (thinking): thinking...",
-            "sophi: Hello!"
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Reasoning(1, "thinking..."),
+            TranscriptEntry.Answer(2, "Hello!")
         )
     }
 
@@ -250,7 +253,7 @@ class CompanionRuntimeTest : FunSpec({
         runtime.respondToConfirmation(sessionId, true)
 
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
-        runtime.sessionMessages(sessionId).value.last() shouldBe "sophi: done"
+        (runtime.sessionMessages(sessionId).value.last() as TranscriptEntry.Answer).text shouldBe "done"
     }
 
     test("respondToConfirmation is a no-op when nothing is pending for that session") {
@@ -388,6 +391,87 @@ class CompanionRuntimeTest : FunSpec({
         runtime.respondToConfirmation(sessionB, true)
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionB).value == SessionState.Idle } }
         runtime.pendingConfirmations.value shouldBe emptySet()
+    }
+
+    test("sessionMessages replays a persisted session's prior turns without sending anything") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sessionsDir = dir.resolve("sessions")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            this.sessionsDir = sessionsDir
+        }
+        val firstRuntime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(sessionsDir),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+        firstRuntime.sendMessage(sessionId, "hi")
+        runBlocking { waitUntil(timeoutMs = 2000) { firstRuntime.sessionState(sessionId).value == SessionState.Idle } }
+        firstRuntime.close()
+
+        // A fresh runtime/companion window over the same sessions dir — nothing sent yet on this
+        // instance, but the session already has turns on disk from before.
+        val reopenedSophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            this.sessionsDir = sessionsDir
+        }
+        val reopenedRuntime = CompanionRuntime(
+            sophiRuntime = reopenedSophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(sessionsDir),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+
+        reopenedRuntime.sessionMessages(sessionId).value shouldBe listOf(
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Answer(1, "done")
+        )
+    }
+
+    test("sessionMessages doesn't crash when a persisted session has malformed tool-call metadata") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sessionsDir = dir.resolve("sessions")
+        java.nio.file.Files.createDirectories(sessionsDir)
+        val sessionId = "malformed-session"
+        val entry = dev.sophi.core.session.SessionEntry(
+            id = "e1",
+            role = dev.sophi.core.session.EntryRole.ASSISTANT,
+            content = "",
+            timestamp = 1L,
+            metadata = mapOf("toolCalls" to "not-json")
+        )
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        java.nio.file.Files.writeString(
+            sessionsDir.resolve("$sessionId.jsonl"),
+            json.encodeToString(dev.sophi.core.session.SessionEntry.serializer(), entry)
+        )
+
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            this.sessionsDir = sessionsDir
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(sessionsDir),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+
+        runtime.sessionMessages(sessionId).value shouldBe emptyList()
     }
 
     test("a CLI session registered via the hub appears in remoteSessions and can receive a message") {

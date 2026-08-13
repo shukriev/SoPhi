@@ -115,13 +115,29 @@ class CompanionRuntime(
     private fun stateFlowFor(sessionId: String): MutableStateFlow<SessionState> =
         sessionStates.getOrPut(sessionId) { MutableStateFlow(SessionState.Idle) }
 
+    // ponytail: session-history seeding reads+parses the session's .jsonl file synchronously on
+    // whichever thread calls this (Compose UI thread on first ChatTab access, or sendMessage's
+    // caller) — a real if usually brief UI stall for large histories. Not moved to a background
+    // dispatcher here: doing that safely needs startTurn to wait for any in-flight seed rather
+    // than racing it (seed() is a no-op once the transcript is non-empty, so an unlucky ordering
+    // could silently drop the persisted history instead of just being slow). Revisit with that
+    // synchronization if session files large enough to cause a noticeable stall turn up in
+    // practice.
     private fun transcriptBuilderFor(sessionId: String): SessionTranscriptBuilder =
-        transcriptBuilders.getOrPut(sessionId) { SessionTranscriptBuilder() }
+        transcriptBuilders.getOrPut(sessionId) {
+            SessionTranscriptBuilder().also { builder ->
+                runCatching { sessionManager.load(sessionId) }.onSuccess { session ->
+                    runCatching { SessionTranscriptBuilder.entriesFor(session.entries) }
+                        .onSuccess { builder.seed(it) }
+                        .onFailure { System.err.println("sophi-companion: failed to parse persisted history for $sessionId (${it.message})") }
+                }
+            }
+        }
 
     fun sessionState(sessionId: String): StateFlow<SessionState> = stateFlowFor(sessionId)
 
-    /** Chat lines for a session, in order — each is prefixed "you: " or "sophi: " (or "sophi (thinking): " / "sophi (tool)..."). */
-    fun sessionMessages(sessionId: String): StateFlow<List<String>> = transcriptBuilderFor(sessionId).transcript
+    /** A session's turn transcript, in order — see TranscriptEntry for the shape of each entry. */
+    fun sessionMessages(sessionId: String): StateFlow<List<TranscriptEntry>> = transcriptBuilderFor(sessionId).transcript
 
     /** Ids of sessions currently awaiting confirmation, across all sessions. */
     val pendingConfirmations: StateFlow<Set<String>> = pendingConfirmationSessionIds

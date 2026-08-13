@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
 import dev.sophi.companion.SessionState
+import dev.sophi.companion.TranscriptEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,12 +40,15 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String) {
         .collectAsState()
     // Remote (CLI) sessions stream into RemoteSessionRegistry's per-session transcript (built
     // from hub Token/ReasoningToken/ToolCall events); local sessions use CompanionRuntime's own,
-    // populated by sendMessage. Different sources, same shape.
+    // populated by sendMessage. Different sources, same TranscriptEntry shape.
     val history by (if (isRemote) runtime.remoteSessions.transcriptFor(activeSessionId) else runtime.sessionMessages(activeSessionId))
         .collectAsState()
     val pending = state as? SessionState.NeedsConfirmation
     val listState = rememberLazyListState()
     LaunchedEffect(history.size) { if (history.isNotEmpty()) listState.animateScrollToItem(history.lastIndex) }
+    // Keyed by session so switching sessions always starts collapsed again, instead of leaking
+    // one session's expanded entry ids into another session's unrelated entry id space.
+    val expandedIds = remember(activeSessionId) { mutableStateMapOf<Int, Boolean>() }
 
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -62,13 +67,11 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String) {
             Text((state as SessionState.Error).message, color = MaterialTheme.colorScheme.error)
         }
         LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-            items(history) { line ->
-                val muted = line.startsWith("sophi (thinking): ") || line.startsWith("sophi (tool")
-                Text(
-                    line,
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+            items(history, key = { it.id }) { entry ->
+                TranscriptRow(
+                    entry = entry,
+                    expanded = expandedIds[entry.id] == true,
+                    onToggle = { expandedIds[entry.id] = expandedIds[entry.id] != true }
                 )
             }
         }
@@ -114,5 +117,42 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String) {
                 }
             ) { Text("Send") }
         }
+    }
+}
+
+@Composable
+private fun TranscriptRow(entry: TranscriptEntry, expanded: Boolean, onToggle: () -> Unit) {
+    when (entry) {
+        is TranscriptEntry.UserMessage -> Text(
+            "you: ${entry.text}",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        is TranscriptEntry.Answer -> Text(
+            "sophi: ${entry.text}",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        is TranscriptEntry.Reasoning -> CollapsibleCard(
+            expanded = expanded,
+            onToggle = onToggle,
+            container = MaterialTheme.colorScheme.tertiaryContainer,
+            onContainer = MaterialTheme.colorScheme.onTertiaryContainer,
+            summary = "Thinking: " + entry.text.take(80) + if (entry.text.length > 80) "…" else "",
+            full = entry.text,
+        )
+        is TranscriptEntry.ToolInvocation -> CollapsibleCard(
+            expanded = expanded,
+            onToggle = onToggle,
+            container = when {
+                entry.isError -> MaterialTheme.colorScheme.errorContainer
+                entry.result != null -> MaterialTheme.colorScheme.secondaryContainer
+                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+            onContainer = if (entry.isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+            summary = "${entry.name}(${entry.argsJson.take(60)}) → " +
+                if (entry.result == null) "…" else if (entry.isError) "error" else "ok",
+            full = "args: ${entry.argsJson}\nresult: ${entry.result ?: "(running)"}",
+        )
     }
 }

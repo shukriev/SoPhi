@@ -51,7 +51,7 @@ class RemoteSessionRegistryTest : FunSpec({
         val registry = RemoteSessionRegistry()
         registry.onEvent(HubEvent.SessionRegistered("s1", null, 1L, "/repo"))
         registry.onEvent(HubEvent.TurnStarted("s1", "hello there"))
-        registry.transcriptFor("s1").value shouldBe listOf("you: hello there")
+        registry.transcriptFor("s1").value shouldBe listOf(TranscriptEntry.UserMessage(0, "hello there"))
     }
 
     test("Token, ReasoningToken, ToolCallStarted, ToolCallFinished all delegate to the builder") {
@@ -64,11 +64,10 @@ class RemoteSessionRegistryTest : FunSpec({
         registry.onEvent(HubEvent.ToolCallFinished("s1", "bash", "ok", isError = false))
 
         registry.transcriptFor("s1").value shouldBe listOf(
-            "you: hi",
-            "sophi (thinking): thinking",
-            "sophi: answer",
-            "sophi (tool): bash({})",
-            "sophi (tool result): bash -> ok"
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Reasoning(1, "thinking"),
+            TranscriptEntry.Answer(2, "answer"),
+            TranscriptEntry.ToolInvocation(3, "bash", "{}", "ok", false)
         )
     }
 
