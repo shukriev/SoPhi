@@ -12,8 +12,8 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
-import dev.sophi.ai.providers.buildClaudeProvider
-import dev.sophi.ai.providers.buildOpenAiCompatProvider
+import dev.sophi.ai.providers.ProviderConfigException
+import dev.sophi.ai.providers.buildProviderFromType
 import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.CrossPlatformNotifier
@@ -22,12 +22,14 @@ import java.nio.file.Path
 
 private fun buildRuntime(settings: CompanionSettings, apiKey: String?): CompanionRuntime {
     settings.validationError()?.let { error("Invalid ~/.sophi/companion.json: $it") }
-    val provider = when (settings.providerType) {
-        ProviderTypes.OPENAI_COMPAT -> buildOpenAiCompatProvider(
-            requireNotNull(settings.baseUrl) { "baseUrl is required for provider type openai-compat" },
-            apiKey, settings.model
+    val provider = try {
+        buildProviderFromType(
+            settings.providerType, apiKey, settings.baseUrl, settings.model,
+            missingApiKeyMessage = "apiKey is required for provider type claude",
+            missingBaseUrlMessage = "baseUrl is required for provider type openai-compat"
         )
-        else -> buildClaudeProvider(requireNotNull(apiKey) { "apiKey is required for provider type claude" }, settings.model)
+    } catch (e: ProviderConfigException) {
+        error(e.message ?: "Invalid provider configuration")
     }
     lateinit var companionRuntime: CompanionRuntime
     val sophiRuntime = Sophi.runtime {
