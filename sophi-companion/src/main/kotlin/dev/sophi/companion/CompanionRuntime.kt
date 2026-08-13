@@ -119,14 +119,14 @@ class CompanionRuntime(
         transcriptBuilders.getOrPut(sessionId) {
             SessionTranscriptBuilder().also { builder ->
                 runCatching { sessionManager.load(sessionId) }
-                    .onSuccess { builder.seed(SessionTranscriptBuilder.linesFor(it.entries)) }
+                    .onSuccess { builder.seed(SessionTranscriptBuilder.entriesFor(it.entries)) }
             }
         }
 
     fun sessionState(sessionId: String): StateFlow<SessionState> = stateFlowFor(sessionId)
 
-    /** Chat lines for a session, in order — each is prefixed "you: " or "sophi: " (or "sophi (thinking): " / "sophi (tool)..."). */
-    fun sessionMessages(sessionId: String): StateFlow<List<String>> = transcriptBuilderFor(sessionId).transcript
+    /** A session's turn transcript, in order — see TranscriptEntry for the shape of each entry. */
+    fun sessionMessages(sessionId: String): StateFlow<List<TranscriptEntry>> = transcriptBuilderFor(sessionId).transcript
 
     /** Ids of sessions currently awaiting confirmation, across all sessions. */
     val pendingConfirmations: StateFlow<Set<String>> = pendingConfirmationSessionIds

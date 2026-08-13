@@ -186,8 +186,11 @@ class CompanionRuntimeTest : FunSpec({
 
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
 
-        messagesRightAfterSend shouldBe listOf("you: hi")
-        runtime.sessionMessages(sessionId).value shouldBe listOf("you: hi", "sophi: done")
+        messagesRightAfterSend shouldBe listOf(TranscriptEntry.UserMessage(0, "hi"))
+        runtime.sessionMessages(sessionId).value shouldBe listOf(
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Answer(1, "done")
+        )
     }
 
     test("sendMessage streams reasoning and answer tokens incrementally, not as one atomic jump") {
@@ -212,9 +215,9 @@ class CompanionRuntimeTest : FunSpec({
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
 
         runtime.sessionMessages(sessionId).value shouldBe listOf(
-            "you: hi",
-            "sophi (thinking): thinking...",
-            "sophi: Hello!"
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Reasoning(1, "thinking..."),
+            TranscriptEntry.Answer(2, "Hello!")
         )
     }
 
@@ -250,7 +253,7 @@ class CompanionRuntimeTest : FunSpec({
         runtime.respondToConfirmation(sessionId, true)
 
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
-        runtime.sessionMessages(sessionId).value.last() shouldBe "sophi: done"
+        (runtime.sessionMessages(sessionId).value.last() as TranscriptEntry.Answer).text shouldBe "done"
     }
 
     test("respondToConfirmation is a no-op when nothing is pending for that session") {
@@ -429,7 +432,10 @@ class CompanionRuntimeTest : FunSpec({
             notifier = NoopNotifier
         )
 
-        reopenedRuntime.sessionMessages(sessionId).value shouldBe listOf("you: hi", "sophi: done")
+        reopenedRuntime.sessionMessages(sessionId).value shouldBe listOf(
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Answer(1, "done")
+        )
     }
 
     test("a CLI session registered via the hub appears in remoteSessions and can receive a message") {
