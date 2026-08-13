@@ -438,6 +438,42 @@ class CompanionRuntimeTest : FunSpec({
         )
     }
 
+    test("sessionMessages doesn't crash when a persisted session has malformed tool-call metadata") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sessionsDir = dir.resolve("sessions")
+        java.nio.file.Files.createDirectories(sessionsDir)
+        val sessionId = "malformed-session"
+        val entry = dev.sophi.core.session.SessionEntry(
+            id = "e1",
+            role = dev.sophi.core.session.EntryRole.ASSISTANT,
+            content = "",
+            timestamp = 1L,
+            metadata = mapOf("toolCalls" to "not-json")
+        )
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        java.nio.file.Files.writeString(
+            sessionsDir.resolve("$sessionId.jsonl"),
+            json.encodeToString(dev.sophi.core.session.SessionEntry.serializer(), entry)
+        )
+
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            this.sessionsDir = sessionsDir
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(sessionsDir),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier
+        )
+
+        runtime.sessionMessages(sessionId).value shouldBe emptyList()
+    }
+
     test("a CLI session registered via the hub appears in remoteSessions and can receive a message") {
         val dir = createTempDirectory("companion-runtime-test")
         val hubPort = freePort()

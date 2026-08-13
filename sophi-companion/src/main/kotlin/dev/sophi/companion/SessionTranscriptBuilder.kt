@@ -98,6 +98,12 @@ class SessionTranscriptBuilder {
 
     fun endTurn() {
         resetStreamingState()
+        // Any call that started but never got a Finished event (turn errored or was cancelled
+        // mid-round) would otherwise sit in the FIFO forever and get incorrectly matched to a
+        // later, unrelated turn's call to the same tool name. Under normal completion every
+        // started call has already been drained by its matching Finished by the time endTurn
+        // runs, so this is a no-op there — it only matters for the aborted-turn case.
+        pendingToolCalls.clear()
     }
 
     fun onToken(text: String) {
@@ -142,6 +148,10 @@ class SessionTranscriptBuilder {
         state.value = state.value + entry
     }
 
+    // ponytail: id lookup is a linear scan (indexOfFirst) before the existing full-list copy —
+    // doubles the per-token work rather than the O(1) a cached index would give, bounded by
+    // transcript length. Not worth an id->index cache for realistically sized chat transcripts;
+    // revisit if streaming ever visibly lags on long sessions.
     private fun replaceAt(id: Int, transform: (TranscriptEntry) -> TranscriptEntry) {
         val current = state.value
         val index = current.indexOfFirst { it.id == id }

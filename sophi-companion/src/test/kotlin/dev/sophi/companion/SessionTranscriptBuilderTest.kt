@@ -93,6 +93,21 @@ class SessionTranscriptBuilderTest : FunSpec({
         builder.transcript.value shouldBe emptyList()
     }
 
+    test("endTurn clears any tool call that started but never finished, so a later turn's call to the same tool doesn't get matched to the stale entry") {
+        val builder = SessionTranscriptBuilder()
+        builder.startTurn("first")
+        builder.onToolCallStarted("bash", "{\"cmd\":\"aborted\"}") // never finishes
+        builder.endTurn() // turn errored/cancelled
+
+        builder.startTurn("second")
+        builder.onToolCallStarted("bash", "{\"cmd\":\"second\"}")
+        builder.onToolCallFinished("bash", "second-result", isError = false)
+
+        val secondInvocation = builder.transcript.value.last() as TranscriptEntry.ToolInvocation
+        secondInvocation.argsJson shouldBe "{\"cmd\":\"second\"}"
+        secondInvocation.result shouldBe "second-result"
+    }
+
     test("startTurn for a new turn starts a fresh Answer entry instead of continuing the previous turn's") {
         val builder = SessionTranscriptBuilder()
         builder.startTurn("first")
