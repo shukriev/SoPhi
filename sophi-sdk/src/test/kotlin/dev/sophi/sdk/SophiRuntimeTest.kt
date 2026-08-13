@@ -52,7 +52,9 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.writeText
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
@@ -511,5 +513,47 @@ class SophiRuntimeTest : FunSpec({
         shouldThrow<IllegalArgumentException> {
             rt.scheduleEngine(TaskStore(dir.resolve("tasks.json")), RunLog(dir.resolve("runs.jsonl")), NoopNotifier)
         }
+    }
+
+    test("skills lists what's actually on disk in skillsDir") {
+        val dir = createTempDirectory("sophi-sdk-skills-test")
+        dir.resolve("greet.md").writeText("---\ntitle: Greet\ndescription: says hi\n---\n\nSay hello.")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = dir)
+
+        val skills = rt.skills()
+
+        skills.map { it.first } shouldBe listOf("greet")
+        skills.single().second.metadata.title shouldBe "Greet"
+    }
+
+    test("installSkill installs into skillsDir, then skills() finds it") {
+        val skillsDir = createTempDirectory("sophi-sdk-skills-test")
+        val source = createTempDirectory("sophi-sdk-skills-source")
+        val skillFolder = source.resolve("my-skill").also { it.createDirectories() }
+        skillFolder.resolve("SKILL.md").writeText("---\nname: My Skill\ndescription: does things\n---\n\nBody.")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
+
+        val result = rt.installSkill(source.toString())
+
+        result.installed shouldBe listOf("my-skill")
+        rt.skills().map { it.first } shouldBe listOf("my-skill")
+    }
+
+    test("removeSkill deletes an installed skill, then skills() no longer finds it") {
+        val skillsDir = createTempDirectory("sophi-sdk-skills-test")
+        skillsDir.resolve("temp.md").writeText("---\ntitle: Temp\n---\n\nBody.")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
+
+        val removed = rt.removeSkill("temp")
+
+        removed shouldBe true
+        rt.skills() shouldBe emptyList()
+    }
+
+    test("removeSkill returns false for an id that doesn't exist") {
+        val skillsDir = createTempDirectory("sophi-sdk-skills-test")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
+
+        rt.removeSkill("ghost") shouldBe false
     }
 })

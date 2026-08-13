@@ -6,7 +6,9 @@ import kotlinx.serialization.Serializable
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.deleteExisting
 import kotlin.io.path.exists
+import kotlin.io.path.isDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.io.path.readText
@@ -53,6 +55,14 @@ class SkillInstaller {
         } finally {
             cleanup()
         }
+    }
+
+    fun remove(targetDir: Path, id: String): Boolean {
+        val mdFile = targetDir.resolve("$id.md")
+        if (!mdFile.exists()) return false
+        mdFile.deleteExisting()
+        targetDir.resolve(id).takeIf { it.isDirectory() }?.toFile()?.deleteRecursively()
+        return true
     }
 
     private fun resolveSource(source: String): Pair<Path, () -> Unit> {
