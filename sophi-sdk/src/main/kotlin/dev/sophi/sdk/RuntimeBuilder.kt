@@ -148,8 +148,8 @@ class RuntimeBuilder {
         val memorySection = if (memoryPlugin != null) MemoryPromptSection.TEXT else null
 
         val effectiveConfig = agentConfig.copy(
-            systemPrompt = (listOf(DefaultPrompt.BASE) +
-                listOfNotNull(agentConfig.systemPrompt, learningSection, memorySection)
+            systemPrompt = listOfNotNull(
+                DefaultPrompt.BASE, agentConfig.systemPrompt, learningSection, memorySection
             ).joinToString("\n\n")
         )
 
