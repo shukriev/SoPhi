@@ -277,6 +277,27 @@ class ScheduleEngineTest : FunSpec({
         capturedMaxTokens shouldBe 8192
     }
 
+    test("systemPrompt is configurable and threaded into every task's AgentConfig") {
+        val provider = mockk<LLMProvider>()
+        var capturedSystemPrompt: String? = null
+        every { provider.stream(any()) } answers {
+            capturedSystemPrompt = firstArg<CompletionRequest>().systemPrompt
+            flowOf(StreamEvent.Content("x"))
+        }
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-systemprompt-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            systemPrompt = "be careful"
+        )
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+        capturedSystemPrompt shouldBe "be careful"
+    }
+
     test("one task timing out does not abort concurrently-running tasks in the same tick") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } answers {

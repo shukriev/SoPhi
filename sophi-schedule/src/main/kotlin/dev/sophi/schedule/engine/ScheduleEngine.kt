@@ -56,6 +56,12 @@ class ScheduleEngine(
      * ever emitting an answer or tool call.
      */
     private val maxTokens: Int = 4096,
+    /**
+     * Prepended to every task's [AgentConfig]. The caller (typically
+     * [dev.sophi.sdk.SophiRuntime.scheduleEngine]) is responsible for building the full text —
+     * this class has no opinion on its contents and no dependency on where it comes from.
+     */
+    private val systemPrompt: String? = null,
     private val pluginRegistry: PluginRegistry? = null
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
@@ -87,7 +93,7 @@ class ScheduleEngine(
                     grants = task.toolGrants,
                     contextWindowTokens = contextWindowTokens
                 )
-                val config = AgentConfig(model = model, maxTokens = maxTokens)
+                val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
 
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
