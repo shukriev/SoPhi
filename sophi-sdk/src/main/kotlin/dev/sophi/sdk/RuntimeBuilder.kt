@@ -47,11 +47,6 @@ class RuntimeBuilder {
     private var contextWindowTokens: Int? = null
     private var memoryConfig: MemoryConfig? = null
 
-    /** Test seam only: when set, [build] uses this instead of building an OpenAI-compat embedding
-     *  provider from [MemoryConfig.embeddingBaseUrl] — lets tests exercise the probe-success and
-     *  probe-failure paths without a real embeddings endpoint. */
-    internal var embeddingProviderOverride: EmbeddingProvider? = null
-
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
@@ -81,15 +76,20 @@ class RuntimeBuilder {
      * Enables Jane's Theory long-term memory (experimental). [embeddingBaseUrl] is probed once at
      * [build] time; on failure [onWarning] fires and memory stays off for this runtime — it never
      * builds half-on (encoding without recall, or the reverse).
+     *
+     * [embeddingProvider] is a test seam: when set, [build] uses it instead of building an
+     * OpenAI-compat embedding provider from [embeddingBaseUrl] — lets tests exercise the
+     * probe-success and probe-failure paths without a real embeddings endpoint.
      */
     fun memory(
         embeddingModel: String,
         embeddingBaseUrl: String,
         embeddingApiKey: String? = null,
         embeddingDimensions: Int = 1536,
-        onWarning: (String) -> Unit = {}
+        onWarning: (String) -> Unit = {},
+        embeddingProvider: EmbeddingProvider? = null
     ): RuntimeBuilder = apply {
-        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning)
+        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider)
     }
 
     fun build(): SophiRuntime {
@@ -129,7 +129,7 @@ class RuntimeBuilder {
         val learningSection = learningPlugin?.let { it.promptSections(learningConfig!!.scope) }
 
         val memoryPlugin = memoryConfig?.let { mc ->
-            val embeddingProvider = embeddingProviderOverride
+            val embeddingProvider = mc.embeddingProvider
                 ?: buildOpenAiCompatEmbeddingProvider(mc.embeddingBaseUrl, mc.embeddingApiKey, mc.embeddingModel, mc.embeddingDimensions)
             val probeResult = runBlocking { probeEmbeddingProvider(embeddingProvider) }
             if (probeResult.isFailure) {
@@ -162,5 +162,6 @@ private data class MemoryConfig(
     val embeddingBaseUrl: String,
     val embeddingApiKey: String?,
     val embeddingDimensions: Int,
-    val onWarning: (String) -> Unit
+    val onWarning: (String) -> Unit,
+    val embeddingProvider: EmbeddingProvider? = null
 )

@@ -48,10 +48,12 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.systemPrompt = "custom instructions"
-        builder.embeddingProviderOverride = FakeEmbeddingProvider(shouldFail = false)
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
-            .memory(embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override")
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = FakeEmbeddingProvider(shouldFail = false)
+            )
             .build()
 
         val prompt = rt.config.systemPrompt.shouldNotBeNull()
@@ -65,10 +67,12 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
-        builder.embeddingProviderOverride = FakeEmbeddingProvider(shouldFail = false)
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
-            .memory(embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override")
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = FakeEmbeddingProvider(shouldFail = false)
+            )
             .build()
 
         rt.memoryPlugin.shouldNotBeNull()
@@ -80,10 +84,12 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
-        builder.embeddingProviderOverride = FakeEmbeddingProvider(shouldFail = true)
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
-            .memory(embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://unreachable", onWarning = { warnings.add(it) })
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://unreachable",
+                onWarning = { warnings.add(it) }, embeddingProvider = FakeEmbeddingProvider(shouldFail = true)
+            )
             .build()
 
         rt.memoryPlugin.shouldBeNull()
@@ -95,10 +101,12 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
-        builder.embeddingProviderOverride = FakeEmbeddingProvider(shouldFail = false)
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
-            .memory(embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override")
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = FakeEmbeddingProvider(shouldFail = false)
+            )
             .build()
 
         rt.close()
