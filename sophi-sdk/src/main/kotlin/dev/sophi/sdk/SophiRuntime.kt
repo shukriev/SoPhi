@@ -174,6 +174,7 @@ class SophiRuntime internal constructor(
             model = config.model,
             contextWindowTokens = contextWindowTokens,
             maxConcurrentTasks = maxConcurrentTasks,
+            systemPrompt = listOfNotNull(config.systemPrompt, DefaultPrompt.UNATTENDED).joinToString("\n\n"),
             pluginRegistry = pluginRegistry
         )
     }

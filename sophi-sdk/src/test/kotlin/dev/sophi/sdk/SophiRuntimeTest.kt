@@ -7,12 +7,17 @@ import dev.sophi.core.agent.TurnEvent
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
+import dev.sophi.schedule.model.ScheduledTask
+import dev.sophi.schedule.model.TaskMode
+import dev.sophi.schedule.model.Trigger
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
@@ -48,6 +53,7 @@ import io.mockk.slot
 import io.mockk.verify
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
@@ -513,6 +519,32 @@ class SophiRuntimeTest : FunSpec({
         shouldThrow<IllegalArgumentException> {
             rt.scheduleEngine(TaskStore(dir.resolve("tasks.json")), RunLog(dir.resolve("runs.jsonl")), NoopNotifier)
         }
+    }
+
+    test("scheduleEngine threads the effective system prompt plus the unattended addendum into every task run") {
+        val provider = mockk<LLMProvider>()
+        var capturedSystemPrompt: String? = null
+        every { provider.stream(any()) } answers {
+            capturedSystemPrompt = firstArg<CompletionRequest>().systemPrompt
+            flowOf(StreamEvent.Content("done"))
+        }
+        val configuredPrompt = AgentConfig(model = "test-model", systemPrompt = "custom instructions")
+        val rt = SophiRuntime(
+            agentLoop, FileSessionManager(createTempDirectory("schedule-engine-prompt-test")),
+            PluginRegistry(), configuredPrompt,
+            provider = provider, contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val dir = createTempDirectory("schedule-engine-prompt-test")
+        val taskStore = TaskStore(dir.resolve("tasks.json"))
+        val runLog = RunLog(dir.resolve("runs.jsonl"))
+        val engine = rt.scheduleEngine(taskStore, runLog, NoopNotifier)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        val prompt = capturedSystemPrompt.shouldNotBeNull()
+        prompt shouldContain "custom instructions"
+        prompt shouldContain DefaultPrompt.UNATTENDED
     }
 
     test("skills lists what's actually on disk in skillsDir") {
