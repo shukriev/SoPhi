@@ -27,7 +27,6 @@ import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.hub.HubClient
 import dev.sophi.learning.LearningConfig
-import dev.sophi.memory.MemoryPlugin
 import dev.sophi.skills.SkillRegistry
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
@@ -76,7 +75,6 @@ class CliRuntime(
     val confirmationPolicy: ConfirmationPolicy,
     val autoModeToggle: ToggleableConfirmationPolicy?,
     val skillRegistry: SkillRegistry,
-    val memoryPlugin: MemoryPlugin?,
     val planLog: PlanLog,
     val calendarProvider: CalendarProvider,
     val session: AgentSession,
@@ -180,8 +178,6 @@ internal suspend fun buildCliRuntime(
             }
         }
     }
-    val memoryPlugin = runtime.memoryPlugin
-
     val currentSession = (opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
         ?: runtime.sessionManager.create()).also { session = it }
     hubClient = if (opts.noRemote) null else HubClient(opts.hubPort, currentSession.id)
@@ -228,7 +224,6 @@ internal suspend fun buildCliRuntime(
         confirmationPolicy = confirmationPolicy,
         autoModeToggle = toggleableConfirmationPolicy,
         skillRegistry = skillRegistry,
-        memoryPlugin = memoryPlugin,
         planLog = planLog,
         calendarProvider = calendarProvider,
         session = currentSession,

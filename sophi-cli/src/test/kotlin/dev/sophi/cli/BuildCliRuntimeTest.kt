@@ -122,7 +122,7 @@ class BuildCliRuntimeTest : FunSpec({
             input = ScriptedInputSource(emptyList()),
             onWarning = { warnings.add(it) }
         )
-        cli.memoryPlugin shouldBe null
+        cli.runtime.memoryPlugin shouldBe null
         warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
     }
 
@@ -139,7 +139,7 @@ class BuildCliRuntimeTest : FunSpec({
             input = ScriptedInputSource(emptyList()),
             onWarning = { warnings.add(it) }
         )
-        cli.memoryPlugin shouldBe null
+        cli.runtime.memoryPlugin shouldBe null
         warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
     }
 

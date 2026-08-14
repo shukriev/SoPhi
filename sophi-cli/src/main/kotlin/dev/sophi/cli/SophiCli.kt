@@ -231,7 +231,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val session = cli.session
         val hubClient = cli.hubClient
         val learningPlugin = cli.runtime.learningPlugin
-        val memoryPlugin = cli.memoryPlugin
+        val memoryPlugin = cli.runtime.memoryPlugin
 
         // Retries connect() on a timer rather than once at startup: a companion opened after
         // this CLI session already started must still be able to pick it up (and a companion
