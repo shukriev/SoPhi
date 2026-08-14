@@ -138,6 +138,49 @@ class SettingsTest : FunSpec({
         settings.validationError() shouldContain "must not exceed"
     }
 
+    test("memoryEnabled defaults to false and embedding fields default to null/1536") {
+        val settings = CompanionSettings()
+        settings.memoryEnabled shouldBe false
+        settings.embeddingModel shouldBe null
+        settings.embeddingBaseUrl shouldBe null
+        settings.embeddingApiKey shouldBe null
+        settings.embeddingDimensions shouldBe 1536
+    }
+
+    test("memoryEnabled without an embeddingModel is rejected") {
+        val settings = CompanionSettings(memoryEnabled = true, embeddingModel = null, embeddingBaseUrl = "http://localhost:11434/v1")
+
+        settings.validationError() shouldContain "embeddingModel is required"
+    }
+
+    test("memoryEnabled without an embeddingBaseUrl is rejected") {
+        val settings = CompanionSettings(memoryEnabled = true, embeddingModel = "nomic-embed-text", embeddingBaseUrl = null)
+
+        settings.validationError() shouldContain "embeddingBaseUrl is required"
+    }
+
+    test("memoryEnabled with both embedding fields present has no validation error") {
+        val settings = CompanionSettings(
+            memoryEnabled = true, embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://localhost:11434/v1"
+        )
+
+        settings.validationError() shouldBe null
+    }
+
+    test("memory settings round-trip through SettingsStore save/load") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        val settings = CompanionSettings(
+            memoryEnabled = true, embeddingModel = "nomic-embed-text",
+            embeddingBaseUrl = "http://localhost:11434/v1", embeddingApiKey = "emb-key",
+            embeddingDimensions = 768
+        )
+
+        store.save(settings)
+
+        store.load() shouldBe settings
+    }
+
     test("hubPort defaults to 8765") {
         CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m").hubPort shouldBe 8765
     }

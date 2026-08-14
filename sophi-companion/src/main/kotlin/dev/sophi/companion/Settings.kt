@@ -36,7 +36,16 @@ data class CompanionSettings(
     val sessionsDir: String = System.getProperty("user.home") + "/.sophi/sessions",
     val mcpConfigPath: String = System.getProperty("user.home") + "/.sophi/mcp.json",
     /** Port the embedded hub (ADR-023) listens on for CLI sessions to register with. */
-    val hubPort: Int = 8765
+    val hubPort: Int = 8765,
+    /** Enables Jane's Theory long-term memory (experimental). Requires [embeddingModel] and
+     *  [embeddingBaseUrl]. Hand-edit this file to turn it on — no setup-wizard field yet. */
+    val memoryEnabled: Boolean = false,
+    /** Required when [memoryEnabled]. e.g. nomic-embed-text (Ollama) or text-embedding-3-small. */
+    val embeddingModel: String? = null,
+    /** Required when [memoryEnabled]. Ollama: http://localhost:11434/v1, vLLM: http://localhost:8000/v1. */
+    val embeddingBaseUrl: String? = null,
+    val embeddingApiKey: String? = null,
+    val embeddingDimensions: Int = 1536
 )
 
 /**
@@ -55,6 +64,8 @@ fun CompanionSettings.validationError(): String? = when {
     maxTokens <= 0 -> "maxTokens must be greater than 0"
     maxTokens > contextWindowTokens ->
         "maxTokens ($maxTokens) must not exceed contextWindowTokens ($contextWindowTokens)"
+    memoryEnabled && embeddingModel.isNullOrBlank() -> "embeddingModel is required when memoryEnabled is true"
+    memoryEnabled && embeddingBaseUrl.isNullOrBlank() -> "embeddingBaseUrl is required when memoryEnabled is true"
     else -> null
 }
 

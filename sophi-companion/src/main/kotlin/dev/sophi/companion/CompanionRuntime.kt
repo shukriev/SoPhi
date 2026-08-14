@@ -8,6 +8,7 @@ import dev.sophi.skills.Skill
 import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -197,6 +198,14 @@ class CompanionRuntime(
         pollingJob = scope.launch {
             while (isActive) {
                 scheduleEngine.tickOnce()
+                // A memory-store read failure here must not take scheduled-task polling down with it.
+                try {
+                    sophiRuntime.memoryPlugin?.consolidateIfDue()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Best-effort; consolidation just retries on the next poll tick.
+                }
                 delay(intervalMs)
             }
         }

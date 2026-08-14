@@ -48,6 +48,14 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
             // until the matching Chat tab's Approve/Deny calls respondToConfirmation.
             onConfirmationNeeded = { sessionId, requests -> companionRuntime.awaitConfirmation(sessionId, requests) }
         ))
+        // settings.validationError() (checked above) already guarantees embeddingModel/
+        // embeddingBaseUrl are non-blank whenever memoryEnabled is true.
+        if (settings.memoryEnabled) {
+            memory(
+                settings.embeddingModel!!, settings.embeddingBaseUrl!!, settings.embeddingApiKey,
+                settings.embeddingDimensions, onWarning = { msg -> NativeNotifications.send("Sophi memory", msg) }
+            )
+        }
     }
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
     companionRuntime = CompanionRuntime(

@@ -56,6 +56,8 @@ class ScheduleEngine(
      * ever emitting an answer or tool call.
      */
     private val maxTokens: Int = 4096,
+    /** Applied to every task's [AgentConfig]; the caller builds the full text. */
+    private val systemPrompt: String? = null,
     private val pluginRegistry: PluginRegistry? = null
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
@@ -87,7 +89,7 @@ class ScheduleEngine(
                     grants = task.toolGrants,
                     contextWindowTokens = contextWindowTokens
                 )
-                val config = AgentConfig(model = model, maxTokens = maxTokens)
+                val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
 
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {

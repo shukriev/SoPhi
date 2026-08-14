@@ -4,6 +4,7 @@ import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
+import dev.sophi.sdk.DefaultPrompt
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
@@ -111,17 +112,48 @@ class BuildCliRuntimeTest : FunSpec({
         cli.runtime.config.systemPrompt.shouldNotBeNull() shouldContain "BASE PROMPT"
     }
 
+    test("memory enabled without an embedding model warns and leaves memory off") {
+        val dir = tempdir().toPath()
+        val warnings = mutableListOf<String>()
+        val cli = buildCliRuntime(
+            opts = optionsFor(dir).copy(memoryEnabled = true, embeddingModel = null),
+            provider = mockk<LLMProvider>(relaxed = true),
+            terminal = Terminal(),
+            input = ScriptedInputSource(emptyList()),
+            onWarning = { warnings.add(it) }
+        )
+        cli.runtime.memoryPlugin shouldBe null
+        warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
+    }
+
+    test("memory enabled without an embedding base URL or --base-url warns and leaves memory off") {
+        val dir = tempdir().toPath()
+        val warnings = mutableListOf<String>()
+        val cli = buildCliRuntime(
+            opts = optionsFor(dir).copy(
+                memoryEnabled = true, embeddingModel = "nomic-embed-text",
+                embeddingBaseUrl = null, baseUrl = null
+            ),
+            provider = mockk<LLMProvider>(relaxed = true),
+            terminal = Terminal(),
+            input = ScriptedInputSource(emptyList()),
+            onWarning = { warnings.add(it) }
+        )
+        cli.runtime.memoryPlugin shouldBe null
+        warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
+    }
+
     test("model and maxTokens flow through to the agent config") {
         val cli = build()
         cli.runtime.config.model shouldBe "test-model"
         cli.runtime.config.maxTokens shouldBe 4096
     }
 
-    // A fresh learning home has no distilled lessons yet, so promptSections contributes nothing
-    // and the prompt stays null when --system was not passed. Pinning this so the migration
-    // cannot quietly start injecting something here.
-    test("with no --system and an empty learning home the system prompt stays null") {
-        build().runtime.config.systemPrompt shouldBe null
+    // A fresh learning home has no distilled lessons yet, so promptSections contributes nothing.
+    // With no --system passed, the prompt is exactly the SDK default (RuntimeBuilder always
+    // includes DefaultPrompt.BASE now) — pinning this so the migration cannot quietly change it.
+    test("with no --system and an empty learning home the system prompt is exactly the default") {
+        build().runtime.config.systemPrompt shouldBe DefaultPrompt.BASE
     }
 
     test("a new session is created with an id but is not persisted until a turn saves it") {
