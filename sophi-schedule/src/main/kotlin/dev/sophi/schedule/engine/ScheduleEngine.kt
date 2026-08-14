@@ -56,11 +56,7 @@ class ScheduleEngine(
      * ever emitting an answer or tool call.
      */
     private val maxTokens: Int = 4096,
-    /**
-     * Prepended to every task's [AgentConfig]. The caller (typically
-     * [dev.sophi.sdk.SophiRuntime.scheduleEngine]) is responsible for building the full text —
-     * this class has no opinion on its contents and no dependency on where it comes from.
-     */
+    /** Applied to every task's [AgentConfig]; the caller builds the full text. */
     private val systemPrompt: String? = null,
     private val pluginRegistry: PluginRegistry? = null
 ) {

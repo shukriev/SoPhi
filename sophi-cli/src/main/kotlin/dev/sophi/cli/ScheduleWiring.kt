@@ -48,11 +48,8 @@ internal fun buildScheduleEngine(
         agentDefinitions = agentDefinitions,
         taskTimeoutMs = taskTimeoutSeconds * 1000,
         maxTokens = maxTokens,
-        systemPrompt = scheduledTaskSystemPrompt()
+        systemPrompt = "${DefaultPrompt.BASE}\n\n${DefaultPrompt.UNATTENDED}"
     )
 }
-
-internal fun scheduledTaskSystemPrompt(): String =
-    listOf(DefaultPrompt.BASE, DefaultPrompt.UNATTENDED).joinToString("\n\n")
 
 internal fun defaultScheduleDir(): Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule")
