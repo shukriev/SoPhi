@@ -7,6 +7,7 @@ import dev.sophi.schedule.notify.MacNotifier
 import dev.sophi.schedule.notify.NoopNotifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import dev.sophi.sdk.DefaultPrompt
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 
@@ -46,8 +47,12 @@ internal fun buildScheduleEngine(
         contextWindowTokens = contextWindowTokens,
         agentDefinitions = agentDefinitions,
         taskTimeoutMs = taskTimeoutSeconds * 1000,
-        maxTokens = maxTokens
+        maxTokens = maxTokens,
+        systemPrompt = scheduledTaskSystemPrompt()
     )
 }
+
+internal fun scheduledTaskSystemPrompt(): String =
+    listOf(DefaultPrompt.BASE, DefaultPrompt.UNATTENDED).joinToString("\n\n")
 
 internal fun defaultScheduleDir(): Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule")
