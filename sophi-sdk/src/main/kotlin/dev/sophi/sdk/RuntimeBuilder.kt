@@ -147,11 +147,11 @@ class RuntimeBuilder {
         }
         val memorySection = if (memoryPlugin != null) MemoryPromptSection.TEXT else null
 
-        val extraSections = listOfNotNull(learningSection, memorySection)
-        val effectiveConfig = if (extraSections.isEmpty()) agentConfig
-            else agentConfig.copy(
-                systemPrompt = (listOfNotNull(agentConfig.systemPrompt) + extraSections).joinToString("\n\n")
-            )
+        val effectiveConfig = agentConfig.copy(
+            systemPrompt = (listOf(DefaultPrompt.BASE) +
+                listOfNotNull(agentConfig.systemPrompt, learningSection, memorySection)
+            ).joinToString("\n\n")
+        )
 
         return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, memoryPlugin)
     }

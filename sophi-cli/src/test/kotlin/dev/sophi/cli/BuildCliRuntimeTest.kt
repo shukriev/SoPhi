@@ -4,6 +4,7 @@ import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
+import dev.sophi.sdk.DefaultPrompt
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
@@ -148,11 +149,11 @@ class BuildCliRuntimeTest : FunSpec({
         cli.runtime.config.maxTokens shouldBe 4096
     }
 
-    // A fresh learning home has no distilled lessons yet, so promptSections contributes nothing
-    // and the prompt stays null when --system was not passed. Pinning this so the migration
-    // cannot quietly start injecting something here.
-    test("with no --system and an empty learning home the system prompt stays null") {
-        build().runtime.config.systemPrompt shouldBe null
+    // A fresh learning home has no distilled lessons yet, so promptSections contributes nothing.
+    // With no --system passed, the prompt is exactly the SDK default (RuntimeBuilder always
+    // includes DefaultPrompt.BASE now) — pinning this so the migration cannot quietly change it.
+    test("with no --system and an empty learning home the system prompt is exactly the default") {
+        build().runtime.config.systemPrompt shouldBe DefaultPrompt.BASE
     }
 
     test("a new session is created with an id but is not persisted until a turn saves it") {

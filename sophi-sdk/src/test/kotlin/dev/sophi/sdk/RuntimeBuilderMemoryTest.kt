@@ -33,14 +33,32 @@ private fun stubProvider(): LLMProvider {
 
 class RuntimeBuilderMemoryTest : FunSpec({
 
-    test("memory() left uncalled leaves memoryPlugin null and the prompt untouched") {
+    test("memory() left uncalled leaves memoryPlugin null and the prompt at just the default") {
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
 
         rt.memoryPlugin.shouldBeNull()
-        rt.config.systemPrompt shouldBe null
+        rt.config.systemPrompt shouldBe DefaultPrompt.BASE
+    }
+
+    test("the default prompt comes first, ahead of a caller's own prompt and the memory section") {
+        val builder = RuntimeBuilder()
+        builder.provider = stubProvider()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.systemPrompt = "custom instructions"
+        builder.embeddingProviderOverride = FakeEmbeddingProvider(shouldFail = false)
+        val rt = builder
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .memory(embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override")
+            .build()
+
+        val prompt = rt.config.systemPrompt.shouldNotBeNull()
+        val basePos = prompt.indexOf(DefaultPrompt.BASE)
+        val customPos = prompt.indexOf("custom instructions")
+        val memoryPos = prompt.indexOf("## Memory")
+        (basePos >= 0 && basePos < customPos && customPos < memoryPos) shouldBe true
     }
 
     test("memory() with a successful probe registers a MemoryPlugin and appends the memory prompt section") {
@@ -69,7 +87,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .build()
 
         rt.memoryPlugin.shouldBeNull()
-        rt.config.systemPrompt shouldBe null
+        rt.config.systemPrompt shouldBe DefaultPrompt.BASE
         warnings.single() shouldContain "memory: disabled — embeddings endpoint unreachable"
     }
 
