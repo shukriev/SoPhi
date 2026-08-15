@@ -23,7 +23,8 @@ class HubProtocolTest : FunSpec({
             HubEvent.ToolCallStarted("s1", "bash", """{"command":"ls"}"""),
             HubEvent.ToolCallFinished("s1", "bash", "ok", isError = false),
             HubEvent.ConfirmationRequested("s1", listOf(ConfirmationRequest("c1", "bash", "{}", RiskLevel.DESTRUCTIVE))),
-            HubEvent.ConfirmationResolved("s1")
+            HubEvent.ConfirmationResolved("s1"),
+            HubEvent.ScheduleNotification("s1", "Sophi: Twitter monitor", "completed — nothing new")
         )
         events.forEach { event ->
             val encoded = json.encodeToString(HubEvent.serializer(), event)
