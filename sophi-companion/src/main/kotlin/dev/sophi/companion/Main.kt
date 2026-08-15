@@ -1,5 +1,6 @@
 package dev.sophi.companion
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,6 +78,24 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
     return companionRuntime
 }
 
+private class BadgedPainter(
+    private val base: androidx.compose.ui.graphics.painter.Painter,
+    private val showBadge: Boolean
+) : androidx.compose.ui.graphics.painter.Painter() {
+    override val intrinsicSize: androidx.compose.ui.geometry.Size = base.intrinsicSize
+
+    override fun androidx.compose.ui.graphics.drawscope.DrawScope.onDraw() {
+        with(base) { draw(size) }
+        if (showBadge) {
+            drawCircle(
+                color = androidx.compose.ui.graphics.Color(0xFFE53935),
+                radius = size.minDimension * 0.16f,
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.82f, size.height * 0.18f)
+            )
+        }
+    }
+}
+
 fun main() = application {
     val settingsStore = remember { SettingsStore(Path.of(System.getProperty("user.home"), ".sophi", "companion.json")) }
     // A file that exists but is unusable (e.g. written by an older build with a blank model) routes
@@ -87,9 +106,11 @@ fun main() = application {
     var runtime by remember { mutableStateOf<CompanionRuntime?>(null) }
     var isWindowVisible by remember { mutableStateOf(false) }
     val trayState = rememberTrayState()
+    val baseTrayIcon = painterResource("icons/logo.png")
+    val hasUnreadNotifications = runtime?.notificationCenter?.records?.collectAsState()?.value?.any { !it.read } ?: false
 
     Tray(
-        icon = painterResource("icons/logo.png"),
+        icon = remember(hasUnreadNotifications) { BadgedPainter(baseTrayIcon, hasUnreadNotifications) },
         state = trayState,
         tooltip = "Sophi Companion",
         onAction = { isWindowVisible = !isWindowVisible },
