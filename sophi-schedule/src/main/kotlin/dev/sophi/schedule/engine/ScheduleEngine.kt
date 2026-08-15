@@ -4,11 +4,13 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinition
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.plan.LlmPlanCritic
 import dev.sophi.core.agent.plan.LlmPlanner
 import dev.sophi.core.agent.plan.LlmStepCritic
 import dev.sophi.core.agent.plan.PlanFinalStatus
 import dev.sophi.core.agent.plan.PlanRunner
 import dev.sophi.core.agent.plan.PlanRunnerConfig
+import dev.sophi.core.agent.plan.TreePlanner
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
@@ -28,6 +30,16 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
+
+/**
+ * Candidate temperatures for TreePlanner's replan search (experiment). LlmPlanner is
+ * deterministic at 0.0, so distinct temperatures are what make the k candidate tails actually
+ * differ. Set this to listOf(0.0) to disable the search entirely — TreePlanner short-circuits
+ * on a single delegate, restoring exact pre-search behavior at zero extra cost. That is the
+ * A/B toggle for the measurement described in
+ * docs/superpowers/specs/2026-08-14-tot-widened-replan-design.md.
+ */
+private val PLAN_SEARCH_TEMPERATURES = listOf(0.0, 0.7, 1.0)
 
 class ScheduleEngine(
     private val taskStore: TaskStore,
@@ -97,7 +109,12 @@ class ScheduleEngine(
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
                     is TaskMode.Goal -> {
-                        val planner = LlmPlanner(provider, model)
+                        val planner = TreePlanner(
+                            delegates = PLAN_SEARCH_TEMPERATURES.map {
+                                LlmPlanner(provider, model, temperature = it)
+                            },
+                            critic = LlmPlanCritic(provider, model)
+                        )
                         val critic = LlmStepCritic(provider, model)
                         // Scheduled runs are always unattended (DENY_ALL + per-task grants above),
                         // so overlapping confirmation prompts can never happen here — safe to

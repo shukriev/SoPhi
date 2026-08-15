@@ -33,6 +33,9 @@ class LlmPlanner(
     private val provider: LLMProvider,
     private val model: String,
     private val maxTokens: Int = 1024,
+    /** Candidate diversity knob for TreePlanner's replan search. 0.0 preserves the original
+     *  deterministic behavior for every caller that does not set it. */
+    private val temperature: Double = 0.0,
     private val contextProvider: suspend (goalPrompt: String) -> List<String> = { emptyList() }
 ) : Planner {
     private val json = Json { ignoreUnknownKeys = true }
@@ -113,7 +116,7 @@ class LlmPlanner(
         when (val r = runCatching {
             provider.complete(CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
-                model = model, maxTokens = maxTokens, temperature = 0.0))
+                model = model, maxTokens = maxTokens, temperature = temperature))
         }.getOrNull()) {
             is LLMResponse.Text -> r.content
             else -> null

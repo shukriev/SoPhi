@@ -331,4 +331,47 @@ class ScheduleEngineTest : FunSpec({
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 2L) }
         runLog.forTask(task.id).single().outcome shouldBe RunOutcome.Succeeded
     }
+
+    test("a Goal-mode task's initial planning is not branched — plan() stays at temperature 0.0") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did the thing"))
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).single().outcome shouldBe RunOutcome.GoalMet
+        // A run that never fails a step never replans, so the search must not have fired:
+        // every completion here belongs to plan()/critic/judge, all at temperature 0.0.
+        requests.all { it.temperature == 0.0 } shouldBe true
+    }
+
+    test("an unmet stop condition fans the replan out across the temperature ladder") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("tried and got nowhere"))
+        // "0.9" is chosen to reach replan specifically. A *failed* step does NOT replan first:
+        // PlanRunner tries decomposition ahead of it (canDecompose, ADR-020), so a low score
+        // routes into a sub-plan instead of the search. At 0.9 StepCritic marks the step Done,
+        // every step completes, and the LlmJudged stop condition then fails ("0.9" is not
+        // "YES") — which is the branch that always replans. The run ends Exhausted once
+        // RunBudget drains.
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text("0.9", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).single().outcome shouldBe RunOutcome.GoalExhausted
+        // The proof the search is wired into production, not merely compiled: candidate tails
+        // were requested at the non-zero ladder temperatures, which only TreePlanner does.
+        requests.map { it.temperature }.toSet() shouldContain 0.7
+        requests.map { it.temperature }.toSet() shouldContain 1.0
+    }
 })
