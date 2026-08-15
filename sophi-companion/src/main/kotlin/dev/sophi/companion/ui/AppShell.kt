@@ -62,6 +62,7 @@ private sealed class Selection {
     object Mcp : Selection()
     object Goals : Selection()
     object Skills : Selection()
+    object Notifications : Selection()
 }
 
 private data class SidebarSource(val id: String, val title: String, val isRemote: Boolean, val lastActiveMillis: Long)
@@ -82,6 +83,9 @@ fun AppShell(runtime: CompanionRuntime) {
             selected = Selection.Session(id)
         }
     }
+
+    val notifications by runtime.notificationCenter.records.collectAsState()
+    val hasUnreadNotifications = notifications.any { !it.read }
 
     val localIds = localSessions.map { it.id }.toSet()
     val remoteIds = runtime.remoteSessions.remoteSessionIds().filterNot { it in localIds }
@@ -111,6 +115,8 @@ fun AppShell(runtime: CompanionRuntime) {
             onSelectMcp = { selected = Selection.Mcp },
             onSelectGoals = { selected = Selection.Goals },
             onSelectSkills = { selected = Selection.Skills },
+            onSelectNotifications = { selected = Selection.Notifications },
+            hasUnreadNotifications = hasUnreadNotifications,
             onNewSession = {
                 scope.launch {
                     val id = runtime.newSession()
@@ -148,6 +154,7 @@ fun AppShell(runtime: CompanionRuntime) {
                 Selection.Mcp -> McpTab(runtime)
                 Selection.Goals -> GoalsTab(runtime)
                 Selection.Skills -> SkillsTab(runtime)
+                Selection.Notifications -> NotificationsTab(runtime)
                 null -> Text("Starting…")
             }
         }
@@ -162,6 +169,8 @@ private fun Sidebar(
     onSelectMcp: () -> Unit,
     onSelectGoals: () -> Unit,
     onSelectSkills: () -> Unit,
+    onSelectNotifications: () -> Unit,
+    hasUnreadNotifications: Boolean,
     onNewSession: () -> Unit,
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
@@ -197,11 +206,17 @@ private fun Sidebar(
         NavRow(label = "MCP", selected = selected == Selection.Mcp, onClick = onSelectMcp)
         NavRow(label = "Goals", selected = selected == Selection.Goals, onClick = onSelectGoals)
         NavRow(label = "Skills", selected = selected == Selection.Skills, onClick = onSelectSkills)
+        NavRow(
+            label = "Notifications",
+            selected = selected == Selection.Notifications,
+            onClick = onSelectNotifications,
+            hasBadge = hasUnreadNotifications
+        )
     }
 }
 
 @Composable
-private fun NavRow(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun NavRow(label: String, selected: Boolean, onClick: () -> Unit, hasBadge: Boolean = false) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -212,6 +227,10 @@ private fun NavRow(label: String, selected: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 10.dp, vertical = 9.dp)
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
+        if (hasBadge) {
+            Spacer(Modifier.width(6.dp))
+            Box(Modifier.size(7.dp).background(MaterialTheme.colorScheme.error, CircleShape))
+        }
     }
 }
 
