@@ -29,6 +29,7 @@ class CompanionRuntime(
     private val taskStore: TaskStore,
     private val runLog: RunLog,
     notifier: Notifier,
+    val notificationCenter: NotificationCenter,
     hubPort: Int = 8765
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -52,7 +53,12 @@ class CompanionRuntime(
         runCatching { hubServer.start() }
             .onFailure { System.err.println("sophi-companion: hub unavailable (${it.message}) — remote CLI sessions will not appear") }
         scope.launch {
-            hubServer.events.collect { event -> remoteSessions.onEvent(event) }
+            hubServer.events.collect { event ->
+                remoteSessions.onEvent(event)
+                if (event is dev.sophi.hub.HubEvent.ScheduleNotification) {
+                    notificationCenter.add(NotificationKind.Schedule, event.title, event.body)
+                }
+            }
         }
         scope.launch {
             mcpServers().filter { it.enabled }.forEach { config ->

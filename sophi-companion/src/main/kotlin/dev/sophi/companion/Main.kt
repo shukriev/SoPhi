@@ -58,13 +58,15 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         }
     }
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
+    val notificationCenter = NotificationCenter(NotificationStore(tasksDir.resolve("notifications.json")))
     companionRuntime = CompanionRuntime(
         sophiRuntime = sophiRuntime,
         sessionManager = dev.sophi.core.session.FileSessionManager(Path.of(settings.sessionsDir)),
         mcpConfigPath = Path.of(settings.mcpConfigPath),
         taskStore = dev.sophi.schedule.store.TaskStore(tasksDir.resolve("tasks.json")),
         runLog = dev.sophi.schedule.store.RunLog(tasksDir.resolve("runs.jsonl")),
-        notifier = CrossPlatformNotifier()
+        notifier = CrossPlatformNotifier(),
+        notificationCenter = notificationCenter
     )
     companionRuntime.startSchedulePolling()
     return companionRuntime

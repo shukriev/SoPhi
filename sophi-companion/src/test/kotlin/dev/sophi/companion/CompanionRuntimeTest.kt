@@ -98,7 +98,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionA = runBlocking { sophiRuntime.newSession() }
         val sessionB = runBlocking { sophiRuntime.newSession() }
@@ -131,7 +132,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionId = runBlocking { sophiRuntime.newSession() }
 
@@ -157,7 +159,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
 
         runtime.sessionState("never-sent-to").value shouldBe SessionState.Idle
@@ -177,7 +180,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionId = runBlocking { sophiRuntime.newSession() }
 
@@ -207,7 +211,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionId = runBlocking { sophiRuntime.newSession() }
 
@@ -241,7 +246,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionId = runBlocking { sophiRuntime.newSession() }
 
@@ -270,7 +276,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
 
         runtime.respondToConfirmation("never-had-a-pending-confirmation", true)  // must not throw
@@ -296,7 +303,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionA = runBlocking { sophiRuntime.newSession() }
         val sessionB = runBlocking { sophiRuntime.newSession() }
@@ -336,7 +344,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionId = runBlocking { sophiRuntime.newSession() }
 
@@ -371,7 +380,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionA = runBlocking { sophiRuntime.newSession() }
         val sessionB = runBlocking { sophiRuntime.newSession() }
@@ -408,7 +418,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionId = runBlocking { sophiRuntime.newSession() }
         firstRuntime.sendMessage(sessionId, "hi")
@@ -429,7 +440,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
 
         reopenedRuntime.sessionMessages(sessionId).value shouldBe listOf(
@@ -468,7 +480,8 @@ class CompanionRuntimeTest : FunSpec({
             mcpConfigPath = dir.resolve("mcp.json"),
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
 
         runtime.sessionMessages(sessionId).value shouldBe emptyList()
@@ -490,6 +503,7 @@ class CompanionRuntimeTest : FunSpec({
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
             notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
             hubPort = hubPort
         )
         runBlocking {
@@ -529,6 +543,7 @@ class CompanionRuntimeTest : FunSpec({
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
             notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
             hubPort = hubPort
         )
         runBlocking {
@@ -546,6 +561,39 @@ class CompanionRuntimeTest : FunSpec({
                 client.close()
             }
         }
+        runtime.close()
+    }
+
+    test("a ScheduleNotification event received over the hub is added to the notification center") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val hubPort = freePort()
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = notificationCenter,
+            hubPort = hubPort
+        )
+        runBlocking {
+            withTimeout(5000) {
+                val client = dev.sophi.hub.HubClient(hubPort, sessionId = "task-1")
+                client.connect(this)
+                client.publish(dev.sophi.hub.HubEvent.ScheduleNotification("task-1", "Sophi: t", "completed — ok"))
+                waitUntil(timeoutMs = 2000) { notificationCenter.records.value.isNotEmpty() }
+                client.close()
+            }
+        }
+        notificationCenter.records.value.single().title shouldBe "Sophi: t"
         runtime.close()
     }
 })
