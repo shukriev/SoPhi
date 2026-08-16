@@ -80,6 +80,14 @@ sealed class HubEvent {
         override val sessionId: String,
         override val timestamp: Long = System.currentTimeMillis()
     ) : HubEvent()
+
+    @Serializable
+    data class ScheduleNotification(
+        override val sessionId: String,
+        val title: String,
+        val body: String,
+        override val timestamp: Long = System.currentTimeMillis()
+    ) : HubEvent()
 }
 
 /** Commands the companion sends into a specific running CLI session, routed by [sessionId]. */

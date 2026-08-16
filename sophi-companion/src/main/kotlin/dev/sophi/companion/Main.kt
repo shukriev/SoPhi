@@ -1,5 +1,6 @@
 package dev.sophi.companion
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,12 +17,14 @@ import dev.sophi.ai.providers.ProviderConfigException
 import dev.sophi.ai.providers.buildProviderFromType
 import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
-import dev.sophi.schedule.notify.CrossPlatformNotifier
-import dev.sophi.schedule.notify.NativeNotifications
+import dev.sophi.schedule.notify.NotificationText
+import dev.sophi.schedule.notify.Notifier
 import java.nio.file.Path
 
 private fun buildRuntime(settings: CompanionSettings, apiKey: String?): CompanionRuntime {
     settings.validationError()?.let { error("Invalid ~/.sophi/companion.json: $it") }
+    val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
+    val notificationCenter = NotificationCenter(NotificationStore(tasksDir.resolve("notifications.json")))
     val provider = try {
         buildProviderFromType(
             settings.providerType, apiKey, settings.baseUrl, settings.model,
@@ -42,7 +45,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         // marked enabled in .sophi/mcp.json, via SophiRuntime.connectMcpServer, instead of
         // RuntimeBuilder's own unconditional "connect everything in the file" behavior.
         confirmationPolicy(GuiConfirmationPolicy(
-            notify = { t, b -> NativeNotifications.send(t, b) },
+            notify = { t, b -> notificationCenter.add(NotificationKind.Confirmation, t, b) },
             // Routed per session via SessionIdContext (see CompanionRuntime.sendMessage):
             // awaitConfirmation sets that session's state to NeedsConfirmation and suspends
             // until the matching Chat tab's Approve/Deny calls respondToConfirmation.
@@ -53,21 +56,44 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         if (settings.memoryEnabled) {
             memory(
                 settings.embeddingModel!!, settings.embeddingBaseUrl!!, settings.embeddingApiKey,
-                settings.embeddingDimensions, onWarning = { msg -> NativeNotifications.send("Sophi memory", msg) }
+                settings.embeddingDimensions,
+                onWarning = { msg -> notificationCenter.add(NotificationKind.Memory, "Sophi memory", msg) }
             )
         }
     }
-    val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
+    val scheduleNotifier = Notifier { task, run ->
+        val (title, body) = NotificationText.forTaskRun(task, run)
+        notificationCenter.add(NotificationKind.Schedule, title, body)
+    }
     companionRuntime = CompanionRuntime(
         sophiRuntime = sophiRuntime,
         sessionManager = dev.sophi.core.session.FileSessionManager(Path.of(settings.sessionsDir)),
         mcpConfigPath = Path.of(settings.mcpConfigPath),
         taskStore = dev.sophi.schedule.store.TaskStore(tasksDir.resolve("tasks.json")),
         runLog = dev.sophi.schedule.store.RunLog(tasksDir.resolve("runs.jsonl")),
-        notifier = CrossPlatformNotifier()
+        notifier = scheduleNotifier,
+        notificationCenter = notificationCenter
     )
     companionRuntime.startSchedulePolling()
     return companionRuntime
+}
+
+private class BadgedPainter(
+    private val base: androidx.compose.ui.graphics.painter.Painter,
+    private val showBadge: Boolean
+) : androidx.compose.ui.graphics.painter.Painter() {
+    override val intrinsicSize: androidx.compose.ui.geometry.Size = base.intrinsicSize
+
+    override fun androidx.compose.ui.graphics.drawscope.DrawScope.onDraw() {
+        with(base) { draw(size) }
+        if (showBadge) {
+            drawCircle(
+                color = androidx.compose.ui.graphics.Color(0xFFE53935),
+                radius = size.minDimension * 0.16f,
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.82f, size.height * 0.18f)
+            )
+        }
+    }
 }
 
 fun main() = application {
@@ -80,9 +106,11 @@ fun main() = application {
     var runtime by remember { mutableStateOf<CompanionRuntime?>(null) }
     var isWindowVisible by remember { mutableStateOf(false) }
     val trayState = rememberTrayState()
+    val baseTrayIcon = painterResource("icons/logo.png")
+    val hasUnreadNotifications = runtime?.notificationCenter?.records?.collectAsState()?.value?.any { !it.read } ?: false
 
     Tray(
-        icon = painterResource("icons/logo.png"),
+        icon = remember(hasUnreadNotifications) { BadgedPainter(baseTrayIcon, hasUnreadNotifications) },
         state = trayState,
         tooltip = "Sophi Companion",
         onAction = { isWindowVisible = !isWindowVisible },

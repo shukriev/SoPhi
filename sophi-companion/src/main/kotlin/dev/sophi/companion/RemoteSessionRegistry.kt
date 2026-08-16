@@ -57,6 +57,7 @@ class RemoteSessionRegistry {
             is HubEvent.ConfirmationRequested ->
                 stateFlow(event.sessionId).value = SessionState.NeedsConfirmation(event.requests)
             is HubEvent.ConfirmationResolved -> stateFlow(event.sessionId).value = SessionState.Running
+            is HubEvent.ScheduleNotification -> Unit // not a CLI session event; CompanionRuntime routes this to NotificationCenter
         }
     }
 

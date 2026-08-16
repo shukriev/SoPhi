@@ -92,4 +92,10 @@ class RemoteSessionRegistryTest : FunSpec({
     test("lastActiveMillisFor an unknown session defaults to 0") {
         RemoteSessionRegistry().lastActiveMillisFor("never-seen") shouldBe 0L
     }
+
+    test("ScheduleNotification is ignored — no session registered, no state created") {
+        val registry = RemoteSessionRegistry()
+        registry.onEvent(HubEvent.ScheduleNotification("task-1", "Sophi: t", "completed — ok"))
+        registry.remoteSessionIds() shouldBe emptySet()
+    }
 })
