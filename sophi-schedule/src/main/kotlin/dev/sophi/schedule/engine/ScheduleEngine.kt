@@ -116,6 +116,11 @@ class ScheduleEngine(
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
 
+                // Null unless a plan actually ran — see RunRecord.replans on why null and 0 must
+                // stay distinguishable.
+                var replans: Int? = null
+                var decompositions: Int? = null
+
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
                         val result = loop.turn(session, task.prompt, config, bridge)
@@ -138,11 +143,16 @@ class ScheduleEngine(
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
                         val result = runner.run(session.id, task.prompt, mode.stopCondition)
+                        replans = result.replans.size
+                        decompositions = result.decompositions.size
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
                             result.finalOutput
                     }
                 }
-                RunRecord(task.id, startedAtMs, System.currentTimeMillis(), outcome, summary)
+                RunRecord(
+                    task.id, startedAtMs, System.currentTimeMillis(), outcome, summary,
+                    replans = replans, decompositions = decompositions
+                )
             }
         } catch (e: TimeoutCancellationException) {
             RunRecord(task.id, startedAtMs, System.currentTimeMillis(),

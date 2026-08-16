@@ -19,7 +19,9 @@ import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.every
@@ -373,5 +375,59 @@ class ScheduleEngineTest : FunSpec({
         // were requested at the non-zero ladder temperatures, which only TreePlanner does.
         requests.map { it.temperature }.toSet() shouldContain 0.7
         requests.map { it.temperature }.toSet() shouldContain 1.0
+    }
+
+    test("a Goal-mode run records how many times it replanned") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did some work"))
+        // "0.9" marks every step Done but never satisfies the LlmJudged stop condition, so the
+        // run takes the always-replan branch repeatedly until RunBudget drains. See the
+        // temperature-ladder test above for why a *failed* step would decompose instead.
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("0.9", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).single()
+        record.outcome shouldBe RunOutcome.GoalExhausted
+        (record.replans ?: -1) shouldBeGreaterThan 0
+        // 0, not null: this run reached the search, and no step failure was intercepted by
+        // ADR-020 decomposition. The two counts together are what tell those paths apart.
+        record.decompositions shouldBe 0
+    }
+
+    test("a Recurring run leaves the plan counts null, distinguishing it from a zero-replan goal") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "recurring-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Recurring, prompt = "check"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).single()
+        record.outcome shouldBe RunOutcome.Succeeded
+        record.replans shouldBe null
+        record.decompositions shouldBe null
+    }
+
+    test("plan counts survive a RunLog write/read round trip") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did some work"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("0.9", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        // forTask() decodes from JSONL, so a non-null count here proves the field is actually
+        // serialised and not merely held in memory.
+        runLog.forTask(task.id).single().replans shouldNotBe null
     }
 })
