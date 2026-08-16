@@ -30,6 +30,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Candidate temperatures for TreePlanner's replan search (experiment). LlmPlanner is
@@ -40,6 +41,18 @@ import kotlinx.coroutines.withTimeout
  * docs/superpowers/specs/2026-08-14-tot-widened-replan-design.md.
  */
 private val PLAN_SEARCH_TEMPERATURES = listOf(0.0, 0.7, 1.0)
+
+/**
+ * Scoring budget for TreePlanner's candidate tails. Deliberately far above LlmPlanCritic's 30s
+ * default, which is too tight for this call: a local reasoning model measured 166s to emit a
+ * single score (probe, 2026-08-16, qwen3.5:9b). That matters more here than for LlmStepCritic,
+ * which shares the 30s default — StepCritic failing open degrades to a safe assumption, whereas
+ * PlanCritic failing open makes every candidate tie at 1.0, so maxBy returns delegates[0] and
+ * the search silently collapses to pre-search behavior while still paying for every extra
+ * planner and critic call. A no-op that costs full price is the one outcome worth engineering
+ * against.
+ */
+private val PLAN_CRITIC_TIMEOUT = 300.seconds
 
 class ScheduleEngine(
     private val taskStore: TaskStore,
@@ -113,7 +126,7 @@ class ScheduleEngine(
                             delegates = PLAN_SEARCH_TEMPERATURES.map {
                                 LlmPlanner(provider, model, temperature = it)
                             },
-                            critic = LlmPlanCritic(provider, model)
+                            critic = LlmPlanCritic(provider, model, timeout = PLAN_CRITIC_TIMEOUT)
                         )
                         val critic = LlmStepCritic(provider, model)
                         // Scheduled runs are always unattended (DENY_ALL + per-task grants above),
