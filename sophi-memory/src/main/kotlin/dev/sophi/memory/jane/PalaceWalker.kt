@@ -14,7 +14,6 @@ private data class Hit(val memory: Memory, val score: Double, val direct: Boolea
  */
 class PalaceWalker(
     private val store: PalaceStore,
-    private val index: EmbeddingIndex,
     private val profile: UserProfile,
     private val embeddings: EmbeddingProvider,
     private val config: JanesPalaceConfig
@@ -30,13 +29,13 @@ class PalaceWalker(
 
         val profVecs = profileVectorsFor(prof)
         fun resonance(id: String): Double {
-            val v = index.get(id) ?: return 0.0
+            val v = store.vectorFor(id) ?: return 0.0
             return profVecs.maxOfOrNull { cosine(v, it) }?.coerceAtLeast(0.0) ?: 0.0
         }
 
         // 1. Direct hits: blended score, relevance floor, sensitivity floors (spec §6 steps 3+5).
         val direct = candidates.mapNotNull { m ->
-            val sem = index.get(m.id)?.let { cosine(queryVector, it) } ?: return@mapNotNull null
+            val sem = store.vectorFor(m.id)?.let { cosine(queryVector, it) } ?: return@mapNotNull null
             val floor = when (m.sensitivity) {
                 Sensitivity.RESTRICTED -> config.restrictedFloor
                 Sensitivity.SENSITIVE -> config.sensitiveFloor
@@ -60,8 +59,8 @@ class PalaceWalker(
         val hits = LinkedHashMap<String, Hit>()
         direct.forEach { hits[it.memory.id] = it }
         direct.forEach { hit ->
-            val vec = index.get(hit.memory.id) ?: return@forEach
-            index.nearest(vec, config.neighborsPerHit + 1).forEach { n ->
+            val vec = store.vectorFor(hit.memory.id) ?: return@forEach
+            store.nearest(vec, config.neighborsPerHit + 1).forEach { n ->
                 val m = all[n.id] ?: return@forEach
                 if (n.id != hit.memory.id && n.id !in hits && m.active && m.room == hit.memory.room &&
                     m.sensitivity < Sensitivity.SENSITIVE) {

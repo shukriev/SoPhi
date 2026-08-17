@@ -15,10 +15,9 @@ class PalaceWalkerTest : FunSpec({
 
     class Rig {
         val store = PalaceStore(tempdir().toPath())
-        val index = EmbeddingIndex()
         val profile = UserProfile(store)
         val config = JanesPalaceConfig()
-        val walker = PalaceWalker(store, index, profile, fake, config)
+        val walker = PalaceWalker(store, profile, fake, config)
         suspend fun add(id: String, text: String, room: Room = Room.EPISODES,
                         salience: Double = 0.8, at: Long = 0L,
                         sensitivity: Sensitivity = Sensitivity.PERSONAL,
@@ -27,7 +26,7 @@ class PalaceWalkerTest : FunSpec({
                 sensitivity, provenance, at, at, "s")
             store.upsertMemory(m)
             val v = fake.embed(listOf(text)).single()
-            store.putEmbedding(id, "fake", v); index.put(id, v)
+            store.putEmbedding(id, "fake", v)
             return m
         }
         suspend fun walk(input: String, nowMs: Long = DAY, rooms: List<Room> = Room.entries.toList()) =
