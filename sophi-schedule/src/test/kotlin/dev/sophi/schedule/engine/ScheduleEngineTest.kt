@@ -377,6 +377,26 @@ class ScheduleEngineTest : FunSpec({
         requests.map { it.temperature }.toSet() shouldContain 1.0
     }
 
+    test("the ToT search kill switch collapses the ladder to a single delegate when disabled") {
+        // TreePlanner short-circuits on one delegate, so listOf(0.0) IS byte-identical
+        // pre-search behaviour — the off switch needs no change inside TreePlanner itself.
+        listOf("false", "FALSE", "False", "0").forEach { disabling ->
+            planSearchTemperatures { if (it == "SOPHI_TOT_SEARCH_ENABLED") disabling else null }
+                .shouldBe(listOf(0.0))
+        }
+    }
+
+    test("the ToT search stays on when the kill switch is unset or set to anything else") {
+        val ladder = listOf(0.0, 0.7, 1.0)
+        planSearchTemperatures { null } shouldBe ladder
+        // Fails safe toward ON: only an explicit false/0 disables, so a typo or a stray value
+        // can't silently switch off a feature under probation review without anyone noticing.
+        listOf("true", "1", "yes", "", "nonsense").forEach { value ->
+            planSearchTemperatures { if (it == "SOPHI_TOT_SEARCH_ENABLED") value else null }
+                .shouldBe(ladder)
+        }
+    }
+
     test("a Goal-mode run records how many times it replanned") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did some work"))

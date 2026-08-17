@@ -32,15 +32,27 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.seconds
 
+/** Env kill switch for the ToT replan search — see [planSearchTemperatures] (ADR-024). */
+internal const val TOT_SEARCH_ENABLED_ENV = "SOPHI_TOT_SEARCH_ENABLED"
+
 /**
- * Candidate temperatures for TreePlanner's replan search (experiment). LlmPlanner is
+ * Candidate temperatures for TreePlanner's replan search (ADR-024, on probation). LlmPlanner is
  * deterministic at 0.0, so distinct temperatures are what make the k candidate tails actually
- * differ. Set this to listOf(0.0) to disable the search entirely — TreePlanner short-circuits
- * on a single delegate, restoring exact pre-search behavior at zero extra cost. That is the
- * A/B toggle for the measurement described in
- * docs/superpowers/specs/2026-08-14-tot-widened-replan-design.md.
+ * differ — TreePlanner has no diversity mechanism of its own.
+ *
+ * Setting SOPHI_TOT_SEARCH_ENABLED=false (or 0) collapses this to listOf(0.0), which TreePlanner
+ * short-circuits on a single delegate — byte-identical pre-search behaviour at zero extra cost,
+ * with no change needed inside TreePlanner. A feature on probation has to be killable without a
+ * code deploy, and this is also how the A/B's baseline arm was run.
+ *
+ * Fails safe toward ON: only an explicit false/0 disables. A typo or stray value must not
+ * silently switch off the very thing a probation review is measuring.
+ *
+ * [env] is injectable for testing only — System.getenv cannot be mutated in-process.
  */
-private val PLAN_SEARCH_TEMPERATURES = listOf(0.0, 0.7, 1.0)
+internal fun planSearchTemperatures(env: (String) -> String? = System::getenv): List<Double> =
+    if (env(TOT_SEARCH_ENABLED_ENV)?.lowercase() in setOf("false", "0")) listOf(0.0)
+    else listOf(0.0, 0.7, 1.0)
 
 /**
  * Scoring budget for TreePlanner's candidate tails. Deliberately far above LlmPlanCritic's 30s
@@ -128,7 +140,7 @@ class ScheduleEngine(
                     }
                     is TaskMode.Goal -> {
                         val planner = TreePlanner(
-                            delegates = PLAN_SEARCH_TEMPERATURES.map {
+                            delegates = planSearchTemperatures().map {
                                 LlmPlanner(provider, model, temperature = it)
                             },
                             critic = LlmPlanCritic(provider, model, timeout = PLAN_CRITIC_TIMEOUT)
