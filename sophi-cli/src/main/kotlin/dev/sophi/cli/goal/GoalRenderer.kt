@@ -25,19 +25,11 @@ class GoalRenderer(
     approvedPlan: Plan,
     private val liveRegion: LiveRegion,
     private val output: (String) -> Unit,
-    tokenViewKey: Char,
     private val autoExitTokenView: Boolean
 ) {
     var currentPlan: Plan = approvedPlan; private set
     var lastStepOutput: String = ""; private set
     private var presenter = StreamingTurnPresenter(autoExitTokenView)
-
-    init {
-        // tokenViewKey is accepted for interface symmetry with TurnController/GoalController's
-        // shared toggle-key configuration; the actual key match happens where GoalController
-        // races input.awaitControlKeys(tokenViewKey, ...), not here.
-        @Suppress("UNUSED_EXPRESSION") tokenViewKey
-    }
 
     fun toggleTokenView() {
         presenter.toggleTokenView()

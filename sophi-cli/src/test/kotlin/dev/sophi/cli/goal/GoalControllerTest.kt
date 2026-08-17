@@ -65,7 +65,7 @@ class GoalControllerTest : FunSpec({
 
     fun singleStepPlan() = Plan(id = "plan_1", goalPrompt = "goal", steps = listOf(PlanStep(id = "s1", instruction = "do it")))
 
-    test("declining the preview leaves session.entries empty, never calls planner.plan twice, and returns Declined(UserDeclined)") {
+    test("declining the preview leaves session.entries empty, never calls planner.plan twice, and returns Declined") {
         val provider = mockk<LLMProvider>()
         val planner = mockk<Planner>()
         coEvery { planner.plan(any(), any()) } returns singleStepPlan()
@@ -75,7 +75,6 @@ class GoalControllerTest : FunSpec({
         val result = runBlocking { gc.run(session, "do the thing") }
 
         result.shouldBeInstanceOf<GoalRunResult.Declined>()
-        (result as GoalRunResult.Declined).reason shouldBe DeclineReason.UserDeclined
         session.entries.isEmpty() shouldBe true
         coVerify(exactly = 1) { planner.plan(any(), any()) }
     }
@@ -112,7 +111,7 @@ class GoalControllerTest : FunSpec({
         dev.sophi.core.prompt.PromptBuilder.build(session.branch()).size shouldBe 2
     }
 
-    test("a planner exception leaves the session untouched, prints planning failed, and returns Declined(Failed)") {
+    test("a planner exception leaves the session untouched, prints planning failed, and returns Declined") {
         val provider = mockk<LLMProvider>()
         val planner = mockk<Planner>()
         coEvery { planner.plan(any(), any()) } throws RuntimeException("provider down")
@@ -122,7 +121,6 @@ class GoalControllerTest : FunSpec({
         val result = runBlocking { gc.run(session, "do the thing") }
 
         result.shouldBeInstanceOf<GoalRunResult.Declined>()
-        (result as GoalRunResult.Declined).reason shouldBe DeclineReason.Failed
         session.entries.isEmpty() shouldBe true
         output.any { it.contains("planning failed") } shouldBe true
     }
@@ -156,21 +154,6 @@ class GoalControllerTest : FunSpec({
 
         val lines = dev.sophi.learning.JsonlLog(home.resolve("session-outcomes.jsonl")).readAll()
         lines.single() shouldContain "goal"
-    }
-
-    test("an autonomous trigger never calls GoalArgs.parse — a --check-looking message runs as literal task text") {
-        val provider = mockk<LLMProvider>()
-        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        val capturedGoalPrompt = mutableListOf<String>()
-        coEvery { planner.plan(capture(capturedGoalPrompt), any()) } returns singleStepPlan()
-        val (gc, _) = controller(provider, planner)
-        val session = AgentSession(id = "s1")
-
-        runBlocking { gc.run(session, "--check the weather forecast then decide", GoalTrigger.Autonomous(TriggerSource.Rules)) }
-
-        capturedGoalPrompt.single() shouldBe "--check the weather forecast then decide"
     }
 
     test("non-interactive input auto-approves the preview without reading a line") {

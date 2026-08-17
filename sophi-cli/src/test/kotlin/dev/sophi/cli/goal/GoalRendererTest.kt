@@ -19,7 +19,7 @@ class GoalRendererTest : FunSpec({
 
     fun renderer(session: AgentSession, output: MutableList<String>) = GoalRenderer(
         session, plan(), LiveRegion(StringBuilder()) { 80 }, { output.add(it) },
-        tokenViewKey = 'T', autoExitTokenView = true
+        autoExitTokenView = true
     )
 
     test("StepStarted prints a step header") {

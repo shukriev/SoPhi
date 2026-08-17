@@ -40,14 +40,10 @@ class GoalController(
     private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit,
     private val output: (String) -> Unit
 ) {
-    suspend fun run(session: AgentSession, rawInput: String?, trigger: GoalTrigger = GoalTrigger.Explicit): GoalRunResult {
-        val argsResult = when (trigger) {
-            is GoalTrigger.Explicit -> GoalArgs.parse(rawInput)
-            is GoalTrigger.Autonomous -> Result.success(GoalArgs(task = rawInput.orEmpty(), check = null))
-        }
-        val args = argsResult.getOrElse {
+    suspend fun run(session: AgentSession, rawInput: String?): GoalRunResult {
+        val args = GoalArgs.parse(rawInput).getOrElse {
             output(it.message ?: GoalArgs.USAGE)
-            return GoalRunResult.Declined(session, DeclineReason.Failed)
+            return GoalRunResult.Declined(session)
         }
 
         output("Planning…")
@@ -55,7 +51,7 @@ class GoalController(
             planner.plan(args.task)
         } catch (e: Exception) {
             output("goal: planning failed — ${e.message}")
-            return GoalRunResult.Declined(session, DeclineReason.Failed)
+            return GoalRunResult.Declined(session)
         }
 
         val stopCondition = args.check?.let { StopCondition.ShellCheck(it) } ?: StopCondition.LlmJudged
@@ -75,22 +71,18 @@ class GoalController(
         val approved = if (!interactive) {
             true
         } else {
-            val prompt = when (trigger) {
-                is GoalTrigger.Explicit -> "Run this plan? [y/N] "
-                is GoalTrigger.Autonomous -> "Run this plan? [y/N]  (n = just answer normally) "
-            }
-            output(prompt)
+            output("Run this plan? [y/N] ")
             val answer = input.readLine()?.trim()?.lowercase()
             answer == "y" || answer == "yes"
         }
         if (!approved) {
             output("Cancelled.")
-            return GoalRunResult.Declined(session, DeclineReason.UserDeclined)
+            return GoalRunResult.Declined(session)
         }
 
         session.append(EntryRole.USER, args.task, mapOf("goal" to "true", "planId" to plan.id))
 
-        val renderer = GoalRenderer(session, plan, liveRegion, output, tokenViewKey, autoExitTokenView)
+        val renderer = GoalRenderer(session, plan, liveRegion, output, autoExitTokenView)
         // Two seams, one renderer: onProgress carries the plan-shaped boundaries, onEvent the raw
         // token stream of whichever step is in flight. PlanRunner fires the boundary first, so the
         // renderer has already reset its presenter before the first token of a step arrives.
