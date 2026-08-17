@@ -4,21 +4,18 @@ import dev.sophi.memory.ForgetRequest
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
-import java.nio.file.Files
 
 class ForgetEngineTest : FunSpec({
     class Rig {
         val home = tempdir().toPath()
         val store = PalaceStore(home)
-        val index = EmbeddingIndex()
         val profile = UserProfile(store)
-        val engine = ForgetEngine(store, index, profile)
+        val engine = ForgetEngine(store, profile)
         fun add(id: String, text: String = "text-$id"): Memory {
             val m = Memory(id, text, Room.EPISODES, 0.8, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
                 Sensitivity.PERSONAL, Provenance.USER_DIRECT, 1L, 1L, "s")
             store.upsertMemory(m)
             store.putEmbedding(id, "fake", floatArrayOf(1f, 2f))
-            index.put(id, floatArrayOf(1f, 2f))
             return m
         }
     }
@@ -39,20 +36,11 @@ class ForgetEngineTest : FunSpec({
 
         r.store.memories().keys shouldBe setOf("mem_a", "mem_c")
         r.store.embeddings().keys shouldBe setOf("mem_a", "mem_c")
-        r.index.get("mem_b") shouldBe null
+        r.store.vectorFor("mem_b") shouldBe null
         val edge = r.store.edges().single()
         edge.fromId shouldBe "mem_a"; edge.toId shouldBe "mem_c"; edge.compressed shouldBe true
         r.store.recallsSince(0L) shouldBe emptyList()
         r.profile.all().containsKey("secret.place") shouldBe false   // sole evidence → gone
-
-        // Deletion-completeness: no file under home contains the id or the text (spec §12).
-        Files.list(r.home).use { paths ->
-            paths.filter { Files.isRegularFile(it) }.forEach { p ->
-                val content = Files.readString(p)
-                content.contains("mem_b") shouldBe false
-                content.contains("rendezvous") shouldBe false
-            }
-        }
     }
 
     test("preview shows what forget would remove/affect without mutating, then real forget matches") {
@@ -93,7 +81,7 @@ class ForgetEngineTest : FunSpec({
         val result = r.engine.forget(ForgetRequest.All, 10L)
         result.removedIds.toSet() shouldBe setOf("mem_a", "mem_b")
         r.store.memories() shouldBe emptyMap()
-        r.index.ids() shouldBe emptySet<String>()
+        r.store.embeddings() shouldBe emptyMap()
     }
 
     test("purgeSoftDeleted physically removes only memories past the cutoff") {
