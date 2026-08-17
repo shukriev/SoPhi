@@ -404,6 +404,32 @@ through plain injected callbacks instead of direct SPI dependencies:
 `Planner`'s `contextProvider: suspend (String) -> List<String>` and `PlanRunner`'s
 `onPlanComplete: suspend (PlanOutcome) -> Unit`. See ADR-018.
 
+### GoalController + the `/goal` command (`dev.sophi.cli.goal`, ADR-025)
+
+ADR-025 folded its progress needs into ADR-020's existing `PlanProgressEvent` rather than
+standing up a second stream: `PlanReady`, `StepAttempt` (which model, which child session,
+attempt 1 or the escalation re-run) and `Escalating` joined `StepStarted`/`StepFinished`/
+`Replanned`/`Decomposed`, and `Replanned` now carries the replacement `Plan` itself so a UI can
+re-render the step list. Raw per-token `TurnEvent`s stay on `PlanRunner`'s separate `onEvent`
+seam — the hub/companion bridge wants them unwrapped, and a renderer that wants both subscribes
+to both. `PlanRunner` fires the boundary before the turn events of the step it opens, which is
+what lets a renderer reset per-step state safely. `PlanRunner.run(...)` also gained
+`initialPlan: Plan? = null` so a caller can generate a plan, show it, and only pass it to
+`run()` after approval, without a new `PlanFinalStatus` value for "declined".
+
+`sophi-cli`'s `dev.sophi.cli.goal` package is the first interactive consumer:
+`GoalController.run(session, input, trigger: GoalTrigger)` — parses (or, for an autonomous
+trigger, treats the message as literal task text), plans, previews, runs the per-invocation
+`PlanRunner` under an ESC race, and settles — returning `GoalRunResult` (`Ran`/`Declined`).
+`GoalRenderer` consumes both seams: steps still execute in `PlanRunner`'s isolated child
+sessions, but the anchor session gets one `replay=false` entry per finished step plus one
+replayed summary entry, so `/branch` and a follow-up turn both see the episode without paying
+its full token cost. Because /goal drives `PlanRunner` directly instead of
+`SophiRuntime.streamTurn`, it settles its own episode through `SophiRuntime.settleExternalTurn`
+and plans against `SophiRuntime.contextFor`, so AFTER_TURN hooks and memory context behave
+exactly as they do for a chat turn. See ADR-025 for the full rationale, including why the
+plan-preview prompt uses `input.readLine()` rather than `input.awaitYesNo()`.
+
 ### TreePlanner + PlanCritic (`dev.sophi.core.agent.plan`, ADR-024 — probation)
 
 `PlanRunner` already runs a depth-first search with backtracking: a failed step anchors a
@@ -710,6 +736,7 @@ to decide.
 | [ADR-020](adr/ADR-020-generalized-goal-decomposition.md) | Generalized goal decomposition | Recursion inside PlanRunner (no new module/type); two triggers over one decomposeStep seam; shared RunBudget; LlmJudged-only sub-plans; two entry points (decompose_goal tool + /plan) over one buildPlanRunner factory |
 | [ADR-022](adr/ADR-022-sophi-companion.md) | `sophi-companion` OS tray app | Standalone Gradle module outside the Maven reactor (Compose Desktop is Gradle-only); embeds `sophi-sdk` in-process, HTTP via `sophi-web` rejected; five additive SDK/core/mcp gaps fixed rather than worked around (`ToolRegistry.unregister`, per-server MCP connect/disconnect, `McpConfigWriter` + `McpServerConfig.enabled`, `SessionManager.rename`/`delete` + title persistence, `SophiRuntime.scheduleEngine`); one coroutine + one `StateFlow` per session; confirmation ships notify-only (always-approve stub, blocked on ADR-016's session-id-less `confirm`); `jpackage` bundling in v1 because macOS notifications need a real `.app` |
 | [ADR-023](adr/ADR-023-cli-hub-remote-control.md) | CLI session monitoring & remote control | New `sophi-hub` module (protocol+server+client); companion owns hub lifecycle, CLI registers on by default; `TurnEvent`/`ConfirmationPolicy` reused as the forwarding seam instead of new `AgentHook` points; confirmation races terminal vs. remote, first response wins, no lock |
+| [ADR-025](adr/ADR-025-interactive-goal-command.md) | Interactive `/goal` command | Hybrid session visibility (isolated step execution, structured anchor-session record); plan preview via `input.readLine()`, not `awaitYesNo()`; extends ADR-020's `PlanProgressEvent` instead of adding a second event stream; `initialPlan` preview seam; `allowParallelSteps` stays `false`; CLI-only v1 |
 | [ADR-024](adr/ADR-024-tot-widened-replan-search.md) | Tree-of-thought widened replan search | **Accepted — probation**, written retroactively: `PlanRunner`'s existing search was already DFS-with-backtracking at width 1, so `TreePlanner` widens one node rather than adding a subsystem; GoT rejected because merge is incoherent over side-effecting executed steps; `Planner` decorator (zero `PlanRunner` diff), `replan()` only, goal-mode only by construction; new `PlanCritic` because `StepCritic` can't score an unexecuted plan; 300s critic timeout because failing open here is a full-price no-op, not a safe degrade; `SOPHI_TOT_SEARCH_ENABLED` kill switch; probation because the mechanism works but value was never demonstrated |
 
 ---
@@ -742,6 +769,7 @@ to decide.
 | `sophi-core`/`sophi-schedule` — tiered tool confirmation & grants | post-M7 | design | [article-22](articles/article-22.md) |
 | `sophi-core` auto mode + hybrid risk classifier | post-M7 | complete | [article-23](articles/article-23.md) |
 | `sophi-core`/`sophi-schedule` — Plan-and-Execute upgrade | post-M7 | complete | [article-24](articles/article-24.md) |
+| `sophi-cli` — interactive `/goal` command | post-M7 | complete | — |
 | `sophi-core` — `invoke_claude_code` tool | post-M7 | complete | — |
 | `sophi-companion` — OS tray desktop app embedding `sophi-sdk` | post-M7 | complete | [article-25](articles/article-25.md) |
 | `sophi-core`/`sophi-schedule` — `TreePlanner` widened replan search | post-M7 | probation | — |

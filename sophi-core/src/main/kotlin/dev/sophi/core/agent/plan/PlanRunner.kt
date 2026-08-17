@@ -29,20 +29,6 @@ internal class RunBudget(private val max: Int) {
     fun used(): Int = consumed.get()
 }
 
-/**
- * Live-progress counterpart to the batch results in PlanOutcome — fired as a run happens rather
- * than returned once it finishes, so a caller (the CLI's /plan) can show something between the
- * long silences of chained agentLoop.turn calls instead of only a summary at the very end.
- */
-sealed class PlanProgressEvent {
-    data class StepStarted(val planId: String, val step: PlanStep) : PlanProgressEvent()
-    data class StepFinished(val planId: String, val step: PlanStep) : PlanProgressEvent()
-    data class Replanned(val planId: String, val stepId: String, val reason: String) : PlanProgressEvent()
-    data class Decomposed(
-        val stepId: String, val childPlanId: String, val trigger: DecompositionTrigger
-    ) : PlanProgressEvent()
-}
-
 data class PlanRunnerConfig(
     val model: String,
     val maxTokens: Int = 4096,
@@ -76,11 +62,18 @@ class PlanRunner(
     private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val onProgress: suspend (PlanProgressEvent) -> Unit = {}
 ) {
+    /**
+     * [initialPlan] lets a caller that has already generated (and, for /goal, shown and had the
+     * user approve) a plan run *that* plan instead of paying for a second planner.plan() call
+     * that could come back different from the one the user said yes to. Replanning still goes
+     * through [planner] as usual.
+     */
     suspend fun run(
         parentSessionId: String,
         goalPrompt: String,
         stopCondition: StopCondition,
-        context: List<String> = emptyList()
+        context: List<String> = emptyList(),
+        initialPlan: Plan? = null
     ): PlanOutcome = runPlan(
         parentSessionId = parentSessionId,
         goalPrompt = goalPrompt,
@@ -89,7 +82,8 @@ class PlanRunner(
         depth = 0,
         parentStepId = null,
         budget = RunBudget(config.maxStepExecutions),
-        decompositions = mutableListOf()
+        decompositions = mutableListOf(),
+        initialPlan = initialPlan
     )
 
     private suspend fun runPlan(
@@ -100,9 +94,14 @@ class PlanRunner(
         depth: Int,
         parentStepId: String?,
         budget: RunBudget,
-        decompositions: MutableList<DecompositionEvent>
+        decompositions: MutableList<DecompositionEvent>,
+        initialPlan: Plan? = null
     ): PlanOutcome {
-        var plan = planner.plan(goalPrompt, context).copy(parentStepId = parentStepId, depth = depth)
+        var plan = (initialPlan ?: planner.plan(goalPrompt, context))
+            .copy(parentStepId = parentStepId, depth = depth)
+        // Only announce a plan this runner generated: a caller supplying initialPlan has already
+        // rendered it, and PlanReady would make it look like a second, different plan.
+        if (initialPlan == null) onProgress(PlanProgressEvent.PlanReady(plan))
         planLog?.append(plan)
         val replans = mutableListOf<ReplanEvent>()
         val stepOutputs = mutableMapOf<String, String>()
@@ -139,7 +138,7 @@ class PlanRunner(
                     .copy(parentStepId = parentStepId, depth = depth)
                 planLog?.append(plan)
                 replans.add(ReplanEvent(anchor.id, reason, plan.version))
-                onProgress(PlanProgressEvent.Replanned(plan.id, anchor.id, reason))
+                onProgress(PlanProgressEvent.Replanned(plan, anchor.id, reason))
                 continue
             }
 
@@ -156,7 +155,7 @@ class PlanRunner(
             plan = planner.replan(plan, anchorId, reason, context).copy(parentStepId = parentStepId, depth = depth)
             planLog?.append(plan)
             replans.add(ReplanEvent(anchorId, reason, plan.version))
-            onProgress(PlanProgressEvent.Replanned(plan.id, anchorId, reason))
+            onProgress(PlanProgressEvent.Replanned(plan, anchorId, reason))
         }
     }
 
@@ -253,9 +252,9 @@ class PlanRunner(
         step: PlanStep, plan: Plan, parentSessionId: String, stepOutputs: MutableMap<String, String>,
         depth: Int, budget: RunBudget, decompositions: MutableList<DecompositionEvent>
     ): Pair<String, PlanStep> {
-        onProgress(PlanProgressEvent.StepStarted(plan.id, step))
+        onProgress(PlanProgressEvent.StepStarted(plan.id, step, plan.version))
         val result = runStepBody(step, plan, parentSessionId, stepOutputs, depth, budget, decompositions)
-        onProgress(PlanProgressEvent.StepFinished(plan.id, result.second))
+        onProgress(PlanProgressEvent.StepFinished(plan.id, result.second, plan.version))
         return result
     }
 
@@ -271,7 +270,8 @@ class PlanRunner(
         }
 
         val instruction = withDependencyContext(step, stepOutputs)
-        val execution = executeOnce(plan, step, instruction, step.modelOverride ?: config.model, parentSessionId, budget)
+        val execution =
+            executeOnce(plan, step, instruction, step.modelOverride ?: config.model, parentSessionId, budget, attempt = 1)
         if (!execution.ok) {
             stepOutputs[step.id] = execution.output
             return step.id to step.copy(status = StepStatus.Failed, confidence = 0.0)
@@ -295,8 +295,9 @@ class PlanRunner(
         var usedModel = step.modelOverride
 
         if (confidence < config.escalationThreshold && step.modelOverride == null && config.escalationModel != null) {
+            onProgress(PlanProgressEvent.Escalating(step.id, confidence, config.escalationModel))
             val escalated =
-                executeOnce(plan, step, instruction, config.escalationModel, parentSessionId, budget)
+                executeOnce(plan, step, instruction, config.escalationModel, parentSessionId, budget, attempt = 2)
             if (escalated.ok) {
                 confidence = critic.judge(step, escalated.output)
                 finalOutput = escalated.output
@@ -321,10 +322,12 @@ class PlanRunner(
     private data class StepExecution(val output: String, val ok: Boolean, val stopReason: TurnStopReason? = null)
 
     private suspend fun executeOnce(
-        plan: Plan, step: PlanStep, instruction: String, model: String, parentSessionId: String, budget: RunBudget
+        plan: Plan, step: PlanStep, instruction: String, model: String, parentSessionId: String,
+        budget: RunBudget, attempt: Int
     ): StepExecution {
         if (!budget.tryConsume()) return StepExecution("step execution budget exhausted", ok = false)
         val stepSession = sessionManager.create(title = "plan:${plan.id}:step:${step.id}", parentSessionId = parentSessionId)
+        onProgress(PlanProgressEvent.StepAttempt(plan.id, step, plan.version, model, stepSession.id, attempt))
         val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens, systemPrompt = config.systemPrompt)
         return try {
             val result = agentLoop.turn(stepSession, instruction, agentConfig, onEvent)

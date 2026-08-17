@@ -3,6 +3,7 @@ package dev.sophi.cli
 import com.github.ajalt.mordant.rendering.TextColors
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.plan.DecompositionTrigger
+import dev.sophi.core.agent.plan.Plan
 import dev.sophi.core.agent.plan.PlanProgressEvent
 import dev.sophi.core.agent.plan.PlanStep
 import dev.sophi.core.agent.plan.StepStatus
@@ -21,7 +22,7 @@ class PlanProgressRendererTest : FunSpec({
         val output = mutableListOf<String>()
         val step = PlanStep(id = "s1", instruction = "ship the release")
 
-        runBlocking { renderer(output).onProgress(PlanProgressEvent.StepStarted("plan_1", step)) }
+        runBlocking { renderer(output).onProgress(PlanProgressEvent.StepStarted("plan_1", step, 1)) }
 
         output shouldBe listOf(TextColors.cyan("▶ [s1] ship the release"))
     }
@@ -30,7 +31,7 @@ class PlanProgressRendererTest : FunSpec({
         val output = mutableListOf<String>()
         val step = PlanStep(id = "s1", instruction = "ship it", status = StepStatus.Done, confidence = 0.9)
 
-        runBlocking { renderer(output).onProgress(PlanProgressEvent.StepFinished("plan_1", step)) }
+        runBlocking { renderer(output).onProgress(PlanProgressEvent.StepFinished("plan_1", step, 1)) }
 
         output shouldBe listOf(TextColors.gray("  [s1] Done (0.9)"))
     }
@@ -42,7 +43,7 @@ class PlanProgressRendererTest : FunSpec({
 
         runBlocking {
             r.onTurnEvent(TurnEvent.ReasoningToken("thinking about it"))
-            r.onProgress(PlanProgressEvent.StepFinished("plan_1", step))
+            r.onProgress(PlanProgressEvent.StepFinished("plan_1", step, 1))
         }
 
         output shouldBe listOf(
@@ -57,10 +58,10 @@ class PlanProgressRendererTest : FunSpec({
 
         runBlocking {
             r.onTurnEvent(TurnEvent.ReasoningToken("first step thoughts"))
-            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s1", instruction = "a", status = StepStatus.Done)))
+            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s1", instruction = "a", status = StepStatus.Done), 1))
             output.clear()
-            r.onProgress(PlanProgressEvent.StepStarted("plan_1", PlanStep(id = "s2", instruction = "b")))
-            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s2", instruction = "b", status = StepStatus.Done)))
+            r.onProgress(PlanProgressEvent.StepStarted("plan_1", PlanStep(id = "s2", instruction = "b"), 1))
+            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s2", instruction = "b", status = StepStatus.Done), 1))
         }
 
         output shouldBe listOf(
@@ -85,7 +86,9 @@ class PlanProgressRendererTest : FunSpec({
         val output = mutableListOf<String>()
 
         runBlocking {
-            renderer(output).onProgress(PlanProgressEvent.Replanned("plan_1", "s1", "step s1 failed"))
+            renderer(output).onProgress(PlanProgressEvent.Replanned(
+                    Plan(id = "plan_1", goalPrompt = "g", steps = emptyList(), version = 2), "s1", "step s1 failed"
+                ))
         }
 
         output shouldBe listOf(TextColors.yellow("↻ replanning [s1]: step s1 failed"))

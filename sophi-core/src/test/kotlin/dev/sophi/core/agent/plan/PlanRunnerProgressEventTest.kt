@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
@@ -12,6 +13,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -42,12 +44,91 @@ class PlanRunnerProgressEventTest : FunSpec({
         )
         runBlocking { runner.run("parent", "goal", StopCondition.LlmJudged) }
 
-        events shouldHaveSize 2
-        val started = events[0] as PlanProgressEvent.StepStarted
+        events shouldHaveSize 4
+        (events[0] as PlanProgressEvent.PlanReady).plan.id shouldBe "plan_1"
+        val started = events[1] as PlanProgressEvent.StepStarted
         started.step.id shouldBe "s1"
-        val finished = events[1] as PlanProgressEvent.StepFinished
+        val attempt = events[2] as PlanProgressEvent.StepAttempt
+        attempt.step.id shouldBe "s1"
+        attempt.attempt shouldBe 1
+        attempt.model shouldBe "m"
+        attempt.childSessionId.isNotBlank() shouldBe true
+        val finished = events[3] as PlanProgressEvent.StepFinished
         finished.step.id shouldBe "s1"
         finished.step.status shouldBe StepStatus.Done
+    }
+
+    test("no PlanReady is emitted for a caller-supplied initialPlan, and planner.plan is never called") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        val events = mutableListOf<PlanProgressEvent>()
+
+        val runner = PlanRunner(
+            agentLoop(provider), FileSessionManager(createTempDirectory("plan-runner-progress-initial")), provider,
+            planner, StepCritic { _, _ -> 1.0 }, PlanRunnerConfig(model = "m"),
+            onProgress = { events.add(it) }
+        )
+        val approved = Plan(id = "plan_9", goalPrompt = "goal", steps = listOf(PlanStep(id = "s1", instruction = "do it")))
+        val outcome = runBlocking {
+            runner.run("parent", "goal", StopCondition.LlmJudged, initialPlan = approved)
+        }
+
+        events.none { it is PlanProgressEvent.PlanReady } shouldBe true
+        coVerify(exactly = 0) { planner.plan(any(), any()) }
+        outcome.planId shouldBe "plan_9"
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+    }
+
+    test("the raw onEvent seam still carries a step's turn events, unwrapped, alongside onProgress") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns
+            Plan(id = "plan_1", goalPrompt = "goal", steps = listOf(PlanStep(id = "s1", instruction = "do it")))
+        val turnEvents = mutableListOf<TurnEvent>()
+        var attemptSeenBeforeFirstToken = false
+
+        val runner = PlanRunner(
+            agentLoop(provider), FileSessionManager(createTempDirectory("plan-runner-progress-raw")), provider,
+            planner, StepCritic { _, _ -> 1.0 }, PlanRunnerConfig(model = "m"),
+            onEvent = { turnEvents.add(it) },
+            onProgress = { if (it is PlanProgressEvent.StepAttempt && turnEvents.isEmpty()) attemptSeenBeforeFirstToken = true }
+        )
+        runBlocking { runner.run("parent", "goal", StopCondition.LlmJudged) }
+
+        turnEvents.filterIsInstance<TurnEvent.Token>().isNotEmpty() shouldBe true
+        // The boundary has to land first, or a renderer resets its per-step state mid-stream.
+        attemptSeenBeforeFirstToken shouldBe true
+    }
+
+    test("a low-confidence step fires Escalating then a second StepAttempt with attempt = 2 and the escalation model") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("attempt"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns
+            Plan(id = "plan_1", goalPrompt = "goal", steps = listOf(PlanStep(id = "s1", instruction = "do it")))
+        var judgeCalls = 0
+        val events = mutableListOf<PlanProgressEvent>()
+
+        val runner = PlanRunner(
+            agentLoop(provider), FileSessionManager(createTempDirectory("plan-runner-progress-esc")), provider,
+            planner, StepCritic { _, _ -> judgeCalls++; if (judgeCalls == 1) 0.2 else 0.9 },
+            PlanRunnerConfig(model = "cheap", escalationModel = "strong", escalationThreshold = 0.5),
+            onProgress = { events.add(it) }
+        )
+        runBlocking { runner.run("parent", "goal", StopCondition.LlmJudged) }
+
+        val escalating = events.filterIsInstance<PlanProgressEvent.Escalating>().single()
+        escalating.toModel shouldBe "strong"
+        escalating.confidence shouldBe 0.2
+        val attempts = events.filterIsInstance<PlanProgressEvent.StepAttempt>()
+        attempts.map { it.attempt } shouldBe listOf(1, 2)
+        attempts[0].model shouldBe "cheap"
+        attempts[1].model shouldBe "strong"
     }
 
     test("a failed step that gets replanned fires a Replanned progress event") {
@@ -79,6 +160,10 @@ class PlanRunnerProgressEventTest : FunSpec({
         replanned shouldHaveSize 1
         replanned.single().stepId shouldBe "s1"
         replanned.single().reason shouldBe "step s1 failed"
+        // Carries the replacement plan itself, not just its id: /goal re-renders the step list
+        // and appends the new version to its PlanLog off this event.
+        replanned.single().plan.version shouldBe 2
+        replanned.single().plan.steps.single().id shouldBe "s1b"
     }
 
     test("a step marked decompose fires a Decomposed progress event") {
@@ -127,5 +212,6 @@ class PlanRunnerProgressEventTest : FunSpec({
         runBlocking { runner.run("parent", "ship it", StopCondition.LlmJudged) }
 
         events.filterIsInstance<PlanProgressEvent.StepStarted>() shouldHaveSize 1
+        events.filterIsInstance<PlanProgressEvent.PlanReady>() shouldHaveSize 1
     }
 })

@@ -173,6 +173,12 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             "a rule has no opinion on) runs unattended for the whole session. Fixed once set — no " +
             "/auto toggle while in this mode. Overrides --auto if both are passed."
     ).flag(default = false)
+    private val goalEscalationModel: String? by option(
+        "--goal-escalation-model",
+        help = "Stronger model /goal escalates a plan step to when its confidence is below " +
+            "threshold. Omit to disable escalation (a low-confidence step just fails and " +
+            "replans instead)."
+    )
     private val hubPort: Int by option(
         "--hub-port",
         help = "Port a running sophi-companion's hub listens on. This session registers with " +
@@ -257,7 +263,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /auto\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto\n"
         )
         if (godMode) {
             if (autoMode) {
@@ -292,6 +298,36 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val onEvent: suspend (dev.sophi.core.agent.TurnEvent) -> Unit = { event ->
             event.toHubEvent(session.id)?.let { hubClient?.publish(it) }
         }
+        // /goal drives PlanRunner directly rather than going through runtime.streamTurn, so it
+        // needs its own AgentLoop over the same registry and confirmation policy — the same
+        // arrangement buildPlanRunner makes for /plan. It is NOT built via buildPlanRunner
+        // because the preview flow has to generate the plan with the very planner the runner
+        // will later replan with, and buildPlanRunner owns its planner privately.
+        val goalPlanner = dev.sophi.core.agent.plan.LlmPlanner(
+            provider, model,
+            contextProvider = { goalPrompt -> cli.runtime.contextFor(session.id, goalPrompt) }
+        )
+        val goalController = dev.sophi.cli.goal.GoalController(
+            agentLoop = AgentLoop(
+                provider, cli.registry, cli.runtime.sessionManager,
+                confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens
+            ),
+            sessionManager = cli.runtime.sessionManager, provider = provider,
+            planner = goalPlanner,
+            critic = dev.sophi.core.agent.plan.LlmStepCritic(provider, model),
+            runnerConfig = dev.sophi.core.agent.plan.PlanRunnerConfig(
+                model = model, maxTokens = maxTokens, systemPrompt = cli.runtime.config.systemPrompt,
+                escalationModel = goalEscalationModel, allowParallelSteps = false
+            ),
+            planLog = cli.planLog,
+            input = inputSource, liveRegion = liveRegion, interactive = sophiTerminal.isInteractive,
+            tokenViewKey = tokenViewKey.singleOrNull() ?: 'T', autoExitTokenView = autoExitTokenView,
+            learning = learningPlugin,
+            onEvent = onEvent,
+            onTurnSettled = { userInput, assistantReply, error ->
+                cli.runtime.settleExternalTurn(session.id, userInput, assistantReply, error)
+            }
+        ) { mordantTerminal.println(it) }
         val slashHandler = SlashHandler(
             cli.runtime.sessionManager, compactor, cli.runtime.config, learningPlugin,
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
@@ -303,7 +339,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
             onEvent = onEvent,
-            input = inputSource
+            input = inputSource,
+            goalController = goalController
         ) { mordantTerminal.println(it) }
         if (tokenViewKey.length != 1) {
             mordantTerminal.println(TextColors.yellow(

@@ -11,6 +11,8 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
+import dev.sophi.cli.goal.GoalController
+import dev.sophi.cli.goal.GoalRunResult
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.BrowseFilter
@@ -34,6 +36,7 @@ class SlashHandler(
     private val calendarProvider: CalendarProvider? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val autoModeToggle: ToggleableConfirmationPolicy? = null,
+    private val goalController: GoalController? = null,
     private val toolRegistry: ToolRegistry? = null,
     private val planLog: PlanLog? = null,
     /**
@@ -124,11 +127,23 @@ class SlashHandler(
             }
             "skill" -> { handleSkill(arg, session); session }
             "plan" -> handlePlan(arg, session)
+            "goal" -> {
+                val controller = goalController
+                if (controller == null) {
+                    output("Goal mode is not available.")
+                    session
+                } else {
+                    when (val result = controller.run(session, arg)) {
+                        is GoalRunResult.Ran -> result.session
+                        is GoalRunResult.Declined -> result.session
+                    }
+                }
+            }
             "auto" -> { handleAuto(); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /auto"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto"
                 )
                 session
             }

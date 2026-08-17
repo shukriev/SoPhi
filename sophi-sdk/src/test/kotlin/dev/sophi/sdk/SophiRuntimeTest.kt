@@ -297,6 +297,87 @@ class SophiRuntimeTest : FunSpec({
         verify(exactly = 0) { sessionManager.load(any()) }
     }
 
+    test("contextFor returns plugin-collected context, unwrapped from the turn machinery") {
+        val contributor = object : SophiPlugin, ContextContributor {
+            override val name = "ctx"
+            override fun hooks(): List<AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String): String = "RECALLED: $userInput"
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(contributor), config)
+
+        rt.contextFor("s1", "goal prompt") shouldBe listOf("RECALLED: goal prompt")
+    }
+
+    test("contextFor never throws — a failing plugin yields no context") {
+        val failing = object : SophiPlugin, ContextContributor {
+            override val name = "boom"
+            override fun hooks(): List<AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String): String = throw RuntimeException("down")
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(failing), config)
+
+        rt.contextFor("s1", "goal prompt") shouldBe emptyList()
+    }
+
+    test("settleExternalTurn with no error dispatches AFTER_TURN with the given input and reply") {
+        val seen = mutableListOf<Pair<HookPoint, HookContext>>()
+        val spy = object : SophiPlugin {
+            override val name = "external-settle-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN to context) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR to context) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+
+        rt.settleExternalTurn("s1", "do it", "done")
+
+        seen.map { it.first } shouldBe listOf(HookPoint.AFTER_TURN)
+        seen[0].second.userInput shouldBe "do it"
+        seen[0].second.assistantReply shouldBe "done"
+    }
+
+    test("settleExternalTurn with an error dispatches ON_ERROR only, never AFTER_TURN") {
+        val seen = mutableListOf<HookPoint>()
+        val spy = object : SophiPlugin {
+            override val name = "external-settle-error-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+
+        rt.settleExternalTurn("s1", "do it", "", RuntimeException("plan failed"))
+
+        seen shouldBe listOf(HookPoint.ON_ERROR)
+    }
+
+    test("settleExternalTurn never throws even when hook dispatch fails") {
+        val failing = object : SophiPlugin {
+            override val name = "settle-boom"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { throw RuntimeException("hook down") }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(failing), config)
+
+        rt.settleExternalTurn("s1", "do it", "done")
+    }
+
     // Smoke test only. loopGuard is a one-line pass-through into AgentLoop, whose guard behavior
     // is already covered by AgentLoopTest and only triggers after AgentConfig.maxToolRounds
     // (default 200) rounds — not worth driving from here. This exists to catch the knob being

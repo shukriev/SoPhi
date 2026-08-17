@@ -102,33 +102,62 @@ class SophiRuntime internal constructor(
                 bridge(event)
                 onEvent(event)
             }
-            settle(session.id, input, updated.lastAssistantReply())
+            settleOutcome(session.id, input, updated.lastAssistantReply(), error = null)
             updated
         } catch (e: CancellationException) {
             // An interrupt is not a failure. Dispatching ON_ERROR here would make LearningPlugin
             // mark the session errored, so recordSessionEnd would write outcome=error for a turn
             // the user simply stopped.
-            settle(session.id, input, partial.toString())
+            settleOutcome(session.id, input, partial.toString(), error = null)
             throw e
         } catch (e: Exception) {
-            pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(session.id, error = e))
+            settleOutcome(session.id, input, "", error = e)
             throw e
         }
     }
 
     /**
-     * Dispatches AFTER_TURN under [NonCancellable] so an interrupted turn is still recorded —
-     * the caller cancelling us must not also erase the turn from learning and memory.
-     *
-     * Both fields are populated: AFTER_TURN hooks that encode the exchange (MemoryPlugin) bail
-     * out on a null userInput or assistantReply, so an empty context silently drops the turn.
+     * The plugin-contributed context [streamTurn] would inject for this input — memory recall,
+     * learned lessons, and so on. Exposed because not every user-visible unit of work goes
+     * through streamTurn: the CLI's /goal drives PlanRunner directly, and its planner should see
+     * the same context a chat turn would. Never throws; a failing plugin yields no context.
      */
-    private suspend fun settle(sessionId: String, input: String, reply: String) {
-        withContext(NonCancellable) {
-            pluginRegistry.dispatch(
-                HookPoint.AFTER_TURN,
-                HookContext(sessionId, userInput = input, assistantReply = reply)
-            )
+    suspend fun contextFor(sessionId: String, input: String): List<String> =
+        runCatching { pluginRegistry.collectContext(sessionId, input) }.getOrDefault(emptyList())
+
+    /**
+     * Settles an exchange this runtime did not stream itself, firing the same AFTER_TURN (or
+     * ON_ERROR) hooks [streamTurn] would. /goal runs a whole plan through PlanRunner rather than
+     * streamTurn, and without this its episode never reaches memory encoding or learning.
+     */
+    suspend fun settleExternalTurn(
+        sessionId: String,
+        userInput: String,
+        assistantReply: String,
+        error: Throwable? = null
+    ) {
+        runCatching { settleOutcome(sessionId, userInput, assistantReply, error) }
+    }
+
+    /**
+     * The AFTER_TURN-or-ON_ERROR choice [streamTurn] and [settleExternalTurn] both make from the
+     * same three inputs — factored out so there is exactly one place that decision is made.
+     *
+     * AFTER_TURN dispatches under [NonCancellable] so an interrupted turn is still recorded — the
+     * caller cancelling us must not also erase the turn from learning and memory. Both userInput
+     * and assistantReply are populated on that path: AFTER_TURN hooks that encode the exchange
+     * (MemoryPlugin) bail out on either being null, so an empty context silently drops the turn.
+     */
+    private suspend fun settleOutcome(sessionId: String, input: String, reply: String, error: Throwable?) {
+        if (error != null) {
+            pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = error))
+        } else {
+            withContext(NonCancellable) {
+                pluginRegistry.dispatch(
+                    HookPoint.AFTER_TURN,
+                    HookContext(sessionId, userInput = input, assistantReply = reply)
+                )
+            }
         }
     }
 

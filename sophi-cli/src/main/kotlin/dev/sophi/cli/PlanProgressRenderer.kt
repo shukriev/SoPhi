@@ -76,13 +76,21 @@ class PlanProgressRenderer(
     suspend fun onProgress(event: PlanProgressEvent) {
         liveRegion.clear()
         when (event) {
+            // /plan echoes the plan in its closing summary instead; announcing it here as well
+            // would print the same step list twice for every run.
+            is PlanProgressEvent.PlanReady -> Unit
             is PlanProgressEvent.StepStarted -> {
-                reasoningBuffer.clear()
-                tokenCount = 0
-                reasoningTokenCount = 0
-                currentPhase = StreamingPhase.Generating()
+                resetTurnState()
                 output(TextColors.cyan("▶ [${event.step.id}] ${event.step.instruction}"))
             }
+            // Attempt 1 is already covered by StepStarted; only a re-run is news here.
+            is PlanProgressEvent.StepAttempt -> if (event.attempt > 1) {
+                resetTurnState()
+                output(TextColors.gray("  ↑ [${event.step.id}] retrying with ${event.model}"))
+            }
+            is PlanProgressEvent.Escalating ->
+                output(TextColors.gray("  ~ [${event.stepId}] confidence %.2f below threshold — escalating to %s"
+                    .format(event.confidence, event.toModel)))
             is PlanProgressEvent.StepFinished -> {
                 if (reasoningBuffer.isNotEmpty()) output(ResponseRenderer.renderReasoning(reasoningBuffer.toString()))
                 val confidence = event.step.confidence?.let { " ($it)" } ?: ""
@@ -93,6 +101,13 @@ class PlanProgressRenderer(
             is PlanProgressEvent.Decomposed ->
                 output(TextColors.magenta("⤷ [${event.stepId}] expanded into sub-plan ${event.childPlanId}"))
         }
+    }
+
+    private fun resetTurnState() {
+        reasoningBuffer.clear()
+        tokenCount = 0
+        reasoningTokenCount = 0
+        currentPhase = StreamingPhase.Generating()
     }
 
     private fun bumpGeneratingPhase() {

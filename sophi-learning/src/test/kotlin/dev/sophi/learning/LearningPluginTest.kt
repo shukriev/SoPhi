@@ -119,4 +119,28 @@ class LearningPluginTest : FunSpec({
         val p = LearningPlugin(LearningConfig(home = bad.resolve("sub"), scope = "/p"))
         p.recordExplicitFeedback("s1", 0, "positive", null)   // must not throw
     }
+
+    test("recordPlanOutcome notes accumulate into recordSessionEnd's SessionOutcome.planningNote") {
+        val home = tempdir().toPath()
+        val p = plugin(home)
+        p.recordPlanOutcome("s1", "goal \"ship it\" -> Met (2 steps, plan v1)")
+        p.recordPlanOutcome("s1", "goal \"add tests\" -> Exhausted (1 step, plan v2)")
+        runBlocking { p.recordSessionEnd("s1") }
+        val lines = JsonlLog(home.resolve("session-outcomes.jsonl")).readAll()
+        val decoded = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString(SessionOutcome.serializer(), lines.single())
+        decoded.planningNote shouldBe
+            "goal \"ship it\" -> Met (2 steps, plan v1)\ngoal \"add tests\" -> Exhausted (1 step, plan v2)"
+    }
+
+    test("no recordPlanOutcome call leaves planningNote null") {
+        val home = tempdir().toPath()
+        val p = plugin(home)
+        runBlocking { p.recordSessionEnd("s1") }
+        val lines = JsonlLog(home.resolve("session-outcomes.jsonl")).readAll()
+        // LearningPlugin's own `json` instance is `Json { encodeDefaults = true }`, so a null
+        // planningNote still serializes the key with an explicit null value rather than omitting
+        // it — matching every other optional SessionOutcome field already written this way.
+        lines.single() shouldContain "\"planningNote\":null"
+    }
 })

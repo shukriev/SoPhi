@@ -109,6 +109,7 @@ In-session slash commands:
 /good       rate the last reply as good (feeds the learning system)
 /bad [reason]   rate the last reply as bad, optionally saying why
 /schedule [list|log|pause <id>|resume <id>|remove <id>]   manage scheduled/goal tasks
+/goal [--check "<command>"] <task>   explicit multi-step planning, with a preview before running
 /feedback [list|delete <id>]   inspect and manage explicit feedback records
 /lessons [list|archive <id>]   inspect and manage learned lessons
 /memory [list|show <id>|threads|profile|why]   browse Jane's Theory memory (needs --memory)
