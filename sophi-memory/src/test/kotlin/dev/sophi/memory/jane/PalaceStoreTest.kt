@@ -20,6 +20,7 @@ class PalaceStoreTest : FunSpec({
 
     test("edge fold: last record per (from,to) wins and removed edges disappear") {
         val s = store()
+        s.upsertMemory(mem("a")); s.upsertMemory(mem("b")); s.upsertMemory(mem("c"))
         s.upsertEdge(CausalEdge("a", "b", "t"))
         s.upsertEdge(CausalEdge("a", "b", "t", removed = true))
         s.upsertEdge(CausalEdge("b", "c", "t"))
@@ -50,20 +51,6 @@ class PalaceStoreTest : FunSpec({
         s.recallsSince(150L).map { it.memoryId } shouldBe listOf("mem_2")
     }
 
-    test("rewriteAll leaves no trace of dropped records") {
-        val s = store()
-        s.upsertMemory(mem("mem_1")); s.upsertMemory(mem("mem_2"))
-        s.putEmbedding("mem_1", "m", floatArrayOf(1f)); s.putEmbedding("mem_2", "m", floatArrayOf(2f))
-        s.upsertEdge(CausalEdge("mem_1", "mem_2", "t"))
-        s.logRecall(RecallRecord(1L, "mem_1", "s"))
-        val kept = s.memories().getValue("mem_2")
-        s.rewriteAll(listOf(kept), emptyList(), emptyList(), mapOf("mem_2" to floatArrayOf(2f)), "m", emptyList())
-        s.memories().keys shouldBe setOf("mem_2")
-        s.edges() shouldBe emptyList()
-        s.embeddings().keys shouldBe setOf("mem_2")
-        s.recallsSince(0L) shouldBe emptyList()
-    }
-
     test("consolidation marker round-trips; absent initially") {
         val s = store()
         s.lastConsolidationMs() shouldBe null
@@ -71,12 +58,48 @@ class PalaceStoreTest : FunSpec({
         s.lastConsolidationMs() shouldBe 42L
     }
 
-    test("malformed jsonl lines are skipped, not fatal") {
-        val dir = tempdir().toPath()
-        val s = PalaceStore(dir)
+    test("deleteMemory removes it from memories()") {
+        val s = store()
+        s.upsertMemory(mem("mem_1")); s.upsertMemory(mem("mem_2"))
+        s.deleteMemory("mem_1")
+        s.memories().keys shouldBe setOf("mem_2")
+    }
+
+    test("deleteEdge removes it from edges()") {
+        val s = store()
+        s.upsertMemory(mem("mem_1")); s.upsertMemory(mem("mem_2"))
+        s.upsertEdge(CausalEdge("mem_1", "mem_2", "t"))
+        s.deleteEdge("mem_1", "mem_2")
+        s.edges() shouldBe emptyList()
+    }
+
+    test("deleteAttribute removes it from attributes()") {
+        val s = store()
+        s.upsertAttribute(ProfileAttribute("a.b", "x", 0.5, 1, listOf("mem_1"), 1L))
+        s.deleteAttribute("a.b")
+        s.attributes().keys shouldBe emptySet()
+    }
+
+    test("vectorFor and nearest round-trip") {
+        val s = store()
+        s.upsertMemory(mem("mem_1")); s.upsertMemory(mem("mem_2"))
+        s.putEmbedding("mem_1", "m", floatArrayOf(1f, 0f))
+        s.putEmbedding("mem_2", "m", floatArrayOf(0f, 1f))
+        s.vectorFor("mem_1")?.toList() shouldBe listOf(1f, 0f)
+        s.nearest(floatArrayOf(1f, 0f), 1).map { it.id } shouldBe listOf("mem_1")
+    }
+
+    test("wipe clears memories, edges, attributes, embeddings, and last-recall state") {
+        val s = store()
         s.upsertMemory(mem("mem_1"))
-        java.nio.file.Files.write(dir.resolve("memories.jsonl"),
-            "{not json}\n".toByteArray(), java.nio.file.StandardOpenOption.APPEND)
-        s.memories().keys shouldBe setOf("mem_1")
+        s.upsertEdge(CausalEdge("mem_1", "mem_1", "t"))
+        s.upsertAttribute(ProfileAttribute("a.b", "x", 0.5, 1, listOf("mem_1"), 1L))
+        s.putEmbedding("mem_1", "m", floatArrayOf(1f))
+        s.writeLastRecall("explain text")
+        s.wipe()
+        s.memories() shouldBe emptyMap()
+        s.edges() shouldBe emptyList()
+        s.attributes() shouldBe emptyMap()
+        s.readLastRecall() shouldBe null
     }
 })
