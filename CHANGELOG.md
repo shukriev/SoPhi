@@ -8,13 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `sophi-hub`: local WebSocket hub letting `sophi-companion` monitor and remote-control running `sophi-cli` sessions — live status, streamed tokens, and confirmation prompts, plus sending messages into a session or answering its confirmation prompts from the companion (ADR-023)
 - Interactive `/goal [--check "<command>"] <task>` command: explicit multi-step planning
   (`PlanRunner`) in a live chat session, with a plan preview, live per-step progress, and
-  replanning on failure. See ADR-019.
+  replanning on failure (ADR-025)
 
 ### Changed
+- `PlanRunner`'s progress stream is now one seam: `PlanProgressEvent` gained `PlanReady`,
+  `StepAttempt` and `Escalating`, `StepFinished`/`StepStarted` carry the plan version, and
+  `Replanned` carries the replacement `Plan` rather than only its id. The separate raw
+  `onEvent: (TurnEvent)` seam is unchanged (ADR-025)
 
 ### Fixed
+- `sophi-cli`: a session started before `sophi-companion` never appeared in the companion's Sessions tab, even after the companion started — `HubClient.connect()` was only attempted once, at CLI startup. The CLI now retries the hub connection on a timer for the life of the session (ADR-023)
 
 ### Deprecated
 

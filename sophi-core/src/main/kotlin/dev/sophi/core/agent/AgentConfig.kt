@@ -5,6 +5,8 @@ data class AgentConfig(
     val maxTokens: Int = 4096,
     val temperature: Double = 0.7,
     val systemPrompt: String? = null,
-    val maxToolRounds: Int = 10,
+    // A sanity ceiling, not the primary bound: context usage + mid-loop compaction in AgentLoop
+    // is what actually bounds a turn. Hitting this stops the turn gracefully (work is saved).
+    val maxToolRounds: Int = 200,
     val maxBranchLength: Int = 50
 )

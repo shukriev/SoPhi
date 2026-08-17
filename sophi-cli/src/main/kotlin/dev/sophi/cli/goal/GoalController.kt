@@ -4,6 +4,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.cli.InputSource
 import dev.sophi.cli.LiveRegion
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.plan.PlanFinalStatus
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.agent.plan.PlanOutcome
@@ -34,6 +35,8 @@ class GoalController(
     private val tokenViewKey: Char,
     private val autoExitTokenView: Boolean,
     private val learning: LearningPlugin?,
+    /** Mirrored out to a connected companion, exactly as TurnController does for a chat turn. */
+    private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit,
     private val output: (String) -> Unit
 ) {
@@ -86,12 +89,16 @@ class GoalController(
         }
 
         session.append(EntryRole.USER, args.task, mapOf("goal" to "true", "planId" to plan.id))
-        planLog.append(plan)
 
-        val renderer = GoalRenderer(session, plan, liveRegion, output, planLog, tokenViewKey, autoExitTokenView)
+        val renderer = GoalRenderer(session, plan, liveRegion, output, tokenViewKey, autoExitTokenView)
+        // Two seams, one renderer: onProgress carries the plan-shaped boundaries, onEvent the raw
+        // token stream of whichever step is in flight. PlanRunner fires the boundary first, so the
+        // renderer has already reset its presenter before the first token of a step arrives.
         val runner = PlanRunner(
             agentLoop, sessionManager, provider, planner, critic, runnerConfig,
-            onPlanEvent = { renderer.handle(it) }
+            planLog = planLog,
+            onEvent = { onEvent(it); renderer.handleTurnEvent(it) },
+            onProgress = { renderer.handle(it) }
         )
 
         val outcome: Result<PlanOutcome>? = coroutineScope {

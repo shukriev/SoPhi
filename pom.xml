@@ -18,6 +18,7 @@
         <module>sophi-learning</module>
         <module>sophi-memory</module>
         <module>sophi-mcp</module>
+        <module>sophi-hub</module>
         <module>sophi-schedule</module>
         <module>sophi-calendar</module>
         <module>sophi-cli</module>
@@ -111,12 +112,22 @@
             </dependency>
             <dependency>
                 <groupId>dev.sophi</groupId>
+                <artifactId>sophi-hub</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.sophi</groupId>
                 <artifactId>sophi-schedule</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>dev.sophi</groupId>
                 <artifactId>sophi-calendar</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.sophi</groupId>
+                <artifactId>sophi-sdk</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

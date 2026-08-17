@@ -2,16 +2,14 @@ package dev.sophi.cli.goal
 
 import dev.sophi.cli.LiveRegion
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.plan.DecompositionTrigger
 import dev.sophi.core.agent.plan.Plan
-import dev.sophi.core.agent.plan.PlanEvent
-import dev.sophi.core.agent.plan.PlanLog
+import dev.sophi.core.agent.plan.PlanProgressEvent
 import dev.sophi.core.agent.plan.PlanStep
-import dev.sophi.core.agent.plan.ReplanEvent
 import dev.sophi.core.agent.plan.StepStatus
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
@@ -21,21 +19,44 @@ class GoalRendererTest : FunSpec({
 
     fun renderer(session: AgentSession, output: MutableList<String>) = GoalRenderer(
         session, plan(), LiveRegion(StringBuilder()) { 80 }, { output.add(it) },
-        PlanLog(tempdir().toPath()), tokenViewKey = 'T', autoExitTokenView = true
+        tokenViewKey = 'T', autoExitTokenView = true
     )
 
-    test("StepAttempt (first attempt) prints a step header") {
+    test("StepStarted prints a step header") {
         val output = mutableListOf<String>()
         val r = renderer(AgentSession(id = "s"), output)
-        runBlocking { r.handle(PlanEvent.StepAttempt(plan().steps[0], 1, "m", "child1", attempt = 1)) }
+        runBlocking { r.handle(PlanProgressEvent.StepStarted("plan_1", plan().steps[0], 1)) }
         output.any { it.contains("step 1/1") && it.contains("do it") } shouldBe true
     }
 
-    test("StepAttempt (second attempt) prints a retry line") {
+    test("a first StepAttempt is silent — StepStarted already announced the step") {
         val output = mutableListOf<String>()
         val r = renderer(AgentSession(id = "s"), output)
-        runBlocking { r.handle(PlanEvent.StepAttempt(plan().steps[0], 1, "strong-model", "child1", attempt = 2)) }
+        runBlocking { r.handle(PlanProgressEvent.StepAttempt("plan_1", plan().steps[0], 1, "m", "child1", attempt = 1)) }
+        output.isEmpty() shouldBe true
+    }
+
+    test("a second StepAttempt prints a retry line naming the escalation model") {
+        val output = mutableListOf<String>()
+        val r = renderer(AgentSession(id = "s"), output)
+        runBlocking {
+            r.handle(PlanProgressEvent.StepAttempt("plan_1", plan().steps[0], 1, "strong-model", "child1", attempt = 2))
+        }
         output.any { it.contains("retrying") && it.contains("strong-model") } shouldBe true
+    }
+
+    test("Escalating prints the confidence and the model being escalated to") {
+        val output = mutableListOf<String>()
+        val r = renderer(AgentSession(id = "s"), output)
+        runBlocking { r.handle(PlanProgressEvent.Escalating("s1", 0.2, "strong-model")) }
+        output.single() shouldContain "escalating to strong-model"
+    }
+
+    test("Decomposed reports the sub-plan a step expanded into") {
+        val output = mutableListOf<String>()
+        val r = renderer(AgentSession(id = "s"), output)
+        runBlocking { r.handle(PlanProgressEvent.Decomposed("s1", "plan_2", DecompositionTrigger.Declared)) }
+        output.single() shouldContain "plan_2"
     }
 
     test("StepFinished appends a replay=false entry to the anchor session and updates lastStepOutput") {
@@ -43,9 +64,11 @@ class GoalRendererTest : FunSpec({
         val output = mutableListOf<String>()
         val r = renderer(session, output)
         runBlocking {
-            r.handle(PlanEvent.StepAttempt(plan().steps[0], 1, "m", "child1", attempt = 1))
-            r.handle(PlanEvent.StepTurn("s1", TurnEvent.Token("all done")))
-            r.handle(PlanEvent.StepFinished(plan().steps[0].copy(status = StepStatus.Done, confidence = 0.9), 1))
+            r.handle(PlanProgressEvent.StepStarted("plan_1", plan().steps[0], 1))
+            r.handleTurnEvent(TurnEvent.Token("all done"))
+            r.handle(
+                PlanProgressEvent.StepFinished("plan_1", plan().steps[0].copy(status = StepStatus.Done, confidence = 0.9), 1)
+            )
         }
         r.lastStepOutput shouldBe "all done"
         val entry = session.entries.single()
@@ -55,15 +78,13 @@ class GoalRendererTest : FunSpec({
         entry.content shouldContain "all done"
     }
 
-    test("Replanned updates currentPlan and appends to PlanLog") {
+    test("Replanned swaps in the new plan and re-renders its pending steps") {
         val output = mutableListOf<String>()
-        val planLog = PlanLog(tempdir().toPath())
-        val r = GoalRenderer(AgentSession(id = "s"), plan(), LiveRegion(StringBuilder()) { 80 }, { output.add(it) },
-            planLog, tokenViewKey = 'T', autoExitTokenView = true)
+        val r = renderer(AgentSession(id = "s"), output)
         val newPlan = plan().copy(steps = listOf(PlanStep(id = "s1b", instruction = "retry")), version = 2)
-        runBlocking { r.handle(PlanEvent.Replanned(ReplanEvent("s1", "step s1 failed", 2), newPlan)) }
+        runBlocking { r.handle(PlanProgressEvent.Replanned(newPlan, "s1", "step s1 failed")) }
         r.currentPlan shouldBe newPlan
-        planLog.versions("plan_1") shouldBe listOf(newPlan)
         output.any { it.contains("replanning") && it.contains("v2") } shouldBe true
+        output.any { it.contains("[s1b] retry") } shouldBe true
     }
 })

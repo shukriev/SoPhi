@@ -3,6 +3,8 @@ package dev.sophi.ai.providers
 import com.openai.client.OpenAIClient
 import com.openai.core.http.StreamResponse
 import com.openai.models.chat.completions.ChatCompletionChunk
+import com.openai.models.chat.completions.ChatCompletionCreateParams
+import com.openai.models.completions.CompletionUsage
 import dev.sophi.ai.api.*
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -64,6 +66,20 @@ private fun chunk(
         .addChoice(choiceBuilder.build())
         .build()
 }
+
+private fun usageChunk(promptTokens: Long, completionTokens: Long): ChatCompletionChunk =
+    ChatCompletionChunk.builder()
+        .id("chunk-usage").model("m").created(0L)
+        // OpenAI's usage-bearing chunk carries no choices at all — this mirrors the real shape.
+        .choices(emptyList())
+        .usage(
+            CompletionUsage.builder()
+                .promptTokens(promptTokens)
+                .completionTokens(completionTokens)
+                .totalTokens(promptTokens + completionTokens)
+                .build()
+        )
+        .build()
 
 private fun fakeStreamResponse(chunks: List<ChatCompletionChunk>): StreamResponse<ChatCompletionChunk> {
     val response = mockk<StreamResponse<ChatCompletionChunk>>()
@@ -216,6 +232,30 @@ class OpenAICompatProviderTest : FunSpec({
         val events = runBlocking { provider.stream(req).toList() }
 
         events shouldBe listOf(StreamEvent.Content("just an answer"))
+    }
+
+    test("stream() emits StreamEvent.Usage from the final usage-only chunk") {
+        stubStreaming(listOf(chunk(content = "hi"), chunk(finished = true), usageChunk(120L, 30L)))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "qwen3.5:9b")
+
+        val events = runBlocking { provider.stream(req).toList() }
+
+        events shouldBe listOf(
+            StreamEvent.Content("hi"),
+            StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
+        )
+    }
+
+    test("stream() asks the server for usage via streamOptions.includeUsage") {
+        val params = slot<ChatCompletionCreateParams>()
+        every {
+            mockRawClient.chat().completions().createStreaming(capture(params))
+        } returns fakeStreamResponse(listOf(chunk(content = "hi"), chunk(finished = true)))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "qwen3.5:9b")
+
+        runBlocking { provider.stream(req).toList() }
+
+        params.captured.streamOptions().get().includeUsage().get() shouldBe true
     }
 
     test("stream() closes the underlying StreamResponse on cancellation, unblocking a stalled read") {

@@ -36,9 +36,11 @@ app — same core, three ways to run it.
 | 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
 | 🏛️ `sophi-memory` | Long-term memory (Jane's Theory): a memory-palace store behind a technique-agnostic `MemoryTechnique` SPI |
 | 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
+| 📡 `sophi-hub` | Local WebSocket hub (`HubServer`/`HubClient`) — lets `sophi-companion` monitor and remote-control running `sophi-cli` sessions |
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
+| 🖥️ `sophi-companion` | OS tray / menu-bar desktop app (Compose Multiplatform) embedding `sophi-sdk` in-process — chat, sessions, MCP servers, goals |
 | 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `MetricsPlugin` |
 
 They all sit on the same core, so switching between them later is a
@@ -83,6 +85,8 @@ sophi --memory                # enable long-term memory (see "Cross-cutting: mem
 sophi --embedding-model <m>   # embedding model for --memory, e.g. nomic-embed-text
 sophi --embedding-base-url <url>   # embeddings endpoint (defaults to --base-url)
 sophi --embedding-dimensions <n>   # vector size (768 nomic-embed-text, 1536 OpenAI; default 1536)
+sophi --hub-port <port>       # port a running companion's hub listens on (default: 8765)
+sophi --no-remote             # don't register with a running companion's hub for this session
 ```
 
 Examples with local models:
@@ -137,6 +141,11 @@ concisely. You cannot modify any files.
 The frontmatter's `name` and `description` are what the main agent sees when
 choosing which subagent to delegate to; the Markdown body becomes that
 subagent's system prompt. Delegation nests up to 3 levels deep by default.
+
+**Remote monitoring:** if `sophi-companion` is running, every `sophi-cli` session registers
+with its embedded hub automatically — the companion's Sessions tab shows it live, and you can
+send it a message or answer its confirmation prompts from there. No companion running, or
+`--no-remote` passed: behaves exactly as before, no difference. See ADR-023.
 
 **Good for:** local dev-tool style usage, exploring the agent loop, quick
 one-off tasks — same category as a REPL.
@@ -232,6 +241,60 @@ dashboard, batch job) without standing up a separate service.
 
 ---
 
+## 🖥️ Use case 4: Desktop tray companion (`sophi-companion`)
+
+A native menu-bar / system-tray app that embeds `sophi-sdk` **in-process** — no
+HTTP hop through `sophi-web`. Click the tray icon and you get four tabs: Chat,
+Sessions, MCP, and Goals. Multiple sessions run concurrently in the background,
+and finished turns and scheduled tasks post native OS notifications.
+
+`sophi-companion` is a standalone Gradle project (Compose Multiplatform Desktop),
+deliberately outside the Maven reactor — so install the reactor to `mavenLocal()`
+first, then run it:
+
+```bash
+mvn install -DskipTests            # from the repo root
+cd sophi-companion
+./gradlew run
+```
+
+On first launch it asks for a model and API key and writes
+`~/.sophi/companion.json`; leave the key blank to fall back to
+`ANTHROPIC_API_KEY`. It reuses your existing `~/.sophi/sessions` and
+`~/.sophi/mcp.json`, so sessions you started in `sophi-cli` show up in the
+Sessions tab, and MCP servers can be enabled/disabled live without a restart.
+It also embeds a small local hub (ADR-023): any `sophi-cli` session you run
+while the companion is open registers with it automatically (no setup, no
+flag) and streams its live status, tokens, and confirmation prompts into the
+same Sessions/Chat tabs — you can send it a message or approve/deny its
+confirmation prompts from the companion, same as a session you started
+there. Pass `--no-remote` to a `sophi-cli` invocation to keep it fully local
+instead.
+
+Build a native bundle (`.dmg` on macOS, `.deb`/AppImage on Linux, `.msi` on
+Windows) with `jpackage`:
+
+```bash
+cd sophi-companion
+./gradlew packageDistributionForCurrentOS
+```
+
+On macOS a bundled `.app` is effectively required, not optional — a bare
+`java -jar` process can't reliably post to Notification Center.
+
+Two caveats worth knowing up front: tool confirmation is currently
+**always-approve** (the notification fires, but there's no per-session
+approve/deny UI yet — see ADR-022), and only the macOS bundle has actually been
+built and launched; the Linux and Windows targets are configured but unverified.
+
+Full setup, packaging details, build gotchas, and known limitations live in
+[`sophi-companion/README.md`](sophi-companion/README.md).
+
+**Good for:** keeping an agent one click away while you work — background goals,
+long-running sessions, and OS notifications, without a terminal or a browser tab.
+
+---
+
 ## 🧰 Cross-cutting: skills and plugins
 
 **Skills** (`sophi-skills`) are plain Markdown files with YAML frontmatter —
@@ -259,6 +322,24 @@ Tool permissioning is no longer a plugin — `AgentLoop`'s `riskLevel`/`Confirma
 Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 `PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery
 (`PluginRegistry().discover()`).
+
+### Browsing websites (browser-automation MCP + self-authored site skills)
+
+Sophi has no built-in browser — it connects to any browser-automation MCP server you
+configure in `.sophi/mcp.json`, the same way it connects to any other MCP server (see
+`docs/examples/mcp-browser-server.json` for the shape). Once configured:
+
+- Mark that server's **read-only** tools (navigate, screenshot, page snapshot / get
+  text, list tabs) as `safeTools` — everything else (click, type, select, submit)
+  stays `DESTRUCTIVE` and requires confirmation on every call, including in goal mode.
+- Install `docs/skills/browsing-sites.md` into `~/.sophi/skills/` once. It teaches
+  Sophi to recall a site it's seen before (via a skill it wrote itself last time,
+  through the `write_skill` tool) instead of re-exploring, and to record what it
+  learns after each visit.
+- **Trust boundary:** marking `navigate`/`screenshot` as safe means Sophi can navigate
+  to any URL — including `file://` paths or internal-network addresses — without
+  confirmation, since `safeTools` matches by tool name only, not by argument. If that's
+  not an acceptable default for your environment, leave `navigate` out of `safeTools`.
 
 ---
 
@@ -362,8 +443,9 @@ greps every file on disk to assert zero traces.
 | Poke at the agent yourself, or script one-off tasks | **`sophi-cli`** |
 | Let a frontend, bot, or service talk to the agent | **`sophi-web`** |
 | Add agent capability inside an existing JVM app | **`sophi-sdk`** |
+| Keep the agent in your menu bar, working in the background | **`sophi-companion`** |
 
-All three share the same `sophi-core` agent loop and session format, so
+They all share the same `sophi-core` agent loop and session format, so
 switching between them later doesn't change how sessions or tools work —
 start small, grow into the rest.
 

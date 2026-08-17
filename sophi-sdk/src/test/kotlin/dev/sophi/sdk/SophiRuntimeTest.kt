@@ -2,35 +2,67 @@ package dev.sophi.sdk
 
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.agent.LoopGuardPolicy
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
+import dev.sophi.schedule.model.ScheduledTask
+import dev.sophi.schedule.model.TaskMode
+import dev.sophi.schedule.model.Trigger
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
+import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.AgentHook
+import dev.sophi.extensions.ContextContributor
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.McpConnector
+import dev.sophi.mcp.McpSession
+import dev.sophi.mcp.RemoteToolInfo
+import dev.sophi.mcp.config.McpServerConfig
+import dev.sophi.mcp.config.McpTransport
+import dev.sophi.schedule.notify.NoopNotifier
+import dev.sophi.schedule.store.RunLog
+import dev.sophi.schedule.store.TaskStore
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
 import io.mockk.coEvery
+import io.mockk.coJustRun
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
+import io.mockk.slot
 import io.mockk.verify
+import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.writeText
+
+private const val TEST_CONTEXT_WINDOW = 100_000
 
 class SophiRuntimeTest : FunSpec({
     val agentLoop = mockk<AgentLoop>()
@@ -64,7 +96,7 @@ class SophiRuntimeTest : FunSpec({
             )
         )
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config, any()) } returns updated
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
         runtime.turn("s1", "hi") shouldBe "hello!"
     }
 
@@ -85,14 +117,255 @@ class SophiRuntimeTest : FunSpec({
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(errorPlugin), config)
         val session = AgentSession("s1")
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config, any()) } throws RuntimeException("LLM error")
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } throws RuntimeException("LLM error")
 
         shouldThrow<RuntimeException> { rt.turn("s1", "hi") }
         log shouldBe listOf(HookPoint.ON_ERROR)
     }
 
+    test("AFTER_TURN carries userInput and assistantReply so ContextContributor plugins can encode the turn") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "after-turn-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
+
+        rt.streamTurn("s1", "hi") { }
+
+        seen shouldHaveSize 1
+        seen[0].userInput shouldBe "hi"
+        seen[0].assistantReply shouldBe "hello!"
+    }
+
+    test("a cancelled turn dispatches AFTER_TURN with the partial reply and never dispatches ON_ERROR") {
+        val seen = mutableListOf<Pair<HookPoint, HookContext>>()
+        val spy = object : SophiPlugin {
+            override val name = "cancel-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN to context) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR to context) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        every { sessionManager.load("s1") } returns session
+
+        val started = CompletableDeferred<Unit>()
+        val onEventSlot = slot<suspend (TurnEvent) -> Unit>()
+        coEvery { agentLoop.streamTurn(session, "hi", config, capture(onEventSlot)) } coAnswers {
+            onEventSlot.captured(TurnEvent.Token("par"))
+            onEventSlot.captured(TurnEvent.Token("tial"))
+            started.complete(Unit)
+            awaitCancellation()
+        }
+
+        coroutineScope {
+            val job = launch { runCatching { rt.streamTurn("s1", "hi") { } } }
+            started.await()
+            job.cancelAndJoin()
+        }
+
+        seen.map { it.first } shouldBe listOf(HookPoint.AFTER_TURN)
+        seen[0].second.userInput shouldBe "hi"
+        seen[0].second.assistantReply shouldBe "partial"
+    }
+
+    test("a failed turn dispatches ON_ERROR only, never AFTER_TURN") {
+        val seen = mutableListOf<HookPoint>()
+        val spy = object : SophiPlugin {
+            override val name = "error-only-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TURN
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.AFTER_TURN) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.ON_ERROR
+                    override suspend fun invoke(context: HookContext) { seen.add(HookPoint.ON_ERROR) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        every { sessionManager.load("s1") } returns session
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } throws RuntimeException("boom")
+
+        shouldThrow<RuntimeException> { rt.streamTurn("s1", "hi") { } }
+
+        seen shouldBe listOf(HookPoint.ON_ERROR)
+    }
+
+    test("ContextContributor output is appended to the turn's system prompt and the runtime's base config is untouched") {
+        val contributor = object : SophiPlugin, ContextContributor {
+            override val name = "ctx"
+            override fun hooks(): List<AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String): String = "RECALLED: prior turn"
+        }
+        val base = AgentConfig(model = "test-model", systemPrompt = "BASE")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(contributor), base)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "ok", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        val configSlot = slot<AgentConfig>()
+        coEvery { agentLoop.streamTurn(session, "hi", capture(configSlot), any()) } returns updated
+
+        rt.streamTurn("s1", "hi") { }
+
+        configSlot.captured.systemPrompt shouldBe "BASE\n\nRECALLED: prior turn"
+        base.systemPrompt shouldBe "BASE"
+        rt.config.systemPrompt shouldBe "BASE"
+    }
+
+    test("RuntimeBuilder.toolRegistry uses the caller's registry, so tools registered before and after build are both visible") {
+        val registry = ToolRegistry()
+        val beforeBuild = object : Tool {
+            override val name = "before_build"
+            override val description = "registered by the caller before build()"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String): String = "ok"
+        }
+        registry.register(beforeBuild)
+
+        val rt = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            toolRegistry(registry)
+        }.build()
+
+        rt.toolNames() shouldBe listOf("before_build")
+
+        val afterBuild = object : Tool {
+            override val name = "after_build"
+            override val description = "registered by the caller after build()"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String): String = "ok"
+        }
+        registry.register(afterBuild)
+
+        rt.toolNames() shouldBe listOf("after_build", "before_build")
+    }
+
+    test("the AgentSession overload returns the updated session and shares the id-based overload's choreography") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "overload-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        coEvery { agentLoop.streamTurn(session, "hi", config, any()) } returns updated
+
+        val result = rt.streamTurn(session, "hi") { }
+
+        result shouldBe updated
+        seen shouldHaveSize 1
+        seen[0].assistantReply shouldBe "hello!"
+        // The overload takes the session directly — it must not reload it from disk.
+        verify(exactly = 0) { sessionManager.load(any()) }
+    }
+
+    // Smoke test only. loopGuard is a one-line pass-through into AgentLoop, whose guard behavior
+    // is already covered by AgentLoopTest and only triggers after AgentConfig.maxToolRounds
+    // (default 200) rounds — not worth driving from here. This exists to catch the knob being
+    // dropped or failing to compile.
+    test("RuntimeBuilder.loopGuard accepts a policy and still builds") {
+        val rt = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            loopGuard(LoopGuardPolicy.ALWAYS_CONTINUE)
+        }.build()
+
+        rt.toolNames() shouldBe emptyList()
+    }
+
+    test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {
+        val log = mutableListOf<HookPoint>()
+        val hookPlugin = object : SophiPlugin {
+            override val name = "hook-spy"
+            override fun hooks() = listOf(
+                object : AgentHook {
+                    override val point = HookPoint.BEFORE_TOOL
+                    override suspend fun invoke(context: HookContext) { log.add(HookPoint.BEFORE_TOOL) }
+                },
+                object : AgentHook {
+                    override val point = HookPoint.AFTER_TOOL
+                    override suspend fun invoke(context: HookContext) { log.add(HookPoint.AFTER_TOOL) }
+                }
+            )
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(hookPlugin), config)
+        val session = AgentSession("s1")
+        val updated = AgentSession(
+            "s1", initialEntries = listOf(
+                SessionEntry("e1", null, EntryRole.USER, "hi", 0L),
+                SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
+            )
+        )
+        every { sessionManager.load("s1") } returns session
+        val fakeEvents = listOf(
+            TurnEvent.Token("Hel"),
+            TurnEvent.Token("lo!"),
+            TurnEvent.ToolCallStarted("read_file", "{}"),
+            TurnEvent.ToolCallFinished("read_file", "contents", isError = false)
+        )
+        val onEventSlot = slot<suspend (TurnEvent) -> Unit>()
+        coEvery { agentLoop.streamTurn(session, "hi", config, capture(onEventSlot)) } coAnswers {
+            fakeEvents.forEach { onEventSlot.captured(it) }
+            updated
+        }
+
+        val received = mutableListOf<TurnEvent>()
+        val reply = rt.streamTurn("s1", "hi") { event -> received.add(event) }
+
+        reply shouldBe "hello!"
+        received shouldBe fakeEvents
+        log shouldBe listOf(HookPoint.BEFORE_TOOL, HookPoint.AFTER_TOOL)
+    }
+
     test("RuntimeBuilder build throws when no provider set") {
         shouldThrow<IllegalArgumentException> { RuntimeBuilder().build() }
+    }
+
+    test("RuntimeBuilder build throws when no context window set") {
+        val builder = RuntimeBuilder()
+        builder.provider = mockk<LLMProvider>()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-test")
+
+        val ex = shouldThrow<IllegalArgumentException> { builder.build() }
+        ex.message!! shouldContain "contextWindowTokens"
     }
 
     test("RuntimeBuilder wires confirmationPolicy through to the built AgentLoop, denying a DESTRUCTIVE tool") {
@@ -118,6 +391,7 @@ class SophiRuntimeTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
         val rt = builder
             .tool(destructiveTool)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .confirmationPolicy(ConfirmationPolicy { requests -> requests.associate { it.callId to false } })
             .build()
 
@@ -152,6 +426,7 @@ class SophiRuntimeTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
         val rt = builder
             .tool(destructiveTool)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .grants(setOf("danger"))
             .build()
 
@@ -170,11 +445,147 @@ class SophiRuntimeTest : FunSpec({
         val rt = RuntimeBuilder()
             .also { it.provider = provider }
             .also { it.sessionsDir = createTempDirectory("sophi-sdk-test") }
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .mcpClientManager(mcpManager)
             .build()
 
         rt.close()
 
         verify { mcpManager.close() }
+    }
+
+    test("connectMcpServer registers the connected server's tools and returns their names") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads", "{}"))
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(any()) } returns session
+        val mcpManager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+        val toolRegistry = ToolRegistry()
+        val rt = SophiRuntime(
+            agentLoop, sessionManager, PluginRegistry(), config,
+            mcpClientManager = mcpManager, toolRegistry = toolRegistry
+        )
+
+        val names = rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
+
+        names shouldBe listOf("fs__read_file")
+        rt.toolNames() shouldBe listOf("fs__read_file")
+    }
+
+    test("disconnectMcpServer removes that server's tools from toolNames()") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read_file", "reads", "{}"))
+        coJustRun { session.close() }
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(any()) } returns session
+        val mcpManager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+        val rt = SophiRuntime(
+            agentLoop, sessionManager, PluginRegistry(), config,
+            mcpClientManager = mcpManager, toolRegistry = ToolRegistry()
+        )
+
+        rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
+        rt.disconnectMcpServer("fs")
+
+        rt.toolNames() shouldBe emptyList()
+    }
+
+    test("connectMcpServer throws when this runtime has no McpClientManager configured") {
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config)
+
+        shouldThrow<IllegalArgumentException> {
+            rt.connectMcpServer(McpServerConfig(name = "fs", transport = McpTransport.STDIO, command = listOf("x")))
+        }
+    }
+
+    test("scheduleEngine builds a non-null engine when provider and contextWindowTokens are set") {
+        val rt = SophiRuntime(
+            agentLoop, sessionManager, PluginRegistry(), config,
+            provider = mockk<LLMProvider>(), contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val dir = createTempDirectory("schedule-engine-test")
+
+        val engine = rt.scheduleEngine(
+            TaskStore(dir.resolve("tasks.json")), RunLog(dir.resolve("runs.jsonl")), NoopNotifier
+        )
+
+        engine.shouldNotBeNull()
+    }
+
+    test("scheduleEngine throws when this runtime has no provider configured") {
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config)
+        val dir = createTempDirectory("schedule-engine-test")
+
+        shouldThrow<IllegalArgumentException> {
+            rt.scheduleEngine(TaskStore(dir.resolve("tasks.json")), RunLog(dir.resolve("runs.jsonl")), NoopNotifier)
+        }
+    }
+
+    test("scheduleEngine threads the effective system prompt plus the unattended addendum into every task run") {
+        val provider = mockk<LLMProvider>()
+        var capturedSystemPrompt: String? = null
+        every { provider.stream(any()) } answers {
+            capturedSystemPrompt = firstArg<CompletionRequest>().systemPrompt
+            flowOf(StreamEvent.Content("done"))
+        }
+        val configuredPrompt = AgentConfig(model = "test-model", systemPrompt = "custom instructions")
+        val rt = SophiRuntime(
+            agentLoop, FileSessionManager(createTempDirectory("schedule-engine-prompt-test")),
+            PluginRegistry(), configuredPrompt,
+            provider = provider, contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val dir = createTempDirectory("schedule-engine-prompt-test")
+        val taskStore = TaskStore(dir.resolve("tasks.json"))
+        val runLog = RunLog(dir.resolve("runs.jsonl"))
+        val engine = rt.scheduleEngine(taskStore, runLog, NoopNotifier)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        val prompt = capturedSystemPrompt.shouldNotBeNull()
+        prompt shouldContain "custom instructions"
+        prompt shouldContain DefaultPrompt.UNATTENDED
+    }
+
+    test("skills lists what's actually on disk in skillsDir") {
+        val dir = createTempDirectory("sophi-sdk-skills-test")
+        dir.resolve("greet.md").writeText("---\ntitle: Greet\ndescription: says hi\n---\n\nSay hello.")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = dir)
+
+        val skills = rt.skills()
+
+        skills.map { it.first } shouldBe listOf("greet")
+        skills.single().second.metadata.title shouldBe "Greet"
+    }
+
+    test("installSkill installs into skillsDir, then skills() finds it") {
+        val skillsDir = createTempDirectory("sophi-sdk-skills-test")
+        val source = createTempDirectory("sophi-sdk-skills-source")
+        val skillFolder = source.resolve("my-skill").also { it.createDirectories() }
+        skillFolder.resolve("SKILL.md").writeText("---\nname: My Skill\ndescription: does things\n---\n\nBody.")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
+
+        val result = rt.installSkill(source.toString())
+
+        result.installed shouldBe listOf("my-skill")
+        rt.skills().map { it.first } shouldBe listOf("my-skill")
+    }
+
+    test("removeSkill deletes an installed skill, then skills() no longer finds it") {
+        val skillsDir = createTempDirectory("sophi-sdk-skills-test")
+        skillsDir.resolve("temp.md").writeText("---\ntitle: Temp\n---\n\nBody.")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
+
+        val removed = rt.removeSkill("temp")
+
+        removed shouldBe true
+        rt.skills() shouldBe emptyList()
+    }
+
+    test("removeSkill returns false for an id that doesn't exist") {
+        val skillsDir = createTempDirectory("sophi-sdk-skills-test")
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
+
+        rt.removeSkill("ghost") shouldBe false
     }
 })

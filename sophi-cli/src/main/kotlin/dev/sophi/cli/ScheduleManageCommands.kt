@@ -50,7 +50,12 @@ class ScheduleLog(
         val log = RunLog(home.resolve("runs.jsonl"))
         val records = (taskId?.let { log.forTask(it) } ?: log.readAll()).takeLast(tail)
         if (records.isEmpty()) { echo("No run history."); return }
-        records.forEach { echo("${it.taskId}  ${it.outcome::class.simpleName}  ${it.summary}") }
+        records.forEach { r ->
+            // Only goal runs have a plan, so the counts are appended only when present —
+            // a recurring run must not read as "replans=0".
+            val plan = r.replans?.let { "  [replans=$it decompositions=${r.decompositions ?: 0}]" } ?: ""
+            echo("${r.taskId}  ${r.outcome::class.simpleName}  ${r.summary}$plan")
+        }
     }
 }
 

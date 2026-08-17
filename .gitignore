@@ -1,6 +1,7 @@
 target/
 *.class
 *.jar
+!sophi-companion/gradle/wrapper/gradle-wrapper.jar
 *.war
 *.iml
 .idea/
@@ -8,8 +9,17 @@ target/
 *.log
 .env
 
+sophi-companion/build/
+sophi-companion/.gradle/
+
+.sophi/
+.playwright-mcp/
+
 docs/superpowers/
+docs/guides/
 doc/articles/
 .worktrees/
 TODO_TASK.md
 TESTING_SCHEDULE.md
+TICKET_PIPELINE_SETUP.md
+work-folder/

@@ -5,7 +5,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.mockk
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Duration.Companion.milliseconds
 
 class McpToolTest : FunSpec({
 
@@ -47,6 +49,22 @@ class McpToolTest : FunSpec({
         val result = runBlocking { tool.execute("{}") }
 
         result shouldBe "Error: connection lost"
+    }
+
+    test("execute times out and returns an Error string when the underlying call hangs past the configured timeout") {
+        val session = mockk<McpSession>()
+        coEvery { session.callTool("navigate", any()) } coAnswers {
+            delay(10_000)
+            "unreachable"
+        }
+        val tool = McpTool(
+            session, "browser", RemoteToolInfo("navigate", "navigates", "{}"), emptySet(),
+            timeout = 50.milliseconds
+        )
+
+        val result = runBlocking { tool.execute("{}") }
+
+        result shouldBe "Error: MCP tool 'navigate' timed out after 50ms"
     }
 
     test("description and parametersJson are copied from the remote tool") {

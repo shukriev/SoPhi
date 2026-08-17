@@ -1,5 +1,6 @@
 package dev.sophi.core.tools
 
+@kotlinx.serialization.Serializable
 enum class RiskLevel { SAFE, CAUTION, DESTRUCTIVE }
 
 enum class RuleVerdict { LOW_RISK, HIGH_RISK, UNKNOWN }

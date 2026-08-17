@@ -13,6 +13,8 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlin.io.path.createTempDirectory
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class SophiRuntimeLearningTest : FunSpec({
 
     test("turn records a failed tool event to the learning tool-events log") {
@@ -40,6 +42,7 @@ class SophiRuntimeLearningTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-learning-sessions")
         val rt = builder
             .tool(boomTool)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .learning(LearningConfig(home = learningHome, scope = "/p"))
             .build()
 

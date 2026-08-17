@@ -3,25 +3,28 @@ package dev.sophi.cli.goal
 import dev.sophi.cli.LiveRegion
 import dev.sophi.cli.ResponseRenderer
 import dev.sophi.cli.streaming.StreamingTurnPresenter
+import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.plan.Plan
-import dev.sophi.core.agent.plan.PlanEvent
-import dev.sophi.core.agent.plan.PlanLog
+import dev.sophi.core.agent.plan.PlanProgressEvent
 import dev.sophi.core.agent.plan.StepStatus
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 
 /**
- * Consumes PlanEvents for one GoalController.run() invocation: owns terminal output, one
- * StreamingTurnPresenter per in-flight step, the anchor-session appends (Approach C from the
- * design — steps stay isolated in their own child sessions, but the anchor session gets a
- * structured record so /branch and follow-up turns see the episode), and PlanLog.
+ * Consumes one GoalController.run() invocation's output from PlanRunner's two seams: the
+ * plan-shaped boundaries on [handle] (onProgress) and the raw per-token stream on
+ * [handleTurnEvent] (onEvent). PlanRunner always fires the boundary before the turn events of
+ * the step it opens, which is what lets a single presenter be reset per attempt.
+ *
+ * Owns terminal output and the anchor-session appends (Approach C from the design — steps stay
+ * isolated in their own child sessions, but the anchor session gets a structured record so
+ * /branch and follow-up turns see the episode). PlanLog is PlanRunner's job, not this class's.
  */
 class GoalRenderer(
     private val session: AgentSession,
     approvedPlan: Plan,
     private val liveRegion: LiveRegion,
     private val output: (String) -> Unit,
-    private val planLog: PlanLog,
     tokenViewKey: Char,
     private val autoExitTokenView: Boolean
 ) {
@@ -43,32 +46,41 @@ class GoalRenderer(
 
     private fun render() = liveRegion.update(presenter.renderFrame())
 
-    suspend fun handle(event: PlanEvent) {
-        when (event) {
-            is PlanEvent.PlanReady -> Unit // never arrives on the /goal path — GoalController supplies initialPlan
-            is PlanEvent.StepAttempt -> {
-                presenter = StreamingTurnPresenter(autoExitTokenView)
-                val index = currentPlan.steps.indexOfFirst { it.id == event.step.id } + 1
-                if (event.attempt == 1) {
-                    output("\n▸ step $index/${currentPlan.steps.size} [${event.step.id}] ${event.step.instruction}")
-                } else {
-                    output("  ↑ retrying [${event.step.id}] with ${event.model}")
-                }
+    /** PlanRunner's raw onEvent seam — the tokens and tool calls of whichever step is in flight. */
+    fun handleTurnEvent(event: TurnEvent) {
+        when (val rendered = presenter.feed(event)) {
+            is StreamingTurnPresenter.Rendered.Cleared -> liveRegion.clear()
+            is StreamingTurnPresenter.Rendered.Redraw -> render()
+            is StreamingTurnPresenter.Rendered.ToolLine -> {
+                liveRegion.clear()
+                output(rendered.text)
                 render()
             }
-            is PlanEvent.StepTurn -> when (val rendered = presenter.feed(event.event)) {
-                is StreamingTurnPresenter.Rendered.Cleared -> liveRegion.clear()
-                is StreamingTurnPresenter.Rendered.Redraw -> render()
-                is StreamingTurnPresenter.Rendered.ToolLine -> {
-                    liveRegion.clear()
-                    output(rendered.text)
-                    render()
-                }
-                null -> Unit
+            null -> Unit
+        }
+    }
+
+    suspend fun handle(event: PlanProgressEvent) {
+        when (event) {
+            // Never arrives on the /goal path — GoalController supplies the approved initialPlan.
+            is PlanProgressEvent.PlanReady -> Unit
+            is PlanProgressEvent.StepStarted -> {
+                presenter = StreamingTurnPresenter(autoExitTokenView)
+                val index = currentPlan.steps.indexOfFirst { it.id == event.step.id } + 1
+                output("\n▸ step $index/${currentPlan.steps.size} [${event.step.id}] ${event.step.instruction}")
+                render()
             }
-            is PlanEvent.Escalating ->
+            // Attempt 1 is already announced by StepStarted; only an escalation re-run is news.
+            is PlanProgressEvent.StepAttempt -> if (event.attempt > 1) {
+                presenter = StreamingTurnPresenter(autoExitTokenView)
+                output("  ↑ retrying [${event.step.id}] with ${event.model}")
+                render()
+            }
+            is PlanProgressEvent.Escalating ->
                 output("  ~ confidence %.2f below threshold — escalating to %s".format(event.confidence, event.toModel))
-            is PlanEvent.StepFinished -> {
+            is PlanProgressEvent.Decomposed ->
+                output("  ⤷ [${event.stepId}] expanded into sub-plan ${event.childPlanId} (${event.trigger})")
+            is PlanProgressEvent.StepFinished -> {
                 liveRegion.clear()
                 presenter.reasoningText()?.let { output(ResponseRenderer.renderReasoning(it)) }
                 val text = presenter.finalText()
@@ -87,10 +99,9 @@ class GoalRenderer(
                     )
                 )
             }
-            is PlanEvent.Replanned -> {
+            is PlanProgressEvent.Replanned -> {
                 currentPlan = event.plan
-                planLog.append(event.plan)
-                output("  ↻ replanning after \"${event.event.reason}\" → plan v${event.plan.version} (${event.plan.steps.size} steps)")
+                output("  ↻ replanning after \"${event.reason}\" → plan v${event.plan.version} (${event.plan.steps.size} steps)")
                 event.plan.steps.filter { it.status == StepStatus.Pending }.forEach {
                     output("     [${it.id}] ${it.instruction}")
                 }

@@ -3,6 +3,8 @@ package dev.sophi.cli
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -11,6 +13,7 @@ import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.cli.goal.GoalController
 import dev.sophi.cli.goal.GoalRunResult
+import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.BrowseFilter
 import dev.sophi.memory.MemoryPlugin
@@ -34,6 +37,17 @@ class SlashHandler(
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val autoModeToggle: ToggleableConfirmationPolicy? = null,
     private val goalController: GoalController? = null,
+    private val toolRegistry: ToolRegistry? = null,
+    private val planLog: PlanLog? = null,
+    /**
+     * Total context window of `config.model`, in tokens. Optional here for the same reason
+     * `provider` and `toolRegistry` are: a SlashHandler built without the full agent wiring
+     * simply reports the affected commands as unavailable rather than guessing a value.
+     */
+    private val contextWindowTokens: Int? = null,
+    private val liveRegion: LiveRegion = LiveRegion(StringBuilder()) { 80 },
+    private val onEvent: suspend (TurnEvent) -> Unit = {},
+    private val input: InputSource = NoOpInputSource,
     private val output: (String) -> Unit
 ) {
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -112,7 +126,7 @@ class SlashHandler(
                 session
             }
             "skill" -> { handleSkill(arg, session); session }
-            "auto" -> { handleAuto(); session }
+            "plan" -> handlePlan(arg, session)
             "goal" -> {
                 val controller = goalController
                 if (controller == null) {
@@ -125,10 +139,11 @@ class SlashHandler(
                     }
                 }
             }
+            "auto" -> { handleAuto(); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /auto /goal"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto"
                 )
                 session
             }
@@ -155,7 +170,10 @@ class SlashHandler(
     private suspend fun handleCalendar(arg: String?) {
         val calProvider = calendarProvider
         val llmProvider = provider
-        if (calProvider == null || llmProvider == null) { output("Calendar is not enabled."); return }
+        val window = contextWindowTokens
+        if (calProvider == null || llmProvider == null || window == null) {
+            output("Calendar is not enabled."); return
+        }
         val parts = (arg ?: "list").trim().ifEmpty { "list" }.split(" ", limit = 2)
         val sub = parts[0].lowercase()
         val subArg = parts.getOrNull(1)?.trim()
@@ -172,7 +190,10 @@ class SlashHandler(
             "calendars" -> CalendarCalendars(calProvider, output).run()
             "create" -> {
                 if (subArg.isNullOrEmpty()) output("Usage: /calendar create <description>")
-                else CalendarCreate(llmProvider, calProvider, sessionManager, confirmationPolicy, config, subArg, output).run()
+                else CalendarCreate(
+                    llmProvider, calProvider, sessionManager, confirmationPolicy, config,
+                    window, subArg, output
+                ).run()
             }
             else -> output("Unknown /calendar subcommand: $sub  Available: list get delete calendars create")
         }
@@ -217,6 +238,25 @@ class SlashHandler(
             session.append(EntryRole.TOOL_RESULT, skill.body)
             output("Injected skill: $sub")
         }
+    }
+
+    private suspend fun handlePlan(arg: String?, session: AgentSession): AgentSession {
+        if (arg.isNullOrBlank()) {
+            output("Usage: /plan <goal>")
+            return session
+        }
+        val registry = toolRegistry
+        val llm = provider
+        val window = contextWindowTokens
+        if (registry == null || llm == null || window == null) {
+            output("Planning is not available (no tools configured).")
+            return session
+        }
+        return PlanCommand(
+            provider = llm, registry = registry, sessionManager = sessionManager, config = config,
+            contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = planLog,
+            onEvent = onEvent, liveRegion = liveRegion, input = input, echo = output
+        ).run(arg, session)
     }
 
     private fun handleAuto() {

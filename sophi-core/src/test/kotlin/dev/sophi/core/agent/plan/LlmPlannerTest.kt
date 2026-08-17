@@ -105,4 +105,90 @@ class LlmPlannerTest : FunSpec({
         replanned.steps.single().id shouldBe "s1"
         replanned.steps.single().instruction shouldBe "Retry: notify team"
     }
+
+    test("plan parses the decompose flag and defaults it to false when omitted") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s1","instruction":"process every ticket","decompose":true},""" +
+                """{"id":"s2","instruction":"post a summary"}]}""",
+            TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        val plan = runBlocking { planner.plan("clear the backlog") }
+        plan.steps[0].decompose shouldBe true
+        plan.steps[1].decompose shouldBe false
+    }
+
+    test("the plan prompt documents the decompose field and discourages over-marking") {
+        val provider = mockk<LLMProvider>()
+        val capturedPrompts = mutableListOf<String>()
+        coEvery { provider.complete(any()) } coAnswers {
+            capturedPrompts.add(firstArg<CompletionRequest>().messages.first().content)
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        }
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        runBlocking { planner.plan("goal") }
+        capturedPrompts.single() shouldContain "\"decompose\""
+        capturedPrompts.single() shouldContain "Most steps are false."
+    }
+
+    test("the plan prompt tells the model to discover-then-decompose for goals that enumerate many items") {
+        val provider = mockk<LLMProvider>()
+        val capturedPrompts = mutableListOf<String>()
+        coEvery { provider.complete(any()) } coAnswers {
+            capturedPrompts.add(firstArg<CompletionRequest>().messages.first().content)
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        }
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        runBlocking { planner.plan("goal") }
+        capturedPrompts.single() shouldContain "each X"
+        capturedPrompts.single() shouldContain "isn't known yet"
+        capturedPrompts.single() shouldContain "discovers"
+    }
+
+    test("the unparseable-response fallback step is never marked for decomposition") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("nope", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        val plan = runBlocking { planner.plan("do the thing") }
+        plan.steps.single().decompose shouldBe false
+    }
+
+    test("temperature defaults to 0.0, preserving pre-search behavior") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        runBlocking { planner.plan("goal") }
+        requests.single().temperature shouldBe 0.0
+    }
+
+    test("the configured temperature reaches the completion request") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model", temperature = 0.7)
+
+        runBlocking { planner.plan("goal") }
+        requests.single().temperature shouldBe 0.7
+    }
+
+    test("replan uses the configured temperature too") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s2","instruction":"retry"}]}""", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model", temperature = 1.0)
+        val current = Plan(id = "p1", goalPrompt = "goal",
+            steps = listOf(PlanStep(id = "s1", instruction = "build", status = StepStatus.Failed)))
+
+        runBlocking { planner.replan(current, "s1", "step s1 failed") }
+        requests.single().temperature shouldBe 1.0
+    }
 })

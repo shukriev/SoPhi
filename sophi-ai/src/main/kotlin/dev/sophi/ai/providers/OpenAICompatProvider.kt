@@ -13,12 +13,14 @@ import com.openai.models.chat.completions.ChatCompletionMessageParam
 import com.openai.models.chat.completions.ChatCompletionSystemMessageParam
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam
+import com.openai.models.chat.completions.ChatCompletionStreamOptions
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
+import dev.sophi.ai.api.TokenUsage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -78,6 +80,13 @@ class OpenAICompatProvider(
                             if (merged.isNotEmpty()) trySend(StreamEvent.ToolCallsReady(merged))
                         }
                     }
+                    // Present only on the final chunk (per the OpenAI streaming convention), and
+                    // that chunk carries no choices — so this must live outside the loop above.
+                    chunk.usage().orElse(null)?.let { u ->
+                        trySend(StreamEvent.Usage(
+                            TokenUsage(u.promptTokens().toInt(), u.completionTokens().toInt())
+                        ))
+                    }
                 }
                 close()
             } catch (e: Exception) {
@@ -109,6 +118,8 @@ class OpenAICompatProvider(
             .model(model)
             .maxCompletionTokens(maxTokens.toLong())
             .temperature(temperature)
+            // Without this the server sends no usage on any streamed chunk at all.
+            .streamOptions(ChatCompletionStreamOptions.builder().includeUsage(true).build())
         systemPrompt?.let { builder.addMessage(ChatCompletionSystemMessageParam.builder().content(it).build()) }
         messages.forEach { message -> builder.addMessage(message.toRawMessageParam()) }
         tools.forEach { tool ->

@@ -35,6 +35,8 @@ private class FakeCreateOnlyCalendarProvider : CalendarProvider {
     override fun delete(eventId: String, calendarId: String?): Boolean = false
 }
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class CalendarCreateCommandTest : FunSpec({
     val config = AgentConfig(model = "test-model")
 
@@ -49,7 +51,7 @@ class CalendarCreateCommandTest : FunSpec({
 
         CalendarCreate(
             provider, FakeCreateOnlyCalendarProvider(), sessionManager, ConfirmationPolicy.ALLOW_ALL, config,
-            "Anniversary 2026-09-24"
+            TEST_CONTEXT_WINDOW, "Anniversary 2026-09-24"
         ) {}.run()
 
         capturedRequests.single().tools.map { it.name } shouldBe listOf("create_calendar_event")
@@ -66,7 +68,7 @@ class CalendarCreateCommandTest : FunSpec({
 
         CalendarCreate(
             provider, FakeCreateOnlyCalendarProvider(), sessionManager, ConfirmationPolicy.ALLOW_ALL, config,
-            "Anniversary 2026-09-24"
+            TEST_CONTEXT_WINDOW, "Anniversary 2026-09-24"
         ) {}.run()
 
         val prompt = capturedRequests.single().systemPrompt!!
@@ -82,7 +84,7 @@ class CalendarCreateCommandTest : FunSpec({
 
         CalendarCreate(
             provider, FakeCreateOnlyCalendarProvider(), sessionManager, ConfirmationPolicy.ALLOW_ALL, config,
-            "Anniversary 2026-09-24"
+            TEST_CONTEXT_WINDOW, "Anniversary 2026-09-24"
         ) { echoed.add(it) }.run()
 
         echoed shouldBe listOf("Created your anniversary event!")
@@ -108,7 +110,7 @@ class CalendarCreateCommandTest : FunSpec({
 
         CalendarCreate(
             provider, calendarProvider, sessionManager, ConfirmationPolicy.DENY_ALL, config,
-            "Anniversary 2026-09-24"
+            TEST_CONTEXT_WINDOW, "Anniversary 2026-09-24"
         ) {}.run()
 
         calendarProvider.created shouldBe emptyList()

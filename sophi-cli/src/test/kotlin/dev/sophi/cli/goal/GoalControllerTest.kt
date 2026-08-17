@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class GoalControllerTest : FunSpec({
     fun sessionManager(): SessionManager = FileSessionManager(createTempDirectory("goal-controller-test"))
 
@@ -47,7 +49,7 @@ class GoalControllerTest : FunSpec({
         learning: LearningPlugin? = null,
         output: MutableList<String> = mutableListOf()
     ): Pair<GoalController, MutableList<String>> {
-        val loop = AgentLoop(provider, ToolRegistry(), sm)
+        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         val gc = GoalController(
             agentLoop = loop, sessionManager = sm, provider = provider, planner = planner,
             critic = StepCritic { _, _ -> 1.0 },
@@ -194,7 +196,7 @@ class GoalControllerTest : FunSpec({
         coEvery { planner.plan(any(), any()) } returns singleStepPlan()
         val scriptedInput = ScriptedInputSource(listOf("y"))
         val sm = sessionManager()
-        val loop = AgentLoop(provider, ToolRegistry(), sm)
+        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         val gc = GoalController(
             agentLoop = loop, sessionManager = sm, provider = provider, planner = planner,
             critic = StepCritic { _, _ -> 1.0 },

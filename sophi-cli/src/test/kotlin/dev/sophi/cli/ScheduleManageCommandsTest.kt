@@ -76,6 +76,23 @@ class ScheduleManageCommandsTest : FunSpec({
         (out.toString().contains("other")) shouldBe false
     }
 
+    test("ScheduleLog shows plan counts for goal runs and omits them for recurring ones") {
+        val home = tempdir().toPath()
+        val log = RunLog(home.resolve("runs.jsonl"))
+        log.append(RunRecord("t1", 1L, 2L, RunOutcome.GoalExhausted, "gave up",
+            replans = 2, decompositions = 1))
+        log.append(RunRecord("t2", 3L, 4L, RunOutcome.Succeeded, "plain recurring run"))
+        val out = StringBuilder()
+        ScheduleLog(home, taskId = null, tail = 10) { out.appendLine(it) }.run()
+
+        val lines = out.toString().trim().lines()
+        // Without this, a probation review of the replan search has to parse runs.jsonl by hand.
+        lines.first { it.startsWith("t1") } shouldContain "replans=2"
+        lines.first { it.startsWith("t1") } shouldContain "decompositions=1"
+        // A recurring run has no plan, so it must not gain a misleading "replans=0".
+        (lines.first { it.startsWith("t2") }.contains("replans")) shouldBe false
+    }
+
     test("--schedule-dir on the list/log/pause/resume/remove commands points at a non-default directory") {
         val home = tempdir().toPath()
         val store = TaskStore(home.resolve("tasks.json"))

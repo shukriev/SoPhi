@@ -23,6 +23,10 @@
             <artifactId>sophi-ai</artifactId>
         </dependency>
         <dependency>
+            <groupId>dev.sophi</groupId>
+            <artifactId>sophi-extensions</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.cronutils</groupId>
             <artifactId>cron-utils</artifactId>
             <version>9.2.0</version>

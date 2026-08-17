@@ -21,7 +21,8 @@ import kotlin.io.path.writeText
 private data class SessionSidecar(
     val parentSessionId: String? = null,
     val model: String? = null,
-    val systemPrompt: String? = null
+    val systemPrompt: String? = null,
+    val title: String? = null
 )
 
 class FileSessionManager(private val sessionsDir: Path) : SessionManager {
@@ -50,9 +51,11 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         val file = sessionsDir.resolve("${session.id}.jsonl")
         atomicWrite(file, session.entries.joinToString("\n") { json.encodeToString(it) })
 
-        if (session.parentSessionId != null) {
-            writeSidecar(session.id, readSidecar(session.id).copy(parentSessionId = session.parentSessionId))
-        }
+        val current = readSidecar(session.id)
+        writeSidecar(session.id, current.copy(
+            parentSessionId = session.parentSessionId ?: current.parentSessionId,
+            title = session.title ?: current.title
+        ))
     }
 
     // Write-in-place would corrupt the file if the process dies mid-write;
@@ -78,7 +81,8 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         val entries = file.readLines()
             .filter { it.isNotBlank() }
             .map { json.decodeFromString<SessionEntry>(it) }
-        return AgentSession(id = sessionId, parentSessionId = readSidecar(sessionId).parentSessionId, initialEntries = entries)
+        val sidecar = readSidecar(sessionId)
+        return AgentSession(id = sessionId, title = sidecar.title, parentSessionId = sidecar.parentSessionId, initialEntries = entries)
     }
 
     override fun list(): List<SessionMeta> {
@@ -87,11 +91,13 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
             .map { file ->
                 val lines = file.readLines().filter { it.isNotBlank() }
                 val id = file.fileName.toString().removeSuffix(".jsonl")
+                val sidecar = readSidecar(id)
                 SessionMeta(
                     id = id,
                     entryCount = lines.size,
                     lastModifiedMillis = file.getLastModifiedTime().toMillis(),
-                    parentSessionId = readSidecar(id).parentSessionId
+                    parentSessionId = sidecar.parentSessionId,
+                    title = sidecar.title
                 )
             }
             .sortedBy { it.id }
@@ -117,5 +123,16 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
     fun readConfigSnapshot(sessionId: String): Pair<String?, String?> {
         validateId(sessionId)
         return readSidecar(sessionId).let { it.model to it.systemPrompt }
+    }
+
+    override fun rename(sessionId: String, title: String) {
+        validateId(sessionId)
+        writeSidecar(sessionId, readSidecar(sessionId).copy(title = title))
+    }
+
+    override fun delete(sessionId: String) {
+        validateId(sessionId)
+        Files.deleteIfExists(sessionsDir.resolve("$sessionId.jsonl"))
+        Files.deleteIfExists(sessionsDir.resolve("$sessionId.meta.json"))
     }
 }

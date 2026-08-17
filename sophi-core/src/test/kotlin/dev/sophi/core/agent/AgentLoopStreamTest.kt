@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val TEST_CONTEXT_WINDOW = 100_000
+
 class AgentLoopStreamTest : FunSpec({
     val provider = mockk<LLMProvider>()
     val sessionManager = mockk<SessionManager>(relaxed = true)
@@ -30,8 +32,19 @@ class AgentLoopStreamTest : FunSpec({
 
     beforeTest { clearMocks(provider, sessionManager) }
 
+    fun newLoop(
+        registry: ToolRegistry = ToolRegistry(),
+        confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+        loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
+    ): AgentLoop = AgentLoop(
+        provider, registry, sessionManager,
+        confirmationPolicy = confirmationPolicy,
+        loopGuard = loopGuard,
+        contextWindowTokens = TEST_CONTEXT_WINDOW
+    )
+
     test("streamTurn() emits a Token event per Content chunk and persists the final answer") {
-        val loop = AgentLoop(provider, ToolRegistry(), sessionManager)
+        val loop = newLoop()
         val session = AgentSession(id = "s1")
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Hello"), StreamEvent.Content(" World"))
 
@@ -47,7 +60,7 @@ class AgentLoopStreamTest : FunSpec({
     }
 
     test("streamTurn() emits a ReasoningToken event per Reasoning chunk, not counted as content") {
-        val loop = AgentLoop(provider, ToolRegistry(), sessionManager)
+        val loop = newLoop()
         val session = AgentSession(id = "s2")
         every { provider.stream(any()) } returns flowOf(
             StreamEvent.Reasoning("thinking..."), StreamEvent.Content("answer")
@@ -68,7 +81,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "sunny"
         }
         val registry = ToolRegistry().register(tool)
-        val loop = AgentLoop(provider, registry, sessionManager)
+        val loop = newLoop(registry)
         val session = AgentSession(id = "s3")
         var round = 0
         every { provider.stream(any()) } answers {
@@ -105,7 +118,7 @@ class AgentLoopStreamTest : FunSpec({
             }
         }
         val registry = ToolRegistry().register(slowTool)
-        val loop = AgentLoop(provider, registry, sessionManager)
+        val loop = newLoop(registry)
         val session = AgentSession(id = "s4")
         var round = 0
         every { provider.stream(any()) } answers {
@@ -133,7 +146,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "deleted"
         }
         val registry = ToolRegistry().register(destructiveTool)
-        val loop = AgentLoop(provider, registry, sessionManager, confirmationPolicy = ConfirmationPolicy.DENY_ALL)
+        val loop = newLoop(registry, confirmationPolicy = ConfirmationPolicy.DENY_ALL)
         val session = AgentSession(id = "s5")
         var round = 0
         every { provider.stream(any()) } answers {
@@ -159,7 +172,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "deleted"
         }
         val registry = ToolRegistry().register(destructiveTool)
-        val loop = AgentLoop(provider, registry, sessionManager, confirmationPolicy = ConfirmationPolicy.ALLOW_ALL)
+        val loop = newLoop(registry, confirmationPolicy = ConfirmationPolicy.ALLOW_ALL)
         val session = AgentSession(id = "s6")
         var round = 0
         every { provider.stream(any()) } answers {
@@ -188,7 +201,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "contents"
         }
         val registry = ToolRegistry().register(safeTool)
-        val loop = AgentLoop(provider, registry, sessionManager)
+        val loop = newLoop(registry)
         val session = AgentSession(id = "s7")
         var round = 0
         every { provider.stream(any()) } answers {
@@ -204,7 +217,7 @@ class AgentLoopStreamTest : FunSpec({
         events.filterIsInstance<TurnEvent.ConfirmationFinished>() shouldBe emptyList()
     }
 
-    test("streamTurn() throws IllegalStateException when maxToolRounds is exceeded and the loop guard always continues") {
+    test("streamTurn() stops gracefully at the maxToolRounds ceiling instead of throwing") {
         val tool = object : Tool {
             override val name = "loop_tool"
             override val description = ""
@@ -213,22 +226,21 @@ class AgentLoopStreamTest : FunSpec({
         }
         val registry = ToolRegistry().register(tool)
         // ALWAYS_CONTINUE: see the equivalent AgentLoopTest.kt comment — the default guard would
-        // otherwise stop this early via its own round-budget trigger before the hard ceiling.
-        val loop = AgentLoop(provider, registry, sessionManager, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
+        // otherwise stop this early via its own round-budget trigger before the ceiling.
+        val loop = newLoop(registry, loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE)
         val session = AgentSession(id = "s6")
         val limitedConfig = AgentConfig(model = "test-model", maxToolRounds = 1)
         every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "loop_tool", "{}"))))
 
-        try {
-            loop.streamTurn(session, "loop forever", limitedConfig) {}
-            error("expected IllegalStateException")
-        } catch (e: IllegalStateException) {
-            e.message shouldBe "Max tool rounds (1) exceeded"
-        }
+        val events = mutableListOf<TurnEvent>()
+        loop.streamTurn(session, "loop forever", limitedConfig) { events.add(it) }
+
+        session.branch().last().content shouldBe "[Stopped early: reached the tool-round sanity ceiling (1)]"
+        events.last() shouldBe TurnEvent.Token("[Stopped early: reached the tool-round sanity ceiling (1)]")
     }
 
     test("streamTurn() propagates a stream failure as an error, with no fallback") {
-        val loop = AgentLoop(provider, ToolRegistry(), sessionManager)
+        val loop = newLoop()
         val session = AgentSession(id = "s7")
         every { provider.stream(any()) } returns flow { throw RuntimeException("stream error") }
 
@@ -250,7 +262,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String): String = throw RuntimeException("nope")
         }
         val registry = ToolRegistry().register(tool)
-        val loop = AgentLoop(provider, registry, sessionManager)
+        val loop = newLoop(registry)
         val session = AgentSession(id = "s8")
         every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "broken", "{}"))))
 
@@ -269,7 +281,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "no matches"
         }
         val registry = ToolRegistry().register(tool)
-        val loop = AgentLoop(provider, registry, sessionManager)
+        val loop = newLoop(registry)
         val session = AgentSession(id = "s9")
         var round = 0
         every { provider.stream(any()) } answers {
@@ -295,7 +307,7 @@ class AgentLoopStreamTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "fine"
         }
         val registry = ToolRegistry().register(tool)
-        val loop = AgentLoop(provider, registry, sessionManager)
+        val loop = newLoop(registry)
         val session = AgentSession(id = "s10")
         every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "ok", "{}"))))
 
