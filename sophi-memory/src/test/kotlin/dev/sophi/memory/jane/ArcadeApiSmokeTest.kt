@@ -43,7 +43,6 @@ class ArcadeApiSmokeTest : FunSpec({
             generateSequence { if (rs.hasNext()) rs.next() else null }.toList()
         }
         edges.size shouldBe 1
-        println("edge propertyNames=" + edges.first().propertyNames)
 
         db.close()
     }
@@ -63,7 +62,6 @@ class ArcadeApiSmokeTest : FunSpec({
             db.command("sql", "INSERT INTO Doc SET id = ?, embedding = ?", "d1", floatArrayOf(1f, 0f, 0f))
             db.command("sql", "INSERT INTO Doc SET id = ?, embedding = ?", "d2", floatArrayOf(0f, 1f, 0f))
         }
-        println("indexes=" + db.schema.indexes.map { it.name })
         val index = db.schema.indexes.first { it.typeName == "Doc" } as LSMVectorIndex
         val nearest = index.findNeighborsFromVector(floatArrayOf(0.9f, 0.1f, 0f), 1)
         val nearestId = nearest.first().first.let { rid -> db.lookupByRID(rid, true) }
