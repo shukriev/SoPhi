@@ -51,8 +51,9 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │             sophi-core  (agent loop, written from scratch)   │
 │  session/  context/  tools/  agent/  agent/plan/  prompt/     │
 │  agent/plan/: Plan · Planner · StepCritic · PlanRunner ·      │
-│              DecomposeGoalTool                                │
+│              DecomposeGoalTool · PlanCritic · TreePlanner      │
 │  (ADR-018 — Plan-and-Execute, supersedes GoalRunner)          │
+│  (TreePlanner — widened replan search, goal-mode, probation)  │
 └──────────────────────┬───────────────────────────────────────┘
           ┌────────────┼─────────────┐
           │            │             │
@@ -79,6 +80,8 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │  ScheduleEngine (tickOnce/runNow) · TaskStore / RunLog ·      │
 │  Notifier · manage_scheduled_task Tool · Goal mode now runs   │
 │  via sophi-core's PlanRunner (ADR-018 — GoalRunner retired)   │
+│  Goal-mode planner is a TreePlanner (k-way replan search,     │
+│  probation, see Plan + PlanRunner section)                    │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │    sophi-calendar  (native OS calendar integration)          │
@@ -97,7 +100,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-hub` | Local-only (127.0.0.1) WebSocket hub — `HubEvent`/`HubCommand` protocol, `HubServer` (embedded by `sophi-companion`), `HubClient` (used by `sophi-cli`); lets the companion monitor and remote-control running CLI sessions (ADR-023) | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
 | `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn | complete |
-| `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired | complete |
+| `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired; the `Planner` it hands `PlanRunner` is a `TreePlanner` widening the replan search (probation, see Plan + PlanRunner) | complete |
 | `sophi-calendar` | Native OS calendar CRUD: `CalendarProvider` seam, `MacCalendarProvider` (AppleScript/Calendar.app) — Windows/Linux deferred; six create/read/update/delete/list Tools | in progress |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
@@ -401,6 +404,86 @@ through plain injected callbacks instead of direct SPI dependencies:
 `Planner`'s `contextProvider: suspend (String) -> List<String>` and `PlanRunner`'s
 `onPlanComplete: suspend (PlanOutcome) -> Unit`. See ADR-018.
 
+### TreePlanner + PlanCritic (`dev.sophi.core.agent.plan`, ADR-024 — probation)
+
+`PlanRunner` already runs a depth-first search with backtracking: a failed step anchors a
+replan, `Planner.replan()` regenerates one new tail, and the cycle repeats up to
+`maxReplans`. That search is width 1 — one candidate continuation, executed without ever
+being compared against an alternative. `TreePlanner` is a `Planner` decorator that widens
+exactly that node:
+
+```kotlin
+fun interface PlanCritic {   // scores an unexecuted candidate — StepCritic scores a finished one
+    suspend fun score(goalPrompt: String, candidate: Plan, failureReason: String): Double
+}
+
+class TreePlanner(
+    private val delegates: List<Planner>,   // one LlmPlanner per temperature — see below
+    private val critic: PlanCritic
+) : Planner {
+    // plan() delegates to delegates.first() untouched — no failure evidence yet to score against.
+    // replan() with 1 delegate short-circuits to a plain call (byte-identical to pre-search).
+    // With >1 delegates: runs every delegate's replan() concurrently, scores each candidate
+    // with the critic, returns the highest score. maxBy returns the FIRST maximum, so an
+    // all-fail-open critic (every score 1.0) reproduces the old width-1 result deterministically.
+}
+```
+
+Losing candidates are data and never execute, so the search costs only extra planner/critic
+LLM calls — no agent turns, no tool calls, no side effects, and no `RunBudget` consumption
+(`RunBudget` counts `executeOnce` invocations only). `LlmPlanCritic` mirrors `LlmStepCritic`
+and fails OPEN for the same reason (efficiency gate, not a safety gate) — a provider timeout
+or unparseable response scores `1.0`, not a rejection.
+
+`ScheduleEngine` wires this into goal-mode tasks only (`TaskMode.Goal`); the interactive CLI's
+planner is untouched:
+
+```kotlin
+TreePlanner(
+    delegates = planSearchTemperatures().map { LlmPlanner(provider, model, temperature = it) },
+    critic = LlmPlanCritic(provider, model, timeout = 300.seconds)
+)
+```
+
+**Kill switch.** `planSearchTemperatures()` reads `SOPHI_TOT_SEARCH_ENABLED` via
+`System.getenv` (the `BRAVE_SEARCH_API_KEY` precedent in `SophiCli.kt`): `false` or `0`,
+case-insensitive, collapses the ladder to `listOf(0.0)`, which `TreePlanner` short-circuits on
+a single delegate — byte-identical pre-search behaviour at zero extra cost, no change needed
+inside `TreePlanner`. Anything else, including unset, keeps the ladder. It fails safe *toward
+ON* deliberately: a kill switch that treated a typo as "off" would produce a "no effect"
+reading that looks like probation evidence. This is also how the A/B's baseline arm was run,
+and it is what makes the feature revertible without a deploy while on probation.
+
+`LlmPlanner`'s default `temperature = 0.0` would make every delegate return an identical
+tail, so the temperature ladder is what actually buys candidate diversity — `TreePlanner`
+itself has no diversity mechanism of its own. `LlmPlanCritic`'s 300s timeout (vs.
+`LlmStepCritic`'s 30s default) exists because `PlanCritic` failing open is not a safe
+degrade the way `StepCritic` failing open is: every candidate tying at `1.0` collapses the
+search to width-1 while still *paying* for every extra planner/critic call — a silent,
+expensive no-op rather than a safe fallback. A 9B local reasoning model measured 166s for a
+single score call; hosted models (DeepSeek: ~3s) never approach the old 30s default.
+
+**Why probation, not a graduated feature:** this shipped from a brainstorm → plan →
+implementation cycle, so ADR-024 was written retroactively rather than gating the design (see
+`docs/superpowers/plans/2026-08-14-tot-widened-replan.md` and the paired spec — both
+gitignored, local-only). DeepSeek-backed probes and a 15-run A/B (also local-only, see
+`TODO_TASK.md`) found the mechanism sound — the ladder produces genuinely distinct
+candidates under real strategic ambiguity, and the critic discriminates well (spread up to
+0.8, correctly scoring a bad plan near 0.0) — but did not demonstrate value: baseline
+single-tail replan already scored 0.85–0.9 and found root cause reliably across tested
+scenarios, with the search changing the selected candidate only 1 of 4 times, within the
+critic's own noise. The end-to-end A/B itself was underpowered (both arms hit
+`maxIterations` regardless of arm) and isn't real evidence either way.
+
+Rather than delete outright or call it done, `RunOutcome`/`RunRecord` (`sophi-schedule`) now
+records `replans: Int?` and `decompositions: Int?` per goal run — `null` for a `Recurring`
+task (no plan ran at all), `0` for a goal run that genuinely never replanned, so the two
+stay distinguishable in `sophi schedule log`. A failed step decomposes *before* it replans
+(ADR-020's `canDecompose` check runs first), so `replans` alone can't tell "the search ran"
+from "decomposition intercepted the failure" — both counts are surfaced together for that
+reason. This is what makes "watch it on real workloads" an actual, decidable probation
+review instead of a permanent unknown.
+
 ### SophiPlugin + AgentHook (`dev.sophi.extensions`)
 
 Lifecycle hooks are the extension point for observability, logging, and side effects without
@@ -627,6 +710,7 @@ to decide.
 | [ADR-020](adr/ADR-020-generalized-goal-decomposition.md) | Generalized goal decomposition | Recursion inside PlanRunner (no new module/type); two triggers over one decomposeStep seam; shared RunBudget; LlmJudged-only sub-plans; two entry points (decompose_goal tool + /plan) over one buildPlanRunner factory |
 | [ADR-022](adr/ADR-022-sophi-companion.md) | `sophi-companion` OS tray app | Standalone Gradle module outside the Maven reactor (Compose Desktop is Gradle-only); embeds `sophi-sdk` in-process, HTTP via `sophi-web` rejected; five additive SDK/core/mcp gaps fixed rather than worked around (`ToolRegistry.unregister`, per-server MCP connect/disconnect, `McpConfigWriter` + `McpServerConfig.enabled`, `SessionManager.rename`/`delete` + title persistence, `SophiRuntime.scheduleEngine`); one coroutine + one `StateFlow` per session; confirmation ships notify-only (always-approve stub, blocked on ADR-016's session-id-less `confirm`); `jpackage` bundling in v1 because macOS notifications need a real `.app` |
 | [ADR-023](adr/ADR-023-cli-hub-remote-control.md) | CLI session monitoring & remote control | New `sophi-hub` module (protocol+server+client); companion owns hub lifecycle, CLI registers on by default; `TurnEvent`/`ConfirmationPolicy` reused as the forwarding seam instead of new `AgentHook` points; confirmation races terminal vs. remote, first response wins, no lock |
+| [ADR-024](adr/ADR-024-tot-widened-replan-search.md) | Tree-of-thought widened replan search | **Accepted — probation**, written retroactively: `PlanRunner`'s existing search was already DFS-with-backtracking at width 1, so `TreePlanner` widens one node rather than adding a subsystem; GoT rejected because merge is incoherent over side-effecting executed steps; `Planner` decorator (zero `PlanRunner` diff), `replan()` only, goal-mode only by construction; new `PlanCritic` because `StepCritic` can't score an unexecuted plan; 300s critic timeout because failing open here is a full-price no-op, not a safe degrade; `SOPHI_TOT_SEARCH_ENABLED` kill switch; probation because the mechanism works but value was never demonstrated |
 
 ---
 
@@ -660,3 +744,4 @@ to decide.
 | `sophi-core`/`sophi-schedule` — Plan-and-Execute upgrade | post-M7 | complete | [article-24](articles/article-24.md) |
 | `sophi-core` — `invoke_claude_code` tool | post-M7 | complete | — |
 | `sophi-companion` — OS tray desktop app embedding `sophi-sdk` | post-M7 | complete | [article-25](articles/article-25.md) |
+| `sophi-core`/`sophi-schedule` — `TreePlanner` widened replan search | post-M7 | probation | — |

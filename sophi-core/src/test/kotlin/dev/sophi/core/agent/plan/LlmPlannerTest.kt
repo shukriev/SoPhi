@@ -156,4 +156,39 @@ class LlmPlannerTest : FunSpec({
         val plan = runBlocking { planner.plan("do the thing") }
         plan.steps.single().decompose shouldBe false
     }
+
+    test("temperature defaults to 0.0, preserving pre-search behavior") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model")
+
+        runBlocking { planner.plan("goal") }
+        requests.single().temperature shouldBe 0.0
+    }
+
+    test("the configured temperature reaches the completion request") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model", temperature = 0.7)
+
+        runBlocking { planner.plan("goal") }
+        requests.single().temperature shouldBe 0.7
+    }
+
+    test("replan uses the configured temperature too") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text(
+            """{"steps":[{"id":"s2","instruction":"retry"}]}""", TokenUsage(1, 1))
+        val planner = LlmPlanner(provider, model = "test-model", temperature = 1.0)
+        val current = Plan(id = "p1", goalPrompt = "goal",
+            steps = listOf(PlanStep(id = "s1", instruction = "build", status = StepStatus.Failed)))
+
+        runBlocking { planner.replan(current, "s1", "step s1 failed") }
+        requests.single().temperature shouldBe 1.0
+    }
 })

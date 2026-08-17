@@ -19,7 +19,9 @@ import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.every
@@ -330,5 +332,122 @@ class ScheduleEngineTest : FunSpec({
         taskStore.update(task.id) { it.copy(nextRunAtMs = 1L) }
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 2L) }
         runLog.forTask(task.id).single().outcome shouldBe RunOutcome.Succeeded
+    }
+
+    test("a Goal-mode task's initial planning is not branched — plan() stays at temperature 0.0") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did the thing"))
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).single().outcome shouldBe RunOutcome.GoalMet
+        // A run that never fails a step never replans, so the search must not have fired:
+        // every completion here belongs to plan()/critic/judge, all at temperature 0.0.
+        requests.all { it.temperature == 0.0 } shouldBe true
+    }
+
+    test("an unmet stop condition fans the replan out across the temperature ladder") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("tried and got nowhere"))
+        // "0.9" is chosen to reach replan specifically. A *failed* step does NOT replan first:
+        // PlanRunner tries decomposition ahead of it (canDecompose, ADR-020), so a low score
+        // routes into a sub-plan instead of the search. At 0.9 StepCritic marks the step Done,
+        // every step completes, and the LlmJudged stop condition then fails ("0.9" is not
+        // "YES") — which is the branch that always replans. The run ends Exhausted once
+        // RunBudget drains.
+        coEvery { provider.complete(capture(requests)) } returns LLMResponse.Text("0.9", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).single().outcome shouldBe RunOutcome.GoalExhausted
+        // The proof the search is wired into production, not merely compiled: candidate tails
+        // were requested at the non-zero ladder temperatures, which only TreePlanner does.
+        requests.map { it.temperature }.toSet() shouldContain 0.7
+        requests.map { it.temperature }.toSet() shouldContain 1.0
+    }
+
+    test("the ToT search kill switch collapses the ladder to a single delegate when disabled") {
+        // TreePlanner short-circuits on one delegate, so listOf(0.0) IS byte-identical
+        // pre-search behaviour — the off switch needs no change inside TreePlanner itself.
+        listOf("false", "FALSE", "False", "0").forEach { disabling ->
+            planSearchTemperatures { if (it == "SOPHI_TOT_SEARCH_ENABLED") disabling else null }
+                .shouldBe(listOf(0.0))
+        }
+    }
+
+    test("the ToT search stays on when the kill switch is unset or set to anything else") {
+        val ladder = listOf(0.0, 0.7, 1.0)
+        planSearchTemperatures { null } shouldBe ladder
+        // Fails safe toward ON: only an explicit false/0 disables, so a typo or a stray value
+        // can't silently switch off a feature under probation review without anyone noticing.
+        listOf("true", "1", "yes", "", "nonsense").forEach { value ->
+            planSearchTemperatures { if (it == "SOPHI_TOT_SEARCH_ENABLED") value else null }
+                .shouldBe(ladder)
+        }
+    }
+
+    test("a Goal-mode run records how many times it replanned") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did some work"))
+        // "0.9" marks every step Done but never satisfies the LlmJudged stop condition, so the
+        // run takes the always-replan branch repeatedly until RunBudget drains. See the
+        // temperature-ladder test above for why a *failed* step would decompose instead.
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("0.9", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).single()
+        record.outcome shouldBe RunOutcome.GoalExhausted
+        (record.replans ?: -1) shouldBeGreaterThan 0
+        // 0, not null: this run reached the search, and no step failure was intercepted by
+        // ADR-020 decomposition. The two counts together are what tell those paths apart.
+        record.decompositions shouldBe 0
+    }
+
+    test("a Recurring run leaves the plan counts null, distinguishing it from a zero-replan goal") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "recurring-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Recurring, prompt = "check"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).single()
+        record.outcome shouldBe RunOutcome.Succeeded
+        record.replans shouldBe null
+        record.decompositions shouldBe null
+    }
+
+    test("plan counts survive a RunLog write/read round trip") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did some work"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("0.9", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        // forTask() decodes from JSONL, so a non-null count here proves the field is actually
+        // serialised and not merely held in memory.
+        runLog.forTask(task.id).single().replans shouldNotBe null
     }
 })
