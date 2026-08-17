@@ -18,17 +18,16 @@ class ConsolidatorTest : FunSpec({
 
     class Rig(provider: LLMProvider? = null) {
         val store = PalaceStore(tempdir().toPath())
-        val index = EmbeddingIndex()
         val config = JanesPalaceConfig(sessionModel = "test-model")
-        val engine = ForgetEngine(store, index, UserProfile(store))
-        val consolidator = Consolidator(store, index, engine, provider, config)
+        val engine = ForgetEngine(store, UserProfile(store))
+        val consolidator = Consolidator(store, engine, provider, config)
         suspend fun add(id: String, text: String, room: Room = Room.EPISODES,
                         salience: Double = 0.8, at: Long = 0L, softDeletedAt: Long? = null): Memory {
             val m = Memory(id, text, room, salience, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
                 Sensitivity.PERSONAL, Provenance.USER_DIRECT, at, at, "s", softDeletedAt = softDeletedAt)
             store.upsertMemory(m)
             val v = fake.embed(listOf(text)).single()
-            store.putEmbedding(id, "fake", v); index.put(id, v)
+            store.putEmbedding(id, "fake", v)
             return m
         }
     }
