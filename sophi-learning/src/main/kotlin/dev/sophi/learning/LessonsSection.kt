@@ -5,8 +5,8 @@ class LessonsSection(
     private val store: LessonStore,
     private val config: LearningConfig
 ) {
-    fun render(scope: String): String? {
-        val recalled = recall.recall(scope, config.lessonTokenBudget)
+    fun render(scope: String, query: String? = null): String? {
+        val recalled = recall.recall(scope, config.lessonTokenBudget, query)
         if (recalled.isEmpty()) return null
         store.bumpUse(recalled)
         return buildString {

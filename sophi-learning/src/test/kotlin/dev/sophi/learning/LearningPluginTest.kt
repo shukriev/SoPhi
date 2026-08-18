@@ -143,4 +143,35 @@ class LearningPluginTest : FunSpec({
         // it — matching every other optional SessionOutcome field already written this way.
         lines.single() shouldContain "\"planningNote\":null"
     }
+
+    test("contribute renders lesson recall via collectContext, ranked by the turn's userInput") {
+        val home = tempdir().toPath()
+        val p = LearningPlugin(LearningConfig(home = home, scope = "/p"),
+            model = "m1", embeddingProvider = FakeEmbeddingProvider())
+        p.lessonStore.add(Lesson("les_a", 1L, "/p", "s", "always write tests first", "approach", useCount = 5))
+        p.lessonStore.add(Lesson("les_b", 2L, "/p", "s", "database migrations need a rollback plan", "approach"))
+        val registry = dev.sophi.extensions.PluginRegistry().register(p)
+        val rendered = registry.collectContext("s1", "planning a database migration").single()
+        rendered shouldContain "database migrations need a rollback plan"
+    }
+
+    test("contribute returns null gracefully when the embedding provider throws") {
+        val home = tempdir().toPath()
+        val throwing = object : dev.sophi.ai.api.EmbeddingProvider {
+            override val dimensions = 64
+            override suspend fun embed(texts: List<String>): List<FloatArray> = error("endpoint down")
+        }
+        val p = LearningPlugin(LearningConfig(home = home, scope = "/p"), embeddingProvider = throwing)
+        p.lessonStore.add(Lesson("les_a", 1L, "/p", "s", "a tip", "approach"))
+        val registry = dev.sophi.extensions.PluginRegistry().register(p)
+        registry.collectContext("s1", "anything") shouldBe emptyList()
+    }
+
+    test("promptSections now returns only reliability content, never lessons") {
+        val home = tempdir().toPath()
+        val p = LearningPlugin(LearningConfig(home = home, scope = "/p"))
+        p.lessonStore.add(Lesson("les_a", 1L, "/p", "s", "a distinctive lesson string", "approach"))
+        val sections = p.promptSections("/p")
+        (sections == null || !sections.contains("a distinctive lesson string")) shouldBe true
+    }
 })
