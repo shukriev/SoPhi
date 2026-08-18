@@ -55,4 +55,62 @@ class LessonRecallTest : FunSpec({
         val rendered = section.render("/p")!!
         rendered.length shouldBeLessThan 500
     }
+
+    test("SemanticRecall ranks by query similarity, not recency") {
+        val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        // Recency/usage would rank les_recent first (higher ts, higher useCount); semantic
+        // similarity to "database migration" must still put les_relevant on top.
+        store.add(Lesson("les_recent", 10L, "/p", "s", "always run tests before committing", "approach", useCount = 5))
+        store.add(Lesson("les_relevant", 1L, "/p", "s", "database migrations need a rollback plan", "approach", useCount = 0))
+        val recall = SemanticRecall(FakeEmbeddingProvider(), store)
+        val order = recall.recall("/p", budgetTokens = 600, query = "planning a database migration").map { it.id }
+        order.first() shouldBe "les_relevant"
+    }
+
+    test("SemanticRecall with a null query falls back to recency/usage ranking") {
+        val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        store.add(Lesson("les_a", 1L, "/p", "s", "a tip", "approach", useCount = 1))
+        store.add(Lesson("les_b", 2L, "/p", "s", "b tip", "approach", useCount = 5))
+        val semantic = SemanticRecall(FakeEmbeddingProvider(), store).recall("/p", budgetTokens = 600, query = null)
+        val recency = RecencyUsageRecall(store).recall("/p", budgetTokens = 600, query = null)
+        semantic.map { it.id } shouldBe recency.map { it.id }
+    }
+
+    test("SemanticRecall caches lesson embeddings across calls (embed is not re-invoked per lesson per call)") {
+        val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        store.add(Lesson("les_a", 1L, "/p", "s", "a tip about testing", "approach"))
+        var embedCalls = 0
+        val counting = object : dev.sophi.ai.api.EmbeddingProvider {
+            override val dimensions = 64
+            override suspend fun embed(texts: List<String>): List<FloatArray> {
+                embedCalls += texts.size
+                return FakeEmbeddingProvider().embed(texts)
+            }
+        }
+        val recall = SemanticRecall(counting, store)
+        recall.recall("/p", budgetTokens = 600, query = "testing")
+        val afterFirst = embedCalls
+        recall.recall("/p", budgetTokens = 600, query = "testing again")
+        // Second call embeds the new query (+1) but must not re-embed the already-cached lesson.
+        embedCalls shouldBe afterFirst + 1
+    }
+
+    test("SemanticRecall respects maxRecalled and budget the same way RecencyUsageRecall does") {
+        val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        store.add(Lesson("les_a", 1L, "/p", "s", "x".repeat(500), "approach"))
+        store.add(Lesson("les_b", 2L, "/p", "s", "short tip", "approach"))
+        val recalled = SemanticRecall(FakeEmbeddingProvider(), store, maxRecalled = 10)
+            .recall("/p", budgetTokens = 100, query = "tip")
+        recalled.map { it.id } shouldBe listOf("les_b")
+    }
+
+    test("LessonsSection.render threads a query through to the recall implementation") {
+        val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        store.add(Lesson("les_a", 1L, "/p", "s", "old but recent-ranked tip", "approach", useCount = 5))
+        store.add(Lesson("les_b", 2L, "/p", "s", "database rollback plan", "approach", useCount = 0))
+        val config = LearningConfig(home = java.nio.file.Path.of("/tmp"), scope = "/p")
+        val section = LessonsSection(SemanticRecall(FakeEmbeddingProvider(), store), store, config)
+        val rendered = section.render("/p", query = "database rollback")!!
+        rendered shouldContain "database rollback plan"
+    }
 })
