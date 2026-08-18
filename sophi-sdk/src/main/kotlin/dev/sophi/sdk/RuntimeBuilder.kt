@@ -45,6 +45,7 @@ class RuntimeBuilder {
     private var providedRegistry: ToolRegistry? = null
     private var loopGuardPolicy: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
     private var learningConfig: LearningConfig? = null
+    private var learningEmbeddingProvider: EmbeddingProvider? = null
     private var scheduleDir: Path? = null
     private var contextWindowTokens: Int? = null
     private var memoryConfig: MemoryConfig? = null
@@ -66,7 +67,8 @@ class RuntimeBuilder {
     fun toolRegistry(registry: ToolRegistry): RuntimeBuilder = apply { providedRegistry = registry }
 
     fun loopGuard(policy: LoopGuardPolicy): RuntimeBuilder = apply { loopGuardPolicy = policy }
-    fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
+    fun learning(config: LearningConfig, embeddingProvider: EmbeddingProvider? = null): RuntimeBuilder =
+        apply { learningConfig = config; learningEmbeddingProvider = embeddingProvider }
     fun schedule(dir: Path): RuntimeBuilder = apply { scheduleDir = dir }
 
     /**
@@ -136,7 +138,8 @@ class RuntimeBuilder {
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
 
         val learningPlugin = learningConfig?.let { cfg ->
-            LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p, sessionManager = sm).also { plugin ->
+            LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p,
+                sessionManager = sm, embeddingProvider = learningEmbeddingProvider).also { plugin ->
                 pluginRegistry.register(plugin)
             }
         }
