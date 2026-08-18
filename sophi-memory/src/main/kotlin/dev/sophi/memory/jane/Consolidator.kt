@@ -16,7 +16,6 @@ import kotlin.math.min
  */
 class Consolidator(
     private val store: PalaceStore,
-    private val index: EmbeddingIndex,
     private val forgetEngine: ForgetEngine,
     private val provider: LLMProvider?,
     private val config: JanesPalaceConfig
@@ -47,7 +46,7 @@ class Consolidator(
                 for (j in i + 1 until actives.size) {
                     val b = actives[j]
                     if (b.id in absorbed) continue
-                    val va = index.get(a.id) ?: continue; val vb = index.get(b.id) ?: continue
+                    val va = store.vectorFor(a.id) ?: continue; val vb = store.vectorFor(b.id) ?: continue
                     if (cosine(va, vb) >= config.mergeThreshold) {
                         survivorSalience = min(1.0, maxOf(survivorSalience, b.salience) + 0.05)
                         store.upsertMemory(a.copy(
@@ -113,8 +112,8 @@ class Consolidator(
                 provenance = Provenance.SYSTEM_INFERRED, createdAt = nowMs, reinforcedAt = nowMs,
                 sourceSessionId = "consolidation")
             store.upsertMemory(summary)
-            index.get(members.first().id)?.let { v ->
-                store.putEmbedding(summary.id, store.embeddingModel() ?: "", v); index.put(summary.id, v)
+            store.vectorFor(members.first().id)?.let { v ->
+                store.putEmbedding(summary.id, store.embeddingModel() ?: "", v)
             }
             // Endpoints preserved: first -> summary -> last (spec §4.3); interior soft-deleted.
             store.upsertEdge(CausalEdge(members.first().id, summary.id, label, compressed = true))

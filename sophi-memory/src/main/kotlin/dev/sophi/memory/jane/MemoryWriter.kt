@@ -11,7 +11,6 @@ import kotlin.math.min
  */
 class MemoryWriter(
     private val store: PalaceStore,
-    private val index: EmbeddingIndex,
     private val profile: UserProfile,
     private val embeddings: EmbeddingProvider,
     private val embeddingModelName: String,
@@ -28,7 +27,7 @@ class MemoryWriter(
 
             val roomMemories = all.values.filter { it.room == room && it.active }
             val similarities = roomMemories.associate { m ->
-                m.id to (index.get(m.id)?.let { cosine(vector, it) } ?: 0.0)
+                m.id to (store.vectorFor(m.id)?.let { cosine(vector, it) } ?: 0.0)
             }
             val maxSim = similarities.values.maxOrNull() ?: 0.0
 
@@ -64,7 +63,6 @@ class MemoryWriter(
             )
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)
-            index.put(memory.id, vector)
             stored += memory
 
             // Causal links: only to ids that exist (spec §7 — the encoder may only cite the shortlist).

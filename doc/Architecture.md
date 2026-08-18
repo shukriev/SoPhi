@@ -8,7 +8,7 @@
 | Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-hub, sophi-learning, sophi-web, sophi-sdk, sophi-companion, sophi-infra, sophi-memory, sophi-schedule |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
 | Designs approved, not yet implemented | Tiered tool confirmation & grants (ADR-016) — `RiskLevel` gains `CAUTION`; `Tool.riskLevel` becomes argument-aware; `ConfirmationPolicy` batches per round; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
-| Last updated | 2026-08-10 |
+| Last updated | 2026-08-18 |
 
 ---
 
@@ -74,6 +74,8 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │        sophi-memory  (Jane's Theory — declarative memory)    │
 │  MemoryTechnique SPI · JanesPalace (rooms, salience, decay,  │
 │  narrative graph, profile) · recall via ContextContributor   │
+│  Storage: ArcadeDB (embedded graph+document+vector db) via   │
+│  ArcadeStore — generic, technique-agnostic (ADR-026)          │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │     sophi-schedule  (recurring & goal-based task scheduler)  │
@@ -99,7 +101,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-hub` | Local-only (127.0.0.1) WebSocket hub — `HubEvent`/`HubCommand` protocol, `HubServer` (embedded by `sophi-companion`), `HubClient` (used by `sophi-cli`); lets the companion monitor and remote-control running CLI sessions (ADR-023) | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
-| `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn | complete |
+| `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn. Storage is ArcadeDB (embedded document+graph+vector database) behind a generic `ArcadeStore` primitive layer (ADR-026), replacing the original JSONL + brute-force-cosine storage; embedded-only, single-process | complete |
 | `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired; the `Planner` it hands `PlanRunner` is a `TreePlanner` widening the replan search (probation, see Plan + PlanRunner) | complete |
 | `sophi-calendar` | Native OS calendar CRUD: `CalendarProvider` seam, `MacCalendarProvider` (AppleScript/Calendar.app) — Windows/Linux deferred; six create/read/update/delete/list Tools | in progress |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
@@ -611,7 +613,16 @@ Technique-agnostic declarative-memory SPI (ADR-013). `JanesPalace` is the first 
 implementation: five typed rooms, salience computed at encoding, decay-weighted retrieval,
 causal narrative links, a confidence-weighted user profile, and true deletion. `MemoryPlugin`
 adapts it to the harness — `contribute()` (`ContextContributor`) calls `recall`, the
-`AFTER_TURN` hook fire-and-forgets `observe`. Storage is user-global under `~/.sophi/memory/`.
+`AFTER_TURN` hook fire-and-forgets `observe`. Storage is user-global under `~/.sophi/memory/`,
+an embedded ArcadeDB database (ADR-026): `Memory`/`CausalEdge` are real graph vertices/edges
+with a native HNSW vector index on the embedding property; `ProfileAttribute`/`RecallRecord`
+are documents; `audit.jsonl`/`last-recall.txt`/`consolidation.marker` stay plain files. The
+generic `ArcadeStore` primitive layer (`dev.sophi.memory.store.arcade`) that `PalaceStore`
+builds on carries no Jane's-Palace-specific types, so a future second memory technique can
+reuse it. ArcadeDB locks its database to one open process — `PalaceStore`/`JanesPalace`/
+`MemoryPlugin.close()` release it, and only one Sophi process should hold a given memory home
+at a time (see ADR-026: ArcadeDB's remote client can't do vector search in this version, so
+the originally-planned CLI/`sophi-web` shared-server split was dropped).
 
 ```kotlin
 interface MemoryTechnique {
@@ -627,13 +638,15 @@ interface MemoryTechnique {
 }
 ```
 
-`ForgetEngine` (behind `JanesPalace.forget`) performs the compacting rewrite: re-links the
-causal chain around the removed memory, reduces profile evidence, and deletes
-`last-recall.txt` so a forgotten memory cannot resurface through the explain path.
-`ForgetEngine.preview(id)` / `JanesPalace.previewForget(id)` compute the same impact
-non-destructively, so `sophi memory forget` can show the blast radius before committing.
-`ForgetEngine.purgeSoftDeleted(cutoffMs, nowMs)` is the consolidation-time sweep that
-physically drops soft-deleted memories once they clear the retention cutoff.
+`ForgetEngine` (behind `JanesPalace.forget`) performs targeted deletes against ArcadeDB
+(`deleteMemory`/`deleteEdge`/`deleteRecallsFor` — a real `DELETE`, not the pre-ADR-026
+compacting JSONL rewrite): re-links the causal chain around the removed memory, reduces
+profile evidence, and deletes `last-recall.txt` so a forgotten memory cannot resurface
+through the explain path. `ForgetEngine.preview(id)` / `JanesPalace.previewForget(id)`
+compute the same impact non-destructively, so `sophi memory forget` can show the blast
+radius before committing. `ForgetEngine.purgeSoftDeleted(cutoffMs, nowMs)` is the
+consolidation-time sweep that physically drops soft-deleted memories once they clear the
+retention cutoff.
 
 ### Skill + SkillLoader (`dev.sophi.skills`)
 
@@ -738,6 +751,7 @@ to decide.
 | [ADR-023](adr/ADR-023-cli-hub-remote-control.md) | CLI session monitoring & remote control | New `sophi-hub` module (protocol+server+client); companion owns hub lifecycle, CLI registers on by default; `TurnEvent`/`ConfirmationPolicy` reused as the forwarding seam instead of new `AgentHook` points; confirmation races terminal vs. remote, first response wins, no lock |
 | [ADR-025](adr/ADR-025-interactive-goal-command.md) | Interactive `/goal` command | Hybrid session visibility (isolated step execution, structured anchor-session record); plan preview via `input.readLine()`, not `awaitYesNo()`; extends ADR-020's `PlanProgressEvent` instead of adding a second event stream; `initialPlan` preview seam; `allowParallelSteps` stays `false`; CLI-only v1 |
 | [ADR-024](adr/ADR-024-tot-widened-replan-search.md) | Tree-of-thought widened replan search | **Accepted — probation**, written retroactively: `PlanRunner`'s existing search was already DFS-with-backtracking at width 1, so `TreePlanner` widens one node rather than adding a subsystem; GoT rejected because merge is incoherent over side-effecting executed steps; `Planner` decorator (zero `PlanRunner` diff), `replan()` only, goal-mode only by construction; new `PlanCritic` because `StepCritic` can't score an unexecuted plan; 300s critic timeout because failing open here is a full-price no-op, not a safe degrade; `SOPHI_TOT_SEARCH_ENABLED` kill switch; probation because the mechanism works but value was never demonstrated |
+| [ADR-026](adr/ADR-026-arcadedb-memory-storage.md) | Jane's Palace storage backend | ArcadeDB (embedded document+graph+vector db) behind a generic `ArcadeStore` layer, replacing JSONL + brute-force cosine; multi-process (CLI/`sophi-web` shared-server) design dropped mid-implementation — ArcadeDB's remote client can't do vector search in this version |
 
 ---
 
@@ -773,3 +787,4 @@ to decide.
 | `sophi-core` — `invoke_claude_code` tool | post-M7 | complete | — |
 | `sophi-companion` — OS tray desktop app embedding `sophi-sdk` | post-M7 | complete | [article-25](articles/article-25.md) |
 | `sophi-core`/`sophi-schedule` — `TreePlanner` widened replan search | post-M7 | probation | — |
+| `sophi-memory` — ArcadeDB storage migration | post-M7 | complete | [article-26](articles/article-26.md) |

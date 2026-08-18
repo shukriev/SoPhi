@@ -33,6 +33,7 @@ class RuntimeBuilder {
     var systemPrompt: String? = null
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
+    var memoryHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "memory")
 
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
@@ -140,7 +141,7 @@ class RuntimeBuilder {
                 null
             } else {
                 val palace = JanesPalace(
-                    JanesPalaceConfig(sessionModel = model), p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
+                    JanesPalaceConfig(home = memoryHome, sessionModel = model), p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                 )
                 MemoryPlugin(palace).also { pluginRegistry.register(it) }
             }
