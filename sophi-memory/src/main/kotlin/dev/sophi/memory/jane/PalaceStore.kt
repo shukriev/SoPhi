@@ -11,6 +11,13 @@ import java.nio.file.Path
  * Memory/CausalEdge/ProfileAttribute/RecallRecord live in ArcadeDB (graph + document + vector);
  * audit/last-recall/consolidation-marker stay plain files (spec §4: they don't need query
  * capability, and an independent audit trail survives a corrupted database).
+ *
+ * Embedded-only: ArcadeDB locks its database directory to one process, so only one Sophi
+ * process (CLI or sophi-web) should touch a given [home] at a time. A remote-client/server
+ * split was considered (spec §2) but dropped — ArcadeDB 26.5.1's remote client has no path
+ * to vector search (`vector.neighbors(...)` doesn't work in SQL, and the LSMVectorIndex Java
+ * API it's replaced with here is embedded-only), so a remote client couldn't do the one thing
+ * this migration is for. Revisit only if concurrent CLI+web usage becomes a real workflow.
  */
 class PalaceStore(
     private val home: Path,
