@@ -53,5 +53,8 @@ class MemoryPlugin(
     /** Test hook: await all in-flight encodes. */
     suspend fun drainEncodes() { inFlight.toList().forEach { it.join() } }
 
-    fun close() { encodeScope.cancel() }
+    fun close() {
+        encodeScope.cancel()
+        (technique as? dev.sophi.memory.jane.JanesPalace)?.close()
+    }
 }

@@ -58,6 +58,9 @@ class JanesPalace(
 
     fun consolidationDue(nowMs: Long): Boolean = consolidator.isDue(nowMs)
 
+    /** Releases the underlying database (see [PalaceStore.close]). */
+    fun close() = store.close()
+
     override suspend fun forget(request: ForgetRequest): ForgetResult =
         forgetEngine.forget(request, System.currentTimeMillis())
 

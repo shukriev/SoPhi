@@ -7,7 +7,7 @@ data class Scored(val id: String, val score: Double)
  * no Jane's-Palace types here — so a future second memory technique can build on this
  * same layer (spec: docs/superpowers/specs/2026-08-18-arcadedb-memory-storage-design.md).
  */
-interface ArcadeStore {
+interface ArcadeStore : AutoCloseable {
     fun upsertVertex(type: String, id: String, properties: Map<String, Any?>)
     fun getVertex(type: String, id: String): Map<String, Any?>?
     fun queryVertices(type: String): List<Map<String, Any?>>

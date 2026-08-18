@@ -2,6 +2,7 @@ package dev.sophi.memory.jane
 
 import com.arcadedb.database.Database
 import com.arcadedb.database.DatabaseFactory
+import com.arcadedb.index.TypeIndex
 import com.arcadedb.index.vector.LSMVectorIndex
 import com.arcadedb.schema.Type
 import io.kotest.core.spec.style.FunSpec
@@ -62,7 +63,7 @@ class ArcadeApiSmokeTest : FunSpec({
             db.command("sql", "INSERT INTO Doc SET id = ?, embedding = ?", "d1", floatArrayOf(1f, 0f, 0f))
             db.command("sql", "INSERT INTO Doc SET id = ?, embedding = ?", "d2", floatArrayOf(0f, 1f, 0f))
         }
-        val index = db.schema.indexes.first { it.typeName == "Doc" } as LSMVectorIndex
+        val index = (db.schema.getIndexByName("Doc[embedding]") as TypeIndex).subIndexes.first() as LSMVectorIndex
         val nearest = index.findNeighborsFromVector(floatArrayOf(0.9f, 0.1f, 0f), 1)
         val nearestId = nearest.first().first.let { rid -> db.lookupByRID(rid, true) }
             .let { it as com.arcadedb.database.Document }.getString("id")

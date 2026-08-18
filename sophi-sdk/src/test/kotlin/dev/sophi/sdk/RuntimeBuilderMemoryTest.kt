@@ -37,6 +37,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
 
         rt.memoryPlugin.shouldBeNull()
@@ -47,6 +48,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         builder.systemPrompt = "custom instructions"
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
@@ -67,6 +69,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(
@@ -84,6 +87,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(
@@ -101,6 +105,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(

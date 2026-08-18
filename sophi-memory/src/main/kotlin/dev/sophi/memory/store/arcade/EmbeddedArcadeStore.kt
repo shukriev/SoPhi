@@ -112,6 +112,8 @@ class EmbeddedArcadeStore(private val db: Database) : ArcadeStore {
         db.transaction { db.command("sql", "DELETE FROM $type") }
     }
 
+    override fun close() = db.close()
+
     private fun upsertRecord(type: String, id: String, properties: Map<String, Any?>) {
         db.transaction {
             val all = mapOf("id" to id) + properties

@@ -83,6 +83,10 @@ class PalaceStore(
         Files.writeString(home.resolve("consolidation.marker"), nowMs.toString())
     }
 
+    /** Releases the underlying ArcadeDB database — required before another process (or another
+     *  PalaceStore in this process) can open the same [home] again (see class doc). */
+    fun close() = db.close()
+
     fun wipe() {
         db.deleteAll("Memory"); db.deleteAll("CausalEdge")
         db.deleteAll("ProfileAttribute"); db.deleteAll("RecallRecord")
