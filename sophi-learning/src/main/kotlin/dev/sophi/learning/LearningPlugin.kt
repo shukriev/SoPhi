@@ -22,6 +22,7 @@ class LearningPlugin(
     private val json = Json { encodeDefaults = true }
     private val toolEvents = JsonlLog(config.home.resolve("tool-events.jsonl"))
     private val outcomes = JsonlLog(config.home.resolve("session-outcomes.jsonl"))
+    private val lessonUsage = JsonlLog(config.home.resolve("lesson-usage.jsonl"))
     val toolStats = ToolStatsStore(toolEvents, config.recentWindow)
     val lessonStore = LessonStore(JsonlLog(config.home.resolve("lessons.jsonl")), config.maxActiveLessons)
     val preferenceStore = PreferenceStore(JsonlLog(config.home.resolve("preferences.jsonl")))
@@ -29,7 +30,7 @@ class LearningPlugin(
     private val lessonRecall: LessonRecall =
         embeddingProvider?.let { SemanticRecall(it, lessonStore, config.maxRecalledLessons) }
             ?: RecencyUsageRecall(lessonStore, config.maxRecalledLessons)
-    private val lessonsSection = LessonsSection(lessonRecall, lessonStore, config)
+    private val lessonsSection = LessonsSection(lessonRecall, lessonStore, lessonUsage, config)
     private val reliabilitySection = ToolReliabilitySection(toolStats, config)
 
     private class Acc {
@@ -43,7 +44,7 @@ class LearningPlugin(
     private val accs = ConcurrentHashMap<String, Acc>()
 
     override suspend fun contribute(sessionId: String, userInput: String): String? =
-        runCatching { lessonsSection.render(config.scope, userInput) }.getOrNull()
+        runCatching { lessonsSection.render(config.scope, sessionId, userInput) }.getOrNull()
 
     override fun hooks(): List<AgentHook> = listOf(
         hook(HookPoint.AFTER_TOOL) { ctx: HookContext ->

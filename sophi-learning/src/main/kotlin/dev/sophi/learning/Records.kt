@@ -30,6 +30,20 @@ data class SessionOutcome(
                                       // emit "planning"-kind lessons, not just conversational ones
 )
 
+/**
+ * One lesson surfaced during one session's context contribution. The keystone attribution record
+ * for lessons: contribute()'s injected text is per-turn and never persisted to the session itself
+ * (unlike tool calls, which ADR-009 already records), so this is the only durable link from a
+ * session back to which lessons it saw.
+ */
+@Serializable
+data class LessonUsageEvent(
+    val ts: Long,
+    val scope: String,
+    val sessionId: String,
+    val lessonId: String
+)
+
 @Serializable
 data class PreferenceRecord(
     val id: String,                 // "pref_" + UUID

@@ -3,6 +3,7 @@ package dev.sophi.learning
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.string.shouldContain
@@ -10,8 +11,9 @@ import io.kotest.matchers.string.shouldContain
 class LessonRecallTest : FunSpec({
     fun fixture(): Pair<LessonStore, LessonsSection> {
         val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        val usageLog = JsonlLog(tempdir().toPath().resolve("usage.jsonl"))
         val config = LearningConfig(home = java.nio.file.Path.of("/tmp"), scope = "/p")
-        return store to LessonsSection(RecencyUsageRecall(store), store, config)
+        return store to LessonsSection(RecencyUsageRecall(store), store, usageLog, config)
     }
 
     test("preference lessons rank first; local before global; useCount breaks ties") {
@@ -43,17 +45,44 @@ class LessonRecallTest : FunSpec({
 
     test("render produces section and bumps useCount; empty store renders null") {
         val (store, section) = fixture()
-        section.render("/p").shouldBeNull()
+        section.render("/p", "sess_1").shouldBeNull()
         store.add(Lesson("les_1", 1L, "/p", "s", "Use -pl targeting", "environment"))
-        section.render("/p")!! shouldContain "## Lessons from previous sessions"
+        section.render("/p", "sess_1")!! shouldContain "## Lessons from previous sessions"
         store.active("/p").single().useCount shouldBe 1
     }
 
     test("render truncates an oversized lesson so it can't dominate the injected prompt") {
         val (store, section) = fixture()
         store.add(Lesson("les_1", 1L, "/p", "s", "x".repeat(1000), "environment"))
-        val rendered = section.render("/p")!!
+        val rendered = section.render("/p", "sess_1")!!
         rendered.length shouldBeLessThan 500
+    }
+
+    test("render logs a LessonUsageEvent per recalled lesson, keyed by sessionId") {
+        val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        val usageLog = JsonlLog(tempdir().toPath().resolve("usage.jsonl"))
+        val config = LearningConfig(home = java.nio.file.Path.of("/tmp"), scope = "/p")
+        val section = LessonsSection(RecencyUsageRecall(store), store, usageLog, config)
+        store.add(Lesson("les_1", 1L, "/p", "s", "Use -pl targeting", "environment"))
+        store.add(Lesson("les_2", 2L, "/p", "s", "Run mvn clean, not mvn test", "environment"))
+
+        section.render("/p", "sess_42")
+
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val events = usageLog.readAll().map { json.decodeFromString(LessonUsageEvent.serializer(), it) }
+        events.map { it.lessonId } shouldContainExactlyInAnyOrder listOf("les_1", "les_2")
+        events.all { it.sessionId == "sess_42" } shouldBe true
+    }
+
+    test("render does not log a LessonUsageEvent when nothing was recalled") {
+        val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
+        val usageLog = JsonlLog(tempdir().toPath().resolve("usage.jsonl"))
+        val config = LearningConfig(home = java.nio.file.Path.of("/tmp"), scope = "/p")
+        val section = LessonsSection(RecencyUsageRecall(store), store, usageLog, config)
+
+        section.render("/p", "sess_42").shouldBeNull()
+
+        usageLog.readAll() shouldBe emptyList()
     }
 
     test("SemanticRecall ranks by query similarity, not recency") {
@@ -108,9 +137,10 @@ class LessonRecallTest : FunSpec({
         val store = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")))
         store.add(Lesson("les_a", 1L, "/p", "s", "old but recent-ranked tip", "approach", useCount = 5))
         store.add(Lesson("les_b", 2L, "/p", "s", "database rollback plan", "approach", useCount = 0))
+        val usageLog = JsonlLog(tempdir().toPath().resolve("usage.jsonl"))
         val config = LearningConfig(home = java.nio.file.Path.of("/tmp"), scope = "/p")
-        val section = LessonsSection(SemanticRecall(FakeEmbeddingProvider(), store), store, config)
-        val rendered = section.render("/p", query = "database rollback")!!
+        val section = LessonsSection(SemanticRecall(FakeEmbeddingProvider(), store), store, usageLog, config)
+        val rendered = section.render("/p", "sess_1", query = "database rollback")!!
         rendered shouldContain "database rollback plan"
     }
 })
