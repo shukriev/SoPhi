@@ -20,6 +20,7 @@ internal fun buildScheduleEngine(
     val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
     val registry = dev.sophi.core.tools.ToolRegistry()
     buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
+    val proposalStore = dev.sophi.schedule.store.ProposalStore(scheduleDir.resolve("proposals.jsonl"))
     val runtime = Sophi.runtime {
         this.provider = provider
         this.model = model
@@ -27,6 +28,8 @@ internal fun buildScheduleEngine(
         contextWindowTokens(contextWindowTokens)
         toolRegistry(registry)
         agentsDir(agentsDir)
+        tool(dev.sophi.schedule.tools.ProposeImprovementTool())
+        plugin(dev.sophi.schedule.tools.ProposalPlugin(proposalStore))
     }
     return runtime.scheduleEngine(
         taskStore = dev.sophi.schedule.store.TaskStore(scheduleDir.resolve("tasks.json")),
