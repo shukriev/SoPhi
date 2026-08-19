@@ -15,6 +15,7 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
+import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
@@ -626,6 +627,52 @@ class SophiRuntimeTest : FunSpec({
         val prompt = capturedSystemPrompt.shouldNotBeNull()
         prompt shouldContain "custom instructions"
         prompt shouldContain DefaultPrompt.UNATTENDED
+    }
+
+    test("scheduleEngine threads maxTokens into every task's AgentConfig") {
+        val provider = mockk<LLMProvider>()
+        var capturedMaxTokens: Int? = null
+        every { provider.stream(any()) } answers {
+            capturedMaxTokens = firstArg<CompletionRequest>().maxTokens
+            flowOf(StreamEvent.Content("x"))
+        }
+        val rt = SophiRuntime(
+            agentLoop, FileSessionManager(createTempDirectory("schedule-engine-maxtokens-test")),
+            PluginRegistry(), config,
+            provider = provider, contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val dir = createTempDirectory("schedule-engine-maxtokens-test")
+        val taskStore = TaskStore(dir.resolve("tasks.json"))
+        val runLog = RunLog(dir.resolve("runs.jsonl"))
+        val engine = rt.scheduleEngine(taskStore, runLog, NoopNotifier, maxTokens = 8192)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        capturedMaxTokens shouldBe 8192
+    }
+
+    test("scheduleEngine threads taskTimeoutMs, failing a run that exceeds it") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns kotlinx.coroutines.flow.flow {
+            kotlinx.coroutines.delay(500)
+            emit(StreamEvent.Content("too late"))
+        }
+        val rt = SophiRuntime(
+            agentLoop, FileSessionManager(createTempDirectory("schedule-engine-timeout-test")),
+            PluginRegistry(), config,
+            provider = provider, contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val dir = createTempDirectory("schedule-engine-timeout-test")
+        val taskStore = TaskStore(dir.resolve("tasks.json"))
+        val runLog = RunLog(dir.resolve("runs.jsonl"))
+        val engine = rt.scheduleEngine(taskStore, runLog, NoopNotifier, taskTimeoutMs = 50)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        (record?.outcome is RunOutcome.Failed) shouldBe true
+        (record?.outcome as RunOutcome.Failed).error shouldContain "timed out"
     }
 
     test("skills lists what's actually on disk in skillsDir") {
