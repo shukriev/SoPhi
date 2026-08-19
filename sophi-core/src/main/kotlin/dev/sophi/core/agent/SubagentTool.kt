@@ -92,7 +92,9 @@ class SubagentTool(
         val nestedLoop = AgentLoop(
             provider, scopedRegistry, sessionManager,
             confirmationPolicy = confirmationPolicy,
-            grants = args.expectedTools?.toSet() ?: emptySet(),
+            grants = args.expectedTools.orEmpty()
+                .filter { scopedRegistry.getOrNull(it)?.riskLevel("{}") == RiskLevel.SAFE }
+                .toSet(),
             contextWindowTokens = contextWindowTokens
         )
         val subSession = sessionManager.create(

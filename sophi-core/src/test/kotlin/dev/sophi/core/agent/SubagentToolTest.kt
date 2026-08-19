@@ -344,13 +344,62 @@ class SubagentToolTest : FunSpec({
         tool.riskLevel("""{"subagent_type":"explore","prompt":"go","expected_tools":["read_file","danger"]}""") shouldBe RiskLevel.DESTRUCTIVE
     }
 
-    test("execute() grants a declared expected_tool to the nested loop without re-confirming it") {
+    test("execute() grants a declared SAFE expected_tool to the nested loop without re-confirming it") {
+        val safeTool = object : Tool {
+            override val name = "lookup"
+            override val description = "harmless"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.SAFE
+            override suspend fun execute(argumentsJson: String) = "ran it"
+        }
+        val def = AgentDefinition(
+            name = "operator",
+            description = "Can run safe tools",
+            systemPrompt = "You take action.",
+            allowedTools = listOf("lookup")
+        )
+        val provider = mockk<LLMProvider>()
+        var callCount = 0
+        every { provider.stream(any()) } answers {
+            callCount++
+            if (callCount == 1)
+                LLMResponse.ToolUse(
+                    calls = listOf(ToolCall("c1", "lookup", "{}")),
+                    usage = TokenUsage(1, 0)
+                ).toStreamFlow()
+            else
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        }
+        val fullRegistry = ToolRegistry().register(safeTool)
+        val tool = SubagentTool(
+            definitions = listOf(def),
+            provider = provider,
+            fullRegistry = fullRegistry,
+            sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
+            parentSessionId = "parent-1",
+            parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW,
+            confirmationPolicy = ConfirmationPolicy { throw AssertionError("should not be consulted for a granted tool") }
+        )
+
+        val result = runBlocking {
+            tool.execute("""{"subagent_type":"operator","prompt":"do it","expected_tools":["lookup"]}""")
+        }
+
+        result shouldBe "done"
+    }
+
+    test("execute() does not auto-grant a DESTRUCTIVE expected_tool — confirmation policy still gates it") {
+        var executed = false
         val destructiveTool = object : Tool {
             override val name = "danger"
             override val description = "risky"
             override val parametersJson = "{}"
             override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
-            override suspend fun execute(argumentsJson: String) = "ran it"
+            override suspend fun execute(argumentsJson: String): String {
+                executed = true
+                return "ran it"
+            }
         }
         val destructiveDef = AgentDefinition(
             name = "operator",
@@ -368,7 +417,7 @@ class SubagentToolTest : FunSpec({
                     usage = TokenUsage(1, 0)
                 ).toStreamFlow()
             else
-                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+                LLMResponse.Text("acknowledged", TokenUsage(1, 1)).toStreamFlow()
         }
         val fullRegistry = ToolRegistry().register(destructiveTool)
         val tool = SubagentTool(
@@ -379,13 +428,13 @@ class SubagentToolTest : FunSpec({
             parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW,
-            confirmationPolicy = ConfirmationPolicy { throw AssertionError("should not be consulted for a granted tool") }
+            confirmationPolicy = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
         )
 
-        val result = runBlocking {
+        runBlocking {
             tool.execute("""{"subagent_type":"operator","prompt":"do it","expected_tools":["danger"]}""")
         }
 
-        result shouldBe "done"
+        executed shouldBe false
     }
 })
