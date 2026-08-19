@@ -52,6 +52,19 @@ class AgentController(
 
     private fun lockFor(id: String): Mutex = sessionLocks.computeIfAbsent(id) { Mutex() }
 
+    /**
+     * Merges any plugin-contributed context (lessons, memory) into a per-turn AgentConfig, the
+     * same collectContext path SophiRuntime.streamTurn already uses. Without this, sophi-web
+     * never receives lesson-recall content: LearningPlugin.promptSections() is baked into [config]
+     * once, statically, at bean-creation time, and no longer includes lessons — those are now
+     * delivered per-turn via ContextContributor, which nothing here was calling.
+     */
+    private suspend fun configWithContext(sessionId: String, input: String): AgentConfig {
+        val extra = pluginRegistry.collectContext(sessionId, input).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+        return if (extra == null) config
+        else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
+    }
+
     @PostMapping("/sessions")
     fun createSession(@RequestParam(required = false) title: String?): SessionDto {
         val session = sessionManager.create(title)
@@ -74,7 +87,7 @@ class AgentController(
             return ResponseEntity.notFound().build()
         }
         val updated = try {
-            agentLoop.turn(session, req.input, config, pluginRegistry.turnEventBridge(id))
+            agentLoop.turn(session, req.input, configWithContext(id, req.input), pluginRegistry.turnEventBridge(id))
         } catch (e: Exception) {
             // Learning must never break responses: dispatch is best-effort, error still propagates.
             runCatching { pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(id, error = e)) }
@@ -116,7 +129,7 @@ class AgentController(
                 lockFor(id).withLock {
                     val session = sessionManager.load(id)
                     val bridge = pluginRegistry.turnEventBridge(id)
-                    agentLoop.streamTurn(session, input, config) { event ->
+                    agentLoop.streamTurn(session, input, configWithContext(id, input)) { event ->
                         bridge(event)
                         sseEventFor(event)?.let { emitter.send(it.build()) }
                     }

@@ -22,6 +22,7 @@ import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import org.springframework.http.HttpStatus
@@ -100,6 +101,31 @@ class AgentControllerTest : FunSpec({
         val line = JsonlLog(home.resolve("session-outcomes.jsonl")).readAll().single()
         line shouldContain "\"outcome\":\"open\""
         line shouldContain "\"turns\":1"
+    }
+
+    test("turn merges plugin-contributed context into the per-turn AgentConfig's systemPrompt") {
+        // Regression coverage: AgentController must call pluginRegistry.collectContext, the same
+        // path SophiRuntime.streamTurn already uses — without it, sophi-web silently never
+        // receives lesson-recall content, since LearningPlugin.promptSections() (baked in once,
+        // statically, at bean-creation time) no longer includes lessons.
+        val contributor = object : dev.sophi.extensions.SophiPlugin, dev.sophi.extensions.ContextContributor {
+            override val name = "test-contributor"
+            override fun hooks() = emptyList<dev.sophi.extensions.AgentHook>()
+            override suspend fun contribute(sessionId: String, userInput: String) = "extra lesson context"
+        }
+        val registry = PluginRegistry().register(contributor)
+        val contributingController = AgentController(sessionManager, agentLoop, config, registry)
+        val session = AgentSession("s-ctx")
+        val updated = AgentSession(
+            "s-ctx", initialEntries = listOf(SessionEntry("e1", null, EntryRole.ASSISTANT, "ok", 0L))
+        )
+        every { sessionManager.load("s-ctx") } returns session
+        val configSlot = slot<AgentConfig>()
+        coEvery { agentLoop.turn(session, "hi", capture(configSlot), any()) } returns updated
+
+        contributingController.turn("s-ctx", ChatRequest("hi"))
+
+        configSlot.captured.systemPrompt shouldContain "extra lesson context"
     }
 
     test("turn returns 404 when session not found") {

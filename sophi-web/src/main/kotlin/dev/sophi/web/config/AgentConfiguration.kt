@@ -100,8 +100,10 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
 
     @Bean
     fun agentConfig(learningPlugin: LearningPlugin, learningConfig: LearningConfig): AgentConfig {
-        // Note: promptSections is evaluated once at bean creation (startup). The web surface never calls recordSessionEnd,
-        // so session-end distillation does not run on web (runs on CLI only). Lessons distilled after startup won't appear until restart.
+        // promptSections() is reliability content only — evaluated once at bean creation (startup)
+        // is fine for it, since it doesn't need per-turn context. Lessons are delivered separately,
+        // per turn, via AgentController.configWithContext()'s collectContext() call — not baked in
+        // here — since they depend on that turn's actual input.
         val section = learningPlugin.promptSections(learningConfig.scope)
         return AgentConfig(model = providerProperties.model, systemPrompt = section)
     }
