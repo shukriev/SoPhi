@@ -49,6 +49,7 @@ class ScheduleDaemonCommand : CliktCommand(
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
             contextWindowTokens, taskTimeoutSeconds, maxTokens
         )
+        bootstrapOrchestrator(dev.sophi.schedule.store.TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")))
         while (true) {
             runCatching { engine.tickOnce() }
             delay(intervalSeconds * 1000)
