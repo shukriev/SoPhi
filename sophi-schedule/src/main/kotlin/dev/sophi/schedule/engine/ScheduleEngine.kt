@@ -112,9 +112,19 @@ class ScheduleEngine(
 
     private suspend fun runTask(task: ScheduledTask): RunRecord {
         val startedAtMs = System.currentTimeMillis()
-        val record = try {
+        var sessionId: String? = null
+        val record = if (wallClockBudgetExceeded(task, startedAtMs)) {
+            RunRecord(
+                task.id, startedAtMs, System.currentTimeMillis(),
+                RunOutcome.Failed(
+                    "wall-clock budget exceeded (${task.maxWallClockMsPerWindow}ms used within " +
+                        "the trailing ${task.wallClockWindowMs}ms window)"
+                ), ""
+            )
+        } else try {
             withTimeout(taskTimeoutMs) {
                 val session = sessionManager.create(title = "schedule:${task.name}")
+                sessionId = session.id
                 val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
                 val scopedRegistry = when (val type = task.subagentType) {
                     null -> fullRegistry
@@ -169,19 +179,35 @@ class ScheduleEngine(
                 }
                 RunRecord(
                     task.id, startedAtMs, System.currentTimeMillis(), outcome, summary,
-                    replans = replans, decompositions = decompositions
+                    replans = replans, decompositions = decompositions, sessionId = sessionId
                 )
             }
         } catch (e: TimeoutCancellationException) {
             RunRecord(task.id, startedAtMs, System.currentTimeMillis(),
-                RunOutcome.Failed("timed out after ${taskTimeoutMs / 1000}s"), "")
+                RunOutcome.Failed("timed out after ${taskTimeoutMs / 1000}s"), "", sessionId = sessionId)
         } catch (e: Exception) {
-            RunRecord(task.id, startedAtMs, System.currentTimeMillis(), RunOutcome.Failed(e.message ?: "unknown error"), "")
+            RunRecord(task.id, startedAtMs, System.currentTimeMillis(),
+                RunOutcome.Failed(e.message ?: "unknown error"), "", sessionId = sessionId)
         }
 
         runLog.append(record)
         taskStore.recordRun(task.id, record.finishedAtMs)
         notifier.notify(task, record)
         return record
+    }
+
+    /**
+     * True when [task]'s own past runs, summed within the trailing [ScheduledTask.wallClockWindowMs]
+     * ending at [nowMs], already meet or exceed [ScheduledTask.maxWallClockMsPerWindow]. Always
+     * false when that budget is unset (the default) — every existing task is unaffected. Derived
+     * entirely from RunLog's existing startedAtMs/finishedAtMs; no new persistence.
+     */
+    private fun wallClockBudgetExceeded(task: ScheduledTask, nowMs: Long): Boolean {
+        val budget = task.maxWallClockMsPerWindow ?: return false
+        val windowStart = nowMs - task.wallClockWindowMs
+        val usedMs = runLog.forTask(task.id)
+            .filter { it.startedAtMs >= windowStart }
+            .sumOf { it.finishedAtMs - it.startedAtMs }
+        return usedMs >= budget
     }
 }

@@ -9,6 +9,7 @@ import dev.sophi.core.agent.plan.StopCondition
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.schedule.model.RunOutcome
+import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
@@ -24,6 +25,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flow
@@ -481,5 +483,94 @@ class ScheduleEngineTest : FunSpec({
         // forTask() decodes from JSONL, so a non-null count here proves the field is actually
         // serialised and not merely held in memory.
         runLog.forTask(task.id).single().replans shouldNotBe null
+    }
+
+    test("runNow captures the session id it created into the RunRecord on success") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val (engine, taskStore, _) = engine(provider)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        record?.sessionId shouldNotBe null
+    }
+
+    test("a run that times out still records the session id it had already created") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flow {
+            kotlinx.coroutines.delay(500)
+            emit(StreamEvent.Content("too late"))
+        }
+        val (engine, taskStore, _) = engine(provider, taskTimeoutMs = 50)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        record?.sessionId shouldNotBe null
+    }
+
+    test("a run that throws still records the session id it had already created") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } throws RuntimeException("LLM unreachable")
+        val (engine, taskStore, _) = engine(provider)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        record?.sessionId shouldNotBe null
+    }
+
+    test("tickOnce skips a task whose wall-clock budget for the trailing window is already exhausted, without calling the provider") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("should never run"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            maxWallClockMsPerWindow = 1000L, wallClockWindowMs = 3600_000L
+        ))
+        val now = System.currentTimeMillis()
+        runLog.append(RunRecord(task.id, startedAtMs = now - 2000, finishedAtMs = now - 1000, outcome = RunOutcome.Succeeded, summary = "prior run"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).last()
+        (record.outcome is RunOutcome.Failed) shouldBe true
+        (record.outcome as RunOutcome.Failed).error shouldContain "budget"
+        record.sessionId shouldBe null
+        coVerify(exactly = 0) { provider.stream(any()) }
+    }
+
+    test("tickOnce still runs a task whose cumulative wall-clock usage is under budget") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("ran fine"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            maxWallClockMsPerWindow = 10_000L, wallClockWindowMs = 3600_000L
+        ))
+        val now = System.currentTimeMillis()
+        runLog.append(RunRecord(task.id, startedAtMs = now - 2000, finishedAtMs = now - 1000, outcome = RunOutcome.Succeeded, summary = "prior run"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).last().outcome shouldBe RunOutcome.Succeeded
+    }
+
+    test("tickOnce ignores prior runs outside the trailing window when checking the wall-clock budget") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("ran fine"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            maxWallClockMsPerWindow = 1000L, wallClockWindowMs = 60_000L
+        ))
+        val now = System.currentTimeMillis()
+        // Well outside the 60s trailing window — must not count toward the budget.
+        runLog.append(RunRecord(task.id, startedAtMs = now - 120_000, finishedAtMs = now - 119_000, outcome = RunOutcome.Succeeded, summary = "old run"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).last().outcome shouldBe RunOutcome.Succeeded
     }
 })
