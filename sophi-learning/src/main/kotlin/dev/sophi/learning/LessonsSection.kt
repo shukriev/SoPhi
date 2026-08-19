@@ -10,7 +10,7 @@ class LessonsSection(
 ) {
     private val json = Json { encodeDefaults = true }
 
-    fun render(scope: String, sessionId: String, query: String? = null): String? {
+    suspend fun render(scope: String, sessionId: String, query: String? = null): String? {
         val recalled = recall.recall(scope, config.lessonTokenBudget, query)
         if (recalled.isEmpty()) return null
         store.bumpUse(recalled)
