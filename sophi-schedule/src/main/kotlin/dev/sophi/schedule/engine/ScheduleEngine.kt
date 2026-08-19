@@ -116,10 +116,16 @@ class ScheduleEngine(
             withTimeout(taskTimeoutMs) {
                 val session = sessionManager.create(title = "schedule:${task.name}")
                 val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
-                val scopedRegistry = task.subagentType
-                    ?.let { type -> agentDefinitions.find { it.name == type } }
-                    ?.let { def -> fullRegistry.subset(def.allowedTools) }
-                    ?: fullRegistry
+                val scopedRegistry = when (val type = task.subagentType) {
+                    null -> fullRegistry
+                    else -> {
+                        val def = agentDefinitions.find { it.name == type }
+                            ?: throw IllegalStateException(
+                                "Scheduled task '${task.name}' (${task.id}) references unknown subagentType '$type'"
+                            )
+                        fullRegistry.subset(def.allowedTools)
+                    }
+                }
                 val loop = AgentLoop(
                     provider, scopedRegistry, sessionManager,
                     confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,

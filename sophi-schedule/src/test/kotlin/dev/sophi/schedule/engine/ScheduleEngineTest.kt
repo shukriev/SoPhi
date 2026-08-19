@@ -435,6 +435,38 @@ class ScheduleEngineTest : FunSpec({
         record.decompositions shouldBe null
     }
 
+    test("tickOnce fails closed when a task's subagentType matches no AgentDefinition, instead of falling back to the full unscoped registry") {
+        val dangerTool = object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "ran"
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("should never run"))
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry().register(dangerTool),
+            FileSessionManager(createTempDirectory("schedule-engine-unknown-subagent-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            agentDefinitions = emptyList()
+        )
+        val task = taskStore.add(ScheduledTask(
+            name = "orphaned", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            subagentType = "ghost"
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).single()
+        (record.outcome is RunOutcome.Failed) shouldBe true
+        (record.outcome as RunOutcome.Failed).error shouldContain "ghost"
+        (record.outcome as RunOutcome.Failed).error shouldContain "orphaned"
+    }
+
     test("plan counts survive a RunLog write/read round trip") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did some work"))
