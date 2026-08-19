@@ -1,47 +1,39 @@
 package dev.sophi.cli
 
+import dev.sophi.schedule.model.RunOutcome
+import dev.sophi.schedule.model.ScheduledTask
+import dev.sophi.schedule.model.TaskMode
+import dev.sophi.schedule.model.Trigger
+import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import java.io.ByteArrayOutputStream
-import java.io.PrintStream
 import kotlin.io.path.createTempDirectory
-import kotlin.io.path.writeText
 
 class ScheduleWiringTest : FunSpec({
 
-    test("loadAgentDefinitionsOrWarn returns an empty list and warns on stderr when a definition file is malformed") {
-        val agentsDir = createTempDirectory("agents-test")
-        agentsDir.resolve("broken.md").writeText("not a valid agent definition")
-
-        val captured = ByteArrayOutputStream()
-        val originalErr = System.err
-        System.setErr(PrintStream(captured))
-        val result = try {
-            loadAgentDefinitionsOrWarn(agentsDir)
-        } finally {
-            System.setErr(originalErr)
-        }
-
-        result.shouldBeEmpty()
-        captured.toString() shouldContain "Warning"
-        captured.toString() shouldContain agentsDir.toString()
-    }
-
-    test("loadAgentDefinitionsOrWarn returns an empty list without warning when the directory is simply empty") {
+    test("buildScheduleEngine fails a task closed when its subagentType matches no definition loaded from agentsDir") {
         val agentsDir = createTempDirectory("agents-test-empty")
+        val scheduleDir = createTempDirectory("schedule-test")
+        val engine = buildScheduleEngine(
+            model = "m", providerType = "claude", apiKeyOption = "test-key", baseUrl = null,
+            scheduleDir = scheduleDir, sessionsDir = createTempDirectory("sessions-test"),
+            agentsDir = agentsDir, braveApiKeyOption = null, contextWindowTokens = 100_000
+        )
+        val taskStore = TaskStore(scheduleDir.resolve("tasks.json"))
+        val task = taskStore.add(ScheduledTask(
+            name = "orphaned", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p",
+            subagentType = "ghost"
+        ))
 
-        val captured = ByteArrayOutputStream()
-        val originalErr = System.err
-        System.setErr(PrintStream(captured))
-        val result = try {
-            loadAgentDefinitionsOrWarn(agentsDir)
-        } finally {
-            System.setErr(originalErr)
-        }
+        // This throws (and is caught into RunOutcome.Failed) before any provider call is made —
+        // ScheduleEngine.runTask resolves subagentType before constructing the AgentLoop — so
+        // this test needs no real or mocked LLM endpoint. It proves buildScheduleEngine's new
+        // Sophi.runtime{}-based wiring threads agentsDir's (empty, here) definitions into the
+        // resulting ScheduleEngine correctly, exercising the exact production code path.
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
 
-        result.shouldBeEmpty()
-        captured.toString() shouldBe ""
+        (record?.outcome is RunOutcome.Failed) shouldBe true
+        (record?.outcome as RunOutcome.Failed).error shouldContain "ghost"
     }
 })

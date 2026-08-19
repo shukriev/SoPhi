@@ -124,7 +124,7 @@ internal suspend fun buildCliRuntime(
     val loopGuardPolicy = TerminalLoopGuardPolicy(terminal, input)
 
     val agentsDir = Path.of(opts.agentsDir).also { it.createDirectories() }
-    val agentDefinitions = AgentDefinitionLoader().load(agentsDir)
+    val agentDefinitions = AgentDefinitionLoader().loadOrWarn(agentsDir, onWarning)
 
     val skillRegistry = SkillRegistry.load(
         globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
