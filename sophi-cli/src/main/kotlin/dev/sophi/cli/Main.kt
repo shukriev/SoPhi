@@ -15,6 +15,7 @@ fun main(args: Array<String>) = SophiCli()
             SchedulePauseCommand(), ScheduleResumeCommand(), ScheduleRemoveCommand(),
             ScheduleInstallLaunchdCommand()
         ),
+        ProposalsCommand().subcommands(ProposalsListCommand(), ProposalsAcceptCommand(), ProposalsRejectCommand()),
         GoalCommand().subcommands(GoalRunCommand()),
         SkillCommand().subcommands(SkillInstallCommand())
     )
