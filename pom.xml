@@ -16,6 +16,7 @@
         <module>sophi-skills</module>
         <module>sophi-extensions</module>
         <module>sophi-learning</module>
+        <module>sophi-store</module>
         <module>sophi-memory</module>
         <module>sophi-mcp</module>
         <module>sophi-hub</module>
@@ -98,6 +99,11 @@
             <dependency>
                 <groupId>dev.sophi</groupId>
                 <artifactId>sophi-learning</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.sophi</groupId>
+                <artifactId>sophi-store</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

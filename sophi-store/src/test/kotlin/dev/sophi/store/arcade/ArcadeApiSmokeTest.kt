@@ -1,4 +1,4 @@
-package dev.sophi.memory.jane
+package dev.sophi.store.arcade
 
 import com.arcadedb.database.Database
 import com.arcadedb.database.DatabaseFactory

@@ -1,4 +1,4 @@
-package dev.sophi.memory.store.arcade
+package dev.sophi.store.arcade
 
 data class Scored(val id: String, val score: Double)
 
