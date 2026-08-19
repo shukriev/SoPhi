@@ -67,4 +67,17 @@ class ProposalStoreTest : FunSpec({
         store.list() shouldHaveSize 1
         store.list().single().status shouldBe "rejected"
     }
+
+    test("concurrent accept and reject on the same proposal never let both succeed") {
+        val store = ProposalStore(tempdir().toPath().resolve("proposals.jsonl"))
+        val p = store.add(Proposal(sessionId = "s1", title = "A", category = "process", rationale = "r", suggestedAction = "x"))
+        val results = java.util.concurrent.ConcurrentLinkedQueue<Boolean>()
+
+        val t1 = Thread { results.add(store.accept(p.id)) }
+        val t2 = Thread { results.add(store.reject(p.id, "no")) }
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        results.count { it } shouldBe 1
+    }
 })

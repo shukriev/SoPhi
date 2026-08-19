@@ -23,14 +23,17 @@ class ProposalStore(private val path: Path) {
 
     fun get(id: String): Proposal? = fold()[id]
 
+    @Synchronized
     fun add(proposal: Proposal): Proposal {
         append(proposal)
         return proposal
     }
 
+    @Synchronized
     fun accept(id: String): Boolean =
         transition(id) { it.copy(status = "accepted", reviewedAtMs = System.currentTimeMillis()) }
 
+    @Synchronized
     fun reject(id: String, reason: String): Boolean =
         transition(id) { it.copy(status = "rejected", reviewedAtMs = System.currentTimeMillis(), reviewReason = reason) }
 
