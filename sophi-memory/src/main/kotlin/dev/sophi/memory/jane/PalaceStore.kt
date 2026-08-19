@@ -1,9 +1,9 @@
 package dev.sophi.memory.jane
 
 import dev.sophi.memory.store.JsonlLog
-import dev.sophi.memory.store.arcade.ArcadeStore
-import dev.sophi.memory.store.arcade.EmbeddedArcadeStore
-import dev.sophi.memory.store.arcade.Scored
+import dev.sophi.store.arcade.ArcadeStore
+import dev.sophi.store.arcade.EmbeddedArcadeStore
+import dev.sophi.store.arcade.Scored
 import java.nio.file.Files
 import java.nio.file.Path
 
