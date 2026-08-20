@@ -53,12 +53,7 @@ class DecomposeGoalTool(
     override fun riskLevel(argumentsJson: String): RiskLevel {
         val args = runCatching { json.decodeFromString(DecomposeGoalArgs.serializer(), argumentsJson) }.getOrNull()
             ?: return RiskLevel.SAFE
-        val tiers = args.expectedTools.orEmpty().mapNotNull { fullRegistry.getOrNull(it)?.riskLevel("{}") }
-        return when {
-            RiskLevel.DESTRUCTIVE in tiers -> RiskLevel.DESTRUCTIVE
-            RiskLevel.CAUTION in tiers -> RiskLevel.CAUTION
-            else -> RiskLevel.SAFE
-        }
+        return fullRegistry.worstRiskAmong(args.expectedTools)
     }
 
     override suspend fun execute(argumentsJson: String): String {

@@ -47,4 +47,19 @@ class ToolRegistry {
      */
     fun safeGrantsFrom(expectedTools: List<String>?): Set<String> =
         expectedTools.orEmpty().filter { getOrNull(it)?.riskLevel("{}") == RiskLevel.SAFE }.toSet()
+
+    /**
+     * The worst (most restrictive) risk tier among [expectedTools], probed the same way
+     * [safeGrantsFrom] does — empty arguments ("{}"), since no real call exists yet. Shared by
+     * SubagentTool/DecomposeGoalTool to report their own risk level from a caller's self-declared
+     * expected tools.
+     */
+    fun worstRiskAmong(expectedTools: List<String>?): RiskLevel {
+        val tiers = expectedTools.orEmpty().mapNotNull { getOrNull(it)?.riskLevel("{}") }
+        return when {
+            RiskLevel.DESTRUCTIVE in tiers -> RiskLevel.DESTRUCTIVE
+            RiskLevel.CAUTION in tiers -> RiskLevel.CAUTION
+            else -> RiskLevel.SAFE
+        }
+    }
 }

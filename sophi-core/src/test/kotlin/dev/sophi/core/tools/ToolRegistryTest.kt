@@ -161,4 +161,23 @@ class ToolRegistryTest : FunSpec({
         registry.safeGrantsFrom(null) shouldBe emptySet()
         registry.safeGrantsFrom(emptyList()) shouldBe emptySet()
     }
+
+    test("worstRiskAmong reports the worst tier among the given names") {
+        val registry = ToolRegistry()
+            .register(riskyTool("safe_tool", RiskLevel.SAFE))
+            .register(riskyTool("caution_tool", RiskLevel.CAUTION))
+            .register(riskyTool("destructive_tool", RiskLevel.DESTRUCTIVE))
+
+        registry.worstRiskAmong(listOf("safe_tool")) shouldBe RiskLevel.SAFE
+        registry.worstRiskAmong(listOf("safe_tool", "caution_tool")) shouldBe RiskLevel.CAUTION
+        registry.worstRiskAmong(listOf("safe_tool", "caution_tool", "destructive_tool")) shouldBe RiskLevel.DESTRUCTIVE
+    }
+
+    test("worstRiskAmong ignores names not present in the registry and defaults to SAFE for null or empty") {
+        val registry = ToolRegistry().register(riskyTool("destructive_tool", RiskLevel.DESTRUCTIVE))
+
+        registry.worstRiskAmong(listOf("does_not_exist")) shouldBe RiskLevel.SAFE
+        registry.worstRiskAmong(null) shouldBe RiskLevel.SAFE
+        registry.worstRiskAmong(emptyList()) shouldBe RiskLevel.SAFE
+    }
 })
