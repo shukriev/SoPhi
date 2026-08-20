@@ -24,6 +24,7 @@ import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
+import dev.sophi.skills.SkillInvocationStore
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
@@ -136,6 +137,8 @@ class RuntimeBuilder {
             contextWindowTokens = window
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
+        SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
+            .also { pluginRegistry.register(it) }
 
         val learningPlugin = learningConfig?.let { cfg ->
             LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p,
