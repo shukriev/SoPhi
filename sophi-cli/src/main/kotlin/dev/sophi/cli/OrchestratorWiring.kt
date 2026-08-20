@@ -23,6 +23,9 @@ internal val ORCHESTRATOR_PROMPT = """
       failures, refreshed by `sophi skill review`; may be missing or empty if no one has run it yet
     - ~/.sophi/skills/.unattributed.jsonl — invocations of a skill with no matching recorded
       version, also refreshed by `sophi skill review`
+    - ~/.sophi/memory/consolidations.jsonl — every memory consolidation run: merged/strengthened/
+      compressed/pruned/purged counts, which memory ids were soft-deleted or physically purged,
+      and whether auto-purge was enabled for that run
 
     Look for patterns: a lesson recalled often but never correlated with a good outcome, a tool that
     fails disproportionately, a recurring theme across session outcomes. When you have one concrete,

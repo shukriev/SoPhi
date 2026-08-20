@@ -73,6 +73,10 @@ class OrchestratorWiringTest : FunSpec({
         ORCHESTRATOR_PROMPT shouldContain "~/.sophi/skills/.unattributed.jsonl"
     }
 
+    test("the prompt tells the orchestrator to inspect the consolidation history") {
+        ORCHESTRATOR_PROMPT shouldContain "~/.sophi/memory/consolidations.jsonl"
+    }
+
     test("re-bootstrapping after the stored prompt has drifted from the current constant updates the stored task") {
         val store = TaskStore(tempdir().toPath().resolve("tasks.json"))
         val on: (String) -> String? = { if (it == ORCHESTRATOR_ENABLED_ENV) "true" else null }
