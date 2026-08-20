@@ -92,4 +92,35 @@ class ForgetEngineTest : FunSpec({
         r.engine.purgeSoftDeleted(cutoffMs = 500L, nowMs = 1_000L) shouldBe listOf("mem_a")     // only mem_a is old enough
         r.store.memories().keys shouldBe setOf("mem_b")
     }
+
+    test("restore re-activates a memory that is soft-deleted but not yet purged") {
+        val r = Rig()
+        val a = r.add("mem_a")
+        r.store.upsertMemory(a.copy(softDeletedAt = 100L))
+
+        r.engine.restore("mem_a") shouldBe true
+
+        r.store.memories().getValue("mem_a").softDeletedAt shouldBe null
+        r.store.memories().getValue("mem_a").active shouldBe true
+    }
+
+    test("restore returns false for an unknown id") {
+        val r = Rig()
+        r.engine.restore("mem_zz") shouldBe false
+    }
+
+    test("restore returns false for a memory that was never soft-deleted") {
+        val r = Rig()
+        r.add("mem_a")
+        r.engine.restore("mem_a") shouldBe false
+    }
+
+    test("restore returns false for an id that has already been physically purged") {
+        val r = Rig()
+        val a = r.add("mem_a")
+        r.store.upsertMemory(a.copy(softDeletedAt = 100L))
+        r.engine.purgeSoftDeleted(cutoffMs = 500L, nowMs = 1_000L)
+
+        r.engine.restore("mem_a") shouldBe false
+    }
 })

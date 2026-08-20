@@ -65,4 +65,15 @@ class ForgetEngine(
         victims.forEach { forgetOne(it.id, nowMs) }
         return victims.map { it.id }
     }
+
+    /** The inverse of purgeSoftDeleted: re-activates a memory before its grace period elapses.
+     *  Returns false for an unknown id, a memory that was never soft-deleted, or one that's
+     *  already been physically purged -- the last two are indistinguishable, correctly, since
+     *  the memory is equally unrecoverable either way from restore's point of view. */
+    fun restore(id: String): Boolean {
+        val m = store.memories()[id] ?: return false
+        if (m.softDeletedAt == null) return false
+        store.upsertMemory(m.copy(softDeletedAt = null))
+        return true
+    }
 }
