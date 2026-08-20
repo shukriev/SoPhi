@@ -23,4 +23,15 @@ class SkillInvocationStoreTest : FunSpec({
     test("all() returns an empty list when no invocations were ever recorded") {
         store().all() shouldBe emptyList()
     }
+
+    test("an embedded newline in a field does not corrupt the JSONL framing of the following record") {
+        val store = store()
+        store.record(SkillInvocationEvent(ts = 1L, sessionId = "s1\nrogue-line", skillId = "site-a"))
+        store.record(SkillInvocationEvent(ts = 2L, sessionId = "s2", skillId = "site-b"))
+
+        val all = store.all()
+
+        all shouldHaveSize 2
+        all[1].skillId shouldBe "site-b"
+    }
 })

@@ -14,7 +14,11 @@ class SkillInvocationStore(private val path: Path) {
     @Synchronized
     fun record(event: SkillInvocationEvent) {
         path.parent?.let { Files.createDirectories(it) }
-        val line = json.encodeToString(event)
+        // kotlinx.serialization already JSON-escapes embedded newlines in string fields, so this
+        // never actually strips anything today -- kept only to match SkillVersionStore/
+        // ProposalStore's identical defensive line, in case a future field stops going through
+        // the JSON encoder untouched.
+        val line = json.encodeToString(event).replace("\n", " ")
         Files.write(path, (line + "\n").toByteArray(), CREATE, APPEND)
     }
 
