@@ -123,4 +123,16 @@ class ForgetEngineTest : FunSpec({
 
         r.engine.restore("mem_a") shouldBe false
     }
+
+    test("restore refuses a memory that is both soft-deleted and superseded, rather than claim success while it stays invisible") {
+        val r = Rig()
+        val a = r.add("mem_a")
+        r.store.upsertMemory(a.copy(softDeletedAt = 100L, supersededBy = "mem_b"))
+
+        r.engine.restore("mem_a") shouldBe false
+
+        // Refused, so nothing changed -- still soft-deleted and still superseded.
+        r.store.memories().getValue("mem_a").softDeletedAt shouldBe 100L
+        r.store.memories().getValue("mem_a").supersededBy shouldBe "mem_b"
+    }
 })
