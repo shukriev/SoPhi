@@ -5,6 +5,8 @@ import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.skills.SkillLoader
 import dev.sophi.skills.SkillMetadata
+import dev.sophi.skills.SkillVersion
+import dev.sophi.skills.SkillVersionStore
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -82,6 +84,9 @@ class WriteSkillTool(
         if (reread == null || reread.metadata.title != args.title) {
             return "Error: wrote ${args.id}.md but it failed to re-parse — check the title/description for characters kaml can't round-trip"
         }
+
+        SkillVersionStore(targetDir.resolve(".versions.jsonl"))
+            .record(SkillVersion(skillId = args.id, project = args.project, content = content))
 
         return "Wrote skill '${args.id}' to $resolved"
     }

@@ -3,7 +3,9 @@ package dev.sophi.cli
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.skills.SkillMetadata
 import dev.sophi.skills.SkillLoader
+import dev.sophi.skills.SkillVersionStore
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
@@ -80,5 +82,40 @@ class WriteSkillToolTest : FunSpec({
 
     test("riskLevel is always DESTRUCTIVE") {
         tool.riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
+    }
+
+    test("execute() records a version on a successful write") {
+        runBlocking { tool.execute(VALID_ARGS) }
+
+        val versions = SkillVersionStore(globalDir.resolve(".versions.jsonl")).history("site-example-com", project = false)
+
+        versions shouldHaveSize 1
+        versions.first().content shouldContain "Step 1: navigate to /login."
+    }
+
+    test("execute() records a new version per overwrite, not just the first write") {
+        runBlocking { tool.execute(VALID_ARGS) }
+        val updated = VALID_ARGS.replace("How to use example.com", "Updated notes")
+        runBlocking { tool.execute(updated) }
+
+        val versions = SkillVersionStore(globalDir.resolve(".versions.jsonl")).history("site-example-com", project = false)
+
+        versions shouldHaveSize 2
+        versions.first().content shouldContain "Updated notes"
+    }
+
+    test("execute() with project=true records into the project versions log, not the global one") {
+        val args = """{"id":"site-example-com","title":"t","description":"d","tags":[],"body":"b","project":true}"""
+        runBlocking { tool.execute(args) }
+
+        SkillVersionStore(projectDir.resolve(".versions.jsonl")).history("site-example-com", project = true) shouldHaveSize 1
+        SkillVersionStore(globalDir.resolve(".versions.jsonl")).history("site-example-com", project = false) shouldHaveSize 0
+    }
+
+    test("a rejected write (bad id pattern) records no version") {
+        val badArgs = """{"id":"not-a-site-id","title":"t","description":"d","tags":[],"body":"b"}"""
+        runBlocking { tool.execute(badArgs) }
+
+        SkillVersionStore(globalDir.resolve(".versions.jsonl")).history("not-a-site-id", project = false) shouldHaveSize 0
     }
 })
