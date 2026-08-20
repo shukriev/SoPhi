@@ -160,7 +160,8 @@ class RuntimeBuilder {
                 null
             } else {
                 val palace = JanesPalace(
-                    JanesPalaceConfig(home = memoryHome, sessionModel = model), p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
+                    JanesPalaceConfig(home = memoryHome, sessionModel = model, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
+                    p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                 )
                 MemoryPlugin(palace).also { pluginRegistry.register(it) }
             }

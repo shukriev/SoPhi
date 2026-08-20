@@ -37,7 +37,10 @@ internal fun palace(
         buildOpenAiCompatEmbeddingProvider(baseUrl, apiKey, embeddingModel, dimensions) else null
     val llm = if (baseUrl != null && chatModel != null)
         buildProvider("openai-compat", apiKey, baseUrl, chatModel, 60L, 2) else null
-    return JanesPalace(JanesPalaceConfig(sessionModel = chatModel), llm, emb, embeddingModel ?: "unknown")
+    return JanesPalace(
+        JanesPalaceConfig(sessionModel = chatModel, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
+        llm, emb, embeddingModel ?: "unknown"
+    )
 }
 
 private fun renderView(v: dev.sophi.memory.MemoryView): String {
