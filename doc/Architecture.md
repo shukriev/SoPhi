@@ -74,8 +74,8 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │        sophi-memory  (Jane's Theory — declarative memory)    │
 │  MemoryTechnique SPI · JanesPalace (rooms, salience, decay,  │
 │  narrative graph, profile) · recall via ContextContributor   │
-│  Storage: ArcadeDB (embedded graph+document+vector db) via   │
-│  ArcadeStore — generic, technique-agnostic (ADR-026)          │
+│  Storage: ArcadeDB via sophi-store's ArcadeStore (generic,   │
+│  technique-agnostic, its own leaf module — ADR-026)           │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │     sophi-schedule  (recurring & goal-based task scheduler)  │
@@ -101,7 +101,8 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-hub` | Local-only (127.0.0.1) WebSocket hub — `HubEvent`/`HubCommand` protocol, `HubServer` (embedded by `sophi-companion`), `HubClient` (used by `sophi-cli`); lets the companion monitor and remote-control running CLI sessions (ADR-023) | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
-| `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn. Storage is ArcadeDB (embedded document+graph+vector database) behind a generic `ArcadeStore` primitive layer (ADR-026), replacing the original JSONL + brute-force-cosine storage; embedded-only, single-process | complete |
+| `sophi-store` | Generic document/graph/vector storage primitives over ArcadeDB (`ArcadeStore`/`EmbeddedArcadeStore`), extracted from `sophi-memory` for reuse by any future consumer — depends on nothing Sophi-internal | complete |
+| `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn. Storage is ArcadeDB (embedded document+graph+vector database) via `sophi-store`'s `ArcadeStore` primitive layer (ADR-026), replacing the original JSONL + brute-force-cosine storage; embedded-only, single-process | complete |
 | `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired; the `Planner` it hands `PlanRunner` is a `TreePlanner` widening the replan search (probation, see Plan + PlanRunner) | complete |
 | `sophi-calendar` | Native OS calendar CRUD: `CalendarProvider` seam, `MacCalendarProvider` (AppleScript/Calendar.app) — Windows/Linux deferred; six create/read/update/delete/list Tools | in progress |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
@@ -111,6 +112,8 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-infra` | Auth, budget, observability | complete |
 
 **Dependency direction rules (never violate):**
+- `sophi-store` depends on nothing Sophi-internal (ArcadeDB + kotlin-stdlib only); any module
+  may depend on it, it depends on none of them
 - `sophi-core` never imports from `sophi-web`, `sophi-cli`, `sophi-sdk`, or `sophi-infra`
 - `sophi-ai` never imports from `sophi-core`
 - `sophi-skills` has no dependency on `sophi-core`
@@ -617,9 +620,11 @@ adapts it to the harness — `contribute()` (`ContextContributor`) calls `recall
 an embedded ArcadeDB database (ADR-026): `Memory`/`CausalEdge` are real graph vertices/edges
 with a native HNSW vector index on the embedding property; `ProfileAttribute`/`RecallRecord`
 are documents; `audit.jsonl`/`last-recall.txt`/`consolidation.marker` stay plain files. The
-generic `ArcadeStore` primitive layer (`dev.sophi.memory.store.arcade`) that `PalaceStore`
-builds on carries no Jane's-Palace-specific types, so a future second memory technique can
-reuse it. ArcadeDB locks its database to one open process — `PalaceStore`/`JanesPalace`/
+generic `ArcadeStore` primitive layer (`dev.sophi.store.arcade`, in its own module `sophi-store`
+since Phase 0 of `docs/superpowers/specs/2026-08-18-autonomous-self-improvement-roadmap.md`)
+that `PalaceStore` builds on carries no Jane's-Palace-specific types, so a future second memory
+technique — or any other consumer — can reuse it without depending on `sophi-memory`. ArcadeDB
+locks its database to one open process — `PalaceStore`/`JanesPalace`/
 `MemoryPlugin.close()` release it, and only one Sophi process should hold a given memory home
 at a time (see ADR-026: ArcadeDB's remote client can't do vector search in this version, so
 the originally-planned CLI/`sophi-web` shared-server split was dropped).

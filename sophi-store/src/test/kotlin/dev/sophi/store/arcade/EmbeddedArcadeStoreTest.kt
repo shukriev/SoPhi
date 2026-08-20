@@ -1,4 +1,4 @@
-package dev.sophi.memory.store.arcade
+package dev.sophi.store.arcade
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir

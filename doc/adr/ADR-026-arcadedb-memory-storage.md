@@ -86,6 +86,12 @@ no such release) so a process that's done with memory frees the lock for the nex
    `Memory`/`CausalEdge` types, so a second memory technique — should one ever exist — builds
    on the same layer instead of re-solving "how do I talk to ArcadeDB."
 
+   **Addendum (2026-08-18):** this storage layer was subsequently extracted into its own
+   module, `sophi-store` (package `dev.sophi.store.arcade`), so consumers other than
+   `sophi-memory` can depend on it directly — see
+   `docs/superpowers/specs/2026-08-18-sophi-store-extraction-design.md`. The decision recorded
+   above (generic layer, not Jane's-Palace-specific) is unchanged; only its address moved.
+
 4. **Not everything needs to move.** `audit.jsonl`/`last-recall.txt`/`consolidation.marker`
    are write-once-read-rarely or single-value state with no query need; keeping them as plain
    files means the audit trail survives even a corrupted or unreachable database — a real
