@@ -86,7 +86,7 @@ class WriteSkillTool(
         }
 
         SkillVersionStore(targetDir.resolve(".versions.jsonl"))
-            .record(SkillVersion(skillId = args.id, project = args.project, content = content))
+            .record(SkillVersion(skillId = args.id, project = args.project, content = content, trial = true))
 
         return "Wrote skill '${args.id}' to $resolved"
     }

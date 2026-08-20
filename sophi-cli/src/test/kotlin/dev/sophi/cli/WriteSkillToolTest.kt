@@ -118,4 +118,12 @@ class WriteSkillToolTest : FunSpec({
 
         SkillVersionStore(globalDir.resolve(".versions.jsonl")).history("not-a-site-id", project = false) shouldHaveSize 0
     }
+
+    test("execute() records the version as trial = true, not the SkillVersion default of false") {
+        runBlocking { tool.execute(VALID_ARGS) }
+
+        val versions = SkillVersionStore(globalDir.resolve(".versions.jsonl")).history("site-example-com", project = false)
+
+        versions.single().trial shouldBe true
+    }
 })
