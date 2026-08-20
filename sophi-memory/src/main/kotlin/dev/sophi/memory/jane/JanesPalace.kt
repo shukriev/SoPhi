@@ -36,7 +36,10 @@ class JanesPalace(
         MemoryWriter(store, profile, it, embeddingModelName, config)
     }
     private val forgetEngine = ForgetEngine(store, profile)
-    private val consolidator = Consolidator(store, forgetEngine, llmProvider, config)
+    private val consolidator = Consolidator(
+        store, forgetEngine, llmProvider, config,
+        ConsolidationHistoryStore(config.home.resolve("consolidations.jsonl"))
+    )
 
     override suspend fun recall(query: RecallQuery): MemoryBlock? {
         val w = walker ?: return null

@@ -13,12 +13,14 @@ import kotlin.math.min
  * The "sleep" cycle (spec §8): Merge -> Strengthen -> Compress -> Prune -> Purge.
  * No daemon: runs opportunistically (isDue at session end) or on demand from the CLI.
  * Compress needs an LLM; without a provider it is skipped, everything else still runs.
+ * Purge is the one physically-irreversible step; config.autoPurgeEnabled can disable just it.
  */
 class Consolidator(
     private val store: PalaceStore,
     private val forgetEngine: ForgetEngine,
     private val provider: LLMProvider?,
-    private val config: JanesPalaceConfig
+    private val config: JanesPalaceConfig,
+    private val historyStore: ConsolidationHistoryStore
 ) {
     fun isDue(nowMs: Long): Boolean =
         (store.lastConsolidationMs() ?: Long.MIN_VALUE) + config.consolidationIntervalMs <= nowMs
@@ -26,15 +28,20 @@ class Consolidator(
     suspend fun run(nowMs: Long): ConsolidationReport {
         val merged = merge(nowMs)
         val strengthened = strengthen(nowMs)
-        val compressed = compress(nowMs)
+        val compressResult = compress(nowMs)
         val pruned = prune(nowMs)
-        val purged = forgetEngine.purgeSoftDeleted(nowMs - config.softDeleteGraceMs, nowMs)
+        val purged = if (config.autoPurgeEnabled) forgetEngine.purgeSoftDeleted(nowMs - config.softDeleteGraceMs, nowMs) else emptyList()
         store.markConsolidation(nowMs)
-        return ConsolidationReport(merged, strengthened, compressed, pruned, purged)
+        historyStore.record(ConsolidationRecord(
+            ts = nowMs, merged = merged.size, strengthened = strengthened, compressed = compressResult.threadsCompressed,
+            pruned = pruned.size, softDeletedIds = merged + compressResult.softDeletedIds + pruned, purgedIds = purged,
+            autoPurgeEnabled = config.autoPurgeEnabled
+        ))
+        return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size)
     }
 
-    private fun merge(nowMs: Long): Int {
-        var count = 0
+    private fun merge(nowMs: Long): List<String> {
+        val absorbedAll = mutableListOf<String>()
         Room.entries.forEach { room ->
             val actives = store.memories().values.filter { it.active && it.room == room }
                 .sortedBy { it.createdAt }
@@ -60,12 +67,13 @@ class Consolidator(
                                 fromId = if (e.fromId == b.id) a.id else e.fromId,
                                 toId = if (e.toId == b.id) a.id else e.toId, removed = false))
                         }
-                        absorbed += b.id; count++
+                        absorbed += b.id
                     }
                 }
             }
+            absorbedAll += absorbed
         }
-        return count
+        return absorbedAll
     }
 
     private fun strengthen(nowMs: Long): Int {
@@ -78,12 +86,15 @@ class Consolidator(
         }
     }
 
-    private suspend fun compress(nowMs: Long): Int {
-        val llm = provider ?: return 0
-        val model = config.encoderModel ?: config.sessionModel ?: return 0
+    private data class CompressResult(val threadsCompressed: Int, val softDeletedIds: List<String>)
+
+    private suspend fun compress(nowMs: Long): CompressResult {
+        val llm = provider ?: return CompressResult(0, emptyList())
+        val model = config.encoderModel ?: config.sessionModel ?: return CompressResult(0, emptyList())
         val all = store.memories()
         val edges = store.edges().filter { !it.compressed }
-        var count = 0
+        var threadsCompressed = 0
+        val softDeleted = mutableListOf<String>()
         edges.groupBy { it.threadLabel }.forEach { (label, threadEdges) ->
             val ids = (threadEdges.map { it.fromId } + threadEdges.map { it.toId }).distinct()
             val members = ids.mapNotNull { all[it] }.filter { it.active }.sortedBy { it.createdAt }
@@ -119,17 +130,19 @@ class Consolidator(
             store.upsertEdge(CausalEdge(members.first().id, summary.id, label, compressed = true))
             store.upsertEdge(CausalEdge(summary.id, members.last().id, label, compressed = true))
             threadEdges.forEach { store.upsertEdge(it.copy(removed = true)) }
-            members.drop(1).dropLast(1).forEach { store.upsertMemory(it.copy(softDeletedAt = nowMs)) }
-            count++
+            val interior = members.drop(1).dropLast(1)
+            interior.forEach { store.upsertMemory(it.copy(softDeletedAt = nowMs)) }
+            softDeleted += interior.map { it.id }
+            threadsCompressed++
         }
-        return count
+        return CompressResult(threadsCompressed, softDeleted)
     }
 
-    private fun prune(nowMs: Long): Int {
+    private fun prune(nowMs: Long): List<String> {
         val linked = store.edges().flatMap { listOf(it.fromId, it.toId) }.toSet()
         return store.memories().values
             .filter { it.active && it.id !in linked && priority(it, nowMs, config.halfLifeMs) < config.pruneFloor }
             .onEach { store.upsertMemory(it.copy(softDeletedAt = nowMs)) }
-            .count()
+            .map { it.id }
     }
 }

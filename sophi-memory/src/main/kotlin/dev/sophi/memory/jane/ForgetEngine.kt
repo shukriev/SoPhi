@@ -60,9 +60,9 @@ class ForgetEngine(
     }
 
     /** Consolidation purge: physically drop soft-deleted memories older than [cutoffMs]. */
-    fun purgeSoftDeleted(cutoffMs: Long, nowMs: Long): Int {
+    fun purgeSoftDeleted(cutoffMs: Long, nowMs: Long): List<String> {
         val victims = store.memories().values.filter { it.softDeletedAt != null && it.softDeletedAt!! < cutoffMs }
         victims.forEach { forgetOne(it.id, nowMs) }
-        return victims.size
+        return victims.map { it.id }
     }
 }

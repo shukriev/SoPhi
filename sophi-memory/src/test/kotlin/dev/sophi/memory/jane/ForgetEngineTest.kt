@@ -89,7 +89,7 @@ class ForgetEngineTest : FunSpec({
         val a = r.add("mem_a"); val b = r.add("mem_b")
         r.store.upsertMemory(a.copy(softDeletedAt = 100L))
         r.store.upsertMemory(b.copy(softDeletedAt = 900L))
-        r.engine.purgeSoftDeleted(cutoffMs = 500L, nowMs = 1_000L) shouldBe 1     // only mem_a is old enough
+        r.engine.purgeSoftDeleted(cutoffMs = 500L, nowMs = 1_000L) shouldBe listOf("mem_a")     // only mem_a is old enough
         r.store.memories().keys shouldBe setOf("mem_b")
     }
 })

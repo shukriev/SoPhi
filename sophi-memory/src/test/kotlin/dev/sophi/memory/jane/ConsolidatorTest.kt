@@ -6,6 +6,7 @@ import dev.sophi.ai.api.TokenUsage
 import dev.sophi.memory.FakeEmbeddingProvider
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
@@ -16,11 +17,11 @@ private const val DAY = 24 * 3_600_000L
 class ConsolidatorTest : FunSpec({
     val fake = FakeEmbeddingProvider()
 
-    class Rig(provider: LLMProvider? = null) {
+    class Rig(provider: LLMProvider? = null, val config: JanesPalaceConfig = JanesPalaceConfig(sessionModel = "test-model")) {
         val store = PalaceStore(tempdir().toPath())
-        val config = JanesPalaceConfig(sessionModel = "test-model")
         val engine = ForgetEngine(store, UserProfile(store))
-        val consolidator = Consolidator(store, engine, provider, config)
+        val historyStore = ConsolidationHistoryStore(tempdir().toPath().resolve("consolidations.jsonl"))
+        val consolidator = Consolidator(store, engine, provider, config, historyStore)
         suspend fun add(id: String, text: String, room: Room = Room.EPISODES,
                         salience: Double = 0.8, at: Long = 0L, softDeletedAt: Long? = null): Memory {
             val m = Memory(id, text, room, salience, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
@@ -119,5 +120,48 @@ class ConsolidatorTest : FunSpec({
         r.store.markConsolidation(0L)
         r.consolidator.isDue(nowMs = 1_000L) shouldBe false
         r.consolidator.isDue(nowMs = 25 * 3_600_000L) shouldBe true
+    }
+
+    test("autoPurgeEnabled = false skips the purge step; a memory past grace stays soft-deleted, not removed") {
+        val r = Rig(config = JanesPalaceConfig(sessionModel = "test-model", autoPurgeEnabled = false))
+        val now = 400 * DAY
+        r.add("mem_old_soft", "already soft deleted", at = 0L, softDeletedAt = now - 31 * DAY)
+
+        val report = r.consolidator.run(nowMs = now)
+
+        report.purged shouldBe 0
+        r.store.memories().containsKey("mem_old_soft") shouldBe true
+        r.store.memories().getValue("mem_old_soft").softDeletedAt shouldBe (now - 31 * DAY)
+    }
+
+    test("every run() appends a ConsolidationRecord to the history store, including a no-op run") {
+        val r = Rig()
+
+        r.consolidator.run(nowMs = 1_000L)
+
+        val history = r.historyStore.all()
+        history shouldHaveSize 1
+        history.single().ts shouldBe 1_000L
+        history.single().autoPurgeEnabled shouldBe true
+    }
+
+    test("softDeletedIds on the recorded entry match the ids actually soft-deleted this run") {
+        val r = Rig()
+        r.add("mem_a", "dentist appointment thursday fourteen", at = 0L, salience = 0.6)
+        r.add("mem_b", "dentist appointment thursday fourteen", at = 100L, salience = 0.5)
+
+        r.consolidator.run(nowMs = 1_000L)
+
+        r.historyStore.all().single().softDeletedIds shouldBe listOf("mem_b")
+    }
+
+    test("purgedIds on the recorded entry match the ids actually purged this run") {
+        val r = Rig()
+        val now = 400 * DAY
+        r.add("mem_old_soft", "already soft deleted", at = 0L, softDeletedAt = now - 31 * DAY)
+
+        r.consolidator.run(nowMs = now)
+
+        r.historyStore.all().single().purgedIds shouldBe listOf("mem_old_soft")
     }
 })
