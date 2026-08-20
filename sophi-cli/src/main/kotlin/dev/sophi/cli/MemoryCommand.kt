@@ -24,7 +24,7 @@ import kotlinx.coroutines.runBlocking
 class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control Sophi's long-term memory") {
     init {
         subcommands(MemoryList(), MemoryShow(), MemoryThreads(), MemoryProfile(),
-            MemoryForget(), MemoryWhy(), MemoryConsolidate(), MemoryReset())
+            MemoryForget(), MemoryWhy(), MemoryConsolidate(), MemoryRestore(), MemoryReset())
     }
     override fun run() = Unit
 }
@@ -158,11 +158,25 @@ class MemoryConsolidate : CliktCommand(name = "consolidate", help = "Run the sle
     private val baseUrl: String? by option("--base-url", help = "Chat endpoint for thread compression (optional)")
     private val apiKey: String? by option("--api-key")
     private val model: String? by option("--model", help = "Chat model for compression (optional)")
+    private val yes: Boolean by option("--yes", help = "Skip confirmation").flag()
     override fun run() = runBlocking {
+        if (!yes && !confirm("Run the sleep cycle now?")) return@runBlocking echo("Aborted.")
         val report = palace(baseUrl, apiKey, chatModel = model).consolidate(System.currentTimeMillis())
         echo("merged=${report.merged} strengthened=${report.strengthened} compressed=${report.compressed} " +
             "pruned=${report.pruned} purged=${report.purged}")
         if (model == null) echo("(compression skipped — pass --base-url and --model to enable)")
+    }
+    private fun confirm(prompt: String): Boolean {
+        echo("$prompt [y/N] ", trailingNewline = false)
+        return readLine()?.trim()?.lowercase() == "y"
+    }
+}
+
+class MemoryRestore : CliktCommand(name = "restore", help = "Undo a soft-delete before it's purged") {
+    private val id: String by argument(help = "memory id")
+    override fun run() = runBlocking {
+        val restored = palace().restore(id)
+        echo(if (restored) "Restored: $id" else "Not found or not soft-deleted: $id")
     }
 }
 
