@@ -25,6 +25,8 @@ class SkillVersionStore(private val path: Path) {
 
     fun get(id: String): SkillVersion? = fold()[id]
 
+    fun all(): List<SkillVersion> = fold().values.toList()
+
     @Synchronized
     fun record(version: SkillVersion): SkillVersion {
         path.parent?.let { Files.createDirectories(it) }

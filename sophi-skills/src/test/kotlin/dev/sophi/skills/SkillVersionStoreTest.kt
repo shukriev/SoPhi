@@ -40,4 +40,12 @@ class SkillVersionStoreTest : FunSpec({
     test("history is empty for a skillId with no recorded versions") {
         store().history("site-never-written", project = false) shouldHaveSize 0
     }
+
+    test("all() returns every recorded version across every skill id, not filtered by any one id") {
+        val store = store()
+        val a = store.record(SkillVersion(skillId = "site-a", project = false, content = "one"))
+        val b = store.record(SkillVersion(skillId = "site-b", project = false, content = "two"))
+
+        store.all().map { it.id }.toSet() shouldBe setOf(a.id, b.id)
+    }
 })
