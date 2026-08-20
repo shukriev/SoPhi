@@ -94,9 +94,7 @@ class DecomposeGoalTool(
             ),
             contextWindowTokens = contextWindowTokens,
             confirmationPolicy = confirmationPolicy,
-            grants = args.expectedTools.orEmpty()
-                .filter { fullRegistry.getOrNull(it)?.riskLevel("{}") == RiskLevel.SAFE }
-                .toSet(),
+            grants = fullRegistry.safeGrantsFrom(args.expectedTools),
             planLog = planLog
         )
         val outcome = runner.run(parentSessionId, args.goal, StopCondition.LlmJudged)

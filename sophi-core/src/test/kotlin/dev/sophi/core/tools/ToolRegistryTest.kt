@@ -131,4 +131,34 @@ class ToolRegistryTest : FunSpec({
         result shouldBe registry
         registry.names() shouldContainExactly listOf("b")
     }
+
+    fun riskyTool(name: String, tier: RiskLevel) = object : Tool {
+        override val name = name
+        override val description = "risky"
+        override val parametersJson = "{}"
+        override fun riskLevel(argumentsJson: String) = tier
+        override suspend fun execute(argumentsJson: String) = "ran"
+    }
+
+    test("safeGrantsFrom keeps only names that probe SAFE with empty arguments") {
+        val registry = ToolRegistry()
+            .register(riskyTool("safe_tool", RiskLevel.SAFE))
+            .register(riskyTool("caution_tool", RiskLevel.CAUTION))
+            .register(riskyTool("destructive_tool", RiskLevel.DESTRUCTIVE))
+
+        registry.safeGrantsFrom(listOf("safe_tool", "caution_tool", "destructive_tool")) shouldBe setOf("safe_tool")
+    }
+
+    test("safeGrantsFrom drops names not present in the registry") {
+        val registry = ToolRegistry().register(riskyTool("safe_tool", RiskLevel.SAFE))
+
+        registry.safeGrantsFrom(listOf("safe_tool", "does_not_exist")) shouldBe setOf("safe_tool")
+    }
+
+    test("safeGrantsFrom returns an empty set for a null or empty list") {
+        val registry = ToolRegistry().register(riskyTool("safe_tool", RiskLevel.SAFE))
+
+        registry.safeGrantsFrom(null) shouldBe emptySet()
+        registry.safeGrantsFrom(emptyList()) shouldBe emptySet()
+    }
 })
