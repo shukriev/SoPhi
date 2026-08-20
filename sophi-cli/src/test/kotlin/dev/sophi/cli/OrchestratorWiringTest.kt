@@ -6,6 +6,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 
 class OrchestratorWiringTest : FunSpec({
     test("switch off creates no task") {
@@ -65,5 +66,21 @@ class OrchestratorWiringTest : FunSpec({
         tasks shouldHaveSize 1
         tasks.single().id shouldBe originalId
         tasks.single().enabled shouldBe true
+    }
+
+    test("the prompt tells the orchestrator to inspect the skill attribution snapshots") {
+        ORCHESTRATOR_PROMPT shouldContain "~/.sophi/skills/.attribution.jsonl"
+        ORCHESTRATOR_PROMPT shouldContain "~/.sophi/skills/.unattributed.jsonl"
+    }
+
+    test("re-bootstrapping after the stored prompt has drifted from the current constant updates the stored task") {
+        val store = TaskStore(tempdir().toPath().resolve("tasks.json"))
+        val on: (String) -> String? = { if (it == ORCHESTRATOR_ENABLED_ENV) "true" else null }
+        bootstrapOrchestrator(store, on)
+        store.update(store.list().single().id) { it.copy(prompt = "a stale prompt from a previous version") }
+
+        bootstrapOrchestrator(store, on)
+
+        store.list().single().prompt shouldBe ORCHESTRATOR_PROMPT
     }
 })

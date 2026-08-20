@@ -19,6 +19,10 @@ internal val ORCHESTRATOR_PROMPT = """
     - ~/.sophi/learning/lesson-usage.jsonl — which lessons were recalled in which session
     - ~/.sophi/learning/tool-events.jsonl — tool call success/failure history
     - ~/.sophi/learning/session-outcomes.jsonl — how sessions concluded
+    - ~/.sophi/skills/.attribution.jsonl — per-skill-version invocation counts and adjacent tool
+      failures, refreshed by `sophi skill review`; may be missing or empty if no one has run it yet
+    - ~/.sophi/skills/.unattributed.jsonl — invocations of a skill with no matching recorded
+      version, also refreshed by `sophi skill review`
 
     Look for patterns: a lesson recalled often but never correlated with a good outcome, a tool that
     fails disproportionately, a recurring theme across session outcomes. When you have one concrete,
@@ -47,6 +51,9 @@ internal fun bootstrapOrchestrator(taskStore: TaskStore, env: (String) -> String
                 maxWallClockMsPerWindow = 3_600_000L, wallClockWindowMs = 86_400_000L
             )
         )
-        !existing.enabled -> taskStore.setEnabled(existing.id, true)
+        else -> {
+            if (!existing.enabled) taskStore.setEnabled(existing.id, true)
+            if (existing.prompt != ORCHESTRATOR_PROMPT) taskStore.update(existing.id) { it.copy(prompt = ORCHESTRATOR_PROMPT) }
+        }
     }
 }
