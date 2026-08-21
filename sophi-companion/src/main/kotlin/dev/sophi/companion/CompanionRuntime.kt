@@ -30,12 +30,14 @@ class CompanionRuntime(
     private val runLog: RunLog,
     notifier: Notifier,
     val notificationCenter: NotificationCenter,
-    hubPort: Int = 8765
+    hubPort: Int = 8765,
+    private val voiceConfig: dev.sophi.companion.voice.VoiceConfig? = null
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val scheduleEngine = sophiRuntime.scheduleEngine(taskStore, runLog, notifier)
     private val sessionStates = mutableMapOf<String, MutableStateFlow<SessionState>>()
     private val transcriptBuilders = mutableMapOf<String, SessionTranscriptBuilder>()
+    private val voiceControllers = mutableMapOf<String, dev.sophi.companion.voice.VoiceController>()
     private val confirmationDeferreds = mutableMapOf<String, CompletableDeferred<Map<String, Boolean>>>()
     private val pendingConfirmationSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private var pollingJob: Job? = null
@@ -146,12 +148,34 @@ class CompanionRuntime(
     /** A session's turn transcript, in order — see TranscriptEntry for the shape of each entry. */
     fun sessionMessages(sessionId: String): StateFlow<List<TranscriptEntry>> = transcriptBuilderFor(sessionId).transcript
 
+    /** Voice mode's per-session controller, or null when the runtime was built without voice
+     *  configured ([voiceConfig] null — i.e. [dev.sophi.companion.CompanionSettings.voiceEnabled]
+     *  is false). */
+    fun voiceController(sessionId: String): dev.sophi.companion.voice.VoiceController? {
+        val config = voiceConfig ?: return null
+        return voiceControllers.getOrPut(sessionId) {
+            dev.sophi.companion.voice.VoiceController(
+                sessionId = sessionId,
+                sendMessage = ::sendMessage,
+                recorder = dev.sophi.companion.voice.JavaSoundAudioRecorder(),
+                transcriber = dev.sophi.companion.voice.ProcessWhisperTranscriber(config),
+                synthesizer = dev.sophi.companion.voice.ProcessPiperSynthesizer(config),
+                player = dev.sophi.companion.voice.JavaSoundAudioPlayer()
+            )
+        }
+    }
+
     /** Ids of sessions currently awaiting confirmation, across all sessions. */
     val pendingConfirmations: StateFlow<Set<String>> = pendingConfirmationSessionIds
 
     suspend fun newSession(title: String? = null): String = sophiRuntime.newSession(title)
 
-    fun sendMessage(sessionId: String, input: String) {
+    fun sendMessage(
+        sessionId: String,
+        input: String,
+        onSpeechToken: (String) -> Unit = {},
+        onSpeechTurnEnd: () -> Unit = {}
+    ) {
         val state = stateFlowFor(sessionId)
         val builder = transcriptBuilderFor(sessionId)
         builder.startTurn(input)
@@ -160,7 +184,7 @@ class CompanionRuntime(
             try {
                 sophiRuntime.streamTurn(sessionId, input) { event ->
                     when (event) {
-                        is TurnEvent.Token -> builder.onToken(event.text)
+                        is TurnEvent.Token -> { builder.onToken(event.text); onSpeechToken(event.text) }
                         is TurnEvent.ReasoningToken -> builder.onReasoningToken(event.text)
                         is TurnEvent.ToolCallStarted -> builder.onToolCallStarted(event.name, event.argsJson)
                         is TurnEvent.ToolCallFinished -> builder.onToolCallFinished(event.name, event.result, event.isError)
@@ -169,9 +193,11 @@ class CompanionRuntime(
                 }
                 builder.endTurn()
                 state.value = SessionState.Idle
+                onSpeechTurnEnd()
             } catch (e: Exception) {
                 builder.endTurn()
                 state.value = SessionState.Error(e.message ?: "unknown error")
+                onSpeechTurnEnd()
             }
         }
     }

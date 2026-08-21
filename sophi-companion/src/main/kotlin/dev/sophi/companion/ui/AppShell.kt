@@ -68,7 +68,7 @@ private sealed class Selection {
 private data class SidebarSource(val id: String, val title: String, val isRemote: Boolean, val lastActiveMillis: Long)
 
 @Composable
-fun AppShell(runtime: CompanionRuntime) {
+fun AppShell(runtime: CompanionRuntime, pttHotkey: String) {
     var selected by remember { mutableStateOf<Selection?>(null) }
     var localSessions by remember { mutableStateOf(listOf<SessionMeta>()) }
     val scope = remember { CoroutineScope(Dispatchers.Default) }
@@ -149,7 +149,7 @@ fun AppShell(runtime: CompanionRuntime) {
             when (val s = selected) {
                 is Selection.Session -> {
                     val title = rows.find { it.id == s.sessionId }?.title ?: s.sessionId
-                    ChatTab(runtime, s.sessionId, title)
+                    ChatTab(runtime, s.sessionId, title, pttHotkey)
                 }
                 Selection.Mcp -> McpTab(runtime)
                 Selection.Goals -> GoalsTab(runtime)
