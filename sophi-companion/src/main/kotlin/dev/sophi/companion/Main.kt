@@ -69,6 +69,17 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         val (title, body) = NotificationText.forTaskRun(task, run)
         notificationCenter.add(NotificationKind.Schedule, title, body)
     }
+    // settings.validationError() (checked above) already guarantees the four path fields are
+    // non-blank whenever voiceEnabled is true.
+    val voiceConfig = if (settings.voiceEnabled) {
+        dev.sophi.companion.voice.VoiceConfig(
+            whisperBinaryPath = settings.whisperBinaryPath!!,
+            whisperModelPath = settings.whisperModelPath!!,
+            piperBinaryPath = settings.piperBinaryPath!!,
+            piperVoicePath = settings.piperVoicePath!!,
+            pttHotkey = settings.pttHotkey
+        )
+    } else null
     companionRuntime = CompanionRuntime(
         sophiRuntime = sophiRuntime,
         sessionManager = dev.sophi.core.session.FileSessionManager(Path.of(settings.sessionsDir)),
@@ -76,7 +87,8 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         taskStore = dev.sophi.schedule.store.TaskStore(tasksDir.resolve("tasks.json")),
         runLog = dev.sophi.schedule.store.RunLog(tasksDir.resolve("runs.jsonl")),
         notifier = scheduleNotifier,
-        notificationCenter = notificationCenter
+        notificationCenter = notificationCenter,
+        voiceConfig = voiceConfig
     )
     companionRuntime.startSchedulePolling()
     return companionRuntime
