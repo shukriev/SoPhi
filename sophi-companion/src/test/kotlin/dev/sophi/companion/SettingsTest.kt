@@ -167,6 +167,79 @@ class SettingsTest : FunSpec({
         settings.validationError() shouldBe null
     }
 
+    test("voiceEnabled defaults to false and voice path fields default to null") {
+        val settings = CompanionSettings()
+
+        settings.voiceEnabled shouldBe false
+        settings.whisperBinaryPath shouldBe null
+        settings.whisperModelPath shouldBe null
+        settings.piperBinaryPath shouldBe null
+        settings.piperVoicePath shouldBe null
+        settings.pttHotkey shouldBe "Right Option"
+        settings.wakeWordEnabled shouldBe false
+        settings.validationError() shouldBe null
+    }
+
+    test("voiceEnabled without whisperBinaryPath is rejected") {
+        val settings = CompanionSettings(
+            voiceEnabled = true,
+            whisperBinaryPath = null,
+            whisperModelPath = "/models/ggml-base.bin",
+            piperBinaryPath = "/usr/local/bin/piper",
+            piperVoicePath = "/models/en_US-voice.onnx"
+        )
+
+        settings.validationError() shouldContain "whisperBinaryPath is required"
+    }
+
+    test("voiceEnabled without whisperModelPath is rejected") {
+        val settings = CompanionSettings(
+            voiceEnabled = true,
+            whisperBinaryPath = "/usr/local/bin/whisper",
+            whisperModelPath = null,
+            piperBinaryPath = "/usr/local/bin/piper",
+            piperVoicePath = "/models/en_US-voice.onnx"
+        )
+
+        settings.validationError() shouldContain "whisperModelPath is required"
+    }
+
+    test("voiceEnabled without piperBinaryPath is rejected") {
+        val settings = CompanionSettings(
+            voiceEnabled = true,
+            whisperBinaryPath = "/usr/local/bin/whisper",
+            whisperModelPath = "/models/ggml-base.bin",
+            piperBinaryPath = null,
+            piperVoicePath = "/models/en_US-voice.onnx"
+        )
+
+        settings.validationError() shouldContain "piperBinaryPath is required"
+    }
+
+    test("voiceEnabled without piperVoicePath is rejected") {
+        val settings = CompanionSettings(
+            voiceEnabled = true,
+            whisperBinaryPath = "/usr/local/bin/whisper",
+            whisperModelPath = "/models/ggml-base.bin",
+            piperBinaryPath = "/usr/local/bin/piper",
+            piperVoicePath = null
+        )
+
+        settings.validationError() shouldContain "piperVoicePath is required"
+    }
+
+    test("voiceEnabled with all four paths present has no validation error") {
+        val settings = CompanionSettings(
+            voiceEnabled = true,
+            whisperBinaryPath = "/usr/local/bin/whisper",
+            whisperModelPath = "/models/ggml-base.bin",
+            piperBinaryPath = "/usr/local/bin/piper",
+            piperVoicePath = "/models/en_US-voice.onnx"
+        )
+
+        settings.validationError() shouldBe null
+    }
+
     test("memory settings round-trip through SettingsStore save/load") {
         val dir = createTempDirectory("sophi-companion-settings-test")
         val store = SettingsStore(dir.resolve("companion.json"))
