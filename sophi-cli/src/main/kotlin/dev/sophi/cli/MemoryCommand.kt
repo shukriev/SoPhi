@@ -43,6 +43,11 @@ internal fun palace(
     )
 }
 
+private fun CliktCommand.confirmPrompt(prompt: String): Boolean {
+    echo("$prompt [y/N] ", trailingNewline = false)
+    return readLine()?.trim()?.lowercase() == "y"
+}
+
 private fun renderView(v: dev.sophi.memory.MemoryView): String {
     val m = v.metadata
     return "[${v.id}] (${m["room"]}, sal ${m["salience"]}, pri ${m["priority"]}, ${m["ageDays"]}d, " +
@@ -136,15 +141,11 @@ class MemoryForget : CliktCommand(name = "forget", help = "Hard-delete a memory 
             echo("Also reduces profile attributes: ${preview.affectedProfilePaths.joinToString()}")
         if (preview.relinkedEdges > 0)
             echo("Re-links ${preview.relinkedEdges} causal edge(s) around the gap.")
-        if (!yes && !confirm("Proceed?")) return@runBlocking echo("Aborted.")
+        if (!yes && !confirmPrompt("Proceed?")) return@runBlocking echo("Aborted.")
         val result = p.forget(ForgetRequest.ById(targetId))
         echo("Deleted ${result.removedIds.size} memor${if (result.removedIds.size == 1) "y" else "ies"}; " +
             "re-linked ${result.relinkedEdges} edge(s); " +
             "affected profile: ${result.affectedProfilePaths.ifEmpty { listOf("none") }.joinToString()}")
-    }
-    private fun confirm(prompt: String): Boolean {
-        echo("$prompt [y/N] ", trailingNewline = false)
-        return readLine()?.trim()?.lowercase() == "y"
     }
 }
 
@@ -160,15 +161,11 @@ class MemoryConsolidate : CliktCommand(name = "consolidate", help = "Run the sle
     private val model: String? by option("--model", help = "Chat model for compression (optional)")
     private val yes: Boolean by option("--yes", help = "Skip confirmation").flag()
     override fun run() = runBlocking {
-        if (!yes && !confirm("Run the sleep cycle now?")) return@runBlocking echo("Aborted.")
+        if (!yes && !confirmPrompt("Run the sleep cycle now?")) return@runBlocking echo("Aborted.")
         val report = palace(baseUrl, apiKey, chatModel = model).consolidate(System.currentTimeMillis())
         echo("merged=${report.merged} strengthened=${report.strengthened} compressed=${report.compressed} " +
             "pruned=${report.pruned} purged=${report.purged}")
         if (model == null) echo("(compression skipped — pass --base-url and --model to enable)")
-    }
-    private fun confirm(prompt: String): Boolean {
-        echo("$prompt [y/N] ", trailingNewline = false)
-        return readLine()?.trim()?.lowercase() == "y"
     }
 }
 
