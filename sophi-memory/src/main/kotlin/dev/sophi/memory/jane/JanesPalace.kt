@@ -36,7 +36,10 @@ class JanesPalace(
         MemoryWriter(store, profile, it, embeddingModelName, config)
     }
     private val forgetEngine = ForgetEngine(store, profile)
-    private val consolidator = Consolidator(store, forgetEngine, llmProvider, config)
+    private val consolidator = Consolidator(
+        store, forgetEngine, llmProvider, config,
+        ConsolidationHistoryStore(config.home.resolve("consolidations.jsonl"))
+    )
 
     override suspend fun recall(query: RecallQuery): MemoryBlock? {
         val w = walker ?: return null
@@ -63,6 +66,8 @@ class JanesPalace(
 
     override suspend fun forget(request: ForgetRequest): ForgetResult =
         forgetEngine.forget(request, System.currentTimeMillis())
+
+    override suspend fun restore(id: String): Boolean = forgetEngine.restore(id)
 
     /** Non-mutating preview of what forgetting [id] would remove and affect (spec §5). */
     fun previewForget(id: String): ForgetResult = forgetEngine.preview(id)

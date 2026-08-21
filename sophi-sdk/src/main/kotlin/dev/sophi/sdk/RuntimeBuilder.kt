@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.probeEmbeddingProvider
 import dev.sophi.ai.providers.buildOpenAiCompatEmbeddingProvider
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.session.FileSessionManager
@@ -23,6 +24,7 @@ import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
+import dev.sophi.skills.SkillInvocationStore
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
@@ -44,9 +46,11 @@ class RuntimeBuilder {
     private var providedRegistry: ToolRegistry? = null
     private var loopGuardPolicy: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
     private var learningConfig: LearningConfig? = null
+    private var learningEmbeddingProvider: EmbeddingProvider? = null
     private var scheduleDir: Path? = null
     private var contextWindowTokens: Int? = null
     private var memoryConfig: MemoryConfig? = null
+    private var agentsDirConfig: AgentsDirConfig? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -64,8 +68,17 @@ class RuntimeBuilder {
     fun toolRegistry(registry: ToolRegistry): RuntimeBuilder = apply { providedRegistry = registry }
 
     fun loopGuard(policy: LoopGuardPolicy): RuntimeBuilder = apply { loopGuardPolicy = policy }
-    fun learning(config: LearningConfig): RuntimeBuilder = apply { learningConfig = config }
+    fun learning(config: LearningConfig, embeddingProvider: EmbeddingProvider? = null): RuntimeBuilder =
+        apply { learningConfig = config; learningEmbeddingProvider = embeddingProvider }
     fun schedule(dir: Path): RuntimeBuilder = apply { scheduleDir = dir }
+
+    /**
+     * Loads AgentDefinitions from [dir] (created if missing) for this runtime's scheduleEngine()
+     * calls to enforce as an allowlist. [onWarning] fires — and definitions stay empty — if any
+     * file in [dir] fails to parse; never throws (see AgentDefinitionLoader.loadOrWarn).
+     */
+    fun agentsDir(dir: Path, onWarning: (String) -> Unit = { System.err.println(it) }): RuntimeBuilder =
+        apply { agentsDirConfig = AgentsDirConfig(dir, onWarning) }
     /**
      * Total context window of [model], in tokens — required before [build]. Sophi compacts the
      * turn's earlier tool rounds once 80% of this is used. There is deliberately no per-model
@@ -99,6 +112,9 @@ class RuntimeBuilder {
             "contextWindowTokens must be set before calling build() — pass the total context " +
                 "window (in tokens) of the model you configured"
         }
+        val agentDefinitions = agentsDirConfig?.let { cfg ->
+            AgentDefinitionLoader().loadOrWarn(cfg.dir, cfg.onWarning)
+        } ?: emptyList()
         val registry = (providedRegistry ?: ToolRegistry()).also { r -> tools.forEach { r.register(it) } }
         scheduleDir?.let { dir ->
             registry.register(ScheduleTaskTool(
@@ -121,9 +137,12 @@ class RuntimeBuilder {
             contextWindowTokens = window
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
+        SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
+            .also { pluginRegistry.register(it) }
 
         val learningPlugin = learningConfig?.let { cfg ->
-            LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p, sessionManager = sm).also { plugin ->
+            LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p,
+                sessionManager = sm, embeddingProvider = learningEmbeddingProvider).also { plugin ->
                 pluginRegistry.register(plugin)
             }
         }
@@ -141,7 +160,8 @@ class RuntimeBuilder {
                 null
             } else {
                 val palace = JanesPalace(
-                    JanesPalaceConfig(home = memoryHome, sessionModel = model), p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
+                    JanesPalaceConfig(home = memoryHome, sessionModel = model, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
+                    p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                 )
                 MemoryPlugin(palace).also { pluginRegistry.register(it) }
             }
@@ -154,9 +174,11 @@ class RuntimeBuilder {
             ).joinToString("\n\n")
         )
 
-        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, memoryPlugin)
+        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, memoryPlugin, agentDefinitions)
     }
 }
+
+private data class AgentsDirConfig(val dir: Path, val onWarning: (String) -> Unit)
 
 private data class MemoryConfig(
     val embeddingModel: String,

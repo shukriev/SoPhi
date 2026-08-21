@@ -42,5 +42,16 @@ data class JanesPalaceConfig(
     val recallTimeoutMs: Long = 2_000,
     val encoderModel: String? = null,
     val sessionModel: String? = null,
-    val encoderMaxTokens: Int = 1024
-)
+    val encoderMaxTokens: Int = 1024,
+    val autoPurgeEnabled: Boolean = true
+) {
+    companion object {
+        /** Only the literal string "false" disables purging -- unset, empty, or a typo all
+         *  preserve today's default-on behavior. Deliberately the inverse of
+         *  SOPHI_ORCHESTRATOR_ENABLED's fail-toward-off: that switch guards a brand-new
+         *  capability; this one retrofits a switch onto behavior that already runs by default, so
+         *  doing nothing must not silently change what every current install already does. */
+        fun autoPurgeEnabledFromEnv(env: (String) -> String? = System::getenv): Boolean =
+            env("SOPHI_MEMORY_AUTO_PURGE_ENABLED")?.lowercase() != "false"
+    }
+}

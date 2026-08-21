@@ -1,6 +1,8 @@
 package dev.sophi.learning
 
+import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.extensions.AgentHook
+import dev.sophi.extensions.ContextContributor
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.SophiPlugin
@@ -12,18 +14,23 @@ class LearningPlugin(
     private val config: LearningConfig,
     private val model: String? = null,
     private val provider: dev.sophi.ai.api.LLMProvider? = null,
-    private val sessionManager: dev.sophi.core.session.SessionManager? = null
-) : SophiPlugin {
+    private val sessionManager: dev.sophi.core.session.SessionManager? = null,
+    private val embeddingProvider: EmbeddingProvider? = null
+) : SophiPlugin, ContextContributor {
     override val name = "learning"
 
     private val json = Json { encodeDefaults = true }
     private val toolEvents = JsonlLog(config.home.resolve("tool-events.jsonl"))
     private val outcomes = JsonlLog(config.home.resolve("session-outcomes.jsonl"))
+    private val lessonUsage = JsonlLog(config.home.resolve("lesson-usage.jsonl"))
     val toolStats = ToolStatsStore(toolEvents, config.recentWindow)
     val lessonStore = LessonStore(JsonlLog(config.home.resolve("lessons.jsonl")), config.maxActiveLessons)
     val preferenceStore = PreferenceStore(JsonlLog(config.home.resolve("preferences.jsonl")))
     private val evaluator = provider?.let { SessionEvaluator(it, lessonStore, outcomes, config, preferenceStore) }
-    private val lessonsSection = LessonsSection(RecencyUsageRecall(lessonStore, config.maxRecalledLessons), lessonStore, config)
+    private val lessonRecall: LessonRecall =
+        embeddingProvider?.let { SemanticRecall(it, lessonStore, config.maxRecalledLessons) }
+            ?: RecencyUsageRecall(lessonStore, config.maxRecalledLessons)
+    private val lessonsSection = LessonsSection(lessonRecall, lessonStore, lessonUsage, config)
     private val reliabilitySection = ToolReliabilitySection(toolStats, config)
 
     private class Acc {
@@ -35,6 +42,9 @@ class LearningPlugin(
         val planningNotes = java.util.Collections.synchronizedList(mutableListOf<String>())
     }
     private val accs = ConcurrentHashMap<String, Acc>()
+
+    override suspend fun contribute(sessionId: String, userInput: String): String? =
+        runCatching { lessonsSection.render(config.scope, sessionId, userInput) }.getOrNull()
 
     override fun hooks(): List<AgentHook> = listOf(
         hook(HookPoint.AFTER_TOOL) { ctx: HookContext ->
@@ -95,12 +105,8 @@ class LearningPlugin(
         }
     }
 
-    fun promptSections(scope: String): String? {
-        val parts = listOfNotNull(
-            runCatching { reliabilitySection.render(scope) }.getOrNull(),
-            runCatching { lessonsSection.render(scope) }.getOrNull())
-        return if (parts.isEmpty()) null else parts.joinToString("\n\n")
-    }
+    fun promptSections(scope: String): String? =
+        runCatching { reliabilitySection.render(scope) }.getOrNull()
 
     private fun writeOutcome(sessionId: String, outcome: String, acc: Acc) {
         append(outcomes, json.encodeToString(SessionOutcome.serializer(), SessionOutcome(

@@ -9,6 +9,7 @@ import dev.sophi.core.agent.plan.StopCondition
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.schedule.model.RunOutcome
+import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
@@ -24,6 +25,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flow
@@ -95,6 +97,77 @@ class ScheduleEngineTest : FunSpec({
         kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
 
         events.map { it.toolName } shouldContain "some_tool"
+    }
+
+    test("a Recurring task's prompt includes plugin-contributed context (lessons, memory)") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            requests.add(firstArg())
+            flowOf(StreamEvent.Content("done"))
+        }
+        val contributor = object : dev.sophi.extensions.SophiPlugin, dev.sophi.extensions.ContextContributor {
+            override val name = "recorder"
+            override fun hooks(): List<dev.sophi.extensions.AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String) =
+                "lesson: always double-check the invoice total"
+        }
+        val pluginRegistry = dev.sophi.extensions.PluginRegistry().register(contributor)
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-recurring-context-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            pluginRegistry = pluginRegistry
+        )
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "do the thing"
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        requests.single().systemPrompt shouldContain "always double-check the invoice total"
+    }
+
+    test("a Goal-mode task's plan generation includes plugin-contributed context") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val prompts = mutableListOf<String>()
+        coEvery { provider.complete(any()) } coAnswers {
+            prompts.add(firstArg<CompletionRequest>().messages.first().content)
+            when (prompts.size) {
+                1 -> LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+                2 -> LLMResponse.Text("1.0", TokenUsage(1, 1))
+                else -> LLMResponse.Text("YES", TokenUsage(1, 1))
+            }
+        }
+        val contributor = object : dev.sophi.extensions.SophiPlugin, dev.sophi.extensions.ContextContributor {
+            override val name = "recorder"
+            override fun hooks(): List<dev.sophi.extensions.AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String) =
+                "lesson: always double-check the invoice total"
+        }
+        val pluginRegistry = dev.sophi.extensions.PluginRegistry().register(contributor)
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-goal-context-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            pluginRegistry = pluginRegistry
+        )
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(stopCondition = StopCondition.LlmJudged, maxIterations = 3),
+            prompt = "do it"
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        prompts.first() shouldContain "always double-check the invoice total"
     }
 
     test("tickOnce runs a due Recurring task and records a Succeeded run") {
@@ -435,6 +508,38 @@ class ScheduleEngineTest : FunSpec({
         record.decompositions shouldBe null
     }
 
+    test("tickOnce fails closed when a task's subagentType matches no AgentDefinition, instead of falling back to the full unscoped registry") {
+        val dangerTool = object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "ran"
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("should never run"))
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry().register(dangerTool),
+            FileSessionManager(createTempDirectory("schedule-engine-unknown-subagent-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            agentDefinitions = emptyList()
+        )
+        val task = taskStore.add(ScheduledTask(
+            name = "orphaned", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            subagentType = "ghost"
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).single()
+        (record.outcome is RunOutcome.Failed) shouldBe true
+        (record.outcome as RunOutcome.Failed).error shouldContain "ghost"
+        (record.outcome as RunOutcome.Failed).error shouldContain "orphaned"
+    }
+
     test("plan counts survive a RunLog write/read round trip") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did some work"))
@@ -449,5 +554,94 @@ class ScheduleEngineTest : FunSpec({
         // forTask() decodes from JSONL, so a non-null count here proves the field is actually
         // serialised and not merely held in memory.
         runLog.forTask(task.id).single().replans shouldNotBe null
+    }
+
+    test("runNow captures the session id it created into the RunRecord on success") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val (engine, taskStore, _) = engine(provider)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        record?.sessionId shouldNotBe null
+    }
+
+    test("a run that times out still records the session id it had already created") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flow {
+            kotlinx.coroutines.delay(500)
+            emit(StreamEvent.Content("too late"))
+        }
+        val (engine, taskStore, _) = engine(provider, taskTimeoutMs = 50)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        record?.sessionId shouldNotBe null
+    }
+
+    test("a run that throws still records the session id it had already created") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } throws RuntimeException("LLM unreachable")
+        val (engine, taskStore, _) = engine(provider)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        record?.sessionId shouldNotBe null
+    }
+
+    test("tickOnce skips a task whose wall-clock budget for the trailing window is already exhausted, without calling the provider") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("should never run"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            maxWallClockMsPerWindow = 1000L, wallClockWindowMs = 3600_000L
+        ))
+        val now = System.currentTimeMillis()
+        runLog.append(RunRecord(task.id, startedAtMs = now - 2000, finishedAtMs = now - 1000, outcome = RunOutcome.Succeeded, summary = "prior run"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        val record = runLog.forTask(task.id).last()
+        (record.outcome is RunOutcome.Failed) shouldBe true
+        (record.outcome as RunOutcome.Failed).error shouldContain "budget"
+        record.sessionId shouldBe null
+        coVerify(exactly = 0) { provider.stream(any()) }
+    }
+
+    test("tickOnce still runs a task whose cumulative wall-clock usage is under budget") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("ran fine"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            maxWallClockMsPerWindow = 10_000L, wallClockWindowMs = 3600_000L
+        ))
+        val now = System.currentTimeMillis()
+        runLog.append(RunRecord(task.id, startedAtMs = now - 2000, finishedAtMs = now - 1000, outcome = RunOutcome.Succeeded, summary = "prior run"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).last().outcome shouldBe RunOutcome.Succeeded
+    }
+
+    test("tickOnce ignores prior runs outside the trailing window when checking the wall-clock budget") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("ran fine"))
+        val (engine, taskStore, runLog) = engine(provider)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "p",
+            maxWallClockMsPerWindow = 1000L, wallClockWindowMs = 60_000L
+        ))
+        val now = System.currentTimeMillis()
+        // Well outside the 60s trailing window — must not count toward the budget.
+        runLog.append(RunRecord(task.id, startedAtMs = now - 120_000, finishedAtMs = now - 119_000, outcome = RunOutcome.Succeeded, summary = "old run"))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        runLog.forTask(task.id).last().outcome shouldBe RunOutcome.Succeeded
     }
 })

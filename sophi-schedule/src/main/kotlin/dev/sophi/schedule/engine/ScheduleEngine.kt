@@ -112,14 +112,30 @@ class ScheduleEngine(
 
     private suspend fun runTask(task: ScheduledTask): RunRecord {
         val startedAtMs = System.currentTimeMillis()
-        val record = try {
+        var sessionId: String? = null
+        val record = if (wallClockBudgetExceeded(task, startedAtMs)) {
+            RunRecord(
+                task.id, startedAtMs, System.currentTimeMillis(),
+                RunOutcome.Failed(
+                    "wall-clock budget exceeded (${task.maxWallClockMsPerWindow}ms used within " +
+                        "the trailing ${task.wallClockWindowMs}ms window)"
+                ), ""
+            )
+        } else try {
             withTimeout(taskTimeoutMs) {
                 val session = sessionManager.create(title = "schedule:${task.name}")
+                sessionId = session.id
                 val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
-                val scopedRegistry = task.subagentType
-                    ?.let { type -> agentDefinitions.find { it.name == type } }
-                    ?.let { def -> fullRegistry.subset(def.allowedTools) }
-                    ?: fullRegistry
+                val scopedRegistry = when (val type = task.subagentType) {
+                    null -> fullRegistry
+                    else -> {
+                        val def = agentDefinitions.find { it.name == type }
+                            ?: throw IllegalStateException(
+                                "Scheduled task '${task.name}' (${task.id}) references unknown subagentType '$type'"
+                            )
+                        fullRegistry.subset(def.allowedTools)
+                    }
+                }
                 val loop = AgentLoop(
                     provider, scopedRegistry, sessionManager,
                     confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
@@ -127,6 +143,10 @@ class ScheduleEngine(
                     contextWindowTokens = contextWindowTokens
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
+                // Same collectContext path every interactive entry point already uses (SophiRuntime.
+                // streamTurn, AgentController.configWithContext) — without this, scheduled tasks
+                // (including the self-improvement orchestrator) ran with zero lesson/memory context.
+                val pluginContext = pluginRegistry?.collectContext(session.id, task.prompt) ?: emptyList()
 
                 // Null unless a plan actually ran — see RunRecord.replans on why null and 0 must
                 // stay distinguishable.
@@ -135,7 +155,10 @@ class ScheduleEngine(
 
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
-                        val result = loop.turn(session, task.prompt, config, bridge)
+                        val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+                        val effectiveConfig = if (extra == null) config
+                            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
+                        val result = loop.turn(session, task.prompt, effectiveConfig, bridge)
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
                     is TaskMode.Goal -> {
@@ -154,7 +177,7 @@ class ScheduleEngine(
                             maxStepExecutions = mode.maxIterations, allowParallelSteps = true
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
-                        val result = runner.run(session.id, task.prompt, mode.stopCondition)
+                        val result = runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
                         replans = result.replans.size
                         decompositions = result.decompositions.size
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
@@ -163,19 +186,35 @@ class ScheduleEngine(
                 }
                 RunRecord(
                     task.id, startedAtMs, System.currentTimeMillis(), outcome, summary,
-                    replans = replans, decompositions = decompositions
+                    replans = replans, decompositions = decompositions, sessionId = sessionId
                 )
             }
         } catch (e: TimeoutCancellationException) {
             RunRecord(task.id, startedAtMs, System.currentTimeMillis(),
-                RunOutcome.Failed("timed out after ${taskTimeoutMs / 1000}s"), "")
+                RunOutcome.Failed("timed out after ${taskTimeoutMs / 1000}s"), "", sessionId = sessionId)
         } catch (e: Exception) {
-            RunRecord(task.id, startedAtMs, System.currentTimeMillis(), RunOutcome.Failed(e.message ?: "unknown error"), "")
+            RunRecord(task.id, startedAtMs, System.currentTimeMillis(),
+                RunOutcome.Failed(e.message ?: "unknown error"), "", sessionId = sessionId)
         }
 
         runLog.append(record)
         taskStore.recordRun(task.id, record.finishedAtMs)
         notifier.notify(task, record)
         return record
+    }
+
+    /**
+     * True when [task]'s own past runs, summed within the trailing [ScheduledTask.wallClockWindowMs]
+     * ending at [nowMs], already meet or exceed [ScheduledTask.maxWallClockMsPerWindow]. Always
+     * false when that budget is unset (the default) — every existing task is unaffected. Derived
+     * entirely from RunLog's existing startedAtMs/finishedAtMs; no new persistence.
+     */
+    private fun wallClockBudgetExceeded(task: ScheduledTask, nowMs: Long): Boolean {
+        val budget = task.maxWallClockMsPerWindow ?: return false
+        val windowStart = nowMs - task.wallClockWindowMs
+        val usedMs = runLog.forTask(task.id)
+            .filter { it.startedAtMs >= windowStart }
+            .sumOf { it.finishedAtMs - it.startedAtMs }
+        return usedMs >= budget
     }
 }

@@ -5,6 +5,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.createTempFile
 import kotlin.io.path.deleteIfExists
@@ -65,6 +66,47 @@ class AgentDefinitionLoaderTest : FunSpec({
             definition.systemPrompt shouldBe "Solo prompt."
         } finally {
             dir.toFile().deleteRecursively()
+        }
+    }
+
+    test("loadOrWarn() returns the loaded definitions when the directory parses cleanly") {
+        val dir = createTempDirectory("agent-defs-loadorwarn-test")
+        try {
+            dir.resolve("a.md").writeText("---\nname: alpha\ndescription: A.\n---\nBody A.")
+            val warnings = mutableListOf<String>()
+            val defs = loader.loadOrWarn(dir, onWarning = { warnings.add(it) })
+            defs.map { it.name } shouldBe listOf("alpha")
+            warnings shouldBe emptyList()
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    test("loadOrWarn() returns empty list and invokes onWarning when a file is malformed") {
+        val dir = createTempDirectory("agent-defs-loadorwarn-test")
+        try {
+            dir.resolve("broken.md").writeText("not a valid agent definition")
+            val warnings = mutableListOf<String>()
+            val defs = loader.loadOrWarn(dir, onWarning = { warnings.add(it) })
+            defs shouldBe emptyList()
+            warnings shouldHaveSize 1
+            warnings.single() shouldContain dir.toString()
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    test("loadOrWarn() creates a missing directory and returns empty list without warning") {
+        val parent = createTempDirectory("agent-defs-loadorwarn-missing-test")
+        val dir = parent.resolve("agents")
+        try {
+            val warnings = mutableListOf<String>()
+            val defs = loader.loadOrWarn(dir, onWarning = { warnings.add(it) })
+            defs shouldBe emptyList()
+            warnings shouldBe emptyList()
+            dir.toFile().exists() shouldBe true
+        } finally {
+            parent.toFile().deleteRecursively()
         }
     }
 })

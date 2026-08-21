@@ -1,13 +1,8 @@
 package dev.sophi.cli
 
-import dev.sophi.core.agent.AgentDefinitionLoader
-import dev.sophi.core.session.FileSessionManager
 import dev.sophi.schedule.engine.ScheduleEngine
-import dev.sophi.schedule.store.RunLog
-import dev.sophi.schedule.store.TaskStore
-import dev.sophi.sdk.DefaultPrompt
+import dev.sophi.sdk.Sophi
 import java.nio.file.Path
-import kotlin.io.path.createDirectories
 
 internal fun buildScheduleEngine(
     model: String,
@@ -25,24 +20,23 @@ internal fun buildScheduleEngine(
     val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
     val registry = dev.sophi.core.tools.ToolRegistry()
     buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
-    val sessionManager = FileSessionManager(sessionsDir)
-    val agentDefinitions = runCatching {
-        AgentDefinitionLoader().load(agentsDir.also { it.createDirectories() })
-    }.getOrDefault(emptyList())
-    val notifier = HubFallbackNotifier()
-    return ScheduleEngine(
-        taskStore = TaskStore(scheduleDir.resolve("tasks.json")),
-        runLog = RunLog(scheduleDir.resolve("runs.jsonl")),
-        provider = provider,
-        fullRegistry = registry,
-        sessionManager = sessionManager,
-        notifier = notifier,
-        model = model,
-        contextWindowTokens = contextWindowTokens,
-        agentDefinitions = agentDefinitions,
+    val proposalStore = dev.sophi.schedule.store.ProposalStore(scheduleDir.resolve("proposals.jsonl"))
+    val runtime = Sophi.runtime {
+        this.provider = provider
+        this.model = model
+        this.sessionsDir = sessionsDir
+        contextWindowTokens(contextWindowTokens)
+        toolRegistry(registry)
+        agentsDir(agentsDir)
+        tool(dev.sophi.schedule.tools.ProposeImprovementTool())
+        plugin(dev.sophi.schedule.tools.ProposalPlugin(proposalStore))
+    }
+    return runtime.scheduleEngine(
+        taskStore = dev.sophi.schedule.store.TaskStore(scheduleDir.resolve("tasks.json")),
+        runLog = dev.sophi.schedule.store.RunLog(scheduleDir.resolve("runs.jsonl")),
+        notifier = HubFallbackNotifier(),
         taskTimeoutMs = taskTimeoutSeconds * 1000,
-        maxTokens = maxTokens,
-        systemPrompt = "${DefaultPrompt.BASE}\n\n${DefaultPrompt.UNATTENDED}"
+        maxTokens = maxTokens
     )
 }
 

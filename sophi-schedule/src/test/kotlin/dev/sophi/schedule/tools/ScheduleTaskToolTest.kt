@@ -196,6 +196,15 @@ class ScheduleTaskToolTest : FunSpec({
         tool.ruleVerdict("not json") shouldBe dev.sophi.core.tools.RuleVerdict.HIGH_RISK
     }
 
+    test("riskLevel is DESTRUCTIVE, not SAFE, when arguments cannot be parsed") {
+        // Fails closed to match ruleVerdict's own convention above: a caller that can't supply
+        // real arguments (e.g. a grants-eligibility probe using placeholder JSON) must not be
+        // able to read an unparseable call as harmless just because action is missing.
+        val tool = ScheduleTaskTool(store(), runLog())
+        tool.riskLevel("not json") shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+        tool.riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+    }
+
     test("update using tool_grants persists it under the renamed field") {
         val s = store()
         val task = s.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))

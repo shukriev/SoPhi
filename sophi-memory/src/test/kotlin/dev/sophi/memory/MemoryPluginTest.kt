@@ -18,6 +18,7 @@ private class ScriptedTechnique : MemoryTechnique {
     }
     override suspend fun consolidate(nowMs: Long) = ConsolidationReport(0, 0, 0, 0, 0)
     override suspend fun forget(request: ForgetRequest) = ForgetResult(emptyList(), 0, emptyList())
+    override suspend fun restore(id: String) = false
     override suspend fun search(query: String, k: Int) = emptyList<MemoryView>()
     override fun browse(filter: BrowseFilter) = emptyList<MemoryView>()
     override fun profileView() = emptyList<ProfileAttributeView>()

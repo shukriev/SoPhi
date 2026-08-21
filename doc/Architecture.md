@@ -4,11 +4,11 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M7 — Jane's Theory memory (palace v1) complete |
-| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-hub, sophi-learning, sophi-web, sophi-sdk, sophi-companion, sophi-infra, sophi-memory, sophi-schedule |
+| Current milestone | M7 — Jane's Theory memory (palace v1) complete; Phase 1 of the autonomous self-improvement roadmap (ADR-027) complete |
+| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-hub, sophi-learning, sophi-web, sophi-sdk, sophi-companion, sophi-infra, sophi-memory, sophi-store, sophi-schedule |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
-| Designs approved, not yet implemented | Tiered tool confirmation & grants (ADR-016) — `RiskLevel` gains `CAUTION`; `Tool.riskLevel` becomes argument-aware; `ConfirmationPolicy` batches per round; `AgentLoop.grants` replaces `AllowlistConfirmationPolicy`; `PermissionGatePlugin` retired |
-| Last updated | 2026-08-18 |
+| Designs approved, not yet implemented | None currently |
+| Last updated | 2026-08-20 |
 
 ---
 
@@ -84,6 +84,9 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │  via sophi-core's PlanRunner (ADR-018 — GoalRunner retired)   │
 │  Goal-mode planner is a TreePlanner (k-way replan search,     │
 │  probation, see Plan + PlanRunner section)                    │
+│  Per-task wall-clock budget · RunRecord.sessionId ·           │
+│  ProposalStore/propose_improvement — the self-improvement     │
+│  orchestrator (ADR-027), gated by SOPHI_ORCHESTRATOR_ENABLED  │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │    sophi-calendar  (native OS calendar integration)          │
@@ -100,10 +103,10 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | complete |
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-hub` | Local-only (127.0.0.1) WebSocket hub — `HubEvent`/`HubCommand` protocol, `HubServer` (embedded by `sophi-companion`), `HubClient` (used by `sophi-cli`); lets the companion monitor and remote-control running CLI sessions (ADR-023) | complete |
-| `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn | complete |
+| `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn. Lesson recall is per-turn and query-aware (`SemanticRecall`, embedding cosine, batched; falls back to `RecencyUsageRecall`) via `ContextContributor`, not baked into the system prompt at session start; each recalled lesson logs a `LessonUsageEvent` keyed by session id (ADR-027), the attribution link `RunRecord.sessionId` joins against | complete |
 | `sophi-store` | Generic document/graph/vector storage primitives over ArcadeDB (`ArcadeStore`/`EmbeddedArcadeStore`), extracted from `sophi-memory` for reuse by any future consumer — depends on nothing Sophi-internal | complete |
 | `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn. Storage is ArcadeDB (embedded document+graph+vector database) via `sophi-store`'s `ArcadeStore` primitive layer (ADR-026), replacing the original JSONL + brute-force-cosine storage; embedded-only, single-process | complete |
-| `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired; the `Planner` it hands `PlanRunner` is a `TreePlanner` widening the replan search (probation, see Plan + PlanRunner) | complete |
+| `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired; the `Planner` it hands `PlanRunner` is a `TreePlanner` widening the replan search (probation, see Plan + PlanRunner). `RunRecord.sessionId` traces a run to its session/trajectory; `ScheduledTask.maxWallClockMsPerWindow` caps cumulative time across many runs of one task, derived from `RunLog`. `ProposalStore`/`propose_improvement`/`ProposalPlugin` are the self-improvement orchestrator's proposal artifacts (ADR-027) | complete |
 | `sophi-calendar` | Native OS calendar CRUD: `CalendarProvider` seam, `MacCalendarProvider` (AppleScript/Calendar.app) — Windows/Linux deferred; six create/read/update/delete/list Tools | in progress |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
@@ -304,6 +307,15 @@ interface Tool {
 of those calls are still low-risk enough to skip the prompt. Default `UNKNOWN` means "no
 opinion," so a tool with no override degrades to the LLM classifier rather than silently
 auto-approving.
+
+**The fail-closed contract on `riskLevel()`.** `ToolRegistry.safeGrantsFrom(expectedTools)`
+(used by `SubagentTool` and `DecomposeGoalTool`, ADR-027) decides which of a model's
+self-declared `expected_tools` to pre-grant by probing `riskLevel("{}")` — placeholder
+arguments, since no real call exists yet at declaration time. Every `Tool.riskLevel` override
+that can return non-`SAFE` for some input **must** fail closed (non-`SAFE`) when its arguments
+don't parse, or this probe silently pre-approves an unattended, unconfirmed call to it for the
+rest of the session. `ScheduleTaskTool` was found and fixed as the one exception (ADR-027) —
+enforced today by convention and this doc comment, not a runtime check.
 
 ### ConfirmationPolicy + grants (`dev.sophi.core.tools`)
 
@@ -515,6 +527,53 @@ from "decomposition intercepted the failure" — both counts are surfaced togeth
 reason. This is what makes "watch it on real workloads" an actual, decidable probation
 review instead of a permanent unknown.
 
+### The self-improvement orchestrator: Proposal + ProposalStore (`dev.sophi.schedule`, ADR-027)
+
+A `ScheduledTask` (`TaskMode.Goal`) that researches Sophi's own operational history and proposes
+concrete improvements — read-only, propose-only, human-reviewed. No new execution machinery:
+it runs through the same `ScheduleEngine`/`PlanRunner`/`TreePlanner` path every other goal-mode
+task does. `OrchestratorWiring.bootstrapOrchestrator` (`sophi-cli`) creates and idempotently
+enables/disables the single task, gated by `SOPHI_ORCHESTRATOR_ENABLED` — fails safe *toward
+OFF*, the inverse of `SOPHI_TOT_SEARCH_ENABLED`'s fail-toward-ON (ADR-024): unset, empty, or
+anything but the literal string `"true"` means disabled.
+
+```kotlin
+@Serializable
+data class Proposal(
+    val id: String = "prop_" + UUID.randomUUID(),
+    val ts: Long = System.currentTimeMillis(),
+    val sessionId: String,
+    val title: String,
+    val category: String,             // "lesson-quality" | "tool-reliability" | "prompt" | "process" | "other"
+    val rationale: String,
+    val suggestedAction: String,
+    val status: String = "pending",   // "pending" | "accepted" | "rejected"
+    val reviewedAtMs: Long? = null,
+    val reviewReason: String? = null
+)
+
+class ProposalStore(path: Path) {
+    fun add(proposal: Proposal): Proposal
+    fun list(status: String? = null): List<Proposal>
+    fun get(id: String): Proposal?
+    fun accept(id: String): Boolean   // only transitions a "pending" proposal
+    fun reject(id: String, reason: String): Boolean
+}
+```
+
+Propose-only is enforced structurally, not by a bespoke allowlist: the task's `toolGrants =
+emptySet()` plus `ScheduleEngine`'s hardcoded `ConfirmationPolicy.DENY_ALL` means only
+genuinely `RiskLevel.SAFE` tools ever run unattended — verified against every builtin tool's
+real tier, not assumed (`FetchUrlTool` is `DESTRUCTIVE`, despite its name). `propose_improvement`
+is the one tool the orchestrator can meaningfully act through: `SAFE`-tier, and trivial by
+design — a `Tool` registered into `ScheduleEngine`'s shared registry can't be bound to one
+session at construction time (unlike `SubagentTool`'s interactive-session binding, ADR-007), so
+capture happens via a `BEFORE_TOOL` hook (`ProposalPlugin`) reading
+`PluginRegistry.turnEventBridge`'s existing per-run `sessionId`/`argumentsJson` instead.
+`sophi proposals list/accept/reject` (mirrors `LessonsCommand`'s shape) is the v1 reviewer —
+deliberately a human, not an LLM; automating that step would blur propose-only into autonomous
+action.
+
 ### SophiPlugin + AgentHook (`dev.sophi.extensions`)
 
 Lifecycle hooks are the extension point for observability, logging, and side effects without
@@ -590,21 +649,33 @@ class LearningPlugin(
     config: LearningConfig,
     model: String? = null,
     provider: LLMProvider? = null,          // enables the session-end evaluator
-    sessionManager: SessionManager? = null
-) : SophiPlugin {
+    sessionManager: SessionManager? = null,
+    embeddingProvider: EmbeddingProvider? = null   // present -> SemanticRecall; absent -> RecencyUsageRecall
+) : SophiPlugin, ContextContributor {
     val toolStats: ToolStatsStore
     val lessonStore: LessonStore
     val preferenceStore: PreferenceStore
     suspend fun recordSessionEnd(sessionId: String)
     fun recordExplicitFeedback(sessionId: String, entryIndex: Int, polarity: String, reason: String?)
-    fun promptSections(scope: String): String?   // reliability warnings + recalled lessons
+    fun promptSections(scope: String): String?               // reliability warnings only
+    override suspend fun contribute(sessionId: String, userInput: String): String?  // recalled lessons, per turn
 }
 
-interface LessonRecall {                          // ranking is swappable; `query` is the
-    fun recall(scope: String, budgetTokens: Int,  // hook for future embedding-based recall
-               query: String? = null): List<Lesson>
+interface LessonRecall {                                     // ranking is swappable; RecencyUsageRecall
+    suspend fun recall(scope: String, budgetTokens: Int,      // (default) or SemanticRecall (embedding cosine)
+                        query: String? = null): List<Lesson>
 }
 ```
+
+Lessons moved out of `promptSections()`'s startup-static prompt and into `contribute()`
+(`ContextContributor`, ADR-013): recalled per turn, query-aware, and genuinely `suspend` end to
+end (no `runBlocking` bridging inside `SemanticRecall` — it would block its coroutine's carrier
+thread rather than suspend). `SemanticRecall` batches every cache-miss lesson into one `embed()`
+call rather than one round trip per lesson. Each render call logs one `LessonUsageEvent(ts,
+scope, sessionId, lessonId)` per recalled lesson — the attribution record joined against
+`RunRecord.sessionId` (ADR-027) to correlate lesson usage with a run's outcome. Skill usage
+needs no equivalent event: it's an ordinary tool call, already captured by ADR-009's tool-round
+session persistence.
 
 Offline, `sophi export` (package `dev.sophi.learning.export`, zero provider imports per
 ADR-012) turns the captured history into `sft.jsonl` / `dpo.jsonl` / `manifest.json` —
@@ -752,11 +823,13 @@ to decide.
 | [ADR-018](adr/ADR-018-plan-and-execute.md) | Plan-and-Execute upgrade | General `sophi-core` capability (`agent/plan`) replaces `sophi-schedule`'s `GoalRunner`; diff-based replanning; explicit `allowParallelSteps` flag instead of `ConfirmationPolicy` introspection; memory/learning integration via injected callbacks, not direct dependencies |
 | [ADR-019](adr/ADR-019-invoke-claude-code-tool.md) | `invoke_claude_code` tool | One new Tool in `sophi-core/tools/`, no new module; `riskLevel`/`ruleVerdict` hardcoded `DESTRUCTIVE`/`HIGH_RISK`, never argument-dependent; two independent gates (outer `toolGrants`, inner `--permission-mode auto`); no orchestration code — `PlanRunner` does per-task decomposition |
 | [ADR-020](adr/ADR-020-generalized-goal-decomposition.md) | Generalized goal decomposition | Recursion inside PlanRunner (no new module/type); two triggers over one decomposeStep seam; shared RunBudget; LlmJudged-only sub-plans; two entry points (decompose_goal tool + /plan) over one buildPlanRunner factory |
+| [ADR-021](adr/ADR-021-website-browsing-self-learning.md) | Website browsing via self-authored site skills | Reuse sophi-mcp + goal mode + the 4-phase learning system; a new durable site-skill artifact instead of the generic (and wrong-shaped) lesson pipeline |
 | [ADR-022](adr/ADR-022-sophi-companion.md) | `sophi-companion` OS tray app | Standalone Gradle module outside the Maven reactor (Compose Desktop is Gradle-only); embeds `sophi-sdk` in-process, HTTP via `sophi-web` rejected; five additive SDK/core/mcp gaps fixed rather than worked around (`ToolRegistry.unregister`, per-server MCP connect/disconnect, `McpConfigWriter` + `McpServerConfig.enabled`, `SessionManager.rename`/`delete` + title persistence, `SophiRuntime.scheduleEngine`); one coroutine + one `StateFlow` per session; confirmation ships notify-only (always-approve stub, blocked on ADR-016's session-id-less `confirm`); `jpackage` bundling in v1 because macOS notifications need a real `.app` |
 | [ADR-023](adr/ADR-023-cli-hub-remote-control.md) | CLI session monitoring & remote control | New `sophi-hub` module (protocol+server+client); companion owns hub lifecycle, CLI registers on by default; `TurnEvent`/`ConfirmationPolicy` reused as the forwarding seam instead of new `AgentHook` points; confirmation races terminal vs. remote, first response wins, no lock |
 | [ADR-025](adr/ADR-025-interactive-goal-command.md) | Interactive `/goal` command | Hybrid session visibility (isolated step execution, structured anchor-session record); plan preview via `input.readLine()`, not `awaitYesNo()`; extends ADR-020's `PlanProgressEvent` instead of adding a second event stream; `initialPlan` preview seam; `allowParallelSteps` stays `false`; CLI-only v1 |
 | [ADR-024](adr/ADR-024-tot-widened-replan-search.md) | Tree-of-thought widened replan search | **Accepted — probation**, written retroactively: `PlanRunner`'s existing search was already DFS-with-backtracking at width 1, so `TreePlanner` widens one node rather than adding a subsystem; GoT rejected because merge is incoherent over side-effecting executed steps; `Planner` decorator (zero `PlanRunner` diff), `replan()` only, goal-mode only by construction; new `PlanCritic` because `StepCritic` can't score an unexecuted plan; 300s critic timeout because failing open here is a full-price no-op, not a safe degrade; `SOPHI_TOT_SEARCH_ENABLED` kill switch; probation because the mechanism works but value was never demonstrated |
 | [ADR-026](adr/ADR-026-arcadedb-memory-storage.md) | Jane's Palace storage backend | ArcadeDB (embedded document+graph+vector db) behind a generic `ArcadeStore` layer, replacing JSONL + brute-force cosine; multi-process (CLI/`sophi-web` shared-server) design dropped mid-implementation — ArcadeDB's remote client can't do vector search in this version |
+| [ADR-027](adr/ADR-027-autonomous-self-improvement-orchestrator.md) | Autonomous self-improvement orchestrator (Phase 1) | Orchestrator is one more Goal-mode ScheduledTask, no new execution machinery; propose-only enforced by existing risk tiers + DENY_ALL, not a new allowlist; `propose_improvement`/`ProposalPlugin` capture via BEFORE_TOOL, not a stateful tool; `SOPHI_ORCHESTRATOR_ENABLED` fails toward OFF (inverse of ADR-024's kill switch); `RunRecord.sessionId` + `LessonUsageEvent` close the real attribution gap; per-task wall-clock budget from existing `RunLog` data; host wiring unified across the CLI daemon and `sophi-companion`; self-grant-bypass fix (`ToolRegistry.safeGrantsFrom`) requires every `Tool.riskLevel` to fail closed on unparseable arguments |
 
 ---
 
@@ -793,3 +866,4 @@ to decide.
 | `sophi-companion` — OS tray desktop app embedding `sophi-sdk` | post-M7 | complete | [article-25](articles/article-25.md) |
 | `sophi-core`/`sophi-schedule` — `TreePlanner` widened replan search | post-M7 | probation | — |
 | `sophi-memory` — ArcadeDB storage migration | post-M7 | complete | [article-26](articles/article-26.md) |
+| `sophi-schedule`/`sophi-cli` — autonomous self-improvement orchestrator (Phase 1) | post-M7 | complete | [article-27](articles/article-27.md) |

@@ -35,6 +35,9 @@ data class CompanionSettings(
     val maxTokens: Int = 4096,
     val sessionsDir: String = System.getProperty("user.home") + "/.sophi/sessions",
     val mcpConfigPath: String = System.getProperty("user.home") + "/.sophi/mcp.json",
+    /** Directory of `*.md` AgentDefinition files this companion's scheduled tasks may delegate
+     *  to via subagentType. Matches the CLI's `--agents-dir` default. */
+    val agentsDir: String = System.getProperty("user.home") + "/.sophi/agents",
     /** Port the embedded hub (ADR-023) listens on for CLI sessions to register with. */
     val hubPort: Int = 8765,
     /** Enables Jane's Theory long-term memory (experimental). Requires [embeddingModel] and

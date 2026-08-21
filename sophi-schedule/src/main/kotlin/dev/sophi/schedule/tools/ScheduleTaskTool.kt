@@ -40,7 +40,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
     override val name = TOOL_NAME
     override fun riskLevel(argumentsJson: String): RiskLevel {
         val args = runCatching { json.decodeFromString(ManageTaskArgs.serializer(), argumentsJson) }.getOrNull()
-            ?: return RiskLevel.SAFE
+            ?: return RiskLevel.DESTRUCTIVE
         val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
         return if (grantingPower) RiskLevel.DESTRUCTIVE else RiskLevel.SAFE
     }

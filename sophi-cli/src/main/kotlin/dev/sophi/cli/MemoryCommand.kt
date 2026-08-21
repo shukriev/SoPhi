@@ -24,7 +24,7 @@ import kotlinx.coroutines.runBlocking
 class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control Sophi's long-term memory") {
     init {
         subcommands(MemoryList(), MemoryShow(), MemoryThreads(), MemoryProfile(),
-            MemoryForget(), MemoryWhy(), MemoryConsolidate(), MemoryReset())
+            MemoryForget(), MemoryWhy(), MemoryConsolidate(), MemoryRestore(), MemoryReset())
     }
     override fun run() = Unit
 }
@@ -37,7 +37,15 @@ internal fun palace(
         buildOpenAiCompatEmbeddingProvider(baseUrl, apiKey, embeddingModel, dimensions) else null
     val llm = if (baseUrl != null && chatModel != null)
         buildProvider("openai-compat", apiKey, baseUrl, chatModel, 60L, 2) else null
-    return JanesPalace(JanesPalaceConfig(sessionModel = chatModel), llm, emb, embeddingModel ?: "unknown")
+    return JanesPalace(
+        JanesPalaceConfig(sessionModel = chatModel, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
+        llm, emb, embeddingModel ?: "unknown"
+    )
+}
+
+private fun CliktCommand.confirmPrompt(prompt: String): Boolean {
+    echo("$prompt [y/N] ", trailingNewline = false)
+    return readLine()?.trim()?.lowercase() == "y"
 }
 
 private fun renderView(v: dev.sophi.memory.MemoryView): String {
@@ -133,15 +141,11 @@ class MemoryForget : CliktCommand(name = "forget", help = "Hard-delete a memory 
             echo("Also reduces profile attributes: ${preview.affectedProfilePaths.joinToString()}")
         if (preview.relinkedEdges > 0)
             echo("Re-links ${preview.relinkedEdges} causal edge(s) around the gap.")
-        if (!yes && !confirm("Proceed?")) return@runBlocking echo("Aborted.")
+        if (!yes && !confirmPrompt("Proceed?")) return@runBlocking echo("Aborted.")
         val result = p.forget(ForgetRequest.ById(targetId))
         echo("Deleted ${result.removedIds.size} memor${if (result.removedIds.size == 1) "y" else "ies"}; " +
             "re-linked ${result.relinkedEdges} edge(s); " +
             "affected profile: ${result.affectedProfilePaths.ifEmpty { listOf("none") }.joinToString()}")
-    }
-    private fun confirm(prompt: String): Boolean {
-        echo("$prompt [y/N] ", trailingNewline = false)
-        return readLine()?.trim()?.lowercase() == "y"
     }
 }
 
@@ -155,11 +159,21 @@ class MemoryConsolidate : CliktCommand(name = "consolidate", help = "Run the sle
     private val baseUrl: String? by option("--base-url", help = "Chat endpoint for thread compression (optional)")
     private val apiKey: String? by option("--api-key")
     private val model: String? by option("--model", help = "Chat model for compression (optional)")
+    private val yes: Boolean by option("--yes", help = "Skip confirmation").flag()
     override fun run() = runBlocking {
+        if (!yes && !confirmPrompt("Run the sleep cycle now?")) return@runBlocking echo("Aborted.")
         val report = palace(baseUrl, apiKey, chatModel = model).consolidate(System.currentTimeMillis())
         echo("merged=${report.merged} strengthened=${report.strengthened} compressed=${report.compressed} " +
             "pruned=${report.pruned} purged=${report.purged}")
         if (model == null) echo("(compression skipped — pass --base-url and --model to enable)")
+    }
+}
+
+class MemoryRestore : CliktCommand(name = "restore", help = "Undo a soft-delete before it's purged") {
+    private val id: String by argument(help = "memory id")
+    override fun run() = runBlocking {
+        val restored = palace().restore(id)
+        echo(if (restored) "Restored: $id" else "Not found or not soft-deleted: $id")
     }
 }
 

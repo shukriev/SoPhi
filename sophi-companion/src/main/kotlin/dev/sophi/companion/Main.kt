@@ -60,6 +60,10 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
                 onWarning = { msg -> notificationCenter.add(NotificationKind.Memory, "Sophi memory", msg) }
             )
         }
+        agentsDir(
+            Path.of(settings.agentsDir),
+            onWarning = { msg -> notificationCenter.add(NotificationKind.Memory, "Agent definitions", msg) }
+        )
     }
     val scheduleNotifier = Notifier { task, run ->
         val (title, body) = NotificationText.forTaskRun(task, run)

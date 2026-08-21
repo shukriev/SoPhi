@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.agent.AgentDefinition
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.AgentSession
@@ -48,7 +49,8 @@ class SophiRuntime internal constructor(
     private val provider: LLMProvider? = null,
     private val contextWindowTokens: Int = 0,
     private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
-    val memoryPlugin: MemoryPlugin? = null
+    val memoryPlugin: MemoryPlugin? = null,
+    internal val agentDefinitions: List<AgentDefinition> = emptyList()
 ) {
     private val skillInstaller = SkillInstaller()
 
@@ -185,7 +187,9 @@ class SophiRuntime internal constructor(
         taskStore: TaskStore,
         runLog: RunLog,
         notifier: Notifier,
-        maxConcurrentTasks: Int = 4
+        maxConcurrentTasks: Int = 4,
+        taskTimeoutMs: Long = 300_000,
+        maxTokens: Int = 4096
     ): ScheduleEngine {
         val p = requireNotNull(provider) {
             "provider was not set on this SophiRuntime — build it via RuntimeBuilder"
@@ -202,7 +206,10 @@ class SophiRuntime internal constructor(
             notifier = notifier,
             model = config.model,
             contextWindowTokens = contextWindowTokens,
+            agentDefinitions = agentDefinitions,
             maxConcurrentTasks = maxConcurrentTasks,
+            taskTimeoutMs = taskTimeoutMs,
+            maxTokens = maxTokens,
             systemPrompt = listOfNotNull(config.systemPrompt, DefaultPrompt.UNATTENDED).joinToString("\n\n"),
             pluginRegistry = pluginRegistry
         )

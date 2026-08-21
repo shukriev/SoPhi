@@ -32,6 +32,7 @@ interface MemoryTechnique {
     suspend fun observe(turn: TurnObservation)
     suspend fun consolidate(nowMs: Long): ConsolidationReport
     suspend fun forget(request: ForgetRequest): ForgetResult
+    suspend fun restore(id: String): Boolean
     suspend fun search(query: String, k: Int): List<MemoryView>
     fun browse(filter: BrowseFilter): List<MemoryView>
     fun profileView(): List<ProfileAttributeView>
