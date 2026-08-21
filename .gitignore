@@ -21,6 +21,7 @@ docs/guides/
 doc/articles/
 .worktrees/
 TODO_TASK.md
+TODO_TASKS.md
 TESTING_SCHEDULE.md
 TICKET_PIPELINE_SETUP.md
 work-folder/
