@@ -143,6 +143,10 @@ class ScheduleEngine(
                     contextWindowTokens = contextWindowTokens
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
+                // Same collectContext path every interactive entry point already uses (SophiRuntime.
+                // streamTurn, AgentController.configWithContext) — without this, scheduled tasks
+                // (including the self-improvement orchestrator) ran with zero lesson/memory context.
+                val pluginContext = pluginRegistry?.collectContext(session.id, task.prompt) ?: emptyList()
 
                 // Null unless a plan actually ran — see RunRecord.replans on why null and 0 must
                 // stay distinguishable.
@@ -151,7 +155,10 @@ class ScheduleEngine(
 
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
-                        val result = loop.turn(session, task.prompt, config, bridge)
+                        val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+                        val effectiveConfig = if (extra == null) config
+                            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
+                        val result = loop.turn(session, task.prompt, effectiveConfig, bridge)
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
                     is TaskMode.Goal -> {
@@ -170,7 +177,7 @@ class ScheduleEngine(
                             maxStepExecutions = mode.maxIterations, allowParallelSteps = true
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
-                        val result = runner.run(session.id, task.prompt, mode.stopCondition)
+                        val result = runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
                         replans = result.replans.size
                         decompositions = result.decompositions.size
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to

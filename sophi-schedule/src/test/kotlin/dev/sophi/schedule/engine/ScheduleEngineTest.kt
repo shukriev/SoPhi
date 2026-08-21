@@ -99,6 +99,77 @@ class ScheduleEngineTest : FunSpec({
         events.map { it.toolName } shouldContain "some_tool"
     }
 
+    test("a Recurring task's prompt includes plugin-contributed context (lessons, memory)") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            requests.add(firstArg())
+            flowOf(StreamEvent.Content("done"))
+        }
+        val contributor = object : dev.sophi.extensions.SophiPlugin, dev.sophi.extensions.ContextContributor {
+            override val name = "recorder"
+            override fun hooks(): List<dev.sophi.extensions.AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String) =
+                "lesson: always double-check the invoice total"
+        }
+        val pluginRegistry = dev.sophi.extensions.PluginRegistry().register(contributor)
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-recurring-context-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            pluginRegistry = pluginRegistry
+        )
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "do the thing"
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        requests.single().systemPrompt shouldContain "always double-check the invoice total"
+    }
+
+    test("a Goal-mode task's plan generation includes plugin-contributed context") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val prompts = mutableListOf<String>()
+        coEvery { provider.complete(any()) } coAnswers {
+            prompts.add(firstArg<CompletionRequest>().messages.first().content)
+            when (prompts.size) {
+                1 -> LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+                2 -> LLMResponse.Text("1.0", TokenUsage(1, 1))
+                else -> LLMResponse.Text("YES", TokenUsage(1, 1))
+            }
+        }
+        val contributor = object : dev.sophi.extensions.SophiPlugin, dev.sophi.extensions.ContextContributor {
+            override val name = "recorder"
+            override fun hooks(): List<dev.sophi.extensions.AgentHook> = emptyList()
+            override suspend fun contribute(sessionId: String, userInput: String) =
+                "lesson: always double-check the invoice total"
+        }
+        val pluginRegistry = dev.sophi.extensions.PluginRegistry().register(contributor)
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-goal-context-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            pluginRegistry = pluginRegistry
+        )
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(stopCondition = StopCondition.LlmJudged, maxIterations = 3),
+            prompt = "do it"
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        prompts.first() shouldContain "always double-check the invoice total"
+    }
+
     test("tickOnce runs a due Recurring task and records a Succeeded run") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("checked, nothing new"))
