@@ -32,15 +32,9 @@ class SentenceSplitter {
         return remainder.ifEmpty { null }
     }
 
-    private fun findBoundary(): Int? {
-        for (i in buffer.indices) {
-            val c = buffer[i]
-            if ((c == '.' || c == '!' || c == '?' || c == '\n') &&
-                i + 1 < buffer.length && buffer[i + 1].isWhitespace()
-            ) {
-                return i + 1
-            }
-        }
-        return null
+    private fun findBoundary(): Int? = boundaryRegex.find(buffer)?.range?.last?.plus(1)
+
+    private companion object {
+        val boundaryRegex = Regex("""[.!?\n]\s""")
     }
 }

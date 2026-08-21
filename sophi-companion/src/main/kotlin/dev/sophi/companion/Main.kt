@@ -76,8 +76,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
             whisperBinaryPath = settings.whisperBinaryPath!!,
             whisperModelPath = settings.whisperModelPath!!,
             piperBinaryPath = settings.piperBinaryPath!!,
-            piperVoicePath = settings.piperVoicePath!!,
-            pttHotkey = settings.pttHotkey
+            piperVoicePath = settings.piperVoicePath!!
         )
     } else null
     companionRuntime = CompanionRuntime(

@@ -156,7 +156,7 @@ class CompanionRuntime(
         return voiceControllers.getOrPut(sessionId) {
             dev.sophi.companion.voice.VoiceController(
                 sessionId = sessionId,
-                sendMessage = { sid, text, onToken, onTurnEnd -> sendMessage(sid, text, onToken, onTurnEnd) },
+                sendMessage = ::sendMessage,
                 recorder = dev.sophi.companion.voice.JavaSoundAudioRecorder(),
                 transcriber = dev.sophi.companion.voice.ProcessWhisperTranscriber(config),
                 synthesizer = dev.sophi.companion.voice.ProcessPiperSynthesizer(config),

@@ -299,8 +299,7 @@ class CompanionRuntimeTest : FunSpec({
                 whisperBinaryPath = "/bin/true",
                 whisperModelPath = "/dev/null",
                 piperBinaryPath = "/bin/true",
-                piperVoicePath = "/dev/null",
-                pttHotkey = "Right Option"
+                piperVoicePath = "/dev/null"
             )
         )
 

@@ -60,9 +60,7 @@ data class CompanionSettings(
     /** Path to a piper voice model (.onnx). Required when [voiceEnabled]. */
     val piperVoicePath: String? = null,
     /** Held to record while the Chat tab's message field does not have focus. */
-    val pttHotkey: String = "Right Option",
-    /** Reserved: no wake-word engine is wired up yet. */
-    val wakeWordEnabled: Boolean = false
+    val pttHotkey: String = "Right Option"
 )
 
 /**

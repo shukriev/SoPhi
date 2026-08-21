@@ -176,7 +176,6 @@ class SettingsTest : FunSpec({
         settings.piperBinaryPath shouldBe null
         settings.piperVoicePath shouldBe null
         settings.pttHotkey shouldBe "Right Option"
-        settings.wakeWordEnabled shouldBe false
         settings.validationError() shouldBe null
     }
 
