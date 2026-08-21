@@ -58,8 +58,8 @@ class VoiceControllerTest : FunSpec({
         val transcriber = FakeWhisperTranscriber(Result.success("hello there"))
         val synthesizer = FakePiperSynthesizer()
         val player = FakeAudioPlayer()
-        lateinit var capturedOnToken: (String) -> Unit
-        lateinit var capturedOnTurnEnd: () -> Unit
+        var capturedOnToken: ((String) -> Unit)? = null
+        var capturedOnTurnEnd: (() -> Unit)? = null
         val controller = VoiceController(
             sessionId = "s1",
             sendMessage = { _, _, onToken, onTurnEnd ->
@@ -74,14 +74,14 @@ class VoiceControllerTest : FunSpec({
 
         controller.onPttPress()
         controller.onPttRelease()
-        runBlocking { withTimeout(2000) { waitUntil { transcriber.calls.isNotEmpty() } } }
+        runBlocking { withTimeout(2000) { waitUntil { capturedOnToken != null && capturedOnTurnEnd != null } } }
 
         transcriber.calls shouldBe listOf(wavFile)
         recorder.startCalls shouldBe 1
 
-        capturedOnToken("Hi. ")
-        capturedOnToken("Bye. ")
-        capturedOnTurnEnd()
+        capturedOnToken!!("Hi. ")
+        capturedOnToken!!("Bye. ")
+        capturedOnTurnEnd!!()
 
         runBlocking { withTimeout(2000) { waitUntil { player.enqueued.size == 2 } } }
         synthesizer.calls shouldBe listOf("Hi.", "Bye.")
@@ -92,8 +92,8 @@ class VoiceControllerTest : FunSpec({
         val transcriber = FakeWhisperTranscriber(Result.success("hi"))
         val synthesizer = FakePiperSynthesizer()
         val player = FakeAudioPlayer()
-        lateinit var capturedOnToken: (String) -> Unit
-        lateinit var capturedOnTurnEnd: () -> Unit
+        var capturedOnToken: ((String) -> Unit)? = null
+        var capturedOnTurnEnd: (() -> Unit)? = null
         val controller = VoiceController(
             sessionId = "s1",
             sendMessage = { _, _, onToken, onTurnEnd -> capturedOnToken = onToken; capturedOnTurnEnd = onTurnEnd },
@@ -105,10 +105,10 @@ class VoiceControllerTest : FunSpec({
 
         controller.onPttPress()
         controller.onPttRelease()
-        runBlocking { withTimeout(2000) { waitUntil { transcriber.calls.isNotEmpty() } } }
+        runBlocking { withTimeout(2000) { waitUntil { capturedOnToken != null && capturedOnTurnEnd != null } } }
 
-        capturedOnToken("No trailing punctuation")
-        capturedOnTurnEnd()
+        capturedOnToken!!("No trailing punctuation")
+        capturedOnTurnEnd!!()
 
         runBlocking { withTimeout(2000) { waitUntil { player.enqueued.size == 1 } } }
         synthesizer.calls shouldBe listOf("No trailing punctuation")
@@ -137,7 +137,7 @@ class VoiceControllerTest : FunSpec({
         val transcriber = FakeWhisperTranscriber(Result.success("hi"))
         val synthesizer = FakePiperSynthesizer().apply { failOn = "First." }
         val player = FakeAudioPlayer()
-        lateinit var capturedOnToken: (String) -> Unit
+        var capturedOnToken: ((String) -> Unit)? = null
         val controller = VoiceController(
             sessionId = "s1",
             sendMessage = { _, _, onToken, _ -> capturedOnToken = onToken },
@@ -149,9 +149,9 @@ class VoiceControllerTest : FunSpec({
 
         controller.onPttPress()
         controller.onPttRelease()
-        runBlocking { withTimeout(2000) { waitUntil { transcriber.calls.isNotEmpty() } } }
+        runBlocking { withTimeout(2000) { waitUntil { capturedOnToken != null } } }
 
-        capturedOnToken("First. Second. ")
+        capturedOnToken!!("First. Second. ")
 
         runBlocking { withTimeout(2000) { waitUntil { synthesizer.calls.size == 2 } } }
         player.enqueued.size shouldBe 1 // only "Second." made it to the player

@@ -1,5 +1,10 @@
 package dev.sophi.companion.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -22,17 +28,28 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
 import dev.sophi.companion.SessionState
 import dev.sophi.companion.TranscriptEntry
+import dev.sophi.companion.voice.VoiceController
+import dev.sophi.companion.voice.VoiceState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @Composable
-fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String) {
+fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, pttHotkey: String) {
     var input by remember { mutableStateOf("") }
     val scope = remember { CoroutineScope(Dispatchers.Default) }
     val isRemote = runtime.isRemote(activeSessionId)
@@ -49,8 +66,28 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String) {
     // Keyed by session so switching sessions always starts collapsed again, instead of leaking
     // one session's expanded entry ids into another session's unrelated entry id space.
     val expandedIds = remember(activeSessionId) { mutableStateMapOf<Int, Boolean>() }
+    val voiceController = remember(activeSessionId) { runtime.voiceController(activeSessionId) }
+    var textFieldFocused by remember { mutableStateOf(false) }
+    val chatFocusRequester = remember { FocusRequester() }
+    val hotkeyKey = remember(pttHotkey) { pttHotkeyToKey(pttHotkey) }
+    LaunchedEffect(activeSessionId) { chatFocusRequester.requestFocus() }
 
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(8.dp)
+            .focusRequester(chatFocusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (voiceController == null || textFieldFocused || hotkeyKey == null || event.key != hotkeyKey) {
+                    false
+                } else when (event.type) {
+                    KeyEventType.KeyDown -> { voiceController.onPttPress(); true }
+                    KeyEventType.KeyUp -> { voiceController.onPttRelease(); true }
+                    else -> false
+                }
+            }
+    ) {
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             Text(
@@ -98,11 +135,12 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String) {
                 }
             }
         }
+        VoiceControls(voiceController)
         Row {
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).onFocusChanged { textFieldFocused = it.isFocused },
                 enabled = state != SessionState.Running && state !is SessionState.NeedsConfirmation
             )
             Button(
@@ -154,5 +192,75 @@ private fun TranscriptRow(entry: TranscriptEntry, expanded: Boolean, onToggle: (
                 if (entry.result == null) "…" else if (entry.isError) "error" else "ok",
             full = "args: ${entry.argsJson}\nresult: ${entry.result ?: "(running)"}",
         )
+    }
+}
+
+// ponytail: covers the handful of keys sensible as a hold-to-talk hotkey (modifier keys and
+// function keys, which don't collide with normal typing). An unrecognized pttHotkey value in
+// settings just means the keyboard shortcut silently does nothing — the mic button (see
+// VoiceControls below) still works either way.
+private fun pttHotkeyToKey(name: String): Key? = when (name) {
+    "Right Option", "Right Alt" -> Key.AltRight
+    "Left Option", "Left Alt" -> Key.AltLeft
+    "Right Control" -> Key.CtrlRight
+    "Left Control" -> Key.CtrlLeft
+    "Space" -> Key.Spacebar
+    "F12" -> Key.F12
+    else -> null
+}
+
+// Note on scope vs. the spec's UI wording: the spec says the mic control is disabled when the
+// binaries "aren't found at those paths," which would need a filesystem existence check at
+// render time. This only disables the control when voice mode is off entirely (voiceController
+// == null). A configured-but-wrong path surfaces the first time it's actually used, through
+// VoiceState.Error — the same mechanism used everywhere else failures are surfaced here — rather
+// than a second, separate existence-check codepath.
+@Composable
+private fun VoiceControls(voiceController: VoiceController?) {
+    if (voiceController == null) {
+        Text(
+            "Voice mode not configured — set the whisper/piper paths in ~/.sophi/companion.json",
+            style = MaterialTheme.typography.bodySmall
+        )
+        return
+    }
+    val voiceState by voiceController.state.collectAsState()
+    val isSpeaking by voiceController.isSpeaking.collectAsState()
+
+    Row {
+        Box(
+            modifier = Modifier
+                .padding(end = 8.dp)
+                .background(
+                    if (voiceState is VoiceState.Recording) MaterialTheme.colorScheme.errorContainer
+                    else MaterialTheme.colorScheme.secondaryContainer,
+                    CircleShape
+                )
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .pointerInput(voiceController) {
+                    detectTapGestures(onPress = {
+                        voiceController.onPttPress()
+                        tryAwaitRelease()
+                        voiceController.onPttRelease()
+                    })
+                }
+        ) {
+            Text(
+                when (voiceState) {
+                    VoiceState.Recording -> "Recording…"
+                    VoiceState.Transcribing -> "Transcribing…"
+                    else -> "Hold to talk"
+                }
+            )
+        }
+        val error = voiceState as? VoiceState.Error
+        if (error != null) {
+            Text(error.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+        }
+        if (isSpeaking) {
+            Text("Speaking…", modifier = Modifier.padding(top = 8.dp, start = 8.dp))
+            Button(onClick = { voiceController.stopSpeaking() }) { Text("Stop") }
+        }
     }
 }

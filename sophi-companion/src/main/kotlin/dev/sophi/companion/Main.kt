@@ -157,7 +157,7 @@ fun main() = application {
                     )
                 } else {
                     val current = runtime ?: buildRuntime(currentSettings, settingsStore.resolveApiKey(currentSettings)).also { runtime = it }
-                    AppShell(current)
+                    AppShell(current, currentSettings.pttHotkey)
                 }
             }
         }
