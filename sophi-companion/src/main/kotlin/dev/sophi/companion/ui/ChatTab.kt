@@ -209,12 +209,6 @@ private fun pttHotkeyToKey(name: String): Key? = when (name) {
     else -> null
 }
 
-// Note on scope vs. the spec's UI wording: the spec says the mic control is disabled when the
-// binaries "aren't found at those paths," which would need a filesystem existence check at
-// render time. This only disables the control when voice mode is off entirely (voiceController
-// == null). A configured-but-wrong path surfaces the first time it's actually used, through
-// VoiceState.Error — the same mechanism used everywhere else failures are surfaced here — rather
-// than a second, separate existence-check codepath.
 @Composable
 private fun VoiceControls(voiceController: VoiceController?) {
     if (voiceController == null) {
