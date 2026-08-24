@@ -4,6 +4,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpSize
@@ -19,12 +20,13 @@ import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.NotificationText
 import dev.sophi.schedule.notify.Notifier
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import java.nio.file.Path
 
-private fun buildRuntime(settings: CompanionSettings, apiKey: String?): CompanionRuntime {
+private fun buildRuntime(
+    settings: CompanionSettings,
+    apiKey: String?,
+    voiceInstaller: dev.sophi.companion.voice.VoiceInstaller
+): CompanionRuntime {
     settings.validationError()?.let { error("Invalid ~/.sophi/companion.json: $it") }
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
     val notificationCenter = NotificationCenter(NotificationStore(tasksDir.resolve("notifications.json")))
@@ -72,12 +74,11 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         val (title, body) = NotificationText.forTaskRun(task, run)
         notificationCenter.add(NotificationKind.Schedule, title, body)
     }
-    val voiceInstallDir = Path.of(System.getProperty("user.home"), ".sophi", "voice")
     val voiceConfig = if (settings.voiceEnabled) {
-        val whisperBinaryPath = settings.whisperBinaryPath ?: voiceInstallDir.resolve("bin/whisper/whisper-cli").toString()
-        val whisperModelPath = settings.whisperModelPath ?: voiceInstallDir.resolve("models/ggml-base.en.bin").toString()
-        val piperPythonPath = settings.piperPythonPath ?: voiceInstallDir.resolve("bin/piper/python/bin/python3").toString()
-        val piperVoicePath = settings.piperVoicePath ?: voiceInstallDir.resolve("models/en_US-lessac-medium.onnx").toString()
+        val whisperBinaryPath = settings.whisperBinaryPath ?: voiceInstaller.whisperBinaryPath.toString()
+        val whisperModelPath = settings.whisperModelPath ?: voiceInstaller.modelPath("ggml-base.en.bin").toString()
+        val piperPythonPath = settings.piperPythonPath ?: voiceInstaller.piperPythonPath.toString()
+        val piperVoicePath = settings.piperVoicePath ?: voiceInstaller.modelPath("en_US-lessac-medium.onnx").toString()
         val resolvedPaths = listOf(whisperBinaryPath, whisperModelPath, piperPythonPath, piperVoicePath)
         if (resolvedPaths.all { java.nio.file.Files.exists(Path.of(it)) }) {
             dev.sophi.companion.voice.VoiceConfig(whisperBinaryPath, whisperModelPath, piperPythonPath, piperVoicePath)
@@ -124,11 +125,10 @@ private class BadgedPainter(
 
 fun main() = application {
     val settingsStore = remember { SettingsStore(Path.of(System.getProperty("user.home"), ".sophi", "companion.json")) }
-    val voiceInstallerScope = remember { CoroutineScope(Dispatchers.Default + SupervisorJob()) }
+    val voiceInstallerScope = rememberCoroutineScope()
     val voiceInstaller = remember {
         dev.sophi.companion.voice.VoiceInstaller(
             downloader = dev.sophi.companion.voice.ProcessDownloader(),
-            extractor = dev.sophi.companion.voice.ProcessExtractor(),
             scope = voiceInstallerScope
         )
     }
@@ -162,30 +162,26 @@ fun main() = application {
         ) {
             window.minimumSize = java.awt.Dimension(700, 450)
             dev.sophi.companion.ui.SophiTheme {
+                val applySettings: (CompanionSettings) -> Unit = { newSettings ->
+                    settingsStore.save(newSettings)
+                    settings = newSettings
+                    runtime?.close()
+                    runtime = buildRuntime(newSettings, settingsStore.resolveApiKey(newSettings), voiceInstaller)
+                }
                 val currentSettings = settings
                 if (currentSettings == null) {
                     dev.sophi.companion.ui.FirstRunSettingsScreen(
                         existing = storedSettings,
                         problem = storedProblem,
-                        onSaved = { newSettings ->
-                            settingsStore.save(newSettings)
-                            settings = newSettings
-                            runtime?.close()
-                            runtime = buildRuntime(newSettings, settingsStore.resolveApiKey(newSettings))
-                        }
+                        onSaved = applySettings
                     )
                 } else {
-                    val current = runtime ?: buildRuntime(currentSettings, settingsStore.resolveApiKey(currentSettings)).also { runtime = it }
+                    val current = runtime ?: buildRuntime(currentSettings, settingsStore.resolveApiKey(currentSettings), voiceInstaller).also { runtime = it }
                     AppShell(
                         runtime = current,
                         pttHotkey = currentSettings.pttHotkey,
                         settings = currentSettings,
-                        onSettingsChanged = { newSettings ->
-                            settingsStore.save(newSettings)
-                            settings = newSettings
-                            runtime?.close()
-                            runtime = buildRuntime(newSettings, settingsStore.resolveApiKey(newSettings))
-                        },
+                        onSettingsChanged = applySettings,
                         voiceInstaller = voiceInstaller
                     )
                 }

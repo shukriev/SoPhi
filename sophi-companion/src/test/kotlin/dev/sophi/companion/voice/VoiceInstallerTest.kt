@@ -1,19 +1,19 @@
 package dev.sophi.companion.voice
 
+import io.kotest.assertions.nondeterministic.eventually
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeBytes
+import kotlin.time.Duration.Companion.seconds
 
 private fun sha256Hex(bytes: ByteArray): String =
     MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -29,28 +29,6 @@ private class FakeDownloader(private val content: Map<String, ByteArray>, privat
         dest.writeBytes(bytes)
         return Result.success(Unit)
     }
-}
-
-private class FakeExtractor : Extractor {
-    val extractedInto = mutableListOf<Path>()
-    override suspend fun extractTarGz(tarFile: Path, destDir: Path): Result<Unit> {
-        extractedInto.add(destDir)
-        Files.createDirectories(destDir)
-        // Fake the two files VoiceInstaller's status()/CheckingExisting checks for existence of.
-        Files.createDirectories(destDir.resolve("python/bin"))
-        Files.write(destDir.resolve("whisper-cli"), byteArrayOf(1))
-        Files.write(destDir.resolve("python/bin/python3"), byteArrayOf(1))
-        return Result.success(Unit)
-    }
-}
-
-private suspend fun waitUntil(timeoutMs: Long = 2000, poll: () -> Boolean) {
-    val deadline = System.currentTimeMillis() + timeoutMs
-    while (System.currentTimeMillis() < deadline) {
-        if (poll()) return
-        delay(10)
-    }
-    error("waitUntil timed out after ${timeoutMs}ms")
 }
 
 class VoiceInstallerTest : FunSpec({
@@ -89,13 +67,12 @@ class VoiceInstallerTest : FunSpec({
     test("a fresh install downloads, verifies, extracts, and reaches Ready") {
         val installDir = createTempDirectory("voice-installer-test")
         val downloader = FakeDownloader(fakeContent())
-        val extractor = FakeExtractor()
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val installer = VoiceInstaller(downloader, extractor, scope, installDir)
+        val installer = VoiceInstaller(downloader, scope, installDir)
 
         installer.install()
 
-        runBlocking { withTimeout(5000) { waitUntil { installer.state.value is InstallState.Error || installer.state.value == InstallState.Ready } } }
+        runBlocking { eventually(5.seconds) { (installer.state.value is InstallState.Error || installer.state.value == InstallState.Ready) shouldBe true } }
 
         // Model checksums won't match the pinned table (fake bytes, not the real HF files), so
         // this real run is expected to end in Error at Verifying — this test's job is to prove
@@ -106,54 +83,26 @@ class VoiceInstallerTest : FunSpec({
         downloader.downloadedUrls shouldBe listOf(MANIFEST_URL, whisperTarballUrl, piperTarballUrl) + MODEL_ARTIFACTS.map { it.url }
     }
 
-    test("already-installed files short-circuit install() straight to Ready without downloading") {
+    test("isInstalled() never touches the network") {
         val installDir = createTempDirectory("voice-installer-test")
-        // Pre-populate exactly what allFilesPresentAndValid() checks: tool binaries by existence
-        // only (no checksum — status()/CheckingExisting is network-free by design, and the tool
-        // bundles' checksums only exist in the manifest), model files needing existence AND
-        // matching the real pinned checksum, which this test deliberately does NOT fabricate
-        // (content whose sha256 equals the real pinned value can't be produced without knowing a
-        // preimage) — so this test exercises the negative case, proving Idle rather than Ready.
-        // A true positive Ready-from-status() case would need real HF file bytes, which is exactly
-        // what Task 8's manual end-to-end run against the real files covers instead.
-        Files.createDirectories(installDir.resolve("bin/whisper"))
-        Files.createDirectories(installDir.resolve("bin/piper/python/bin"))
-        Files.write(installDir.resolve("bin/whisper/whisper-cli"), byteArrayOf(1))
-        Files.write(installDir.resolve("bin/piper/python/bin/python3"), byteArrayOf(1))
-        Files.createDirectories(installDir.resolve("models"))
-        val downloader = FakeDownloader(emptyMap())
-        val extractor = FakeExtractor()
+        val downloader = FakeDownloader(emptyMap()) // would fail loudly if isInstalled() tried to download anything
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val installer = VoiceInstaller(downloader, extractor, scope, installDir)
+        val installer = VoiceInstaller(downloader, scope, installDir)
 
-        val status = runBlocking { installer.status() }
+        val installed = runBlocking { installer.isInstalled() }
 
-        status shouldBe InstallState.Idle // model files absent — existence check fails before checksum is even considered
-        downloader.downloadedUrls shouldBe emptyList()
-    }
-
-    test("status() never touches the network") {
-        val installDir = createTempDirectory("voice-installer-test")
-        val downloader = FakeDownloader(emptyMap()) // would fail loudly if status() tried to download anything
-        val extractor = FakeExtractor()
-        val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val installer = VoiceInstaller(downloader, extractor, scope, installDir)
-
-        val status = runBlocking { installer.status() }
-
-        status shouldBe InstallState.Idle
+        installed shouldBe false
         downloader.downloadedUrls shouldBe emptyList()
     }
 
     test("a manifest fetch failure surfaces as Error and downloads nothing else") {
         val installDir = createTempDirectory("voice-installer-test")
         val downloader = FakeDownloader(emptyMap(), failUrls = setOf(MANIFEST_URL))
-        val extractor = FakeExtractor()
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val installer = VoiceInstaller(downloader, extractor, scope, installDir)
+        val installer = VoiceInstaller(downloader, scope, installDir)
 
         installer.install()
-        runBlocking { withTimeout(2000) { waitUntil { installer.state.value is InstallState.Error } } }
+        runBlocking { eventually(2.seconds) { installer.state.value.shouldBeInstanceOf<InstallState.Error>() } }
 
         downloader.downloadedUrls shouldBe listOf(MANIFEST_URL)
     }
@@ -161,14 +110,13 @@ class VoiceInstallerTest : FunSpec({
     test("a second install() call while one is already running is ignored") {
         val installDir = createTempDirectory("voice-installer-test")
         val downloader = FakeDownloader(fakeContent())
-        val extractor = FakeExtractor()
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val installer = VoiceInstaller(downloader, extractor, scope, installDir)
+        val installer = VoiceInstaller(downloader, scope, installDir)
 
         installer.install()
         installer.install() // should be a no-op — same run still in flight
 
-        runBlocking { withTimeout(5000) { waitUntil { installer.state.value is InstallState.Error || installer.state.value == InstallState.Ready } } }
+        runBlocking { eventually(5.seconds) { (installer.state.value is InstallState.Error || installer.state.value == InstallState.Ready) shouldBe true } }
 
         // Exactly one manifest fetch — a second concurrent run would have fetched it twice.
         downloader.downloadedUrls.count { it == MANIFEST_URL } shouldBe 1
@@ -177,12 +125,11 @@ class VoiceInstallerTest : FunSpec({
     test("the guard is released after a run finishes, so a later install() is not ignored") {
         val installDir = createTempDirectory("voice-installer-test")
         val downloader = FakeDownloader(fakeContent(), failUrls = setOf(MANIFEST_URL))
-        val extractor = FakeExtractor()
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        val installer = VoiceInstaller(downloader, extractor, scope, installDir)
+        val installer = VoiceInstaller(downloader, scope, installDir)
 
         installer.install()
-        runBlocking { withTimeout(2000) { waitUntil { installer.state.value is InstallState.Error } } }
+        runBlocking { eventually(2.seconds) { installer.state.value.shouldBeInstanceOf<InstallState.Error>() } }
 
         // The finally block that clears the concurrency guard runs slightly *after* state
         // reaches Error (they're set from different points in the same coroutine, observed from
@@ -191,11 +138,9 @@ class VoiceInstallerTest : FunSpec({
         // install() inside the poll loop (instead of once, then waiting) is what actually proves
         // the guard eventually releases, without racing on exact timing.
         runBlocking {
-            withTimeout(2000) {
-                waitUntil {
-                    installer.install()
-                    downloader.downloadedUrls.count { it == MANIFEST_URL } == 2
-                }
+            eventually(2.seconds) {
+                installer.install()
+                downloader.downloadedUrls.count { it == MANIFEST_URL } shouldBe 2
             }
         }
 

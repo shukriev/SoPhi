@@ -12,9 +12,12 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.DigestInputStream
 import java.security.MessageDigest
+import java.util.HexFormat
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.readText
 
@@ -58,10 +61,6 @@ class ProcessDownloader : Downloader {
     }
 }
 
-interface Extractor {
-    suspend fun extractTarGz(tarFile: Path, destDir: Path): Result<Unit>
-}
-
 /**
  * The JDK has no tar support. Shelling out to the system tar (present on every macOS install,
  * the same tool sub-project A's own CI uses to *package* these tarballs) preserves the POSIX
@@ -69,15 +68,13 @@ interface Extractor {
  * mode for that would be "Permission denied" or a broken interpreter, discovered only after a
  * successful 324MB download.
  */
-class ProcessExtractor : Extractor {
-    override suspend fun extractTarGz(tarFile: Path, destDir: Path): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            Files.createDirectories(destDir)
-            val process = ProcessBuilder("tar", "xzf", tarFile.toString(), "-C", destDir.toString()).start()
-            val stderr = process.errorStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
-            check(exitCode == 0) { "tar exited with code $exitCode extracting $tarFile: $stderr" }
-        }
+internal suspend fun extractTarGz(tarFile: Path, destDir: Path): Result<Unit> = withContext(Dispatchers.IO) {
+    runCatching {
+        Files.createDirectories(destDir)
+        val process = ProcessBuilder("tar", "xzf", tarFile.toString(), "-C", destDir.toString()).start()
+        val stderr = process.errorStream.bufferedReader().readText()
+        val exitCode = process.waitFor()
+        check(exitCode == 0) { "tar exited with code $exitCode extracting $tarFile: $stderr" }
     }
 }
 
@@ -92,15 +89,10 @@ sealed interface InstallState {
 }
 
 @Serializable
-private data class ManifestArtifact(val file: String, val sha256: String, val sizeBytes: Long)
+private data class ManifestArtifact(val file: String, val sha256: String)
 
 @Serializable
-private data class VoiceToolsManifest(
-    val releaseTag: String,
-    val whisperCppRef: String,
-    val piperTtsVersion: String,
-    val artifacts: Map<String, ManifestArtifact>
-)
+private data class VoiceToolsManifest(val artifacts: Map<String, ManifestArtifact>)
 
 internal data class PinnedModelArtifact(val url: String, val fileName: String, val sha256: String)
 
@@ -143,7 +135,6 @@ private val manifestJson = Json { ignoreUnknownKeys = true }
 
 class VoiceInstaller(
     private val downloader: Downloader,
-    private val extractor: Extractor,
     private val scope: CoroutineScope,
     private val installDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "voice")
 ) {
@@ -163,7 +154,8 @@ class VoiceInstaller(
 
     fun modelPath(fileName: String): Path = modelsDir.resolve(fileName)
 
-    suspend fun status(): InstallState = if (allFilesPresentAndValid()) InstallState.Ready else InstallState.Idle
+    /** Read-only, network-free — safe to call just to check install status without side effects. */
+    suspend fun isInstalled(): Boolean = allFilesPresentAndValid()
 
     fun install() {
         if (!installing.compareAndSet(false, true)) return
@@ -191,14 +183,12 @@ class VoiceInstaller(
             }
 
             val manifestFile = tempDir.resolve("voice-tools-manifest.json")
-            var failed = false
             downloader.download(MANIFEST_URL, manifestFile) { done, total ->
                 _state.value = InstallState.Downloading("voice-tools-manifest.json", done, total)
-            }.onFailure {
+            }.getOrElse {
                 _state.value = InstallState.Error("Failed to fetch manifest: ${it.message}")
-                failed = true
+                return
             }
-            if (failed) return
 
             val manifest = manifestJson.decodeFromString<VoiceToolsManifest>(manifestFile.readText())
             val whisperArtifact = manifest.artifacts["whisper-cli-macos-$arch"]
@@ -217,11 +207,10 @@ class VoiceInstaller(
             for (d in downloads) {
                 downloader.download(d.url, d.dest) { done, total ->
                     _state.value = InstallState.Downloading(d.dest.fileName.toString(), done, total)
-                }.onFailure {
+                }.getOrElse {
                     _state.value = InstallState.Error("Failed to download ${d.dest.fileName}: ${it.message}")
-                    failed = true
+                    return
                 }
-                if (failed) return
             }
 
             _state.value = InstallState.Verifying
@@ -236,16 +225,14 @@ class VoiceInstaller(
             }
 
             _state.value = InstallState.Extracting
-            extractor.extractTarGz(tempDir.resolve(whisperArtifact.file), whisperDir).onFailure {
+            extractTarGz(tempDir.resolve(whisperArtifact.file), whisperDir).getOrElse {
                 _state.value = InstallState.Error("Failed to extract whisper-cli: ${it.message}")
-                failed = true
+                return
             }
-            if (failed) return
-            extractor.extractTarGz(tempDir.resolve(piperArtifact.file), piperDir).onFailure {
+            extractTarGz(tempDir.resolve(piperArtifact.file), piperDir).getOrElse {
                 _state.value = InstallState.Error("Failed to extract piper runtime: ${it.message}")
-                failed = true
+                return
             }
-            if (failed) return
             Files.createDirectories(modelsDir)
             MODEL_ARTIFACTS.forEach {
                 Files.move(
@@ -263,7 +250,7 @@ class VoiceInstaller(
     /** Existence-only for the two tool binaries (their checksums only exist in the manifest, and
      *  fetching it is a network call this method must not make); existence-plus-checksum for the
      *  three model files (checksums are pinned in code, no network needed). This asymmetry is
-     *  deliberate — see the design spec's status() section. */
+     *  deliberate — see the design spec's isInstalled() section. */
     private fun allFilesPresentAndValid(): Boolean {
         if (!Files.isExecutable(whisperBinaryPath) || !Files.isExecutable(piperPythonPath)) return false
         return MODEL_ARTIFACTS.all { artifact ->
@@ -274,14 +261,7 @@ class VoiceInstaller(
 
     private fun sha256(file: Path): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        Files.newInputStream(file).use { input ->
-            val buffer = ByteArray(65536)
-            while (true) {
-                val n = input.read(buffer)
-                if (n < 0) break
-                digest.update(buffer, 0, n)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        DigestInputStream(Files.newInputStream(file), digest).use { it.transferTo(OutputStream.nullOutputStream()) }
+        return HexFormat.of().formatHex(digest.digest())
     }
 }

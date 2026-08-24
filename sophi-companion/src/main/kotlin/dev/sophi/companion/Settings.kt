@@ -56,11 +56,7 @@ data class CompanionSettings(
     val whisperBinaryPath: String? = null,
     /** Path to a whisper.cpp ggml model file. Required when [voiceEnabled]. */
     val whisperModelPath: String? = null,
-    /** Path to the python interpreter inside the installed piper runtime (invoked as
-     *  `<piperPythonPath> -s -m piper ...`). Auto-managed under ~/.sophi/voice/ when unset.
-     *  JSON key stays "piperBinaryPath" for backward compatibility with existing configs — it's
-     *  no longer a bare binary path, but renaming the on-disk key would silently drop existing
-     *  users' configured value (ignoreUnknownKeys means a stale key is just dropped, not an error). */
+    /** Python interpreter inside the installed piper runtime; JSON key kept as piperBinaryPath for back-compat. */
     @SerialName("piperBinaryPath")
     val piperPythonPath: String? = null,
     /** Path to a piper voice model (.onnx). Required when [voiceEnabled]. */
