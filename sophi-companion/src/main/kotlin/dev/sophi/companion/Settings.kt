@@ -1,5 +1,6 @@
 package dev.sophi.companion
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -55,8 +56,13 @@ data class CompanionSettings(
     val whisperBinaryPath: String? = null,
     /** Path to a whisper.cpp ggml model file. Required when [voiceEnabled]. */
     val whisperModelPath: String? = null,
-    /** Path to a local piper executable. Required when [voiceEnabled]. */
-    val piperBinaryPath: String? = null,
+    /** Path to the python interpreter inside the installed piper runtime (invoked as
+     *  `<piperPythonPath> -s -m piper ...`). Auto-managed under ~/.sophi/voice/ when unset.
+     *  JSON key stays "piperBinaryPath" for backward compatibility with existing configs — it's
+     *  no longer a bare binary path, but renaming the on-disk key would silently drop existing
+     *  users' configured value (ignoreUnknownKeys means a stale key is just dropped, not an error). */
+    @SerialName("piperBinaryPath")
+    val piperPythonPath: String? = null,
     /** Path to a piper voice model (.onnx). Required when [voiceEnabled]. */
     val piperVoicePath: String? = null,
     /** Held to record while the Chat tab's message field does not have focus. */
@@ -81,10 +87,6 @@ fun CompanionSettings.validationError(): String? = when {
         "maxTokens ($maxTokens) must not exceed contextWindowTokens ($contextWindowTokens)"
     memoryEnabled && embeddingModel.isNullOrBlank() -> "embeddingModel is required when memoryEnabled is true"
     memoryEnabled && embeddingBaseUrl.isNullOrBlank() -> "embeddingBaseUrl is required when memoryEnabled is true"
-    voiceEnabled && whisperBinaryPath.isNullOrBlank() -> "whisperBinaryPath is required when voiceEnabled is true"
-    voiceEnabled && whisperModelPath.isNullOrBlank() -> "whisperModelPath is required when voiceEnabled is true"
-    voiceEnabled && piperBinaryPath.isNullOrBlank() -> "piperBinaryPath is required when voiceEnabled is true"
-    voiceEnabled && piperVoicePath.isNullOrBlank() -> "piperVoicePath is required when voiceEnabled is true"
     else -> null
 }
 

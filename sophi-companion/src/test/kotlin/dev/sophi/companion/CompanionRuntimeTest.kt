@@ -298,7 +298,7 @@ class CompanionRuntimeTest : FunSpec({
             voiceConfig = dev.sophi.companion.voice.VoiceConfig(
                 whisperBinaryPath = "/bin/true",
                 whisperModelPath = "/dev/null",
-                piperBinaryPath = "/bin/true",
+                piperPythonPath = "/bin/true",
                 piperVoicePath = "/dev/null"
             )
         )
