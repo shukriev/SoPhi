@@ -27,14 +27,15 @@ class ProcessPiperSynthesizer(private val config: VoiceConfig) : PiperSynthesize
     override suspend fun synthesize(text: String): Result<ByteArray> = withContext(Dispatchers.IO) {
         runCatching {
             val process = ProcessBuilder(
-                config.piperBinaryPath, "--model", config.piperVoicePath, "--output-raw"
+                config.piperPythonPath, "-s", "-m", "piper",
+                "--model", config.piperVoicePath, "--output-raw"
             ).start()
             process.outputStream.use { it.write((text + "\n").toByteArray()) }
             val audio = process.inputStream.readBytes()
             val stderr = process.errorStream.bufferedReader().readText()
             val exitCode = process.waitFor()
             check(exitCode == 0) {
-                "piper exited with code $exitCode (binary: ${config.piperBinaryPath}): $stderr"
+                "piper exited with code $exitCode (python: ${config.piperPythonPath}): $stderr"
             }
             audio
         }

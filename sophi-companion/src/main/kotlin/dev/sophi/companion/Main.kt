@@ -75,7 +75,7 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         dev.sophi.companion.voice.VoiceConfig(
             whisperBinaryPath = settings.whisperBinaryPath!!,
             whisperModelPath = settings.whisperModelPath!!,
-            piperBinaryPath = settings.piperBinaryPath!!,
+            piperPythonPath = settings.piperBinaryPath!!,
             piperVoicePath = settings.piperVoicePath!!
         )
     } else null
