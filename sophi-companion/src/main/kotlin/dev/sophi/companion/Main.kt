@@ -19,6 +19,9 @@ import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.NotificationText
 import dev.sophi.schedule.notify.Notifier
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.nio.file.Path
 
 private fun buildRuntime(settings: CompanionSettings, apiKey: String?): CompanionRuntime {
@@ -69,15 +72,23 @@ private fun buildRuntime(settings: CompanionSettings, apiKey: String?): Companio
         val (title, body) = NotificationText.forTaskRun(task, run)
         notificationCenter.add(NotificationKind.Schedule, title, body)
     }
-    // settings.validationError() (checked above) already guarantees the four path fields are
-    // non-blank whenever voiceEnabled is true.
+    val voiceInstallDir = Path.of(System.getProperty("user.home"), ".sophi", "voice")
     val voiceConfig = if (settings.voiceEnabled) {
-        dev.sophi.companion.voice.VoiceConfig(
-            whisperBinaryPath = settings.whisperBinaryPath!!,
-            whisperModelPath = settings.whisperModelPath!!,
-            piperPythonPath = settings.piperPythonPath!!,
-            piperVoicePath = settings.piperVoicePath!!
-        )
+        val whisperBinaryPath = settings.whisperBinaryPath ?: voiceInstallDir.resolve("bin/whisper/whisper-cli").toString()
+        val whisperModelPath = settings.whisperModelPath ?: voiceInstallDir.resolve("models/ggml-base.en.bin").toString()
+        val piperPythonPath = settings.piperPythonPath ?: voiceInstallDir.resolve("bin/piper/python/bin/python3").toString()
+        val piperVoicePath = settings.piperVoicePath ?: voiceInstallDir.resolve("models/en_US-lessac-medium.onnx").toString()
+        val resolvedPaths = listOf(whisperBinaryPath, whisperModelPath, piperPythonPath, piperVoicePath)
+        if (resolvedPaths.all { java.nio.file.Files.exists(Path.of(it)) }) {
+            dev.sophi.companion.voice.VoiceConfig(whisperBinaryPath, whisperModelPath, piperPythonPath, piperVoicePath)
+        } else {
+            notificationCenter.add(
+                NotificationKind.Memory, "Voice mode",
+                "voiceEnabled is set but not all voice files are installed — enable it from the Settings tab, or " +
+                    "check your manually-configured paths in ~/.sophi/companion.json."
+            )
+            null
+        }
     } else null
     companionRuntime = CompanionRuntime(
         sophiRuntime = sophiRuntime,
@@ -113,6 +124,14 @@ private class BadgedPainter(
 
 fun main() = application {
     val settingsStore = remember { SettingsStore(Path.of(System.getProperty("user.home"), ".sophi", "companion.json")) }
+    val voiceInstallerScope = remember { CoroutineScope(Dispatchers.Default + SupervisorJob()) }
+    val voiceInstaller = remember {
+        dev.sophi.companion.voice.VoiceInstaller(
+            downloader = dev.sophi.companion.voice.ProcessDownloader(),
+            extractor = dev.sophi.companion.voice.ProcessExtractor(),
+            scope = voiceInstallerScope
+        )
+    }
     // A file that exists but is unusable (e.g. written by an older build with a blank model) routes
     // to the setup screen pre-filled, rather than dead-ending on a startup error with no way to fix it.
     val storedSettings = remember { runCatching { settingsStore.load() }.getOrNull() }
@@ -151,12 +170,24 @@ fun main() = application {
                         onSaved = { newSettings ->
                             settingsStore.save(newSettings)
                             settings = newSettings
+                            runtime?.close()
                             runtime = buildRuntime(newSettings, settingsStore.resolveApiKey(newSettings))
                         }
                     )
                 } else {
                     val current = runtime ?: buildRuntime(currentSettings, settingsStore.resolveApiKey(currentSettings)).also { runtime = it }
-                    AppShell(current, currentSettings.pttHotkey)
+                    AppShell(
+                        runtime = current,
+                        pttHotkey = currentSettings.pttHotkey,
+                        settings = currentSettings,
+                        onSettingsChanged = { newSettings ->
+                            settingsStore.save(newSettings)
+                            settings = newSettings
+                            runtime?.close()
+                            runtime = buildRuntime(newSettings, settingsStore.resolveApiKey(newSettings))
+                        },
+                        voiceInstaller = voiceInstaller
+                    )
                 }
             }
         }
