@@ -1,0 +1,23 @@
+name: Voice Tools Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag for this voice-tools publish (e.g. voice-tools-v1)'
+        required: true
+        type: string
+
+env:
+  WHISPER_CPP_REF: b4938
+  PIPER_TTS_VERSION: "1.7.0"
+  ONNXRUNTIME_VERSION: "1.23.2"
+  PYTHON_BUILD_STANDALONE_TAG: "20260814"
+  PYTHON_VERSION: "3.12.14"
+
+jobs:
+  # build-whisper-cli, build-piper-runtime, publish added in later tasks
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "scaffold only — replaced by real jobs in Task 2-4"
