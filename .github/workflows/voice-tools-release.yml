@@ -63,3 +63,40 @@ jobs:
           name: whisper-cli-macos-${{ matrix.arch }}
           path: whisper-cli-macos-${{ matrix.arch }}.tar.gz
           retention-days: 1
+
+  build-piper-runtime:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+            standalone_arch: aarch64
+          - os: macos-15-intel
+            arch: x64
+            standalone_arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Download embeddable CPython
+        run: |
+          curl -sL "https://github.com/astral-sh/python-build-standalone/releases/download/${{ env.PYTHON_BUILD_STANDALONE_TAG }}/cpython-${{ env.PYTHON_VERSION }}+${{ env.PYTHON_BUILD_STANDALONE_TAG }}-${{ matrix.standalone_arch }}-apple-darwin-install_only.tar.gz" -o cpython.tar.gz
+          tar xzf cpython.tar.gz
+
+      - name: Install pinned onnxruntime + piper-tts
+        run: ./python/bin/python3 -m pip install onnxruntime==${{ env.ONNXRUNTIME_VERSION }} piper-tts==${{ env.PIPER_TTS_VERSION }}
+
+      - name: Add piper's license (GPL-3.0 compliance — the redistributed bundle must carry it)
+        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o python/PIPER-LICENSE
+
+      - name: Smoke test (isolated invocation — -s is not optional, see Global Constraints)
+        run: ./python/bin/python3 -s -m piper --help
+
+      - name: Package
+        run: tar czf piper-runtime-macos-${{ matrix.arch }}.tar.gz python
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: piper-runtime-macos-${{ matrix.arch }}
+          path: piper-runtime-macos-${{ matrix.arch }}.tar.gz
+          retention-days: 1
