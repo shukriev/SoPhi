@@ -184,8 +184,20 @@ class VoiceInstallerTest : FunSpec({
         installer.install()
         runBlocking { withTimeout(2000) { waitUntil { installer.state.value is InstallState.Error } } }
 
-        installer.install() // guard must have been released by the finally block
-        runBlocking { withTimeout(2000) { waitUntil { downloader.downloadedUrls.count { it == MANIFEST_URL } == 2 } } }
+        // The finally block that clears the concurrency guard runs slightly *after* state
+        // reaches Error (they're set from different points in the same coroutine, observed from
+        // a different thread) — so a single install() call right after seeing Error can still
+        // land in that narrow gap and be silently ignored as "already in flight". Retrying
+        // install() inside the poll loop (instead of once, then waiting) is what actually proves
+        // the guard eventually releases, without racing on exact timing.
+        runBlocking {
+            withTimeout(2000) {
+                waitUntil {
+                    installer.install()
+                    downloader.downloadedUrls.count { it == MANIFEST_URL } == 2
+                }
+            }
+        }
 
         downloader.downloadedUrls.count { it == MANIFEST_URL } shouldBe 2
     }
