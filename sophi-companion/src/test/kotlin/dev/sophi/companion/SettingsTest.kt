@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 class SettingsTest : FunSpec({
@@ -173,58 +174,10 @@ class SettingsTest : FunSpec({
         settings.voiceEnabled shouldBe false
         settings.whisperBinaryPath shouldBe null
         settings.whisperModelPath shouldBe null
-        settings.piperBinaryPath shouldBe null
+        settings.piperPythonPath shouldBe null
         settings.piperVoicePath shouldBe null
         settings.pttHotkey shouldBe "Right Option"
         settings.validationError() shouldBe null
-    }
-
-    test("voiceEnabled without whisperBinaryPath is rejected") {
-        val settings = CompanionSettings(
-            voiceEnabled = true,
-            whisperBinaryPath = null,
-            whisperModelPath = "/models/ggml-base.bin",
-            piperBinaryPath = "/usr/local/bin/piper",
-            piperVoicePath = "/models/en_US-voice.onnx"
-        )
-
-        settings.validationError() shouldContain "whisperBinaryPath is required"
-    }
-
-    test("voiceEnabled without whisperModelPath is rejected") {
-        val settings = CompanionSettings(
-            voiceEnabled = true,
-            whisperBinaryPath = "/usr/local/bin/whisper",
-            whisperModelPath = null,
-            piperBinaryPath = "/usr/local/bin/piper",
-            piperVoicePath = "/models/en_US-voice.onnx"
-        )
-
-        settings.validationError() shouldContain "whisperModelPath is required"
-    }
-
-    test("voiceEnabled without piperBinaryPath is rejected") {
-        val settings = CompanionSettings(
-            voiceEnabled = true,
-            whisperBinaryPath = "/usr/local/bin/whisper",
-            whisperModelPath = "/models/ggml-base.bin",
-            piperBinaryPath = null,
-            piperVoicePath = "/models/en_US-voice.onnx"
-        )
-
-        settings.validationError() shouldContain "piperBinaryPath is required"
-    }
-
-    test("voiceEnabled without piperVoicePath is rejected") {
-        val settings = CompanionSettings(
-            voiceEnabled = true,
-            whisperBinaryPath = "/usr/local/bin/whisper",
-            whisperModelPath = "/models/ggml-base.bin",
-            piperBinaryPath = "/usr/local/bin/piper",
-            piperVoicePath = null
-        )
-
-        settings.validationError() shouldContain "piperVoicePath is required"
     }
 
     test("voiceEnabled with all four paths present has no validation error") {
@@ -232,9 +185,34 @@ class SettingsTest : FunSpec({
             voiceEnabled = true,
             whisperBinaryPath = "/usr/local/bin/whisper",
             whisperModelPath = "/models/ggml-base.bin",
-            piperBinaryPath = "/usr/local/bin/piper",
+            piperPythonPath = "/usr/local/bin/python3",
             piperVoicePath = "/models/en_US-voice.onnx"
         )
+
+        settings.validationError() shouldBe null
+    }
+
+    test("piperPythonPath round-trips through its stable JSON key piperBinaryPath") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        val settings = CompanionSettings(
+            voiceEnabled = true,
+            whisperBinaryPath = "/usr/local/bin/whisper",
+            whisperModelPath = "/models/ggml-base.bin",
+            piperPythonPath = "/usr/local/bin/python3",
+            piperVoicePath = "/models/en_US-voice.onnx"
+        )
+
+        store.save(settings)
+
+        // The JSON key on disk must still be "piperBinaryPath" — a bare Kotlin rename would
+        // silently drop an existing user's configured value as an unknown key.
+        dir.resolve("companion.json").readText() shouldContain "\"piperBinaryPath\""
+        store.load() shouldBe settings
+    }
+
+    test("voiceEnabled alone is sufficient — the four path fields are no longer required") {
+        val settings = CompanionSettings(voiceEnabled = true)
 
         settings.validationError() shouldBe null
     }

@@ -34,9 +34,10 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │   sophi-companion  (Compose Multiplatform Desktop tray app)  │
-│   Chat · Sessions · MCP · Goals — native OS notifications    │
-│   embeds sophi-hub's HubServer — CLI session monitoring &    │
-│   remote control (ADR-023)                                   │
+│   Chat · Sessions · MCP · Goals · Settings — native OS       │
+│   notifications; embeds sophi-hub's HubServer — CLI          │
+│   session monitoring & remote control (ADR-023)              │
+│   Settings tab — voice mode auto-install + push-to-talk      │
 │   (ADR-022 — standalone Gradle module, outside the reactor)  │
 └──────────────────────┬───────────────────────────────────────┘
                        │ embeds sophi-sdk in-process (no HTTP hop)
@@ -111,7 +112,7 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
 | `sophi-sdk` | Embeddable library for Spring `@Service` beans | complete |
-| `sophi-companion` | OS tray/menu-bar desktop app (Compose Multiplatform Desktop) embedding `sophi-sdk` in-process: Chat/Sessions/MCP/Goals tabs, per-session `StateFlow` with one coroutine per turn, in-process `ScheduleEngine` poll loop, cross-platform native notifications, `jpackage` bundles. Standalone Gradle project — **not** in the root Maven `<modules>`; consumes `dev.sophi:sophi-sdk` via `mavenLocal()` (ADR-022) | complete |
+| `sophi-companion` | OS tray/menu-bar desktop app (Compose Multiplatform Desktop) embedding `sophi-sdk` in-process: Chat/Sessions/MCP/Goals/Settings tabs, per-session `StateFlow` with one coroutine per turn, in-process `ScheduleEngine` poll loop, cross-platform native notifications, `jpackage` bundles. Standalone Gradle project — **not** in the root Maven `<modules>`; consumes `dev.sophi:sophi-sdk` via `mavenLocal()` (ADR-022). Voice mode (`dev.sophi.companion.voice`): push-to-talk turns via local `whisper.cpp`/`piper` subprocesses (`VoiceController`, sentence-by-sentence TTS playback as the reply streams), with a `VoiceInstaller` that downloads, checksum-verifies, and extracts the tool binaries + models from a pinned GitHub release manifest into `~/.sophi/voice` — zero manual setup for the common case, driven from the Settings tab | complete |
 | `sophi-infra` | Auth, budget, observability | complete |
 
 **Dependency direction rules (never violate):**
@@ -867,3 +868,4 @@ to decide.
 | `sophi-core`/`sophi-schedule` — `TreePlanner` widened replan search | post-M7 | probation | — |
 | `sophi-memory` — ArcadeDB storage migration | post-M7 | complete | [article-26](articles/article-26.md) |
 | `sophi-schedule`/`sophi-cli` — autonomous self-improvement orchestrator (Phase 1) | post-M7 | complete | [article-27](articles/article-27.md) |
+| `sophi-companion` — voice mode (push-to-talk, local whisper.cpp/piper) + in-app installer | post-M7 | complete | [article-28](articles/article-28.md) |

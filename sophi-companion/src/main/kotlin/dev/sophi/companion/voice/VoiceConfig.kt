@@ -8,6 +8,6 @@ package dev.sophi.companion.voice
 data class VoiceConfig(
     val whisperBinaryPath: String,
     val whisperModelPath: String,
-    val piperBinaryPath: String,
+    val piperPythonPath: String,
     val piperVoicePath: String
 )

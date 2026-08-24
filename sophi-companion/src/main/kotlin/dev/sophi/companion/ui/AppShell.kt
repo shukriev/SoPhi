@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
+import dev.sophi.companion.CompanionSettings
 import dev.sophi.companion.SessionState
 import dev.sophi.core.session.SessionMeta
 import kotlinx.coroutines.CoroutineScope
@@ -63,12 +64,19 @@ private sealed class Selection {
     object Goals : Selection()
     object Skills : Selection()
     object Notifications : Selection()
+    object Settings : Selection()
 }
 
 private data class SidebarSource(val id: String, val title: String, val isRemote: Boolean, val lastActiveMillis: Long)
 
 @Composable
-fun AppShell(runtime: CompanionRuntime, pttHotkey: String) {
+fun AppShell(
+    runtime: CompanionRuntime,
+    pttHotkey: String,
+    settings: CompanionSettings,
+    onSettingsChanged: (CompanionSettings) -> Unit,
+    voiceInstaller: dev.sophi.companion.voice.VoiceInstaller
+) {
     var selected by remember { mutableStateOf<Selection?>(null) }
     var localSessions by remember { mutableStateOf(listOf<SessionMeta>()) }
     val scope = remember { CoroutineScope(Dispatchers.Default) }
@@ -116,6 +124,7 @@ fun AppShell(runtime: CompanionRuntime, pttHotkey: String) {
             onSelectGoals = { selected = Selection.Goals },
             onSelectSkills = { selected = Selection.Skills },
             onSelectNotifications = { selected = Selection.Notifications },
+            onSelectSettings = { selected = Selection.Settings },
             hasUnreadNotifications = hasUnreadNotifications,
             onNewSession = {
                 scope.launch {
@@ -155,6 +164,7 @@ fun AppShell(runtime: CompanionRuntime, pttHotkey: String) {
                 Selection.Goals -> GoalsTab(runtime)
                 Selection.Skills -> SkillsTab(runtime)
                 Selection.Notifications -> NotificationsTab(runtime)
+                Selection.Settings -> SettingsTab(settings, onSettingsChanged, voiceInstaller)
                 null -> Text("Starting…")
             }
         }
@@ -170,6 +180,7 @@ private fun Sidebar(
     onSelectGoals: () -> Unit,
     onSelectSkills: () -> Unit,
     onSelectNotifications: () -> Unit,
+    onSelectSettings: () -> Unit,
     hasUnreadNotifications: Boolean,
     onNewSession: () -> Unit,
     onRename: (String, String) -> Unit,
@@ -212,6 +223,7 @@ private fun Sidebar(
             onClick = onSelectNotifications,
             hasBadge = hasUnreadNotifications
         )
+        NavRow(label = "Settings", selected = selected == Selection.Settings, onClick = onSelectSettings)
     }
 }
 
