@@ -100,3 +100,72 @@ jobs:
           name: piper-runtime-macos-${{ matrix.arch }}
           path: piper-runtime-macos-${{ matrix.arch }}.tar.gz
           retention-days: 1
+
+  publish:
+    needs: [build-whisper-cli, build-piper-runtime]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Compute checksums and write manifest
+        working-directory: artifacts
+        run: |
+          python3 <<'PYEOF'
+          import hashlib, json, os
+
+          artifact_files = [
+              "whisper-cli-macos-arm64.tar.gz",
+              "whisper-cli-macos-x64.tar.gz",
+              "piper-runtime-macos-arm64.tar.gz",
+              "piper-runtime-macos-x64.tar.gz",
+          ]
+          manifest = {
+              "releaseTag": os.environ["RELEASE_TAG"],
+              "whisperCppRef": os.environ["WHISPER_CPP_REF"],
+              "piperTtsVersion": os.environ["PIPER_TTS_VERSION"],
+              "artifacts": {},
+          }
+          for filename in artifact_files:
+              key = filename.removesuffix(".tar.gz")
+              with open(filename, "rb") as f:
+                  data = f.read()
+              manifest["artifacts"][key] = {
+                  "file": filename,
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "sizeBytes": len(data),
+              }
+          with open("voice-tools-manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print(json.dumps(manifest, indent=2))
+          PYEOF
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          WHISPER_CPP_REF: ${{ env.WHISPER_CPP_REF }}
+          PIPER_TTS_VERSION: ${{ env.PIPER_TTS_VERSION }}
+
+      - name: Fetch piper's license as a standalone top-level asset
+        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o artifacts/PIPER-LICENSE
+
+      - name: Create release
+        working-directory: artifacts
+        run: |
+          gh release create "${{ inputs.release_tag }}" \
+            whisper-cli-macos-arm64.tar.gz \
+            whisper-cli-macos-x64.tar.gz \
+            piper-runtime-macos-arm64.tar.gz \
+            piper-runtime-macos-x64.tar.gz \
+            voice-tools-manifest.json \
+            PIPER-LICENSE \
+            --repo "${{ github.repository }}" \
+            --title "${{ inputs.release_tag }}" \
+            --notes "Voice tools: whisper.cpp ${{ env.WHISPER_CPP_REF }}, piper-tts ${{ env.PIPER_TTS_VERSION }} (onnxruntime ${{ env.ONNXRUNTIME_VERSION }})"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
