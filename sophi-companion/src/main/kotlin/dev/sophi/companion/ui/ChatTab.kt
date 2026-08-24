@@ -66,7 +66,7 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
     // Keyed by session so switching sessions always starts collapsed again, instead of leaking
     // one session's expanded entry ids into another session's unrelated entry id space.
     val expandedIds = remember(activeSessionId) { mutableStateMapOf<Int, Boolean>() }
-    val voiceController = remember(activeSessionId) { runtime.voiceController(activeSessionId) }
+    val voiceController = remember(runtime, activeSessionId) { runtime.voiceController(activeSessionId) }
     var textFieldFocused by remember { mutableStateOf(false) }
     val chatFocusRequester = remember { FocusRequester() }
     val hotkeyKey = remember(pttHotkey) { pttHotkeyToKey(pttHotkey) }
@@ -213,7 +213,7 @@ private fun pttHotkeyToKey(name: String): Key? = when (name) {
 private fun VoiceControls(voiceController: VoiceController?) {
     if (voiceController == null) {
         Text(
-            "Voice mode not configured — set the whisper/piper paths in ~/.sophi/companion.json",
+            "Voice mode not enabled — turn it on from the Settings tab",
             style = MaterialTheme.typography.bodySmall
         )
         return
