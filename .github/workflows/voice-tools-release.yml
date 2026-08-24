@@ -16,8 +16,50 @@ env:
   PYTHON_VERSION: "3.12.14"
 
 jobs:
-  # build-whisper-cli, build-piper-runtime, publish added in later tasks
-  placeholder:
-    runs-on: ubuntu-latest
+  build-whisper-cli:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.os }}
     steps:
-      - run: echo "scaffold only — replaced by real jobs in Task 2-4"
+      - name: Checkout whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_CPP_REF }}
+          path: whisper.cpp
+
+      - name: Configure (static link, no dylib relocation problem)
+        working-directory: whisper.cpp
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+
+      - name: Build whisper-cli
+        working-directory: whisper.cpp
+        run: cmake --build build --config Release -j 4
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          cp whisper.cpp/build/bin/whisper-cli dist/
+
+      - name: Smoke test (relocated outside the build tree)
+        run: |
+          mkdir -p /tmp/smoke-test
+          cp dist/whisper-cli /tmp/smoke-test/
+          cd /tmp/smoke-test
+          ./whisper-cli --help
+
+      - name: Package
+        run: tar czf whisper-cli-macos-${{ matrix.arch }}.tar.gz -C dist whisper-cli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-cli-macos-${{ matrix.arch }}
+          path: whisper-cli-macos-${{ matrix.arch }}.tar.gz
+          retention-days: 1
