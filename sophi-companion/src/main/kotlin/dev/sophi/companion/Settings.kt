@@ -48,7 +48,19 @@ data class CompanionSettings(
     /** Required when [memoryEnabled]. Ollama: http://localhost:11434/v1, vLLM: http://localhost:8000/v1. */
     val embeddingBaseUrl: String? = null,
     val embeddingApiKey: String? = null,
-    val embeddingDimensions: Int = 1536
+    val embeddingDimensions: Int = 1536,
+    /** Enables push-to-talk voice mode (experimental). Requires the four path fields below. */
+    val voiceEnabled: Boolean = false,
+    /** Path to a local whisper.cpp executable. Required when [voiceEnabled]. */
+    val whisperBinaryPath: String? = null,
+    /** Path to a whisper.cpp ggml model file. Required when [voiceEnabled]. */
+    val whisperModelPath: String? = null,
+    /** Path to a local piper executable. Required when [voiceEnabled]. */
+    val piperBinaryPath: String? = null,
+    /** Path to a piper voice model (.onnx). Required when [voiceEnabled]. */
+    val piperVoicePath: String? = null,
+    /** Held to record while the Chat tab's message field does not have focus. */
+    val pttHotkey: String = "Right Option"
 )
 
 /**
@@ -69,6 +81,10 @@ fun CompanionSettings.validationError(): String? = when {
         "maxTokens ($maxTokens) must not exceed contextWindowTokens ($contextWindowTokens)"
     memoryEnabled && embeddingModel.isNullOrBlank() -> "embeddingModel is required when memoryEnabled is true"
     memoryEnabled && embeddingBaseUrl.isNullOrBlank() -> "embeddingBaseUrl is required when memoryEnabled is true"
+    voiceEnabled && whisperBinaryPath.isNullOrBlank() -> "whisperBinaryPath is required when voiceEnabled is true"
+    voiceEnabled && whisperModelPath.isNullOrBlank() -> "whisperModelPath is required when voiceEnabled is true"
+    voiceEnabled && piperBinaryPath.isNullOrBlank() -> "piperBinaryPath is required when voiceEnabled is true"
+    voiceEnabled && piperVoicePath.isNullOrBlank() -> "piperVoicePath is required when voiceEnabled is true"
     else -> null
 }
 

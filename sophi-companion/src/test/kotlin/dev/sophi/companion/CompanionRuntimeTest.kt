@@ -226,6 +226,91 @@ class CompanionRuntimeTest : FunSpec({
         )
     }
 
+    test("sendMessage's onSpeechToken fires per answer token and onSpeechTurnEnd fires once at the end") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = ChunkedStreamingFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+        val speechTokens = mutableListOf<String>()
+        var turnEndCalls = 0
+
+        runtime.sendMessage(
+            sessionId, "hi",
+            onSpeechToken = { speechTokens.add(it) },
+            onSpeechTurnEnd = { turnEndCalls++ }
+        )
+        runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
+
+        speechTokens shouldBe listOf("Hel", "lo!")
+        turnEndCalls shouldBe 1
+    }
+
+    test("voiceController returns null when the runtime was built without a VoiceConfig") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+
+        runtime.voiceController("any-session") shouldBe null
+    }
+
+    test("voiceController returns the same instance for the same sessionId when a VoiceConfig is set") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
+            voiceConfig = dev.sophi.companion.voice.VoiceConfig(
+                whisperBinaryPath = "/bin/true",
+                whisperModelPath = "/dev/null",
+                piperBinaryPath = "/bin/true",
+                piperVoicePath = "/dev/null"
+            )
+        )
+
+        val first = runtime.voiceController("s1")
+        val second = runtime.voiceController("s1")
+        val different = runtime.voiceController("s2")
+
+        first shouldBe second
+        (first === different) shouldBe false
+    }
+
     test("a tool call that needs confirmation sets NeedsConfirmation, then resumes once respondToConfirmation is called") {
         val dir = createTempDirectory("companion-runtime-test")
         lateinit var runtime: CompanionRuntime

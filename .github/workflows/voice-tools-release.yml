@@ -1,0 +1,171 @@
+name: Voice Tools Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag for this voice-tools publish (e.g. voice-tools-v1)'
+        required: true
+        type: string
+
+env:
+  WHISPER_CPP_REF: b4938
+  PIPER_TTS_VERSION: "1.7.0"
+  ONNXRUNTIME_VERSION: "1.23.2"
+  PYTHON_BUILD_STANDALONE_TAG: "20260814"
+  PYTHON_VERSION: "3.12.14"
+
+jobs:
+  build-whisper-cli:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_CPP_REF }}
+          path: whisper.cpp
+
+      - name: Configure (static link, no dylib relocation problem)
+        working-directory: whisper.cpp
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+
+      - name: Build whisper-cli
+        working-directory: whisper.cpp
+        run: cmake --build build --config Release -j 4
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          cp whisper.cpp/build/bin/whisper-cli dist/
+
+      - name: Smoke test (relocated outside the build tree)
+        run: |
+          mkdir -p /tmp/smoke-test
+          cp dist/whisper-cli /tmp/smoke-test/
+          cd /tmp/smoke-test
+          ./whisper-cli --help
+
+      - name: Package
+        run: tar czf whisper-cli-macos-${{ matrix.arch }}.tar.gz -C dist whisper-cli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-cli-macos-${{ matrix.arch }}
+          path: whisper-cli-macos-${{ matrix.arch }}.tar.gz
+          retention-days: 1
+
+  build-piper-runtime:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+            standalone_arch: aarch64
+          - os: macos-15-intel
+            arch: x64
+            standalone_arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Download embeddable CPython
+        run: |
+          curl -sL "https://github.com/astral-sh/python-build-standalone/releases/download/${{ env.PYTHON_BUILD_STANDALONE_TAG }}/cpython-${{ env.PYTHON_VERSION }}+${{ env.PYTHON_BUILD_STANDALONE_TAG }}-${{ matrix.standalone_arch }}-apple-darwin-install_only.tar.gz" -o cpython.tar.gz
+          tar xzf cpython.tar.gz
+
+      - name: Install pinned onnxruntime + piper-tts
+        run: ./python/bin/python3 -m pip install onnxruntime==${{ env.ONNXRUNTIME_VERSION }} piper-tts==${{ env.PIPER_TTS_VERSION }}
+
+      - name: Add piper's license (GPL-3.0 compliance — the redistributed bundle must carry it)
+        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o python/PIPER-LICENSE
+
+      - name: Smoke test (isolated invocation — -s is not optional, see Global Constraints)
+        run: ./python/bin/python3 -s -m piper --help
+
+      - name: Package
+        run: tar czf piper-runtime-macos-${{ matrix.arch }}.tar.gz python
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: piper-runtime-macos-${{ matrix.arch }}
+          path: piper-runtime-macos-${{ matrix.arch }}.tar.gz
+          retention-days: 1
+
+  publish:
+    needs: [build-whisper-cli, build-piper-runtime]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Compute checksums and write manifest
+        working-directory: artifacts
+        run: |
+          python3 <<'PYEOF'
+          import hashlib, json, os
+
+          artifact_files = [
+              "whisper-cli-macos-arm64.tar.gz",
+              "whisper-cli-macos-x64.tar.gz",
+              "piper-runtime-macos-arm64.tar.gz",
+              "piper-runtime-macos-x64.tar.gz",
+          ]
+          manifest = {
+              "releaseTag": os.environ["RELEASE_TAG"],
+              "whisperCppRef": os.environ["WHISPER_CPP_REF"],
+              "piperTtsVersion": os.environ["PIPER_TTS_VERSION"],
+              "artifacts": {},
+          }
+          for filename in artifact_files:
+              key = filename.removesuffix(".tar.gz")
+              with open(filename, "rb") as f:
+                  data = f.read()
+              manifest["artifacts"][key] = {
+                  "file": filename,
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "sizeBytes": len(data),
+              }
+          with open("voice-tools-manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print(json.dumps(manifest, indent=2))
+          PYEOF
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          WHISPER_CPP_REF: ${{ env.WHISPER_CPP_REF }}
+          PIPER_TTS_VERSION: ${{ env.PIPER_TTS_VERSION }}
+
+      - name: Fetch piper's license as a standalone top-level asset
+        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o artifacts/PIPER-LICENSE
+
+      - name: Create release
+        working-directory: artifacts
+        run: |
+          gh release create "${{ inputs.release_tag }}" \
+            whisper-cli-macos-arm64.tar.gz \
+            whisper-cli-macos-x64.tar.gz \
+            piper-runtime-macos-arm64.tar.gz \
+            piper-runtime-macos-x64.tar.gz \
+            voice-tools-manifest.json \
+            PIPER-LICENSE \
+            --repo "${{ github.repository }}" \
+            --title "${{ inputs.release_tag }}" \
+            --notes "Voice tools: whisper.cpp ${{ env.WHISPER_CPP_REF }}, piper-tts ${{ env.PIPER_TTS_VERSION }} (onnxruntime ${{ env.ONNXRUNTIME_VERSION }})"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
