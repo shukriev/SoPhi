@@ -27,22 +27,24 @@ Two structural differences between the hosts made a naive port unsafe:
    unattended scheduled/goal-mode runs with nobody watching. Scoping those tools to some arbitrary
    directory — or to the whole filesystem — was not acceptable by default.
 
-An independent architectural review (Opus, reviewing this ADR's design spec before implementation)
-caught a load-bearing false assumption in the first draft: the plan assumed `sophi-cli` and
-`ScheduleEngine` already propagated a session id that `SubagentTool`/`DecomposeGoalTool` could read
-from coroutine context. Neither did. Had the naive per-session-context fix shipped without first
-adding that propagation to all three turn-launching paths, it would have silently broken
-`sophi-cli`'s and `ScheduleEngine`'s own existing subagent-delegation and goal-decomposition
-features — not just failed to add them to companion.
+The first draft of this design assumed `sophi-cli` and `ScheduleEngine` already propagated a
+session id that `SubagentTool`/`DecomposeGoalTool` could read from coroutine context. Neither did.
+Had the naive per-session-context fix shipped without first adding that propagation to all three
+turn-launching paths, it would have silently broken `sophi-cli`'s and `ScheduleEngine`'s own
+existing subagent-delegation and goal-decomposition features — not just failed to add them to
+companion.
 
 ## Decision
 
 1. **`RuntimeBuilder` (`sophi-sdk`) is the single place either host assembles its tool set.** Five
    methods were added: `.builtinTools(root, braveApiKey)`, `.subagentDelegation()`,
-   `.goalDecomposition(plansDir)`, `.skillTools(globalDir, projectDir?)` — plus the pre-existing
-   `.schedule(dir)`. `sophi-cli`'s `CliRuntime.kt` and `sophi-companion`'s `Main.kt` both call the
-   same methods on the same builder; `buildBuiltinTools()` (previously private to `sophi-cli`) and
-   `SkillTool`/`InstallSkillTool`/`WriteSkillTool` (previously in `sophi-cli`) moved into
+   `.goalDecomposition(plansDir)`, `.skillTools()` — plus the pre-existing `.schedule(dir)`.
+   `.skillTools()` resolves its skill directories from the builder's own `skillsDir` field (default
+   `~/.sophi/skills`) plus a fixed `.sophi/skills` project directory, rather than taking them as
+   arguments — both hosts already have `skillsDir` at its default, so there was nothing for a
+   parameter to override. `sophi-cli`'s `CliRuntime.kt` and `sophi-companion`'s `Main.kt` both call
+   the same methods on the same builder; `buildBuiltinTools()` (previously private to `sophi-cli`)
+   and `SkillTool`/`InstallSkillTool`/`WriteSkillTool` (previously in `sophi-cli`) moved into
    `sophi-sdk` to make this possible.
 
 2. **`SessionIdContext` moved from `sophi-companion` to `sophi-core`, and is now set on all three
@@ -68,8 +70,7 @@ features — not just failed to add them to companion.
    The obvious-looking destination was wrong: `doc/Architecture.md` documents (and this repo
    enforces) that `sophi-skills` has no dependency on `sophi-core`, but these three classes
    implement `sophi-core`'s `Tool` interface. `sophi-sdk` already depends on both `sophi-core` and
-   `sophi-skills`, so that's where they went instead — caught during plan self-review, before any
-   code moved.
+   `sophi-skills`, so that's where they went instead.
 
 5. **`sophi-companion` gets a sandboxed, configurable `workspaceDir` setting** (`CompanionSettings.
    workspaceDir`, default `~/.sophi/workspace`), passed as `root` to `.builtinTools(...)`. Unlike

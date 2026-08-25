@@ -348,43 +348,26 @@ class CompanionRuntimeTest : FunSpec({
             piperPythonPath = "/bin/true",
             piperVoicePath = "/dev/null"
         )
+        fun runtime(voiceConfig: dev.sophi.companion.voice.VoiceConfig? = null, ttsEnabled: Boolean = false) =
+            CompanionRuntime(
+                sophiRuntime = sophiRuntime,
+                sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+                mcpConfigPath = dir.resolve("mcp.json"),
+                taskStore = TaskStore(dir.resolve("tasks.json")),
+                runLog = RunLog(dir.resolve("runs.jsonl")),
+                notifier = NoopNotifier,
+                notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
+                voiceConfig = voiceConfig,
+                ttsEnabled = ttsEnabled
+            )
 
-        CompanionRuntime(
-            sophiRuntime = sophiRuntime,
-            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
-            mcpConfigPath = dir.resolve("mcp.json"),
-            taskStore = TaskStore(dir.resolve("tasks.json")),
-            runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier,
-            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
-            ttsEnabled = true
-        ).speechOutput("s1") shouldBe null // no VoiceConfig
+        runtime(ttsEnabled = true).speechOutput("s1") shouldBe null // no VoiceConfig
+        runtime(voiceConfig = config).speechOutput("s1") shouldBe null // ttsEnabled false
 
-        CompanionRuntime(
-            sophiRuntime = sophiRuntime,
-            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
-            mcpConfigPath = dir.resolve("mcp.json"),
-            taskStore = TaskStore(dir.resolve("tasks.json")),
-            runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier,
-            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
-            voiceConfig = config
-        ).speechOutput("s1") shouldBe null // ttsEnabled false
-
-        val runtime = CompanionRuntime(
-            sophiRuntime = sophiRuntime,
-            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
-            mcpConfigPath = dir.resolve("mcp.json"),
-            taskStore = TaskStore(dir.resolve("tasks.json")),
-            runLog = RunLog(dir.resolve("runs.jsonl")),
-            notifier = NoopNotifier,
-            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
-            voiceConfig = config,
-            ttsEnabled = true
-        )
-        val first = runtime.speechOutput("s1")
-        val second = runtime.speechOutput("s1")
-        val different = runtime.speechOutput("s2")
+        val active = runtime(voiceConfig = config, ttsEnabled = true)
+        val first = active.speechOutput("s1")
+        val second = active.speechOutput("s1")
+        val different = active.speechOutput("s2")
 
         (first != null) shouldBe true
         first shouldBe second

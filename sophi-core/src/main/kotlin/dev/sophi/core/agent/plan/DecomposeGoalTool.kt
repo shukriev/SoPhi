@@ -59,7 +59,7 @@ class DecomposeGoalTool(
 
     override suspend fun execute(argumentsJson: String): String {
         val parentSessionId = coroutineContext[SessionIdContext]?.sessionId
-            ?: return "Error: no active session context — this should never happen in normal use"
+            ?: error("no SessionIdContext — the host must wrap turns in it")
         val args = json.decodeFromString(DecomposeGoalArgs.serializer(), argumentsJson)
 
         val stepRegistry = fullRegistry.subset(fullRegistry.names().filter { it != name })

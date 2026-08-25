@@ -17,7 +17,8 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools(globalDir).build()
+            skillsDir = globalDir
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools().build()
 
         val names = runtime.toolNames()
         names shouldContain "skill"
@@ -29,22 +30,12 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools(tempdir().toPath()).build()
+            skillsDir = tempdir().toPath()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools().build()
 
         val names = runtime.toolNames()
         names shouldNotContain "skill"
         names shouldContain "install_skill"
         names shouldContain "write_skill"
-    }
-
-    test("skillTools() works with no projectDir given") {
-        val globalDir = tempdir().toPath()
-        globalDir.resolve("greet.md").writeText("---\ntitle: Greet\ndescription: says hi\n---\nSay hello.")
-        val runtime = RuntimeBuilder().apply {
-            provider = mockk<LLMProvider>()
-            sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools(globalDir).build()
-
-        runtime.toolNames() shouldContain "skill"
     }
 })

@@ -10,23 +10,17 @@ import io.mockk.mockk
 private const val TEST_CONTEXT_WINDOW = 100_000
 
 class RuntimeBuilderBuiltinToolsTest : FunSpec({
-    test("builtinTools() registers the standard file/shell/search/date tool set") {
+    // The full name list buildBuiltinTools() returns is covered by BuiltinToolsTest.kt and
+    // BuildCliRuntimeTest.kt's shouldContainAll — this test's job is only to prove the builder
+    // actually registers whatever that function returns, so one representative name suffices.
+    test("builtinTools() registers buildBuiltinTools()'s tool set") {
         val root = tempdir().toPath()
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
         }.contextWindowTokens(TEST_CONTEXT_WINDOW).builtinTools(root).build()
 
-        val names = runtime.toolNames()
-        names shouldContain "read_file"
-        names shouldContain "write_file"
-        names shouldContain "grep"
-        names shouldContain "glob"
-        names shouldContain "edit_file"
-        names shouldContain "bash"
-        names shouldContain "fetch_url"
-        names shouldContain "get_current_datetime"
-        names shouldContain "invoke_claude_code"
+        runtime.toolNames() shouldContain "read_file"
     }
 
     test("builtinTools() only registers web_search when a Brave API key is given") {

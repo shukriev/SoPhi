@@ -20,7 +20,7 @@ internal fun buildScheduleEngine(
 ): ScheduleEngine {
     val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
     val registry = dev.sophi.core.tools.ToolRegistry()
-    buildBuiltinTools(Path.of("").toAbsolutePath(), braveApiKeyOption).forEach { registry.register(it) }
+    buildBuiltinTools(braveApiKey = braveApiKeyOption).forEach { registry.register(it) }
     val proposalStore = dev.sophi.schedule.store.ProposalStore(scheduleDir.resolve("proposals.jsonl"))
     val runtime = Sophi.runtime {
         this.provider = provider

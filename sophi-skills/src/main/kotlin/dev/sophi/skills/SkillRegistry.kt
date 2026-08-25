@@ -13,9 +13,9 @@ class SkillRegistry(private val skills: Map<String, Skill>) {
         skills.entries.map { it.key to it.value }.sortedBy { it.first }
 
     companion object {
-        fun load(globalDir: Path, projectDir: Path? = null, loader: SkillLoader = SkillLoader()): SkillRegistry {
+        fun load(globalDir: Path, projectDir: Path, loader: SkillLoader = SkillLoader()): SkillRegistry {
             val global = loadDirTolerant(globalDir, loader)
-            val project = projectDir?.let { loadDirTolerant(it, loader) } ?: emptyMap()
+            val project = loadDirTolerant(projectDir, loader)
             return SkillRegistry(global + project) // project entries win on id collision
         }
 

@@ -16,12 +16,12 @@ import java.nio.file.Path
 
 /**
  * The standard file/shell/search/date tool set every interactive Sophi host registers.
- * [root] scopes every filesystem-touching tool (read/write/grep/glob/edit/bash) — there is
- * deliberately no CWD-implicit default here, since not every host has a meaningful "current
- * directory" (sophi-companion doesn't). Falls back to the `BRAVE_SEARCH_API_KEY` environment
- * variable when [braveApiKey] is null; omit both to leave `web_search` unregistered.
+ * [root] scopes every filesystem-touching tool (read/write/grep/glob/edit/bash); defaults to the
+ * process's current directory, matching those tools' own constructor defaults. Falls back to the
+ * `BRAVE_SEARCH_API_KEY` environment variable when [braveApiKey] is null; omit both to leave
+ * `web_search` unregistered.
  */
-fun buildBuiltinTools(root: Path, braveApiKey: String? = null): List<Tool> {
+fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: String? = null): List<Tool> {
     val tools = mutableListOf<Tool>(
         FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), BashTool(root),
         FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool()

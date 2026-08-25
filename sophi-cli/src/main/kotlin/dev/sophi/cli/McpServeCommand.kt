@@ -12,7 +12,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
-import java.nio.file.Path
 
 class McpServeCommand : CliktCommand(
     name = "mcp-serve",
@@ -28,7 +27,7 @@ class McpServeCommand : CliktCommand(
     )
 
     override fun run() = runBlocking {
-        val tools = buildBuiltinTools(Path.of("").toAbsolutePath(), braveApiKeyOption)
+        val tools = buildBuiltinTools(braveApiKey = braveApiKeyOption)
         val server = buildMcpServer(tools, exposeTools.toSet())
         val transport = StdioServerTransport(
             input = System.`in`.asSource().buffered(),

@@ -76,7 +76,7 @@ private fun buildRuntime(
         subagentDelegation()
         goalDecomposition(tasksDir.resolve("plans"))
         builtinTools(root = workspaceDir)
-        skillTools(globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"))
+        skillTools()
         calendarTools(buildCalendarProvider()).forEach { tool(it) }
         // TaskStore/RunLog read fresh from disk on every call, so this second instance sharing
         // tasksDir's tasks.json/runs.jsonl with CompanionRuntime's own below is safe.

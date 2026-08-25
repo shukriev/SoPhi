@@ -11,6 +11,7 @@ import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -132,28 +133,7 @@ class SubagentToolTest : FunSpec({
         metas.first().parentSessionId shouldBe "parent-42"
     }
 
-    test("execute() resolves parentSessionId from SessionIdContext, not a constructor value") {
-        val provider = mockk<LLMProvider>()
-        every { provider.stream(any()) } returns LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
-        val sessionsDir = createTempDirectory("subagent-test")
-        val sessionManager = FileSessionManager(sessionsDir)
-        val tool = SubagentTool(
-            definitions = listOf(explore),
-            provider = provider,
-            fullRegistry = ToolRegistry().register(readTool),
-            sessionManager = sessionManager,
-            parentConfig = AgentConfig(model = "parent-model"),
-            contextWindowTokens = TEST_CONTEXT_WINDOW
-        )
-
-        runBlocking(SessionIdContext("ctx-session-99")) {
-            tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""")
-        }
-
-        sessionManager.list().first().parentSessionId shouldBe "ctx-session-99"
-    }
-
-    test("execute() returns an error, without calling the LLM, when SessionIdContext is absent") {
+    test("execute() throws when SessionIdContext is absent, without calling the LLM") {
         val provider = mockk<LLMProvider>()
         val tool = SubagentTool(
             definitions = listOf(explore),
@@ -164,9 +144,10 @@ class SubagentToolTest : FunSpec({
             contextWindowTokens = TEST_CONTEXT_WINDOW
         )
 
-        val result = runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
+        shouldThrow<IllegalStateException> {
+            runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
+        }
 
-        result shouldContain "Error"
         coVerify(exactly = 0) { provider.stream(any()) }
     }
 

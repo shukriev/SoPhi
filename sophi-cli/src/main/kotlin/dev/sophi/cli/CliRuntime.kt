@@ -144,10 +144,7 @@ internal suspend fun buildCliRuntime(
         agentsDir(agentsDir, onWarning)
         subagentDelegation()
         goalDecomposition(Path.of(opts.plansDir))
-        skillTools(
-            globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
-            projectDir = Path.of(".sophi", "skills")
-        )
+        skillTools()
         loopGuard(loopGuardPolicy)
         confirmationPolicy(confirmationPolicy)
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))

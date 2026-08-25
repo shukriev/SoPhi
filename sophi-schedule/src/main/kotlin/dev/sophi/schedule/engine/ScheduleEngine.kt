@@ -127,71 +127,76 @@ class ScheduleEngine(
             withTimeout(taskTimeoutMs) {
                 val session = sessionManager.create(title = "schedule:${task.name}")
                 sessionId = session.id
-                withContext(SessionIdContext(session.id)) {
-                    val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
-                    val scopedRegistry = when (val type = task.subagentType) {
-                        null -> fullRegistry
-                        else -> {
-                            val def = agentDefinitions.find { it.name == type }
-                                ?: throw IllegalStateException(
-                                    "Scheduled task '${task.name}' (${task.id}) references unknown subagentType '$type'"
-                                )
-                            fullRegistry.subset(def.allowedTools)
-                        }
-                    }
-                    val loop = AgentLoop(
-                        provider, scopedRegistry, sessionManager,
-                        confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
-                        grants = task.toolGrants,
-                        contextWindowTokens = contextWindowTokens
-                    )
-                    val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
-                    // Same collectContext path every interactive entry point already uses (SophiRuntime.
-                    // streamTurn, AgentController.configWithContext) — without this, scheduled tasks
-                    // (including the self-improvement orchestrator) ran with zero lesson/memory context.
-                    val pluginContext = pluginRegistry?.collectContext(session.id, task.prompt) ?: emptyList()
-
-                    // Null unless a plan actually ran — see RunRecord.replans on why null and 0 must
-                    // stay distinguishable.
-                    var replans: Int? = null
-                    var decompositions: Int? = null
-
-                    val (outcome, summary) = when (val mode = task.mode) {
-                        is TaskMode.Recurring -> {
-                            val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
-                            val effectiveConfig = if (extra == null) config
-                                else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
-                            val result = loop.turn(session, task.prompt, effectiveConfig, bridge)
-                            RunOutcome.Succeeded to (result.tip?.content ?: "")
-                        }
-                        is TaskMode.Goal -> {
-                            val planner = TreePlanner(
-                                delegates = planSearchTemperatures().map {
-                                    LlmPlanner(provider, model, temperature = it)
-                                },
-                                critic = LlmPlanCritic(provider, model, timeout = PLAN_CRITIC_TIMEOUT)
+                val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
+                val scopedRegistry = when (val type = task.subagentType) {
+                    null -> fullRegistry
+                    else -> {
+                        val def = agentDefinitions.find { it.name == type }
+                            ?: throw IllegalStateException(
+                                "Scheduled task '${task.name}' (${task.id}) references unknown subagentType '$type'"
                             )
-                            val critic = LlmStepCritic(provider, model)
-                            // Scheduled runs are always unattended (DENY_ALL + per-task grants above),
-                            // so overlapping confirmation prompts can never happen here — safe to
-                            // parallelize independent plan steps (ADR-018).
-                            val runnerConfig = PlanRunnerConfig(
-                                model = model, maxTokens = maxTokens,
-                                maxStepExecutions = mode.maxIterations, allowParallelSteps = true
-                            )
-                            val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
-                            val result = runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
-                            replans = result.replans.size
-                            decompositions = result.decompositions.size
-                            (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
-                                result.finalOutput
-                        }
+                        fullRegistry.subset(def.allowedTools)
                     }
-                    RunRecord(
-                        task.id, startedAtMs, System.currentTimeMillis(), outcome, summary,
-                        replans = replans, decompositions = decompositions, sessionId = sessionId
-                    )
                 }
+                val loop = AgentLoop(
+                    provider, scopedRegistry, sessionManager,
+                    confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
+                    grants = task.toolGrants,
+                    contextWindowTokens = contextWindowTokens
+                )
+                val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
+                // Same collectContext path every interactive entry point already uses (SophiRuntime.
+                // streamTurn, AgentController.configWithContext) — without this, scheduled tasks
+                // (including the self-improvement orchestrator) ran with zero lesson/memory context.
+                val pluginContext = pluginRegistry?.collectContext(session.id, task.prompt) ?: emptyList()
+
+                // Null unless a plan actually ran — see RunRecord.replans on why null and 0 must
+                // stay distinguishable.
+                var replans: Int? = null
+                var decompositions: Int? = null
+
+                // SessionIdContext scopes only the actual turn/plan-run call below — SubagentTool and
+                // DecomposeGoalTool are the only readers, and everything else in this function (config
+                // assembly, RunRecord building) has no use for it.
+                val (outcome, summary) = when (val mode = task.mode) {
+                    is TaskMode.Recurring -> {
+                        val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+                        val effectiveConfig = if (extra == null) config
+                            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
+                        val result = withContext(SessionIdContext(session.id)) {
+                            loop.turn(session, task.prompt, effectiveConfig, bridge)
+                        }
+                        RunOutcome.Succeeded to (result.tip?.content ?: "")
+                    }
+                    is TaskMode.Goal -> {
+                        val planner = TreePlanner(
+                            delegates = planSearchTemperatures().map {
+                                LlmPlanner(provider, model, temperature = it)
+                            },
+                            critic = LlmPlanCritic(provider, model, timeout = PLAN_CRITIC_TIMEOUT)
+                        )
+                        val critic = LlmStepCritic(provider, model)
+                        // Scheduled runs are always unattended (DENY_ALL + per-task grants above),
+                        // so overlapping confirmation prompts can never happen here — safe to
+                        // parallelize independent plan steps (ADR-018).
+                        val runnerConfig = PlanRunnerConfig(
+                            model = model, maxTokens = maxTokens,
+                            maxStepExecutions = mode.maxIterations, allowParallelSteps = true
+                        )
+                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
+                        val result = withContext(SessionIdContext(session.id)) {
+                            runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
+                        }
+                        replans = result.replans.size
+                        decompositions = result.decompositions.size
+                        (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
+                            result.finalOutput
+                    }
+                }
+                RunRecord(
+                    task.id, startedAtMs, System.currentTimeMillis(), outcome, summary,
+                    replans = replans, decompositions = decompositions, sessionId = sessionId
+                )
             }
         } catch (e: TimeoutCancellationException) {
             RunRecord(task.id, startedAtMs, System.currentTimeMillis(),

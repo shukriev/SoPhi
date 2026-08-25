@@ -12,6 +12,7 @@ import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -125,30 +126,7 @@ class DecomposeGoalToolTest : FunSpec({
         t.parametersJson shouldContain "\"goal\""
     }
 
-    test("execute() resolves parentSessionId from SessionIdContext, not a constructor value") {
-        val provider = mockk<LLMProvider>()
-        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("branch created"))
-        coEvery { provider.complete(any()) } returnsMany listOf(
-            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"cut a release branch"}]}""", TokenUsage(1, 1)),
-            LLMResponse.Text("1.0", TokenUsage(1, 1)),
-            LLMResponse.Text("YES", TokenUsage(1, 1))
-        )
-        val t = DecomposeGoalTool(
-            provider = provider,
-            fullRegistry = ToolRegistry(),
-            sessionManager = FileSessionManager(createTempDirectory("decompose-goal-tool-test")),
-            parentConfig = AgentConfig(model = "test-model"),
-            contextWindowTokens = TEST_CONTEXT_WINDOW
-        )
-
-        val result = runBlocking(SessionIdContext("ctx-session-1")) {
-            t.execute("""{"goal":"ship the release"}""")
-        }
-
-        result shouldContain "Done"
-    }
-
-    test("execute() returns an error, without calling the LLM, when SessionIdContext is absent") {
+    test("execute() throws when SessionIdContext is absent, without calling the LLM") {
         val provider = mockk<LLMProvider>()
         val t = DecomposeGoalTool(
             provider = provider,
@@ -158,9 +136,8 @@ class DecomposeGoalToolTest : FunSpec({
             contextWindowTokens = TEST_CONTEXT_WINDOW
         )
 
-        val result = runBlocking { t.execute("""{"goal":"ship the release"}""") }
+        shouldThrow<IllegalStateException> { runBlocking { t.execute("""{"goal":"ship the release"}""") } }
 
-        result shouldContain "Error"
         coVerify(exactly = 0) { provider.complete(any()) }
     }
 })

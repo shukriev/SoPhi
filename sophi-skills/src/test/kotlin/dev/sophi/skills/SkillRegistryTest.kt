@@ -78,16 +78,4 @@ class SkillRegistryTest : FunSpec({
         val registry = SkillRegistry(emptyMap())
         registry.get("nonexistent") shouldBe null
     }
-
-    test("load() with no projectDir loads only the global directory") {
-        val global = createTempDirectory("skills-global")
-        try {
-            global.resolve("alpha.md").writeText("---\ntitle: Alpha\n---\n\nGlobal body.")
-            val registry = SkillRegistry.load(global)
-            registry.all() shouldHaveSize 1
-            registry.get("alpha")?.metadata?.title shouldBe "Alpha"
-        } finally {
-            global.toFile().deleteRecursively()
-        }
-    }
 })

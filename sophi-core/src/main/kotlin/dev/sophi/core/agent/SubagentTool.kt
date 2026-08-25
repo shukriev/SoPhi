@@ -60,7 +60,7 @@ class SubagentTool(
 
     override suspend fun execute(argumentsJson: String): String {
         val parentSessionId = coroutineContext[SessionIdContext]?.sessionId
-            ?: return "Error: no active session context — this should never happen in normal use"
+            ?: error("no SessionIdContext — the host must wrap turns in it")
         val args = json.decodeFromString<SubagentArgs>(argumentsJson)
         val definition = definitions.find { it.name == args.subagentType }
             ?: return "Error: unknown subagent type '${args.subagentType}'. Available: ${definitions.joinToString(", ") { it.name }}"
