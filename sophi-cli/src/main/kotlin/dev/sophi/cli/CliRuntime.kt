@@ -3,12 +3,8 @@ package dev.sophi.cli
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.calendar.provider.CalendarProvider
-import dev.sophi.calendar.tools.CreateCalendarEventTool
-import dev.sophi.calendar.tools.DeleteCalendarEventTool
-import dev.sophi.calendar.tools.GetCalendarEventTool
-import dev.sophi.calendar.tools.ListCalendarEventsTool
-import dev.sophi.calendar.tools.ListCalendarsTool
-import dev.sophi.calendar.tools.UpdateCalendarEventTool
+import dev.sophi.calendar.tools.buildCalendarProvider
+import dev.sophi.calendar.tools.calendarTools
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.agent.plan.PlanLog
@@ -130,12 +126,7 @@ internal suspend fun buildCliRuntime(
     // The builtin file/shell/search/date tools and the schedule tool are both registered by the
     // builder below (builtinTools()/schedule()), into this same registry.
     val calendarProvider = buildCalendarProvider()
-    registry.register(CreateCalendarEventTool(calendarProvider))
-    registry.register(ListCalendarEventsTool(calendarProvider))
-    registry.register(GetCalendarEventTool(calendarProvider))
-    registry.register(UpdateCalendarEventTool(calendarProvider))
-    registry.register(DeleteCalendarEventTool(calendarProvider))
-    registry.register(ListCalendarsTool(calendarProvider))
+    calendarTools(calendarProvider).forEach { registry.register(it) }
 
     val mcpConfigPath = Path.of(opts.mcpConfigPath)
 
