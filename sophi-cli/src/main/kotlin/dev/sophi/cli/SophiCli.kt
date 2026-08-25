@@ -8,7 +8,6 @@ import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import com.github.ajalt.mordant.rendering.TextColors
 import com.github.ajalt.mordant.terminal.Terminal
-import dev.sophi.ai.providers.BraveSearchProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
@@ -16,21 +15,11 @@ import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
-import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.ConfirmationPolicy
-import dev.sophi.core.tools.EditTool
-import dev.sophi.core.tools.FetchUrlTool
-import dev.sophi.core.tools.FileReadTool
-import dev.sophi.core.tools.FileWriteTool
-import dev.sophi.core.tools.GetCurrentDateTimeTool
-import dev.sophi.core.tools.GlobTool
-import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.LlmRiskClassifier
 import dev.sophi.core.tools.RiskClassifier
-import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.hub.HubClient
@@ -401,16 +390,4 @@ private class LegacyReadLineInputSource : InputSource {
     // stdin read is safe here — unlike JLineInputSource, there's nothing for it to race against.
     override suspend fun awaitYesNo(): Boolean =
         kotlin.io.readlnOrNull()?.trim()?.equals("y", ignoreCase = true) == true
-}
-
-internal fun buildBuiltinTools(braveApiKeyOption: String?): List<Tool> {
-    val tools = mutableListOf<Tool>(
-        FileReadTool(), FileWriteTool(), GrepTool(), GlobTool(), EditTool(), BashTool(), FetchUrlTool(),
-        GetCurrentDateTimeTool(), dev.sophi.core.tools.RunClaudeCodeTool()
-    )
-    val braveApiKey = braveApiKeyOption ?: System.getenv("BRAVE_SEARCH_API_KEY")
-    if (braveApiKey != null) {
-        tools.add(WebSearchTool(BraveSearchProvider(braveApiKey)))
-    }
-    return tools
 }

@@ -6,10 +6,12 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -17,6 +19,8 @@ import io.kotest.matchers.string.shouldContain
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
@@ -63,7 +67,6 @@ class SubagentToolTest : FunSpec({
         provider = provider,
         fullRegistry = fullRegistry,
         sessionManager = FileSessionManager(sessionsDir),
-        parentSessionId = "parent-1",
         parentConfig = AgentConfig(model = "parent-model"),
         contextWindowTokens = TEST_CONTEXT_WINDOW,
         depth = depth
@@ -83,7 +86,7 @@ class SubagentToolTest : FunSpec({
         val provider = mockk<LLMProvider>()
         val tool = buildTool(listOf(explore), provider, createTempDirectory("subagent-test"))
 
-        val result = runBlocking { tool.execute("""{"subagent_type":"ghost","prompt":"do something"}""") }
+        val result = runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"ghost","prompt":"do something"}""") }
 
         result shouldContain "unknown subagent type"
         coVerify(exactly = 0) { provider.stream(any()) }
@@ -93,7 +96,7 @@ class SubagentToolTest : FunSpec({
         val provider = mockk<LLMProvider>()
         val tool = buildTool(listOf(explore), provider, createTempDirectory("subagent-test"), depth = 3)
 
-        val result = runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
+        val result = runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
 
         result shouldContain "max delegation depth"
         coVerify(exactly = 0) { provider.stream(any()) }
@@ -104,7 +107,7 @@ class SubagentToolTest : FunSpec({
         every { provider.stream(any()) } returns LLMResponse.Text("Found it in Auth.kt", TokenUsage(10, 5)).toStreamFlow()
         val tool = buildTool(listOf(explore), provider, createTempDirectory("subagent-test"))
 
-        val result = runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""") }
+        val result = runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""") }
 
         result shouldBe "Found it in Auth.kt"
     }
@@ -119,16 +122,68 @@ class SubagentToolTest : FunSpec({
             provider = provider,
             fullRegistry = ToolRegistry().register(readTool),
             sessionManager = sessionManager,
-            parentSessionId = "parent-42",
             parentConfig = AgentConfig(model = "parent-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW
         )
 
-        runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""") }
+        runBlocking(SessionIdContext("parent-42")) { tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""") }
 
         val metas = sessionManager.list()
         metas shouldHaveSize 1
         metas.first().parentSessionId shouldBe "parent-42"
+    }
+
+    test("execute() throws when SessionIdContext is absent, without calling the LLM") {
+        val provider = mockk<LLMProvider>()
+        val tool = SubagentTool(
+            definitions = listOf(explore),
+            provider = provider,
+            fullRegistry = ToolRegistry().register(readTool),
+            sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
+            parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+
+        shouldThrow<IllegalStateException> {
+            runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
+        }
+
+        coVerify(exactly = 0) { provider.stream(any()) }
+    }
+
+    test("two concurrent execute() calls with different SessionIdContext values resolve their own session id, not each other's") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        val sessionManager = FileSessionManager(createTempDirectory("subagent-test"))
+        // A single shared SubagentTool instance, exactly the shape sophi-companion uses today —
+        // one ToolRegistry entry, many concurrent sessions calling into it — is what makes this
+        // test prove the property that actually matters, not just that the mechanism works in
+        // isolation.
+        val tool = SubagentTool(
+            definitions = listOf(explore),
+            provider = provider,
+            fullRegistry = ToolRegistry().register(readTool),
+            sessionManager = sessionManager,
+            parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+
+        runBlocking {
+            coroutineScope {
+                val a = async(SessionIdContext("session-a")) {
+                    tool.execute("""{"subagent_type":"explore","prompt":"task a"}""")
+                }
+                val b = async(SessionIdContext("session-b")) {
+                    tool.execute("""{"subagent_type":"explore","prompt":"task b"}""")
+                }
+                a.await(); b.await()
+            }
+        }
+
+        val metas = sessionManager.list()
+        metas shouldHaveSize 2
+        metas.count { it.parentSessionId == "session-a" } shouldBe 1
+        metas.count { it.parentSessionId == "session-b" } shouldBe 1
     }
 
     test("execute() scopes the nested loop to only the definition's allowedTools") {
@@ -141,7 +196,7 @@ class SubagentToolTest : FunSpec({
         val fullRegistry = ToolRegistry().register(readTool).register(writeTool())
         val tool = buildTool(listOf(explore), provider, createTempDirectory("subagent-test"), fullRegistry = fullRegistry)
 
-        runBlocking { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
+        runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"explore","prompt":"go"}""") }
 
         capturedRequests.first().tools.map { it.name } shouldBe listOf("read_file")
     }
@@ -155,7 +210,7 @@ class SubagentToolTest : FunSpec({
         }
         val tool = buildTool(listOf(recursive), provider, createTempDirectory("subagent-test"))
 
-        runBlocking { tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
+        runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
 
         capturedRequests.first().tools.map { it.name } shouldBe listOf("delegate_to_subagent")
     }
@@ -178,7 +233,6 @@ class SubagentToolTest : FunSpec({
             provider = provider,
             fullRegistry = fullRegistry,
             sessionManager = sessionManager,
-            parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW
         )
@@ -209,7 +263,7 @@ class SubagentToolTest : FunSpec({
             }
         }
 
-        val result = runBlocking { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
+        val result = runBlocking(SessionIdContext("parent-1")) { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
 
         result shouldBe "depth-1 subagent result"
 
@@ -235,7 +289,6 @@ class SubagentToolTest : FunSpec({
             provider = provider,
             fullRegistry = fullRegistry,
             sessionManager = sessionManager,
-            parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW,
             maxDelegationDepth = 1
@@ -262,7 +315,7 @@ class SubagentToolTest : FunSpec({
             }
         }
 
-        val result = runBlocking { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
+        val result = runBlocking(SessionIdContext("parent-1")) { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
 
         result shouldBe "stopped"
 
@@ -313,13 +366,12 @@ class SubagentToolTest : FunSpec({
             provider = provider,
             fullRegistry = fullRegistry,
             sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
-            parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW,
             confirmationPolicy = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
         )
 
-        runBlocking { tool.execute("""{"subagent_type":"operator","prompt":"do it"}""") }
+        runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"operator","prompt":"do it"}""") }
 
         executed shouldBe false
     }
@@ -376,13 +428,12 @@ class SubagentToolTest : FunSpec({
             provider = provider,
             fullRegistry = fullRegistry,
             sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
-            parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW,
             confirmationPolicy = ConfirmationPolicy { throw AssertionError("should not be consulted for a granted tool") }
         )
 
-        val result = runBlocking {
+        val result = runBlocking(SessionIdContext("parent-1")) {
             tool.execute("""{"subagent_type":"operator","prompt":"do it","expected_tools":["lookup"]}""")
         }
 
@@ -425,13 +476,12 @@ class SubagentToolTest : FunSpec({
             provider = provider,
             fullRegistry = fullRegistry,
             sessionManager = FileSessionManager(createTempDirectory("subagent-test")),
-            parentSessionId = "parent-1",
             parentConfig = AgentConfig(model = "parent-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW,
             confirmationPolicy = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
         )
 
-        runBlocking {
+        runBlocking(SessionIdContext("parent-1")) {
             tool.execute("""{"subagent_type":"operator","prompt":"do it","expected_tools":["danger"]}""")
         }
 

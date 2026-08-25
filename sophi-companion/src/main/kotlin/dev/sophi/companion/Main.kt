@@ -16,11 +16,14 @@ import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
 import dev.sophi.ai.providers.ProviderConfigException
 import dev.sophi.ai.providers.buildProviderFromType
+import dev.sophi.calendar.tools.buildCalendarProvider
+import dev.sophi.calendar.tools.calendarTools
 import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.NotificationText
 import dev.sophi.schedule.notify.Notifier
 import java.nio.file.Path
+import kotlin.io.path.createDirectories
 
 private fun buildRuntime(
     settings: CompanionSettings,
@@ -29,6 +32,7 @@ private fun buildRuntime(
 ): CompanionRuntime {
     settings.validationError()?.let { error("Invalid ~/.sophi/companion.json: $it") }
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
+    val workspaceDir = Path.of(settings.workspaceDir).also { it.createDirectories() }
     val notificationCenter = NotificationCenter(NotificationStore(tasksDir.resolve("notifications.json")))
     val provider = try {
         buildProviderFromType(
@@ -69,12 +73,20 @@ private fun buildRuntime(
             Path.of(settings.agentsDir),
             onWarning = { msg -> notificationCenter.add(NotificationKind.Memory, "Agent definitions", msg) }
         )
+        subagentDelegation()
+        goalDecomposition(tasksDir.resolve("plans"))
+        builtinTools(root = workspaceDir)
+        skillTools()
+        calendarTools(buildCalendarProvider()).forEach { tool(it) }
+        // TaskStore/RunLog read fresh from disk on every call, so this second instance sharing
+        // tasksDir's tasks.json/runs.jsonl with CompanionRuntime's own below is safe.
+        schedule(tasksDir)
     }
     val scheduleNotifier = Notifier { task, run ->
         val (title, body) = NotificationText.forTaskRun(task, run)
         notificationCenter.add(NotificationKind.Schedule, title, body)
     }
-    val voiceConfig = if (settings.voiceEnabled) {
+    val voiceConfig = if (settings.sttEnabled || settings.ttsEnabled) {
         val whisperBinaryPath = settings.whisperBinaryPath ?: voiceInstaller.whisperBinaryPath.toString()
         val whisperModelPath = settings.whisperModelPath ?: voiceInstaller.modelPath("ggml-base.en.bin").toString()
         val piperPythonPath = settings.piperPythonPath ?: voiceInstaller.piperPythonPath.toString()
@@ -85,8 +97,8 @@ private fun buildRuntime(
         } else {
             notificationCenter.add(
                 NotificationKind.Memory, "Voice mode",
-                "voiceEnabled is set but not all voice files are installed — enable it from the Settings tab, or " +
-                    "check your manually-configured paths in ~/.sophi/companion.json."
+                "Speech-to-text or text-to-speech is enabled but not all voice files are installed — enable it " +
+                    "from the Settings tab, or check your manually-configured paths in ~/.sophi/companion.json."
             )
             null
         }
@@ -99,7 +111,9 @@ private fun buildRuntime(
         runLog = dev.sophi.schedule.store.RunLog(tasksDir.resolve("runs.jsonl")),
         notifier = scheduleNotifier,
         notificationCenter = notificationCenter,
-        voiceConfig = voiceConfig
+        voiceConfig = voiceConfig,
+        sttEnabled = settings.sttEnabled,
+        ttsEnabled = settings.ttsEnabled
     )
     companionRuntime.startSchedulePolling()
     return companionRuntime

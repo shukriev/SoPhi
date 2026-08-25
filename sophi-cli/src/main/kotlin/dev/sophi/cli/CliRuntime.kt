@@ -3,17 +3,10 @@ package dev.sophi.cli
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.calendar.provider.CalendarProvider
-import dev.sophi.calendar.tools.CreateCalendarEventTool
-import dev.sophi.calendar.tools.DeleteCalendarEventTool
-import dev.sophi.calendar.tools.GetCalendarEventTool
-import dev.sophi.calendar.tools.ListCalendarEventsTool
-import dev.sophi.calendar.tools.ListCalendarsTool
-import dev.sophi.calendar.tools.UpdateCalendarEventTool
-import dev.sophi.core.agent.AgentDefinitionLoader
+import dev.sophi.calendar.tools.buildCalendarProvider
+import dev.sophi.calendar.tools.calendarTools
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
-import dev.sophi.core.agent.SubagentTool
-import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.AgentSession
 import dev.sophi.sdk.Sophi
@@ -123,29 +116,17 @@ internal suspend fun buildCliRuntime(
         ?: AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, manualConfirmationPolicy)
     val loopGuardPolicy = TerminalLoopGuardPolicy(terminal, input)
 
-    val agentsDir = Path.of(opts.agentsDir).also { it.createDirectories() }
-    val agentDefinitions = AgentDefinitionLoader().loadOrWarn(agentsDir, onWarning)
+    val agentsDir = Path.of(opts.agentsDir)
 
     val skillRegistry = SkillRegistry.load(
         globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
         projectDir = Path.of(".sophi", "skills")
     )
 
-    buildBuiltinTools(opts.braveApiKey).forEach { registry.register(it) }
-    // The schedule tool is registered by the builder's schedule(dir) below, into this same registry.
+    // The builtin file/shell/search/date tools and the schedule tool are both registered by the
+    // builder below (builtinTools()/schedule()), into this same registry.
     val calendarProvider = buildCalendarProvider()
-    registry.register(CreateCalendarEventTool(calendarProvider))
-    registry.register(ListCalendarEventsTool(calendarProvider))
-    registry.register(GetCalendarEventTool(calendarProvider))
-    registry.register(UpdateCalendarEventTool(calendarProvider))
-    registry.register(DeleteCalendarEventTool(calendarProvider))
-    registry.register(ListCalendarsTool(calendarProvider))
-
-    if (skillRegistry.all().isNotEmpty()) {
-        registry.register(SkillTool(skillRegistry))
-    }
-    registry.register(InstallSkillTool())
-    registry.register(WriteSkillTool())
+    calendarTools(calendarProvider).forEach { registry.register(it) }
 
     val mcpConfigPath = Path.of(opts.mcpConfigPath)
 
@@ -159,6 +140,11 @@ internal suspend fun buildCliRuntime(
         // caller's own system prompt goes here.
         systemPrompt = opts.systemPrompt
         toolRegistry(registry)
+        builtinTools(root = Path.of("").toAbsolutePath(), braveApiKey = opts.braveApiKey)
+        agentsDir(agentsDir, onWarning)
+        subagentDelegation()
+        goalDecomposition(Path.of(opts.plansDir))
+        skillTools()
         loopGuard(loopGuardPolicy)
         confirmationPolicy(confirmationPolicy)
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))
@@ -187,36 +173,7 @@ internal suspend fun buildCliRuntime(
         )
     }
 
-    // Registered after build() because both need the session id and the runtime's final config.
-    // AgentLoop reads registry.definitions() per round, so tools added now are live from the
-    // next turn — the same mechanism SophiRuntime.connectMcpServer relies on.
-    if (agentDefinitions.isNotEmpty()) {
-        registry.register(
-            SubagentTool(
-                definitions = agentDefinitions,
-                provider = provider,
-                fullRegistry = registry,
-                sessionManager = runtime.sessionManager,
-                parentSessionId = currentSession.id,
-                parentConfig = runtime.config,
-                contextWindowTokens = opts.contextWindowTokens,
-                confirmationPolicy = confirmationPolicy
-            )
-        )
-    }
     val planLog = PlanLog(Path.of(opts.plansDir))
-    registry.register(
-        DecomposeGoalTool(
-            provider = provider,
-            fullRegistry = registry,
-            sessionManager = runtime.sessionManager,
-            parentSessionId = currentSession.id,
-            parentConfig = runtime.config,
-            contextWindowTokens = opts.contextWindowTokens,
-            planLog = planLog,
-            confirmationPolicy = confirmationPolicy
-        )
-    )
 
     return CliRuntime(
         runtime = runtime,

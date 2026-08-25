@@ -168,10 +168,11 @@ class SettingsTest : FunSpec({
         settings.validationError() shouldBe null
     }
 
-    test("voiceEnabled defaults to false and voice path fields default to null") {
+    test("sttEnabled and ttsEnabled default to false and voice path fields default to null") {
         val settings = CompanionSettings()
 
-        settings.voiceEnabled shouldBe false
+        settings.sttEnabled shouldBe false
+        settings.ttsEnabled shouldBe false
         settings.whisperBinaryPath shouldBe null
         settings.whisperModelPath shouldBe null
         settings.piperPythonPath shouldBe null
@@ -180,9 +181,10 @@ class SettingsTest : FunSpec({
         settings.validationError() shouldBe null
     }
 
-    test("voiceEnabled with all four paths present has no validation error") {
+    test("sttEnabled and ttsEnabled with all four paths present has no validation error") {
         val settings = CompanionSettings(
-            voiceEnabled = true,
+            sttEnabled = true,
+            ttsEnabled = true,
             whisperBinaryPath = "/usr/local/bin/whisper",
             whisperModelPath = "/models/ggml-base.bin",
             piperPythonPath = "/usr/local/bin/python3",
@@ -196,7 +198,8 @@ class SettingsTest : FunSpec({
         val dir = createTempDirectory("sophi-companion-settings-test")
         val store = SettingsStore(dir.resolve("companion.json"))
         val settings = CompanionSettings(
-            voiceEnabled = true,
+            sttEnabled = true,
+            ttsEnabled = true,
             whisperBinaryPath = "/usr/local/bin/whisper",
             whisperModelPath = "/models/ggml-base.bin",
             piperPythonPath = "/usr/local/bin/python3",
@@ -211,10 +214,15 @@ class SettingsTest : FunSpec({
         store.load() shouldBe settings
     }
 
-    test("voiceEnabled alone is sufficient — the four path fields are no longer required") {
-        val settings = CompanionSettings(voiceEnabled = true)
+    test("sttEnabled/ttsEnabled alone are sufficient — the four path fields are no longer required") {
+        val settings = CompanionSettings(sttEnabled = true, ttsEnabled = true)
 
         settings.validationError() shouldBe null
+    }
+
+    test("sttEnabled and ttsEnabled are independent — either can be set without the other") {
+        CompanionSettings(sttEnabled = true).validationError() shouldBe null
+        CompanionSettings(ttsEnabled = true).validationError() shouldBe null
     }
 
     test("memory settings round-trip through SettingsStore save/load") {
@@ -240,5 +248,17 @@ class SettingsTest : FunSpec({
         val store = SettingsStore(dir.resolve("companion.json"))
         store.save(CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m", hubPort = 9999))
         store.load()?.hubPort shouldBe 9999
+    }
+
+    test("workspaceDir defaults to ~/.sophi/workspace") {
+        val settings = CompanionSettings()
+        settings.workspaceDir shouldBe System.getProperty("user.home") + "/.sophi/workspace"
+    }
+
+    test("workspaceDir round-trips through SettingsStore save/load") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        store.save(CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m", workspaceDir = "/tmp/workspace"))
+        store.load()?.workspaceDir shouldBe "/tmp/workspace"
     }
 })

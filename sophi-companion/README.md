@@ -12,7 +12,8 @@ anything needing attention floats to the top, then by most recently active. Belo
 session list, fixed nav items open **MCP** (configured servers — enable/disable, remove),
 **Goals** (scheduled tasks — create, run now), and **Skills** (installed skills — add
 from a local path or git URL, remove). Selecting a session opens its chat in the main
-panel.
+panel. A **Settings** tab holds the speech-to-text/text-to-speech toggles and
+`workspaceDir` (see [Configuration](#configuration) and [Tools](#tools) below).
 
 Local sessions stream live, token by token — same as CLI sessions.
 
@@ -71,6 +72,7 @@ explaining what was wrong, so a broken config can be repaired in-app.
 | `maxTokens` | Max tokens generated per response |
 | `sessionsDir` / `mcpConfigPath` | Default to the `sophi-cli` locations |
 | `hubPort` | Port the embedded hub listens on for CLI sessions to register with (default `8765`) |
+| `workspaceDir` | Root directory the `bash`/`write_file`/`edit_file` tools are confined to (default `~/.sophi/workspace`) — see [Tools](#tools) below |
 
 **Claude:**
 
@@ -112,6 +114,37 @@ Sessions and MCP servers are shared with `sophi-cli` by default, so sessions you
 started in the terminal show up in the Sessions tab.
 
 Settings are read once at startup — editing the file requires a restart.
+
+## Tools
+
+The companion registers the same tool surface `sophi-cli` does, via `sophi-sdk`'s
+`RuntimeBuilder` ([ADR-028](../doc/adr/ADR-028-shared-tool-wiring.md)):
+
+- **Builtin file/bash/fetch/search tools** (`read_file`, `write_file`, `edit_file`, `grep`,
+  `glob`, `bash`, `fetch_url`, `web_search`, `get_current_date_time`) — scoped to the `workspaceDir`
+  setting above (default `~/.sophi/workspace`), not the process's working directory. Companion runs
+  unattended scheduled/goal-mode turns with nobody watching, so this stays sandboxed by default;
+  point `workspaceDir` at a real projects folder for `sophi-cli`-equivalent reach.
+- **Calendar** (`create_calendar_event`, `list_calendar_events`, `get_calendar_event`,
+  `update_calendar_event`, `delete_calendar_event`, `list_calendars`) — macOS only.
+- **Subagent delegation** (`delegate_to_subagent`) — delegates to whatever
+  `AgentDefinition` `.md` files are under `agentsDir` (default `~/.sophi/agents`, same as
+  `sophi-cli`). Each chat tab's turn carries its own session id via `SessionIdContext`, so
+  concurrent delegations from two different chat tabs attribute correctly to their own session,
+  not each other's.
+- **Goal decomposition** (`decompose_goal`) — same `SessionIdContext`-based attribution as
+  subagent delegation.
+- **Skill invocation** (`skill`, `install_skill`, `write_skill`) — lets the *agent itself* find and
+  follow an installed skill, or write a new one, mid-conversation. This is a different thing from
+  the **Skills tab** in the sidebar, which is a human-facing UI for installing/removing skills
+  from a local path or git URL; the tools above are what the model can call, the tab is what you
+  click.
+- **Scheduled tasks** (`manage_scheduled_task`) — lets the agent create/list/update scheduled or
+  goal-mode tasks from chat, in addition to the Goals tab's own create button; both read/write the
+  same `~/.sophi/companion/tasks.json`.
+
+Every tool above whose risk tier is above `SAFE` (e.g. `bash`, `write_file`) goes through the same
+per-session Approve/Deny confirmation UI described in [Known limitations](#known-limitations).
 
 ## 📦 Building the installer
 
@@ -196,12 +229,13 @@ tasks.matching { it.name in packageFormatTasks }.configureEach {
 
 ## Known limitations
 
-- **Tool confirmation is always-approve.** `GuiConfirmationPolicy` fires a native
-  notification naming the tools that want to run, but approves everything.
-  `ConfirmationPolicy.confirm()` carries no session id, and one policy instance is
-  shared across all concurrent sessions, so there's no way to route an
-  approve/deny prompt to the right Chat tab. Not a safe place to run destructive
-  tools unattended. See ADR-022 decision 7.
+- **Tool confirmation is a real per-session Approve/Deny UI**, not a stub.
+  `GuiConfirmationPolicy` fires a native notification, then routes the actual
+  confirmation via `SessionIdContext` into that turn's Chat tab as a
+  `SessionState.NeedsConfirmation` card — the same risk-tier (`RiskLevel`) gating
+  `sophi-cli` uses. A scheduled/goal-mode run with nobody watching the app still
+  blocks on a DESTRUCTIVE-tier call until someone opens the tab and answers it;
+  there is no auto-approve or timeout. See [ADR-028](../doc/adr/ADR-028-shared-tool-wiring.md).
 - **Concurrent same-named tool calls can show the wrong result in the live Chat view.**
   `TurnEvent.ToolCallStarted`/`ToolCallFinished` (sophi-core) carry a tool name but no call id,
   so when two calls to the *same* tool are in flight at once, their finish events are matched to
@@ -219,5 +253,8 @@ tasks.matching { it.name in packageFormatTasks }.configureEach {
 ## See also
 
 - [ADR-022](../doc/adr/ADR-022-sophi-companion.md) — design decisions and rationale
+- [ADR-028](../doc/adr/ADR-028-shared-tool-wiring.md) — the shared `RuntimeBuilder` tool wiring
+  described in [Tools](#tools) above, and why calendar/skill-tools ended up where they did
 - `doc/articles/article-25.md` — the write-up of what embedding `sophi-sdk` exposed
+- `doc/articles/article-29.md` — the `SessionIdContext` propagation gap ADR-028 fixed
 - [Architecture](../doc/Architecture.md) — where this module sits

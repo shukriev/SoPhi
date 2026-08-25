@@ -12,6 +12,7 @@ import dev.sophi.core.agent.plan.PlanRunner
 import dev.sophi.core.agent.plan.PlanRunnerConfig
 import dev.sophi.core.agent.plan.TreePlanner
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.PluginRegistry
@@ -29,6 +30,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.seconds
 
@@ -153,12 +155,17 @@ class ScheduleEngine(
                 var replans: Int? = null
                 var decompositions: Int? = null
 
+                // SessionIdContext scopes only the actual turn/plan-run call below — SubagentTool and
+                // DecomposeGoalTool are the only readers, and everything else in this function (config
+                // assembly, RunRecord building) has no use for it.
                 val (outcome, summary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
                         val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
                         val effectiveConfig = if (extra == null) config
                             else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
-                        val result = loop.turn(session, task.prompt, effectiveConfig, bridge)
+                        val result = withContext(SessionIdContext(session.id)) {
+                            loop.turn(session, task.prompt, effectiveConfig, bridge)
+                        }
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
                     is TaskMode.Goal -> {
@@ -177,7 +184,9 @@ class ScheduleEngine(
                             maxStepExecutions = mode.maxIterations, allowParallelSteps = true
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
-                        val result = runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
+                        val result = withContext(SessionIdContext(session.id)) {
+                            runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
+                        }
                         replans = result.replans.size
                         decompositions = result.decompositions.size
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to

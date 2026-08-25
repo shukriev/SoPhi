@@ -1,9 +1,9 @@
 package dev.sophi.companion.voice
 
 /**
- * Local binary/model paths for voice mode. Only constructed when
- * [dev.sophi.companion.CompanionSettings.voiceEnabled] is true — at that point
- * `validationError()` already guarantees all four path fields are non-blank.
+ * Local binary/model paths shared by speech-to-text and text-to-speech. Only constructed when
+ * [dev.sophi.companion.CompanionSettings.sttEnabled] or [dev.sophi.companion.CompanionSettings.ttsEnabled]
+ * is true and all four paths exist on disk (auto-installed defaults, or manually configured).
  */
 data class VoiceConfig(
     val whisperBinaryPath: String,

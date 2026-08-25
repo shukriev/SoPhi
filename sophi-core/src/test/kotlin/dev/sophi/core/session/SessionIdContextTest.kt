@@ -1,4 +1,4 @@
-package dev.sophi.companion
+package dev.sophi.core.session
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldBeNull

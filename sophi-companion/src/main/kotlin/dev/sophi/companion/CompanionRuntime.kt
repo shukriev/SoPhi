@@ -1,6 +1,7 @@
 package dev.sophi.companion
 
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.skills.InstallResult
@@ -31,13 +32,16 @@ class CompanionRuntime(
     notifier: Notifier,
     val notificationCenter: NotificationCenter,
     hubPort: Int = 8765,
-    private val voiceConfig: dev.sophi.companion.voice.VoiceConfig? = null
+    private val voiceConfig: dev.sophi.companion.voice.VoiceConfig? = null,
+    private val sttEnabled: Boolean = false,
+    private val ttsEnabled: Boolean = false
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val scheduleEngine = sophiRuntime.scheduleEngine(taskStore, runLog, notifier)
     private val sessionStates = mutableMapOf<String, MutableStateFlow<SessionState>>()
     private val transcriptBuilders = mutableMapOf<String, SessionTranscriptBuilder>()
     private val voiceControllers = mutableMapOf<String, dev.sophi.companion.voice.VoiceController>()
+    private val speechOutputs = mutableMapOf<String, dev.sophi.companion.voice.SpeechOutput>()
     private val confirmationDeferreds = mutableMapOf<String, CompletableDeferred<Map<String, Boolean>>>()
     private val pendingConfirmationSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private var pollingJob: Job? = null
@@ -148,17 +152,29 @@ class CompanionRuntime(
     /** A session's turn transcript, in order — see TranscriptEntry for the shape of each entry. */
     fun sessionMessages(sessionId: String): StateFlow<List<TranscriptEntry>> = transcriptBuilderFor(sessionId).transcript
 
-    /** Voice mode's per-session controller, or null when the runtime was built without voice
-     *  configured ([voiceConfig] null — i.e. [dev.sophi.companion.CompanionSettings.voiceEnabled]
-     *  is false). */
+    /** Speech-to-text's per-session controller, or null unless both [dev.sophi.companion.
+     *  CompanionSettings.sttEnabled] and voice tools are installed ([voiceConfig] non-null). */
     fun voiceController(sessionId: String): dev.sophi.companion.voice.VoiceController? {
-        val config = voiceConfig ?: return null
+        val config = voiceConfig?.takeIf { sttEnabled } ?: return null
         return voiceControllers.getOrPut(sessionId) {
             dev.sophi.companion.voice.VoiceController(
                 sessionId = sessionId,
-                sendMessage = ::sendMessage,
+                sendMessage = { id, text, onTurnEnd -> sendMessage(id, text, onTurnEnd) },
                 recorder = dev.sophi.companion.voice.JavaSoundAudioRecorder(),
                 transcriber = dev.sophi.companion.voice.ProcessWhisperTranscriber(config),
+                onBargeIn = { speechOutput(sessionId)?.stopSpeaking() }
+            )
+        }
+    }
+
+    /** Text-to-speech's per-session player, or null unless both [dev.sophi.companion.
+     *  CompanionSettings.ttsEnabled] and voice tools are installed ([voiceConfig] non-null).
+     *  [sendMessage] feeds every reply's tokens into this directly, so a turn gets spoken back
+     *  regardless of whether it was typed or sent via [voiceController]. */
+    fun speechOutput(sessionId: String): dev.sophi.companion.voice.SpeechOutput? {
+        val config = voiceConfig?.takeIf { ttsEnabled } ?: return null
+        return speechOutputs.getOrPut(sessionId) {
+            dev.sophi.companion.voice.SpeechOutput(
                 synthesizer = dev.sophi.companion.voice.ProcessPiperSynthesizer(config),
                 player = dev.sophi.companion.voice.JavaSoundAudioPlayer()
             )
@@ -173,18 +189,18 @@ class CompanionRuntime(
     fun sendMessage(
         sessionId: String,
         input: String,
-        onSpeechToken: (String) -> Unit = {},
-        onSpeechTurnEnd: () -> Unit = {}
+        onTurnEnd: () -> Unit = {}
     ) {
         val state = stateFlowFor(sessionId)
         val builder = transcriptBuilderFor(sessionId)
+        val speech = speechOutput(sessionId)
         builder.startTurn(input)
         state.value = SessionState.Running
         scope.launch(SessionIdContext(sessionId)) {
             try {
                 sophiRuntime.streamTurn(sessionId, input) { event ->
                     when (event) {
-                        is TurnEvent.Token -> { builder.onToken(event.text); onSpeechToken(event.text) }
+                        is TurnEvent.Token -> { builder.onToken(event.text); speech?.onToken(event.text) }
                         is TurnEvent.ReasoningToken -> builder.onReasoningToken(event.text)
                         is TurnEvent.ToolCallStarted -> builder.onToolCallStarted(event.name, event.argsJson)
                         is TurnEvent.ToolCallFinished -> builder.onToolCallFinished(event.name, event.result, event.isError)
@@ -193,11 +209,13 @@ class CompanionRuntime(
                 }
                 builder.endTurn()
                 state.value = SessionState.Idle
-                onSpeechTurnEnd()
+                speech?.onTurnEnd()
+                onTurnEnd()
             } catch (e: Exception) {
                 builder.endTurn()
                 state.value = SessionState.Error(e.message ?: "unknown error")
-                onSpeechTurnEnd()
+                speech?.onTurnEnd()
+                onTurnEnd()
             }
         }
     }

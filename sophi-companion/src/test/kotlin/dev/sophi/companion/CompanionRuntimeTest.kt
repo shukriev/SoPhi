@@ -226,7 +226,7 @@ class CompanionRuntimeTest : FunSpec({
         )
     }
 
-    test("sendMessage's onSpeechToken fires per answer token and onSpeechTurnEnd fires once at the end") {
+    test("sendMessage's onTurnEnd fires once when the turn completes") {
         val dir = createTempDirectory("companion-runtime-test")
         val sophiRuntime = Sophi.runtime {
             provider = ChunkedStreamingFakeProvider()
@@ -244,21 +244,15 @@ class CompanionRuntimeTest : FunSpec({
             notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
         )
         val sessionId = runBlocking { sophiRuntime.newSession() }
-        val speechTokens = mutableListOf<String>()
         var turnEndCalls = 0
 
-        runtime.sendMessage(
-            sessionId, "hi",
-            onSpeechToken = { speechTokens.add(it) },
-            onSpeechTurnEnd = { turnEndCalls++ }
-        )
+        runtime.sendMessage(sessionId, "hi", onTurnEnd = { turnEndCalls++ })
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
 
-        speechTokens shouldBe listOf("Hel", "lo!")
         turnEndCalls shouldBe 1
     }
 
-    test("voiceController returns null when the runtime was built without a VoiceConfig") {
+    test("voiceController returns null when the runtime was built without a VoiceConfig, even with sttEnabled") {
         val dir = createTempDirectory("companion-runtime-test")
         val sophiRuntime = Sophi.runtime {
             provider = SlowFakeProvider(delayMs = 0)
@@ -273,13 +267,14 @@ class CompanionRuntimeTest : FunSpec({
             taskStore = TaskStore(dir.resolve("tasks.json")),
             runLog = RunLog(dir.resolve("runs.jsonl")),
             notifier = NoopNotifier,
-            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
+            sttEnabled = true
         )
 
         runtime.voiceController("any-session") shouldBe null
     }
 
-    test("voiceController returns the same instance for the same sessionId when a VoiceConfig is set") {
+    test("voiceController returns null when a VoiceConfig is set but sttEnabled is false") {
         val dir = createTempDirectory("companion-runtime-test")
         val sophiRuntime = Sophi.runtime {
             provider = SlowFakeProvider(delayMs = 0)
@@ -303,10 +298,78 @@ class CompanionRuntimeTest : FunSpec({
             )
         )
 
+        runtime.voiceController("any-session") shouldBe null
+    }
+
+    test("voiceController returns the same instance for the same sessionId when sttEnabled and a VoiceConfig are set") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
+            voiceConfig = dev.sophi.companion.voice.VoiceConfig(
+                whisperBinaryPath = "/bin/true",
+                whisperModelPath = "/dev/null",
+                piperPythonPath = "/bin/true",
+                piperVoicePath = "/dev/null"
+            ),
+            sttEnabled = true
+        )
+
         val first = runtime.voiceController("s1")
         val second = runtime.voiceController("s1")
         val different = runtime.voiceController("s2")
 
+        first shouldBe second
+        (first === different) shouldBe false
+    }
+
+    test("speechOutput returns null unless both ttsEnabled and a VoiceConfig are set, and returns the same instance per session") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val config = dev.sophi.companion.voice.VoiceConfig(
+            whisperBinaryPath = "/bin/true",
+            whisperModelPath = "/dev/null",
+            piperPythonPath = "/bin/true",
+            piperVoicePath = "/dev/null"
+        )
+        fun runtime(voiceConfig: dev.sophi.companion.voice.VoiceConfig? = null, ttsEnabled: Boolean = false) =
+            CompanionRuntime(
+                sophiRuntime = sophiRuntime,
+                sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+                mcpConfigPath = dir.resolve("mcp.json"),
+                taskStore = TaskStore(dir.resolve("tasks.json")),
+                runLog = RunLog(dir.resolve("runs.jsonl")),
+                notifier = NoopNotifier,
+                notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
+                voiceConfig = voiceConfig,
+                ttsEnabled = ttsEnabled
+            )
+
+        runtime(ttsEnabled = true).speechOutput("s1") shouldBe null // no VoiceConfig
+        runtime(voiceConfig = config).speechOutput("s1") shouldBe null // ttsEnabled false
+
+        val active = runtime(voiceConfig = config, ttsEnabled = true)
+        val first = active.speechOutput("s1")
+        val second = active.speechOutput("s1")
+        val different = active.speechOutput("s2")
+
+        (first != null) shouldBe true
         first shouldBe second
         (first === different) shouldBe false
     }

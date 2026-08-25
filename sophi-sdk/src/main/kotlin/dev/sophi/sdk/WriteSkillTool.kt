@@ -1,4 +1,4 @@
-package dev.sophi.cli
+package dev.sophi.sdk
 
 import com.charleskorn.kaml.Yaml
 import dev.sophi.core.tools.RiskLevel

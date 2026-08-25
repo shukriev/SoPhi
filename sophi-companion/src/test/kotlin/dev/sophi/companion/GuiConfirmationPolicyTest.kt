@@ -1,5 +1,6 @@
 package dev.sophi.companion
 
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec

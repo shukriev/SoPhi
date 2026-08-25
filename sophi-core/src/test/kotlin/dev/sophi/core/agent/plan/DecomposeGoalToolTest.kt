@@ -7,14 +7,17 @@ import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.FileSessionManager
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -33,7 +36,6 @@ class DecomposeGoalToolTest : FunSpec({
         provider = provider,
         fullRegistry = registry,
         sessionManager = FileSessionManager(createTempDirectory("decompose-goal-tool-test")),
-        parentSessionId = "parent",
         parentConfig = AgentConfig(model = "test-model"),
         contextWindowTokens = TEST_CONTEXT_WINDOW,
         depth = depth
@@ -48,7 +50,7 @@ class DecomposeGoalToolTest : FunSpec({
             LLMResponse.Text("YES", TokenUsage(1, 1))
         )
 
-        val result = runBlocking { tool(provider).execute("""{"goal":"ship the release"}""") }
+        val result = runBlocking(SessionIdContext("parent")) { tool(provider).execute("""{"goal":"ship the release"}""") }
 
         result shouldContain "branch created"
         result shouldContain "[s1]"
@@ -61,7 +63,7 @@ class DecomposeGoalToolTest : FunSpec({
         coEvery { provider.complete(any()) } returns LLMResponse.Text(
             """{"steps":[{"id":"s1","instruction":"impossible"}]}""", TokenUsage(1, 1))
 
-        val result = runBlocking { tool(provider).execute("""{"goal":"do the impossible"}""") }
+        val result = runBlocking(SessionIdContext("parent")) { tool(provider).execute("""{"goal":"do the impossible"}""") }
 
         result.startsWith("Error: goal not met - ") shouldBe true
     }
@@ -85,7 +87,7 @@ class DecomposeGoalToolTest : FunSpec({
         )
         val registry = ToolRegistry()
 
-        runBlocking { tool(provider, registry, depth = 1).execute("""{"goal":"g"}""") }
+        runBlocking(SessionIdContext("parent")) { tool(provider, registry, depth = 1).execute("""{"goal":"g"}""") }
 
         registry.getOrNull("decompose_goal") shouldBe null
     }
@@ -108,13 +110,12 @@ class DecomposeGoalToolTest : FunSpec({
             provider = provider,
             fullRegistry = registry,
             sessionManager = FileSessionManager(createTempDirectory("decompose-goal-grants-sessions")),
-            parentSessionId = "parent",
             parentConfig = AgentConfig(model = "test-model"),
             contextWindowTokens = TEST_CONTEXT_WINDOW,
             confirmationPolicy = ConfirmationPolicy.DENY_ALL
         )
 
-        runBlocking { t.execute("""{"goal":"g","expected_tools":["bash"]}""") }
+        runBlocking(SessionIdContext("parent")) { t.execute("""{"goal":"g","expected_tools":["bash"]}""") }
 
         marker.exists() shouldBe false
     }
@@ -123,5 +124,20 @@ class DecomposeGoalToolTest : FunSpec({
         val t = tool(mockk<LLMProvider>())
         t.name shouldBe "decompose_goal"
         t.parametersJson shouldContain "\"goal\""
+    }
+
+    test("execute() throws when SessionIdContext is absent, without calling the LLM") {
+        val provider = mockk<LLMProvider>()
+        val t = DecomposeGoalTool(
+            provider = provider,
+            fullRegistry = ToolRegistry(),
+            sessionManager = FileSessionManager(createTempDirectory("decompose-goal-tool-test")),
+            parentConfig = AgentConfig(model = "test-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+
+        shouldThrow<IllegalStateException> { runBlocking { t.execute("""{"goal":"ship the release"}""") } }
+
+        coVerify(exactly = 0) { provider.complete(any()) }
     }
 })

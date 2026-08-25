@@ -3,8 +3,6 @@ package dev.sophi.companion.voice
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.nio.file.Files
@@ -24,24 +22,6 @@ private class FakeWhisperTranscriber(private val result: Result<String>) : Whisp
     }
 }
 
-private class FakePiperSynthesizer : PiperSynthesizer {
-    val calls = mutableListOf<String>()
-    var failOn: String? = null
-    override suspend fun synthesize(text: String): Result<ByteArray> {
-        calls.add(text)
-        return if (text == failOn) Result.failure(RuntimeException("synth failed"))
-        else Result.success(byteArrayOf(1, 2, 3))
-    }
-}
-
-private class FakeAudioPlayer : AudioPlayer {
-    val enqueued = mutableListOf<ByteArray>()
-    var stopAllCalls = 0
-    override val isPlaying: StateFlow<Boolean> = MutableStateFlow(false)
-    override fun enqueue(audio: ByteArray) { enqueued.add(audio) }
-    override fun stopAll() { stopAllCalls++ }
-}
-
 private suspend fun waitUntil(timeoutMs: Long = 2000, poll: () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
@@ -52,77 +32,53 @@ private suspend fun waitUntil(timeoutMs: Long = 2000, poll: () -> Boolean) {
 }
 
 class VoiceControllerTest : FunSpec({
-    test("a successful turn transcribes, sends, splits streamed tokens into sentences, and synthesizes them in order") {
+    test("a successful turn transcribes and sends, with an onTurnEnd callback that releases the guard") {
         val wavFile = Files.createTempFile("voice-controller-test", ".wav")
         val recorder = FakeAudioRecorder(wavFile)
         val transcriber = FakeWhisperTranscriber(Result.success("hello there"))
-        val synthesizer = FakePiperSynthesizer()
-        val player = FakeAudioPlayer()
-        var capturedOnToken: ((String) -> Unit)? = null
+        val sent = mutableListOf<String>()
         var capturedOnTurnEnd: (() -> Unit)? = null
         val controller = VoiceController(
             sessionId = "s1",
-            sendMessage = { _, _, onToken, onTurnEnd ->
-                capturedOnToken = onToken
-                capturedOnTurnEnd = onTurnEnd
-            },
+            sendMessage = { _, text, onTurnEnd -> sent.add(text); capturedOnTurnEnd = onTurnEnd },
             recorder = recorder,
-            transcriber = transcriber,
-            synthesizer = synthesizer,
-            player = player
+            transcriber = transcriber
         )
 
         controller.onPttPress()
         controller.onPttRelease()
-        runBlocking { withTimeout(2000) { waitUntil { capturedOnToken != null && capturedOnTurnEnd != null } } }
+        runBlocking { withTimeout(2000) { waitUntil { sent.isNotEmpty() } } }
 
         transcriber.calls shouldBe listOf(wavFile)
         recorder.startCalls shouldBe 1
-
-        capturedOnToken!!("Hi. ")
-        capturedOnToken!!("Bye. ")
-        capturedOnTurnEnd!!()
-
-        runBlocking { withTimeout(2000) { waitUntil { player.enqueued.size == 2 } } }
-        synthesizer.calls shouldBe listOf("Hi.", "Bye.")
+        sent shouldBe listOf("hello there")
+        (capturedOnTurnEnd != null) shouldBe true
     }
 
-    test("flush()'s remainder at turn end is synthesized too") {
-        val wavFile = Files.createTempFile("voice-controller-test", ".wav")
-        val transcriber = FakeWhisperTranscriber(Result.success("hi"))
-        val synthesizer = FakePiperSynthesizer()
-        val player = FakeAudioPlayer()
-        var capturedOnToken: ((String) -> Unit)? = null
-        var capturedOnTurnEnd: (() -> Unit)? = null
+    test("a blank transcript sends nothing and returns to Idle") {
+        val transcriber = FakeWhisperTranscriber(Result.success("   "))
+        var sendMessageCalls = 0
         val controller = VoiceController(
             sessionId = "s1",
-            sendMessage = { _, _, onToken, onTurnEnd -> capturedOnToken = onToken; capturedOnTurnEnd = onTurnEnd },
-            recorder = FakeAudioRecorder(wavFile),
-            transcriber = transcriber,
-            synthesizer = synthesizer,
-            player = player
+            sendMessage = { _, _, _ -> sendMessageCalls++ },
+            recorder = FakeAudioRecorder(Files.createTempFile("voice-controller-test", ".wav")),
+            transcriber = transcriber
         )
 
         controller.onPttPress()
         controller.onPttRelease()
-        runBlocking { withTimeout(2000) { waitUntil { capturedOnToken != null && capturedOnTurnEnd != null } } }
 
-        capturedOnToken!!("No trailing punctuation")
-        capturedOnTurnEnd!!()
-
-        runBlocking { withTimeout(2000) { waitUntil { player.enqueued.size == 1 } } }
-        synthesizer.calls shouldBe listOf("No trailing punctuation")
+        runBlocking { withTimeout(2000) { waitUntil { controller.state.value == VoiceState.Idle } } }
+        sendMessageCalls shouldBe 0
     }
 
     test("a transcription failure surfaces as VoiceState.Error and never calls sendMessage") {
         var sendMessageCalls = 0
         val controller = VoiceController(
             sessionId = "s1",
-            sendMessage = { _, _, _, _ -> sendMessageCalls++ },
+            sendMessage = { _, _, _ -> sendMessageCalls++ },
             recorder = FakeAudioRecorder(Files.createTempFile("voice-controller-test", ".wav")),
-            transcriber = FakeWhisperTranscriber(Result.failure(RuntimeException("whisper.cpp not found"))),
-            synthesizer = FakePiperSynthesizer(),
-            player = FakeAudioPlayer()
+            transcriber = FakeWhisperTranscriber(Result.failure(RuntimeException("whisper.cpp not found")))
         )
 
         controller.onPttPress()
@@ -133,39 +89,13 @@ class VoiceControllerTest : FunSpec({
         sendMessageCalls shouldBe 0
     }
 
-    test("a synthesis failure on one sentence doesn't stop later sentences from being spoken") {
-        val transcriber = FakeWhisperTranscriber(Result.success("hi"))
-        val synthesizer = FakePiperSynthesizer().apply { failOn = "First." }
-        val player = FakeAudioPlayer()
-        var capturedOnToken: ((String) -> Unit)? = null
-        val controller = VoiceController(
-            sessionId = "s1",
-            sendMessage = { _, _, onToken, _ -> capturedOnToken = onToken },
-            recorder = FakeAudioRecorder(Files.createTempFile("voice-controller-test", ".wav")),
-            transcriber = transcriber,
-            synthesizer = synthesizer,
-            player = player
-        )
-
-        controller.onPttPress()
-        controller.onPttRelease()
-        runBlocking { withTimeout(2000) { waitUntil { capturedOnToken != null } } }
-
-        capturedOnToken!!("First. Second. ")
-
-        runBlocking { withTimeout(2000) { waitUntil { synthesizer.calls.size == 2 } } }
-        player.enqueued.size shouldBe 1 // only "Second." made it to the player
-    }
-
     test("a PTT press while a turn is already in flight is ignored") {
         val recorder = FakeAudioRecorder(Files.createTempFile("voice-controller-test", ".wav"))
         val controller = VoiceController(
             sessionId = "s1",
-            sendMessage = { _, _, _, _ -> },
+            sendMessage = { _, _, _ -> },
             recorder = recorder,
-            transcriber = FakeWhisperTranscriber(Result.success("hi")),
-            synthesizer = FakePiperSynthesizer(),
-            player = FakeAudioPlayer()
+            transcriber = FakeWhisperTranscriber(Result.success("hi"))
         )
 
         controller.onPttPress()
@@ -174,29 +104,28 @@ class VoiceControllerTest : FunSpec({
         recorder.startCalls shouldBe 1
     }
 
-    test("a PTT press while only playback is ongoing (turn already ended) stops playback and starts a new recording") {
-        val player = FakeAudioPlayer()
+    test("a PTT press while only playback is ongoing (turn already ended) calls onBargeIn and starts a new recording") {
         val recorder = FakeAudioRecorder(Files.createTempFile("voice-controller-test", ".wav"))
         var capturedOnTurnEnd: (() -> Unit)? = null
+        var bargeInCalls = 0
         val controller = VoiceController(
             sessionId = "s1",
-            sendMessage = { _, _, _, onTurnEnd -> capturedOnTurnEnd = onTurnEnd },
+            sendMessage = { _, _, onTurnEnd -> capturedOnTurnEnd = onTurnEnd },
             recorder = recorder,
             transcriber = FakeWhisperTranscriber(Result.success("hi")),
-            synthesizer = FakePiperSynthesizer(),
-            player = player
+            onBargeIn = { bargeInCalls++ }
         )
 
         controller.onPttPress()
         controller.onPttRelease()
         runBlocking { withTimeout(2000) { waitUntil { capturedOnTurnEnd != null } } }
-        capturedOnTurnEnd!!() // turn ends; player may still be draining its queue in production
+        capturedOnTurnEnd!!() // turn ends — releases the in-flight guard, same as CompanionRuntime would
 
         controller.onPttPress() // barge-in
 
         recorder.startCalls shouldBe 2
-        // stopAll() is called unconditionally on every successful press (harmless no-op when
+        // onBargeIn() is called unconditionally on every successful press (harmless no-op when
         // nothing's playing), so both the initial press and the barge-in press count here.
-        player.stopAllCalls shouldBe 2
+        bargeInCalls shouldBe 2
     }
 })
