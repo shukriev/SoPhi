@@ -2,6 +2,7 @@ package dev.sophi.core.agent.plan
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
@@ -10,6 +11,7 @@ import dev.sophi.core.tools.ToolRegistry
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlin.coroutines.coroutineContext
 
 const val DECOMPOSE_GOAL_TOOL_NAME = "decompose_goal"
 
@@ -29,7 +31,6 @@ class DecomposeGoalTool(
     private val provider: LLMProvider,
     private val fullRegistry: ToolRegistry,
     private val sessionManager: SessionManager,
-    private val parentSessionId: String,
     private val parentConfig: AgentConfig,
     /** Total context window of `parentConfig.model`, in tokens — see AgentLoop. */
     private val contextWindowTokens: Int,
@@ -57,6 +58,8 @@ class DecomposeGoalTool(
     }
 
     override suspend fun execute(argumentsJson: String): String {
+        val parentSessionId = coroutineContext[SessionIdContext]?.sessionId
+            ?: return "Error: no active session context — this should never happen in normal use"
         val args = json.decodeFromString(DecomposeGoalArgs.serializer(), argumentsJson)
 
         val stepRegistry = fullRegistry.subset(fullRegistry.names().filter { it != name })
@@ -66,7 +69,6 @@ class DecomposeGoalTool(
                     provider = provider,
                     fullRegistry = fullRegistry,
                     sessionManager = sessionManager,
-                    parentSessionId = parentSessionId,
                     parentConfig = parentConfig,
                     contextWindowTokens = contextWindowTokens,
                     planLog = planLog,
