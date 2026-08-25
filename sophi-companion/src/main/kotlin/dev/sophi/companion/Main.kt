@@ -74,7 +74,7 @@ private fun buildRuntime(
         val (title, body) = NotificationText.forTaskRun(task, run)
         notificationCenter.add(NotificationKind.Schedule, title, body)
     }
-    val voiceConfig = if (settings.voiceEnabled) {
+    val voiceConfig = if (settings.sttEnabled || settings.ttsEnabled) {
         val whisperBinaryPath = settings.whisperBinaryPath ?: voiceInstaller.whisperBinaryPath.toString()
         val whisperModelPath = settings.whisperModelPath ?: voiceInstaller.modelPath("ggml-base.en.bin").toString()
         val piperPythonPath = settings.piperPythonPath ?: voiceInstaller.piperPythonPath.toString()
@@ -85,8 +85,8 @@ private fun buildRuntime(
         } else {
             notificationCenter.add(
                 NotificationKind.Memory, "Voice mode",
-                "voiceEnabled is set but not all voice files are installed — enable it from the Settings tab, or " +
-                    "check your manually-configured paths in ~/.sophi/companion.json."
+                "Speech-to-text or text-to-speech is enabled but not all voice files are installed — enable it " +
+                    "from the Settings tab, or check your manually-configured paths in ~/.sophi/companion.json."
             )
             null
         }
@@ -99,7 +99,9 @@ private fun buildRuntime(
         runLog = dev.sophi.schedule.store.RunLog(tasksDir.resolve("runs.jsonl")),
         notifier = scheduleNotifier,
         notificationCenter = notificationCenter,
-        voiceConfig = voiceConfig
+        voiceConfig = voiceConfig,
+        sttEnabled = settings.sttEnabled,
+        ttsEnabled = settings.ttsEnabled
     )
     companionRuntime.startSchedulePolling()
     return companionRuntime

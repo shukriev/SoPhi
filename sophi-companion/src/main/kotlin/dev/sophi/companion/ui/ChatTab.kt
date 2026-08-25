@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
 import dev.sophi.companion.SessionState
 import dev.sophi.companion.TranscriptEntry
+import dev.sophi.companion.voice.SpeechOutput
 import dev.sophi.companion.voice.VoiceController
 import dev.sophi.companion.voice.VoiceState
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +68,7 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
     // one session's expanded entry ids into another session's unrelated entry id space.
     val expandedIds = remember(activeSessionId) { mutableStateMapOf<Int, Boolean>() }
     val voiceController = remember(runtime, activeSessionId) { runtime.voiceController(activeSessionId) }
+    val speechOutput = remember(runtime, activeSessionId) { runtime.speechOutput(activeSessionId) }
     var textFieldFocused by remember { mutableStateOf(false) }
     val chatFocusRequester = remember { FocusRequester() }
     val hotkeyKey = remember(pttHotkey) { pttHotkeyToKey(pttHotkey) }
@@ -135,7 +137,7 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
                 }
             }
         }
-        VoiceControls(voiceController)
+        VoiceControls(voiceController, speechOutput)
         Row {
             OutlinedTextField(
                 value = input,
@@ -210,51 +212,54 @@ private fun pttHotkeyToKey(name: String): Key? = when (name) {
 }
 
 @Composable
-private fun VoiceControls(voiceController: VoiceController?) {
-    if (voiceController == null) {
+private fun VoiceControls(voiceController: VoiceController?, speechOutput: SpeechOutput?) {
+    if (voiceController == null && speechOutput == null) {
         Text(
             "Voice mode not enabled — turn it on from the Settings tab",
             style = MaterialTheme.typography.bodySmall
         )
         return
     }
-    val voiceState by voiceController.state.collectAsState()
-    val isSpeaking by voiceController.isSpeaking.collectAsState()
-
     Row {
-        Box(
-            modifier = Modifier
-                .padding(end = 8.dp)
-                .background(
-                    if (voiceState is VoiceState.Recording) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.secondaryContainer,
-                    CircleShape
+        if (voiceController != null) {
+            val voiceState by voiceController.state.collectAsState()
+            Box(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .background(
+                        if (voiceState is VoiceState.Recording) MaterialTheme.colorScheme.errorContainer
+                        else MaterialTheme.colorScheme.secondaryContainer,
+                        CircleShape
+                    )
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .pointerInput(voiceController) {
+                        detectTapGestures(onPress = {
+                            voiceController.onPttPress()
+                            tryAwaitRelease()
+                            voiceController.onPttRelease()
+                        })
+                    }
+            ) {
+                Text(
+                    when (voiceState) {
+                        VoiceState.Recording -> "Recording…"
+                        VoiceState.Transcribing -> "Transcribing…"
+                        else -> "Hold to talk"
+                    }
                 )
-                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .pointerInput(voiceController) {
-                    detectTapGestures(onPress = {
-                        voiceController.onPttPress()
-                        tryAwaitRelease()
-                        voiceController.onPttRelease()
-                    })
-                }
-        ) {
-            Text(
-                when (voiceState) {
-                    VoiceState.Recording -> "Recording…"
-                    VoiceState.Transcribing -> "Transcribing…"
-                    else -> "Hold to talk"
-                }
-            )
+            }
+            val error = voiceState as? VoiceState.Error
+            if (error != null) {
+                Text(error.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+            }
         }
-        val error = voiceState as? VoiceState.Error
-        if (error != null) {
-            Text(error.message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
-        }
-        if (isSpeaking) {
-            Text("Speaking…", modifier = Modifier.padding(top = 8.dp, start = 8.dp))
-            Button(onClick = { voiceController.stopSpeaking() }) { Text("Stop") }
+        if (speechOutput != null) {
+            val isSpeaking by speechOutput.isSpeaking.collectAsState()
+            if (isSpeaking) {
+                Text("Speaking…", modifier = Modifier.padding(top = 8.dp, start = 8.dp))
+                Button(onClick = { speechOutput.stopSpeaking() }) { Text("Stop") }
+            }
         }
     }
 }

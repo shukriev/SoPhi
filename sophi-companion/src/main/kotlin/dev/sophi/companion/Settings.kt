@@ -50,16 +50,21 @@ data class CompanionSettings(
     val embeddingBaseUrl: String? = null,
     val embeddingApiKey: String? = null,
     val embeddingDimensions: Int = 1536,
-    /** Enables push-to-talk voice mode (experimental). Requires the four path fields below. */
-    val voiceEnabled: Boolean = false,
-    /** Path to a local whisper.cpp executable. Required when [voiceEnabled]. */
+    /** Enables push-to-talk speech-to-text (experimental) — hold [pttHotkey] or the mic button to
+     *  transcribe what you say into a normal chat turn. Independent of [ttsEnabled]; both share
+     *  the four path fields below. */
+    val sttEnabled: Boolean = false,
+    /** Enables spoken replies via local piper (experimental) — every reply is read aloud,
+     *  whether the turn was typed or sent via [sttEnabled]. Independent of [sttEnabled]. */
+    val ttsEnabled: Boolean = false,
+    /** Path to a local whisper.cpp executable. Used when [sttEnabled]. */
     val whisperBinaryPath: String? = null,
-    /** Path to a whisper.cpp ggml model file. Required when [voiceEnabled]. */
+    /** Path to a whisper.cpp ggml model file. Used when [sttEnabled]. */
     val whisperModelPath: String? = null,
     /** Python interpreter inside the installed piper runtime; JSON key kept as piperBinaryPath for back-compat. */
     @SerialName("piperBinaryPath")
     val piperPythonPath: String? = null,
-    /** Path to a piper voice model (.onnx). Required when [voiceEnabled]. */
+    /** Path to a piper voice model (.onnx). Used when [ttsEnabled]. */
     val piperVoicePath: String? = null,
     /** Held to record while the Chat tab's message field does not have focus. */
     val pttHotkey: String = "Right Option"
