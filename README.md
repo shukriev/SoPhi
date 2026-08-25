@@ -40,7 +40,7 @@ app — same core, three ways to run it.
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
-| 🖥️ `sophi-companion` | OS tray / menu-bar desktop app (Compose Multiplatform) embedding `sophi-sdk` in-process — chat, sessions, MCP servers, goals |
+| 🖥️ `sophi-companion` | OS tray / menu-bar desktop app (Compose Multiplatform) embedding `sophi-sdk` in-process — chat, sessions, MCP servers, goals; shares `sophi-cli`'s full tool surface (file/bash/fetch, calendar, skills, subagent delegation, goal decomposition) |
 | 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `MetricsPlugin` |
 
 They all sit on the same core, so switching between them later is a
@@ -244,9 +244,14 @@ dashboard, batch job) without standing up a separate service.
 ## 🖥️ Use case 4: Desktop tray companion (`sophi-companion`)
 
 A native menu-bar / system-tray app that embeds `sophi-sdk` **in-process** — no
-HTTP hop through `sophi-web`. Click the tray icon and you get four tabs: Chat,
-Sessions, MCP, and Goals. Multiple sessions run concurrently in the background,
-and finished turns and scheduled tasks post native OS notifications.
+HTTP hop through `sophi-web`. Click the tray icon and you get Chat, Sessions,
+MCP, Goals, and Settings tabs. Multiple sessions run concurrently in the
+background, and finished turns and scheduled tasks post native OS
+notifications. Companion registers the same tool surface `sophi-cli` does
+(ADR-028) — builtin file/bash/fetch tools sandboxed to a configurable
+`workspaceDir` (default `~/.sophi/workspace`), calendar, skill invocation,
+subagent delegation, and goal decomposition — so a chat turn or a scheduled
+task here can do everything a `sophi-cli` session can.
 
 `sophi-companion` is a standalone Gradle project (Compose Multiplatform Desktop),
 deliberately outside the Maven reactor — so install the reactor to `mavenLocal()`
@@ -282,10 +287,12 @@ cd sophi-companion
 On macOS a bundled `.app` is effectively required, not optional — a bare
 `java -jar` process can't reliably post to Notification Center.
 
-Two caveats worth knowing up front: tool confirmation is currently
-**always-approve** (the notification fires, but there's no per-session
-approve/deny UI yet — see ADR-022), and only the macOS bundle has actually been
-built and launched; the Linux and Windows targets are configured but unverified.
+One caveat worth knowing up front: only the macOS bundle has actually been
+built and launched; the Linux and Windows targets are configured but
+unverified. Tool confirmation routes through a real per-session Approve/Deny
+UI in the Chat tab — a DESTRUCTIVE-tier call (e.g. `bash`, `write_file`)
+pauses that turn and posts a notification until you respond, same risk-tier
+gating as `sophi-cli` (see ADR-028).
 
 Full setup, packaging details, build gotchas, and known limitations live in
 [`sophi-companion/README.md`](sophi-companion/README.md).
