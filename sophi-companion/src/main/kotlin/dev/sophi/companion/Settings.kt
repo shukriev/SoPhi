@@ -67,7 +67,12 @@ data class CompanionSettings(
     /** Path to a piper voice model (.onnx). Used when [ttsEnabled]. */
     val piperVoicePath: String? = null,
     /** Held to record while the Chat tab's message field does not have focus. */
-    val pttHotkey: String = "Right Option"
+    val pttHotkey: String = "Right Option",
+    /** Root directory sophi-companion's file/bash tools are confined to. Sandboxed by default —
+     *  companion is an always-running background app, and some tool calls can fire from
+     *  unattended scheduled/goal-mode runs with nobody watching; point this at a real projects
+     *  folder for CLI-equivalent reach, opted into explicitly rather than granted by accident. */
+    val workspaceDir: String = System.getProperty("user.home") + "/.sophi/workspace"
 )
 
 /**

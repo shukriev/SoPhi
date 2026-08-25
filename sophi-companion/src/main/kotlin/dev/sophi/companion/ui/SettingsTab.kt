@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -103,6 +104,20 @@ fun SettingsTab(
             }
             InstallState.Ready, InstallState.Idle -> Unit
         }
+
+        Text("Workspace", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+        OutlinedTextField(
+            value = settings.workspaceDir,
+            onValueChange = { onSettingsChanged(settings.copy(workspaceDir = it)) },
+            label = { Text("Workspace directory") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "Root directory sophi-companion's file/bash tools are confined to. Scheduled and " +
+                "goal-mode runs can fire unattended, so this stays sandboxed by default — point it " +
+                "at a real projects folder for CLI-equivalent reach.",
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 

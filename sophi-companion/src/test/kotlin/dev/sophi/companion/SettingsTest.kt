@@ -249,4 +249,16 @@ class SettingsTest : FunSpec({
         store.save(CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m", hubPort = 9999))
         store.load()?.hubPort shouldBe 9999
     }
+
+    test("workspaceDir defaults to ~/.sophi/workspace") {
+        val settings = CompanionSettings()
+        settings.workspaceDir shouldBe System.getProperty("user.home") + "/.sophi/workspace"
+    }
+
+    test("workspaceDir round-trips through SettingsStore save/load") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        store.save(CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m", workspaceDir = "/tmp/workspace"))
+        store.load()?.workspaceDir shouldBe "/tmp/workspace"
+    }
 })
