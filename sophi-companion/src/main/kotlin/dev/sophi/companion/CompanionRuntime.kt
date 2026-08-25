@@ -1,6 +1,7 @@
 package dev.sophi.companion
 
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.skills.InstallResult
