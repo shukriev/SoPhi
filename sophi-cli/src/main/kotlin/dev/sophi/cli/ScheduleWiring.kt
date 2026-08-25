@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import dev.sophi.schedule.engine.ScheduleEngine
 import dev.sophi.sdk.Sophi
+import dev.sophi.sdk.buildBuiltinTools
 import java.nio.file.Path
 
 internal fun buildScheduleEngine(
@@ -19,7 +20,7 @@ internal fun buildScheduleEngine(
 ): ScheduleEngine {
     val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
     val registry = dev.sophi.core.tools.ToolRegistry()
-    buildBuiltinTools(braveApiKeyOption).forEach { registry.register(it) }
+    buildBuiltinTools(Path.of("").toAbsolutePath(), braveApiKeyOption).forEach { registry.register(it) }
     val proposalStore = dev.sophi.schedule.store.ProposalStore(scheduleDir.resolve("proposals.jsonl"))
     val runtime = Sophi.runtime {
         this.provider = provider

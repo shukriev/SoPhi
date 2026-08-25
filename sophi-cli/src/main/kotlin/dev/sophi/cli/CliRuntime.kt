@@ -131,8 +131,8 @@ internal suspend fun buildCliRuntime(
         projectDir = Path.of(".sophi", "skills")
     )
 
-    buildBuiltinTools(opts.braveApiKey).forEach { registry.register(it) }
-    // The schedule tool is registered by the builder's schedule(dir) below, into this same registry.
+    // The builtin file/shell/search/date tools and the schedule tool are both registered by the
+    // builder below (builtinTools()/schedule()), into this same registry.
     val calendarProvider = buildCalendarProvider()
     registry.register(CreateCalendarEventTool(calendarProvider))
     registry.register(ListCalendarEventsTool(calendarProvider))
@@ -159,6 +159,7 @@ internal suspend fun buildCliRuntime(
         // caller's own system prompt goes here.
         systemPrompt = opts.systemPrompt
         toolRegistry(registry)
+        builtinTools(root = Path.of("").toAbsolutePath(), braveApiKey = opts.braveApiKey)
         loopGuard(loopGuardPolicy)
         confirmationPolicy(confirmationPolicy)
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))

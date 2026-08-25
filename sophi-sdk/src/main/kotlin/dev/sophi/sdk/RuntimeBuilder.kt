@@ -51,6 +51,7 @@ class RuntimeBuilder {
     private var contextWindowTokens: Int? = null
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
+    private var builtinToolsConfig: BuiltinToolsConfig? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -79,6 +80,10 @@ class RuntimeBuilder {
      */
     fun agentsDir(dir: Path, onWarning: (String) -> Unit = { System.err.println(it) }): RuntimeBuilder =
         apply { agentsDirConfig = AgentsDirConfig(dir, onWarning) }
+
+    /** Registers the standard file/shell/search/date tool set — see [buildBuiltinTools]. */
+    fun builtinTools(root: Path, braveApiKey: String? = null): RuntimeBuilder =
+        apply { builtinToolsConfig = BuiltinToolsConfig(root, braveApiKey) }
     /**
      * Total context window of [model], in tokens — required before [build]. Sophi compacts the
      * turn's earlier tool rounds once 80% of this is used. There is deliberately no per-model
@@ -116,6 +121,7 @@ class RuntimeBuilder {
             AgentDefinitionLoader().loadOrWarn(cfg.dir, cfg.onWarning)
         } ?: emptyList()
         val registry = (providedRegistry ?: ToolRegistry()).also { r -> tools.forEach { r.register(it) } }
+        builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
         scheduleDir?.let { dir ->
             registry.register(ScheduleTaskTool(
                 TaskStore(dir.resolve("tasks.json")),
@@ -179,6 +185,8 @@ class RuntimeBuilder {
 }
 
 private data class AgentsDirConfig(val dir: Path, val onWarning: (String) -> Unit)
+
+private data class BuiltinToolsConfig(val root: Path, val braveApiKey: String?)
 
 private data class MemoryConfig(
     val embeddingModel: String,
