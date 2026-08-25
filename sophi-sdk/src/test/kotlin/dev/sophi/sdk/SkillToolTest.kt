@@ -1,4 +1,4 @@
-package dev.sophi.cli
+package dev.sophi.sdk
 
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.skills.Skill

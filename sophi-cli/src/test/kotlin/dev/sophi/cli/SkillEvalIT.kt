@@ -11,6 +11,8 @@ import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.FileWriteTool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.sdk.SkillTool
+import dev.sophi.sdk.WriteSkillTool
 import dev.sophi.skills.SkillRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe

@@ -137,12 +137,6 @@ internal suspend fun buildCliRuntime(
     registry.register(DeleteCalendarEventTool(calendarProvider))
     registry.register(ListCalendarsTool(calendarProvider))
 
-    if (skillRegistry.all().isNotEmpty()) {
-        registry.register(SkillTool(skillRegistry))
-    }
-    registry.register(InstallSkillTool())
-    registry.register(WriteSkillTool())
-
     val mcpConfigPath = Path.of(opts.mcpConfigPath)
 
     val runtime = Sophi.runtime {
@@ -159,6 +153,10 @@ internal suspend fun buildCliRuntime(
         agentsDir(agentsDir, onWarning)
         subagentDelegation()
         goalDecomposition(Path.of(opts.plansDir))
+        skillTools(
+            globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
+            projectDir = Path.of(".sophi", "skills")
+        )
         loopGuard(loopGuardPolicy)
         confirmationPolicy(confirmationPolicy)
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))

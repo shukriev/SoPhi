@@ -28,6 +28,7 @@ import dev.sophi.memory.jane.JanesPalaceConfig
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
 import dev.sophi.skills.SkillInvocationStore
+import dev.sophi.skills.SkillRegistry
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
@@ -57,6 +58,7 @@ class RuntimeBuilder {
     private var builtinToolsConfig: BuiltinToolsConfig? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
+    private var skillToolsConfig: SkillToolsConfig? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -99,6 +101,14 @@ class RuntimeBuilder {
 
     /** Registers a `decompose_goal` tool; every plan version is logged under [plansDir] ([PlanLog] creates it if missing). */
     fun goalDecomposition(plansDir: Path): RuntimeBuilder = apply { goalDecompositionPlansDir = plansDir }
+
+    /**
+     * Registers `skill` (only when [globalDir]/[projectDir] together yield at least one skill —
+     * an empty skill set advertising itself as a tool is just noise), and unconditionally
+     * `install_skill`/`write_skill`.
+     */
+    fun skillTools(globalDir: Path, projectDir: Path? = null): RuntimeBuilder =
+        apply { skillToolsConfig = SkillToolsConfig(globalDir, projectDir) }
     /**
      * Total context window of [model], in tokens — required before [build]. Sophi compacts the
      * turn's earlier tool rounds once 80% of this is used. There is deliberately no per-model
@@ -137,6 +147,12 @@ class RuntimeBuilder {
         } ?: emptyList()
         val registry = (providedRegistry ?: ToolRegistry()).also { r -> tools.forEach { r.register(it) } }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
+        skillToolsConfig?.let { cfg ->
+            val skillRegistry = SkillRegistry.load(cfg.globalDir, cfg.projectDir)
+            if (skillRegistry.all().isNotEmpty()) registry.register(SkillTool(skillRegistry))
+            registry.register(InstallSkillTool())
+            registry.register(WriteSkillTool())
+        }
         scheduleDir?.let { dir ->
             registry.register(ScheduleTaskTool(
                 TaskStore(dir.resolve("tasks.json")),
@@ -229,6 +245,8 @@ class RuntimeBuilder {
 private data class AgentsDirConfig(val dir: Path, val onWarning: (String) -> Unit)
 
 private data class BuiltinToolsConfig(val root: Path, val braveApiKey: String?)
+
+private data class SkillToolsConfig(val globalDir: Path, val projectDir: Path?)
 
 private data class MemoryConfig(
     val embeddingModel: String,
