@@ -8,6 +8,7 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
+import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
@@ -52,6 +53,7 @@ class RuntimeBuilder {
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
+    private var subagentDelegationEnabled: Boolean = false
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -84,6 +86,13 @@ class RuntimeBuilder {
     /** Registers the standard file/shell/search/date tool set — see [buildBuiltinTools]. */
     fun builtinTools(root: Path, braveApiKey: String? = null): RuntimeBuilder =
         apply { builtinToolsConfig = BuiltinToolsConfig(root, braveApiKey) }
+
+    /**
+     * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
+     * if [agentsDir] was never called or found no definitions, matching [SubagentTool]'s own
+     * "definitions is empty" guard. Safe to call without [agentsDir]; just inert.
+     */
+    fun subagentDelegation(): RuntimeBuilder = apply { subagentDelegationEnabled = true }
     /**
      * Total context window of [model], in tokens — required before [build]. Sophi compacts the
      * turn's earlier tool rounds once 80% of this is used. There is deliberately no per-model
@@ -179,6 +188,20 @@ class RuntimeBuilder {
                 DefaultPrompt.BASE, agentConfig.systemPrompt, learningSection, memorySection
             ).joinToString("\n\n")
         )
+
+        if (subagentDelegationEnabled && agentDefinitions.isNotEmpty()) {
+            registry.register(
+                SubagentTool(
+                    definitions = agentDefinitions,
+                    provider = p,
+                    fullRegistry = registry,
+                    sessionManager = sm,
+                    parentConfig = effectiveConfig,
+                    contextWindowTokens = window,
+                    confirmationPolicy = confirmationPolicy
+                )
+            )
+        }
 
         return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, memoryPlugin, agentDefinitions)
     }
