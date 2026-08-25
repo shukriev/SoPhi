@@ -1,6 +1,7 @@
 package dev.sophi.core.agent
 
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
@@ -10,6 +11,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlin.coroutines.coroutineContext
 
 private const val DELEGATE_TOOL_NAME = "delegate_to_subagent"
 
@@ -25,7 +27,6 @@ class SubagentTool(
     private val provider: LLMProvider,
     private val fullRegistry: ToolRegistry,
     private val sessionManager: SessionManager,
-    private val parentSessionId: String,
     private val parentConfig: AgentConfig,
     /**
      * Total context window of the model the nested loop will use, in tokens. Threaded unchanged
@@ -58,6 +59,8 @@ class SubagentTool(
     }
 
     override suspend fun execute(argumentsJson: String): String {
+        val parentSessionId = coroutineContext[SessionIdContext]?.sessionId
+            ?: return "Error: no active session context — this should never happen in normal use"
         val args = json.decodeFromString<SubagentArgs>(argumentsJson)
         val definition = definitions.find { it.name == args.subagentType }
             ?: return "Error: unknown subagent type '${args.subagentType}'. Available: ${definitions.joinToString(", ") { it.name }}"
@@ -74,7 +77,6 @@ class SubagentTool(
                     provider = provider,
                     fullRegistry = fullRegistry,
                     sessionManager = sessionManager,
-                    parentSessionId = parentSessionId,
                     parentConfig = parentConfig,
                     contextWindowTokens = contextWindowTokens,
                     depth = depth + 1,
