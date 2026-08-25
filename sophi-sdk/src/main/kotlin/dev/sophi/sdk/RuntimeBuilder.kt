@@ -9,6 +9,8 @@ import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.agent.SubagentTool
+import dev.sophi.core.agent.plan.DecomposeGoalTool
+import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
@@ -54,6 +56,7 @@ class RuntimeBuilder {
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
     private var subagentDelegationEnabled: Boolean = false
+    private var goalDecompositionPlansDir: Path? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -93,6 +96,9 @@ class RuntimeBuilder {
      * "definitions is empty" guard. Safe to call without [agentsDir]; just inert.
      */
     fun subagentDelegation(): RuntimeBuilder = apply { subagentDelegationEnabled = true }
+
+    /** Registers a `decompose_goal` tool; every plan version is logged under [plansDir] ([PlanLog] creates it if missing). */
+    fun goalDecomposition(plansDir: Path): RuntimeBuilder = apply { goalDecompositionPlansDir = plansDir }
     /**
      * Total context window of [model], in tokens — required before [build]. Sophi compacts the
      * turn's earlier tool rounds once 80% of this is used. There is deliberately no per-model
@@ -198,6 +204,19 @@ class RuntimeBuilder {
                     sessionManager = sm,
                     parentConfig = effectiveConfig,
                     contextWindowTokens = window,
+                    confirmationPolicy = confirmationPolicy
+                )
+            )
+        }
+        goalDecompositionPlansDir?.let { dir ->
+            registry.register(
+                DecomposeGoalTool(
+                    provider = p,
+                    fullRegistry = registry,
+                    sessionManager = sm,
+                    parentConfig = effectiveConfig,
+                    contextWindowTokens = window,
+                    planLog = PlanLog(dir),
                     confirmationPolicy = confirmationPolicy
                 )
             )

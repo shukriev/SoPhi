@@ -11,7 +11,6 @@ import dev.sophi.calendar.tools.ListCalendarsTool
 import dev.sophi.calendar.tools.UpdateCalendarEventTool
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
-import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.AgentSession
 import dev.sophi.sdk.Sophi
@@ -159,6 +158,7 @@ internal suspend fun buildCliRuntime(
         builtinTools(root = Path.of("").toAbsolutePath(), braveApiKey = opts.braveApiKey)
         agentsDir(agentsDir, onWarning)
         subagentDelegation()
+        goalDecomposition(Path.of(opts.plansDir))
         loopGuard(loopGuardPolicy)
         confirmationPolicy(confirmationPolicy)
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))
@@ -188,18 +188,6 @@ internal suspend fun buildCliRuntime(
     }
 
     val planLog = PlanLog(Path.of(opts.plansDir))
-    registry.register(
-        DecomposeGoalTool(
-            provider = provider,
-            fullRegistry = registry,
-            sessionManager = runtime.sessionManager,
-            parentSessionId = currentSession.id,
-            parentConfig = runtime.config,
-            contextWindowTokens = opts.contextWindowTokens,
-            planLog = planLog,
-            confirmationPolicy = confirmationPolicy
-        )
-    )
 
     return CliRuntime(
         runtime = runtime,
