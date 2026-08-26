@@ -69,6 +69,10 @@ class WriteSkillTool(
             return "Error: id must match ${SITE_ID_PATTERN.pattern} (got: ${args.id})"
         }
 
+        val content = renderSkillContent(args)
+        val violations = checkSkillContent(content)
+        if (violations.isNotEmpty()) return "Error: rejected — ${violations.joinToString("; ")}"
+
         val targetDir = resolveTargetDir(args.project)
         targetDir.createDirectories()
         // args.id is already constrained to [a-z0-9-] by SITE_ID_PATTERN above (no '/' or '.'
@@ -86,11 +90,6 @@ class WriteSkillTool(
             versionStore.record(SkillVersion(skillId = args.id, project = args.project, content = resolved.readText(), trial = false))
         }
 
-        val frontmatter = Yaml.default.encodeToString(
-            SkillMetadata.serializer(),
-            SkillMetadata(title = args.title, description = args.description, tags = args.tags)
-        )
-        val content = "---\n$frontmatter\n---\n${args.body}"
         resolved.writeText(content)
 
         val reread = runCatching { SkillLoader().loadFile(resolved) }.getOrNull()
@@ -102,4 +101,34 @@ class WriteSkillTool(
 
         return "Wrote skill '${args.id}' to $resolved"
     }
+
+    override fun confirmationPreview(argumentsJson: String): String? {
+        val args = runCatching { json.decodeFromString(WriteSkillArgs.serializer(), argumentsJson) }.getOrNull() ?: return null
+        val existingPath = resolveTargetDir(args.project).resolve("${args.id}.md")
+        val newContent = renderSkillContent(args)
+        val header = "Write skill '${args.id}' (title: ${args.title})"
+        return if (!existingPath.exists()) "$header\n(new skill)\n$newContent"
+        else "$header\n${lineDiff(existingPath.readText(), newContent)}"
+    }
+
+    private fun renderSkillContent(args: WriteSkillArgs): String {
+        val frontmatter = Yaml.default.encodeToString(
+            SkillMetadata.serializer(),
+            SkillMetadata(title = args.title, description = args.description, tags = args.tags)
+        )
+        return "---\n$frontmatter\n---\n${args.body}"
+    }
+}
+
+// ponytail: line-set diff, not aligned/ordered — good enough for a confirmation preview.
+private fun lineDiff(old: String, new: String): String {
+    val oldLines = old.lines().toSet()
+    val newLines = new.lines().toSet()
+    val added = new.lines().filter { it !in oldLines }
+    val removed = old.lines().filter { it !in newLines }
+    if (added.isEmpty() && removed.isEmpty()) return "(no textual change)"
+    return buildString {
+        removed.forEach { appendLine("- $it") }
+        added.forEach { appendLine("+ $it") }
+    }.trim()
 }

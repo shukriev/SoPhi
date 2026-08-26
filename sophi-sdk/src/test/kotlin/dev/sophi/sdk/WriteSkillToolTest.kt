@@ -153,4 +153,31 @@ class WriteSkillToolTest : FunSpec({
 
         versionsIn(globalDir, project = false).history("site-example-com", project = false) shouldHaveSize 2 // not 3
     }
+
+    test("execute() rejects content that fails static checks and writes nothing") {
+        val badArgs = """{"id":"site-example-com","title":"t","description":"d","body":"token: AKIAABCDEFGHIJKLMNOP"}"""
+
+        val result = runBlocking { tool.execute(badArgs) }
+
+        result shouldContain "rejected"
+        globalDir.resolve("site-example-com.md").exists() shouldBe false
+    }
+
+    test("confirmationPreview shows '(new skill)' for a skill with no existing file") {
+        val preview = tool.confirmationPreview(VALID_ARGS)
+
+        preview shouldContain "(new skill)"
+        preview shouldContain "site-example-com"
+    }
+
+    test("confirmationPreview shows a diff against the existing file's content") {
+        runBlocking { tool.execute(VALID_ARGS) }
+        val updatedArgs = """
+            {"id":"site-example-com","title":"example.com","description":"How to use example.com","tags":["site"],"body":"# example.com\n\nStep 1: navigate to /login.\nStep 2: click Sign in."}
+        """
+
+        val preview = tool.confirmationPreview(updatedArgs)
+
+        preview shouldContain "+ Step 2: click Sign in."
+    }
 })
