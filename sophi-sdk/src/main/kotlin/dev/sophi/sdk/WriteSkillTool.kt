@@ -7,11 +7,14 @@ import dev.sophi.skills.SkillLoader
 import dev.sophi.skills.SkillMetadata
 import dev.sophi.skills.SkillVersion
 import dev.sophi.skills.SkillVersionStore
+import dev.sophi.versioning.VersionStore
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
+import kotlin.io.path.exists
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 private val SITE_ID_PATTERN = Regex("^site-[a-z0-9-]{1,60}$")
@@ -72,6 +75,16 @@ class WriteSkillTool(
         // possible), so this can never resolve outside targetDir — no separate traversal check
         // needed, unlike FileWriteTool where the path argument itself is untrusted.
         val resolved = targetDir.resolve("${args.id}.md")
+        val versionStore = SkillVersionStore(
+            VersionStore(targetDir.resolve(".versions")), args.project,
+            legacyJsonlPath = targetDir.resolve(".versions.jsonl")
+        )
+
+        // A file that predates this tool, or was hand-edited outside it, has no baseline version —
+        // snapshot its current on-disk content as the root version before this write overwrites it.
+        if (resolved.exists() && versionStore.history(args.id, args.project).isEmpty()) {
+            versionStore.record(SkillVersion(skillId = args.id, project = args.project, content = resolved.readText(), trial = false))
+        }
 
         val frontmatter = Yaml.default.encodeToString(
             SkillMetadata.serializer(),
@@ -85,8 +98,7 @@ class WriteSkillTool(
             return "Error: wrote ${args.id}.md but it failed to re-parse — check the title/description for characters kaml can't round-trip"
         }
 
-        SkillVersionStore(targetDir.resolve(".versions.jsonl"))
-            .record(SkillVersion(skillId = args.id, project = args.project, content = content, trial = true))
+        versionStore.record(SkillVersion(skillId = args.id, project = args.project, content = content, trial = true))
 
         return "Wrote skill '${args.id}' to $resolved"
     }
