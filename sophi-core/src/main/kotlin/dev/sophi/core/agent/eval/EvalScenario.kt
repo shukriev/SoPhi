@@ -26,13 +26,14 @@ suspend fun runEvalScenario(
     sessionManager: SessionManager,
     contextWindowTokens: Int,
     model: String,
-    scenario: EvalScenario
+    scenario: EvalScenario,
+    systemPrompt: String? = null
 ): PlanOutcome {
     val runner = buildPlanRunner(
         provider = provider,
         registry = registry,
         sessionManager = sessionManager,
-        config = PlanRunnerConfig(model = model, maxStepExecutions = scenario.maxIterations),
+        config = PlanRunnerConfig(model = model, maxStepExecutions = scenario.maxIterations, systemPrompt = systemPrompt),
         contextWindowTokens = contextWindowTokens
     )
     val sessionId = sessionManager.create(title = "eval:${scenario.name}").id

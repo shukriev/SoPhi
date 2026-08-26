@@ -1,5 +1,6 @@
 package dev.sophi.core.agent.eval
 
+import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
@@ -13,6 +14,7 @@ import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
@@ -71,5 +73,52 @@ class EvalScenarioTest : FunSpec({
         }
 
         outcome.finalStatus shouldBe PlanFinalStatus.Exhausted
+    }
+
+    test("runEvalScenario injects the given systemPrompt into the underlying completion requests") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        every { provider.stream(capture(captured)) } returns flowOf(StreamEvent.Content("step done"))
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1))
+        )
+        val scenario = EvalScenario(
+            name = "with-prompt", goalPrompt = "do it", check = StopCondition.ShellCheck(command = "exit 0")
+        )
+
+        runBlocking {
+            runEvalScenario(
+                provider = provider, registry = ToolRegistry(),
+                sessionManager = FileSessionManager(createTempDirectory("eval-scenario-prompt")),
+                contextWindowTokens = TEST_CONTEXT_WINDOW, model = "test-model",
+                scenario = scenario, systemPrompt = "Custom eval system prompt"
+            )
+        }
+
+        captured.captured.systemPrompt shouldBe "Custom eval system prompt"
+    }
+
+    test("runEvalScenario with no systemPrompt behaves exactly as before (null, not a forced default)") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        every { provider.stream(capture(captured)) } returns flowOf(StreamEvent.Content("step done"))
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1))
+        )
+        val scenario = EvalScenario(
+            name = "no-prompt", goalPrompt = "do it", check = StopCondition.ShellCheck(command = "exit 0")
+        )
+
+        runBlocking {
+            runEvalScenario(
+                provider = provider, registry = ToolRegistry(),
+                sessionManager = FileSessionManager(createTempDirectory("eval-scenario-no-prompt")),
+                contextWindowTokens = TEST_CONTEXT_WINDOW, model = "test-model", scenario = scenario
+            )
+        }
+
+        captured.captured.systemPrompt shouldBe null
     }
 })
