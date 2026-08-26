@@ -345,6 +345,12 @@ configure in `.sophi/mcp.json`, the same way it connects to any other MCP server
   Sophi to recall a site it's seen before (via a skill it wrote itself last time,
   through the `write_skill` tool) instead of re-exploring, and to record what it
   learns after each visit.
+- Every `write_skill`/`install_skill` call is gated: static content checks (secret
+  scan, size cap, and for `install_skill`'s third-party content, a prompt-injection
+  scan) run before anything lands, and the confirmation prompt shows a real diff or
+  source summary instead of raw JSON. A new write lands as a `trial` version;
+  `sophi skill verify <id>|--all` runs it through the eval suite and reports a
+  human-confirmed promote/revert recommendation.
 - **Trust boundary:** marking `navigate`/`screenshot` as safe means Sophi can navigate
   to any URL — including `file://` paths or internal-network addresses — without
   confirmation, since `safeTools` matches by tool name only, not by argument. If that's
