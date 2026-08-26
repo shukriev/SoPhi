@@ -10,6 +10,7 @@ import dev.sophi.sdk.computeUnattributedInvocationCounts
 import dev.sophi.skills.SkillInvocationStore
 import dev.sophi.skills.SkillVersion
 import dev.sophi.skills.SkillVersionStore
+import dev.sophi.versioning.VersionStore
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -36,8 +37,14 @@ private fun allToolEvents(learningHome: Path): List<ToolEvent> {
  * id collision" resolution rule rather than inventing a new one.
  */
 private fun resolvedVersions(skillsHome: Path, projectSkillsHome: Path): List<SkillVersion> {
-    val global = SkillVersionStore(skillsHome.resolve(".versions.jsonl")).all()
-    val project = SkillVersionStore(projectSkillsHome.resolve(".versions.jsonl")).all()
+    val global = SkillVersionStore(
+        VersionStore(skillsHome.resolve(".versions")), project = false,
+        legacyJsonlPath = skillsHome.resolve(".versions.jsonl")
+    ).all()
+    val project = SkillVersionStore(
+        VersionStore(projectSkillsHome.resolve(".versions")), project = true,
+        legacyJsonlPath = projectSkillsHome.resolve(".versions.jsonl")
+    ).all()
     return (global + project).groupBy { it.skillId }.flatMap { (_, versions) ->
         val projectOnly = versions.filter { it.project }
         if (projectOnly.isNotEmpty()) projectOnly else versions
