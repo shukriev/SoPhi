@@ -34,6 +34,8 @@ app — same core, three ways to run it.
 | 📚 `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
 | 🔌 `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
 | 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
+| 🗄️ `sophi-store` | Embedded ArcadeDB (document+graph+vector) behind a generic `ArcadeStore` layer — the storage backend under memory and versioning |
+| 🕰️ `sophi-versioning` | Generic `Version`/`VersionStore` history + revert for skills, lessons, configs, and agent definitions, plus a config tournament mechanism (`sophi versions`, `sophi tournament`) |
 | 🏛️ `sophi-memory` | Long-term memory (Jane's Theory): a memory-palace store behind a technique-agnostic `MemoryTechnique` SPI |
 | 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
 | 📡 `sophi-hub` | Local WebSocket hub (`HubServer`/`HubClient`) — lets `sophi-companion` monitor and remote-control running `sophi-cli` sessions |
