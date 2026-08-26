@@ -54,6 +54,16 @@ class VersionStore(private val home: Path) {
         }
     }
 
+    fun allForType(artifactType: ArtifactType): List<Version> {
+        val store = EmbeddedArcadeStore.open(home)
+        try {
+            store.ensureSchema(vertexTypes = listOf("Version"), edgeTypes = listOf("MUTATED_FROM"))
+            return store.queryVertices("Version").map { fromProperties(it) }.filter { it.artifactType == artifactType }
+        } finally {
+            store.close()
+        }
+    }
+
     fun get(id: String): Version? {
         val store = EmbeddedArcadeStore.open(home)
         try {

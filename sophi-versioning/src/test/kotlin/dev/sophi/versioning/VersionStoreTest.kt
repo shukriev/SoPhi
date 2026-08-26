@@ -45,6 +45,15 @@ class VersionStoreTest : FunSpec({
         store.history(ArtifactType.LESSON, "greet") shouldHaveSize 1
     }
 
+    test("allForType() returns every version of a given artifactType, across all artifactIds") {
+        val store = VersionStore(createTempDirectory("versioning-test"))
+        val a = store.record(ArtifactType.SKILL, "greet", "one", ProducedBy.HUMAN)
+        val b = store.record(ArtifactType.SKILL, "farewell", "two", ProducedBy.HUMAN)
+        store.record(ArtifactType.LESSON, "greet", "not a skill", ProducedBy.REFLECTION)
+
+        store.allForType(ArtifactType.SKILL).map { it.id }.toSet() shouldBe setOf(a.id, b.id)
+    }
+
     test("get() retrieves a specific version by id") {
         val store = VersionStore(createTempDirectory("versioning-test"))
         val v1 = store.record(ArtifactType.CONFIG, "default", "config-v1", ProducedBy.HUMAN)
