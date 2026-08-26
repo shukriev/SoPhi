@@ -17,7 +17,8 @@ import kotlin.io.path.writeText
 data class InstallResult(
     val installed: List<String>,
     val skipped: List<String>,
-    val notFound: List<String>
+    val notFound: List<String>,
+    val rejected: Map<String, List<String>> = emptyMap()
 )
 
 data class DiscoveredSkill(val id: String, val path: Path, val skillMdPath: Path)
@@ -34,7 +35,12 @@ private data class ClaudeSkillFrontmatter(val name: String? = null, val descript
 private val permissiveYaml = Yaml(configuration = YamlConfiguration(strictMode = false))
 
 class SkillInstaller {
-    fun install(source: String, targetDir: Path, only: Set<String> = emptySet()): InstallResult {
+    fun install(
+        source: String,
+        targetDir: Path,
+        only: Set<String> = emptySet(),
+        validate: (id: String, content: String) -> List<String> = { _, _ -> emptyList() }
+    ): InstallResult {
         targetDir.createDirectories()
         val (root, cleanup) = resolveSource(source)
         try {
@@ -43,15 +49,22 @@ class SkillInstaller {
             val notFound = (only - selected.map { it.id }.toSet()).sorted()
             val installed = mutableListOf<String>()
             val skipped = mutableListOf<String>()
+            val rejected = mutableMapOf<String, List<String>>()
             selected.forEach { skillDir ->
                 if (targetDir.resolve("${skillDir.id}.md").exists()) {
                     skipped += skillDir.id
                 } else {
-                    installSkill(skillDir, targetDir)
-                    installed += skillDir.id
+                    val rawContent = skillDir.skillMdPath.readText()
+                    val violations = validate(skillDir.id, rawContent)
+                    if (violations.isNotEmpty()) {
+                        rejected[skillDir.id] = violations
+                    } else {
+                        installSkill(skillDir, targetDir)
+                        installed += skillDir.id
+                    }
                 }
             }
-            return InstallResult(installed, skipped, notFound)
+            return InstallResult(installed, skipped, notFound, rejected)
         } finally {
             cleanup()
         }

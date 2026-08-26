@@ -4,9 +4,13 @@ import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
 import dev.sophi.skills.SkillInstaller
+import dev.sophi.skills.SkillVersion
+import dev.sophi.skills.SkillVersionStore
+import dev.sophi.versioning.VersionStore
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
+import kotlin.io.path.readText
 
 @Serializable
 private data class InstallSkillArgs(
@@ -42,13 +46,36 @@ class InstallSkillTool(
         val args = runCatching { json.decodeFromString(InstallSkillArgs.serializer(), argumentsJson) }
             .getOrNull() ?: return "Error: invalid arguments"
         val targetDir = resolveTargetDir(args.project)
-        val result = runCatching { installer.install(args.source, targetDir, args.only?.toSet() ?: emptySet()) }
-            .getOrElse { return "Error: ${it.message}" }
+        val result = runCatching {
+            installer.install(args.source, targetDir, args.only?.toSet() ?: emptySet()) { _, content ->
+                checkInstalledSkillContent(content)
+            }
+        }.getOrElse { return "Error: ${it.message}" }
+
+        result.installed.forEach { id ->
+            val versionStore = SkillVersionStore(
+                VersionStore(targetDir.resolve(".versions")), args.project,
+                legacyJsonlPath = targetDir.resolve(".versions.jsonl")
+            )
+            versionStore.record(SkillVersion(skillId = id, project = args.project, content = targetDir.resolve("$id.md").readText(), trial = true))
+        }
+
         return buildString {
             if (result.installed.isNotEmpty()) appendLine("Installed: ${result.installed.joinToString(", ")}")
             if (result.skipped.isNotEmpty()) appendLine("Already installed: ${result.skipped.joinToString(", ")}")
             if (result.notFound.isNotEmpty()) appendLine("Not found: ${result.notFound.joinToString(", ")}")
+            if (result.rejected.isNotEmpty()) {
+                appendLine("Rejected: " + result.rejected.entries.joinToString("; ") { (id, reasons) -> "$id (${reasons.joinToString(", ")})" })
+            }
             if (isEmpty()) append("No skills found under ${args.source}.")
         }.trim()
+    }
+
+    override fun confirmationPreview(argumentsJson: String): String? {
+        val args = runCatching { json.decodeFromString(InstallSkillArgs.serializer(), argumentsJson) }.getOrNull() ?: return null
+        val targetDesc = if (args.project) "./.sophi/skills" else "~/.sophi/skills"
+        val onlyDesc = args.only?.let { " (only: ${it.joinToString(", ")})" } ?: " (all discovered skills)"
+        return "Install from ${args.source}$onlyDesc into $targetDesc. Content is fetched and scanned only " +
+            "after approval — exact skill ids aren't known until the source is cloned."
     }
 }

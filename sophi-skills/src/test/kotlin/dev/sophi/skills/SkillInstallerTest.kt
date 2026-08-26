@@ -211,6 +211,37 @@ class SkillInstallerTest : FunSpec({
         }
     }
 
+    test("install() rejects a skill whose content fails validate and does not write it") {
+        val source = createTempDirectory("source")
+        val target = createTempDirectory("target")
+        try {
+            writeSkill(source, "bad-skill", "name: Bad", "secret content")
+            val result = installer.install(source.toString(), target) { _, content ->
+                if (content.contains("secret")) listOf("contains the word secret") else emptyList()
+            }
+            result.rejected shouldBe mapOf("bad-skill" to listOf("contains the word secret"))
+            result.installed shouldBe emptyList()
+            target.resolve("bad-skill.md").exists() shouldBe false
+        } finally {
+            source.toFile().deleteRecursively()
+            target.toFile().deleteRecursively()
+        }
+    }
+
+    test("install() with the default validate parameter behaves exactly as before") {
+        val source = createTempDirectory("source")
+        val target = createTempDirectory("target")
+        try {
+            writeSkill(source, "good-skill", "name: Good\ndescription: d", "body")
+            val result = installer.install(source.toString(), target)
+            result.installed shouldBe listOf("good-skill")
+            result.rejected shouldBe emptyMap()
+        } finally {
+            source.toFile().deleteRecursively()
+            target.toFile().deleteRecursively()
+        }
+    }
+
     test("remove leaves other skills in the same directory untouched") {
         val target = createTempDirectory("target")
         try {
