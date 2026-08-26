@@ -4,11 +4,11 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M7 — Jane's Theory memory (palace v1) complete; Phase 1 of the autonomous self-improvement roadmap (ADR-027) complete; `sophi-companion`/`sophi-cli` tool parity (ADR-028) complete |
-| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-hub, sophi-learning, sophi-web, sophi-sdk, sophi-companion, sophi-infra, sophi-memory, sophi-store, sophi-schedule |
+| Current milestone | M7 — Jane's Theory memory (palace v1) complete; Phase 1 of the autonomous self-improvement roadmap (ADR-027) complete; `sophi-companion`/`sophi-cli` tool parity (ADR-028) complete; Phase 1.5 — eval/versioning/config tournament substrate (ADR-029) complete |
+| Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-hub, sophi-learning, sophi-web, sophi-sdk, sophi-companion, sophi-infra, sophi-memory, sophi-store, sophi-schedule, sophi-versioning |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
 | Designs approved, not yet implemented | None currently |
-| Last updated | 2026-08-25 |
+| Last updated | 2026-08-26 |
 
 ---
 
@@ -70,6 +70,13 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │  Auth  ·  Budget tracker  ·  Observability                   │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
+│  sophi-versioning  (versioned artifact history)              │
+│  Version/VersionStore (skills, lessons, configs,             │
+│  agent defs) + Scorecard/ScorecardStore, own leaf            │
+│  module over sophi-store, open-write-close ArcadeDB          │
+│  (no held-open lock across processes) -- ADR-029             │
+└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
 │              sophi-learning  (observes via hooks)            │
 │  tool stats · lesson distillation · feedback · export        │
 └──────────────────────────────────────────────────────────────┘
@@ -102,18 +109,19 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 |--------|---------|--------|
 | `sophi-ai` | Spring AI thin wrapper — provider abstraction only | complete |
 | `sophi-core` | Agent loop, session (JSONL tree), tools, compaction, subagents, plan-and-execute (`agent/plan`), recursive goal decomposition (task trees) with a tree-wide execution budget | complete |
-| `sophi-skills` | Lazy-loaded Markdown skill packages; `SkillRegistry` merges global + project directories | complete |
+| `sophi-skills` | Lazy-loaded Markdown skill packages; `SkillRegistry` merges global + project directories. `SkillVersionStore` (skill edit history/revert) is backed by `sophi-versioning`'s `VersionStore` — this module's first-ever Sophi-internal dependency (ADR-029) | complete |
 | `sophi-extensions` | Plugin SPI via JVM ServiceLoader, lifecycle hooks | complete |
 | `sophi-mcp` | MCP client (stdio + Streamable HTTP) and server (stdio, via sophi-cli's `mcp-serve`); adapts tools into/out of dev.sophi.core.tools.Tool | complete |
 | `sophi-hub` | Local-only (127.0.0.1) WebSocket hub — `HubEvent`/`HubCommand` protocol, `HubServer` (embedded by `sophi-companion`), `HubClient` (used by `sophi-cli`); lets the companion monitor and remote-control running CLI sessions (ADR-023) | complete |
 | `sophi-learning` | Self-learning: tool reliability, session-end lesson distillation, preference feedback, SFT/DPO dataset export — observes via hooks, never blocks a turn. Lesson recall is per-turn and query-aware (`SemanticRecall`, embedding cosine, batched; falls back to `RecencyUsageRecall`) via `ContextContributor`, not baked into the system prompt at session start; each recalled lesson logs a `LessonUsageEvent` keyed by session id (ADR-027), the attribution link `RunRecord.sessionId` joins against | complete |
 | `sophi-store` | Generic document/graph/vector storage primitives over ArcadeDB (`ArcadeStore`/`EmbeddedArcadeStore`), extracted from `sophi-memory` for reuse by any future consumer — depends on nothing Sophi-internal | complete |
+| `sophi-versioning` | Versioned artifact history for skills, lessons, `HarnessConfig`, and agent definitions: `Version`/`VersionStore` (generic content + explicit `parentVersionId` + `producedBy`, append-only, revert-as-new-version) and a separate `Scorecard`/`ScorecardStore` for eval-suite measurements. Own leaf module depending only on `sophi-store`; every operation opens its ArcadeDB instance, does its work, and closes it immediately rather than holding it open for a process's lifetime, since CLI/companion/scheduler-daemon are separate processes that could each want it open at once (ADR-029) | complete |
 | `sophi-memory` | Declarative memory (Jane's Theory): MemoryTechnique SPI, JanesPalace rooms/salience/decay/profile, per-turn recall via ContextContributor, true deletion — best-effort, never breaks a turn. Storage is ArcadeDB (embedded document+graph+vector database) via `sophi-store`'s `ArcadeStore` primitive layer (ADR-026), replacing the original JSONL + brute-force-cosine storage; embedded-only, single-process | complete |
 | `sophi-schedule` | Recurring & goal-based task scheduler: `ScheduleEngine` (concurrent `tickOnce`/`runNow`), `TaskStore`/`RunLog`, `Trigger` (interval/cron/once/manual, cron via `com.cronutils`), `Notifier` (macOS), `manage_scheduled_task` Tool — local-only, OS-scheduler-driven. Goal mode (LLM-judged/shell-checked stop conditions) runs via `sophi-core`'s `PlanRunner` (ADR-018) rather than its own `GoalRunner`, which is retired; the `Planner` it hands `PlanRunner` is a `TreePlanner` widening the replan search (probation, see Plan + PlanRunner). `RunRecord.sessionId` traces a run to its session/trajectory; `ScheduledTask.maxWallClockMsPerWindow` caps cumulative time across many runs of one task, derived from `RunLog`. `ProposalStore`/`propose_improvement`/`ProposalPlugin` are the self-improvement orchestrator's proposal artifacts (ADR-027) | complete |
 | `sophi-calendar` | Native OS calendar CRUD: `CalendarProvider` seam, `MacCalendarProvider` (AppleScript/Calendar.app) — Windows/Linux deferred; six create/read/update/delete/list Tools | in progress |
 | `sophi-cli` | Terminal CLI, TUI, slash commands, RPC mode | complete |
 | `sophi-web` | Web UI, WebSocket, SSE, REST endpoints | complete |
-| `sophi-sdk` | Embeddable library for Spring `@Service` beans. `RuntimeBuilder` is the single place a host assembles its tool set: `.builtinTools(root, braveApiKey)` (file/bash/fetch/search/date), `.subagentDelegation()`, `.goalDecomposition(plansDir)`, `.skillTools()` — plus the pre-existing `.schedule(dir)`, `.mcpConfig(path)`, `.memory(...)`. `sophi-cli` and `sophi-companion` both call the same methods (ADR-028) | complete |
+| `sophi-sdk` | Embeddable library for Spring `@Service` beans. `RuntimeBuilder` is the single place a host assembles its tool set: `.builtinTools(root, braveApiKey)` (file/bash/fetch/search/date), `.subagentDelegation()`, `.goalDecomposition(plansDir)`, `.skillTools()` — plus the pre-existing `.schedule(dir)`, `.mcpConfig(path)`, `.memory(...)`. `sophi-cli` and `sophi-companion` both call the same methods (ADR-028). `.configVersion(id, versionStore)` applies a versioned `HarnessConfig` (system prompt/temperature/max tokens/critic on-off/top-k skills/tool-description overrides) at build time (ADR-029) | complete |
 | `sophi-companion` | OS tray/menu-bar desktop app (Compose Multiplatform Desktop) embedding `sophi-sdk` in-process: Chat/Sessions/MCP/Goals/Settings tabs, per-session `StateFlow` with one coroutine per turn, in-process `ScheduleEngine` poll loop, cross-platform native notifications, `jpackage` bundles. Standalone Gradle project — **not** in the root Maven `<modules>`; consumes `dev.sophi:sophi-sdk` via `mavenLocal()` (ADR-022). Shares `sophi-cli`'s full tool surface (ADR-028): builtin file/bash/fetch tools sandboxed to a configurable `workspaceDir` setting (default `~/.sophi/workspace`), calendar, skill invocation, subagent delegation, and goal decomposition — resolved per-turn via `SessionIdContext` (moved to `sophi-core` for this) rather than one hardcoded session id, since companion runs many concurrent chat sessions. Voice mode (`dev.sophi.companion.voice`): push-to-talk turns via local `whisper.cpp`/`piper` subprocesses (`VoiceController`, sentence-by-sentence TTS playback as the reply streams), with a `VoiceInstaller` that downloads, checksum-verifies, and extracts the tool binaries + models from a pinned GitHub release manifest into `~/.sophi/voice` — zero manual setup for the common case, driven from the Settings tab | complete |
 | `sophi-infra` | Auth, budget, observability | complete |
 
@@ -834,6 +842,7 @@ to decide.
 | [ADR-026](adr/ADR-026-arcadedb-memory-storage.md) | Jane's Palace storage backend | ArcadeDB (embedded document+graph+vector db) behind a generic `ArcadeStore` layer, replacing JSONL + brute-force cosine; multi-process (CLI/`sophi-web` shared-server) design dropped mid-implementation — ArcadeDB's remote client can't do vector search in this version |
 | [ADR-027](adr/ADR-027-autonomous-self-improvement-orchestrator.md) | Autonomous self-improvement orchestrator (Phase 1) | Orchestrator is one more Goal-mode ScheduledTask, no new execution machinery; propose-only enforced by existing risk tiers + DENY_ALL, not a new allowlist; `propose_improvement`/`ProposalPlugin` capture via BEFORE_TOOL, not a stateful tool; `SOPHI_ORCHESTRATOR_ENABLED` fails toward OFF (inverse of ADR-024's kill switch); `RunRecord.sessionId` + `LessonUsageEvent` close the real attribution gap; per-task wall-clock budget from existing `RunLog` data; host wiring unified across the CLI daemon and `sophi-companion`; self-grant-bypass fix (`ToolRegistry.safeGrantsFrom`) requires every `Tool.riskLevel` to fail closed on unparseable arguments |
 | [ADR-028](adr/ADR-028-shared-tool-wiring.md) | Shared tool wiring between `sophi-cli` and `sophi-companion` | `RuntimeBuilder` owns tool assembly for anything already in `sophi-sdk`'s mandatory dependency graph (builtin, subagent delegation, goal decomposition, skills); calendar stays a standalone `sophi-calendar` function a host opts into directly, keeping that macOS-only dependency out of the SDK; `SessionIdContext` moved `sophi-companion` → `sophi-core` so `SubagentTool`/`DecomposeGoalTool` can read it (dependency direction only goes one way), fixing a gap that would have silently broken `sophi-cli`'s and `ScheduleEngine`'s own subagent/goal-decomposition features had it shipped naively; `sophi-companion` gets a sandboxed, configurable `workspaceDir` setting for its file/bash tools |
+| [ADR-029](adr/ADR-029-eval-versioning-tournament-substrate.md) | Evaluation, versioning & config tournament substrate (Phase 1.5) | New leaf module `sophi-versioning` (generic `Version`/`VersionStore` over skills/lessons/configs/agent-definitions, open-write-close per operation to route around ArcadeDB's single-process lock); skill versioning migrated onto it rather than rebuilt; lessons gain a `failureModeSignature` field and per-mutation versioning; `EvalCase`/`runSuite`/`Scorecard` close the "no external referent" gap in self-evaluation; `HarnessConfig` gains critic on/off, top-k skills, and tool-description-override seams; tournament runner (`proposeMutation`/`evaluateAcceptance`/`runTournament`) is human-confirmed promotion only, `SOPHI_TOURNAMENT_ENABLED` fails toward OFF |
 
 ---
 
@@ -873,3 +882,4 @@ to decide.
 | `sophi-schedule`/`sophi-cli` — autonomous self-improvement orchestrator (Phase 1) | post-M7 | complete | [article-27](articles/article-27.md) |
 | `sophi-companion` — voice mode (push-to-talk, local whisper.cpp/piper) + in-app installer | post-M7 | complete | [article-28](articles/article-28.md) |
 | `sophi-sdk`/`sophi-cli`/`sophi-companion` — shared `RuntimeBuilder` tool wiring, `SessionIdContext` promotion to `sophi-core` | post-M7 | complete | [article-29](articles/article-29.md) |
+| `sophi-versioning` (new module), eval harness, config tournament — Phase 1.5 (ADR-029) | post-M7 | complete | [article-30](articles/article-30.md) |
