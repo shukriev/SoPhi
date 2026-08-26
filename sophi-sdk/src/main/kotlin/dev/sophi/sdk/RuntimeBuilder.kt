@@ -162,10 +162,13 @@ class RuntimeBuilder {
             AgentDefinitionLoader().loadOrWarn(cfg.dir, cfg.onWarning)
         } ?: emptyList()
         val registry = (providedRegistry ?: ToolRegistry()).also { r -> tools.forEach { r.register(it) } }
+        val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
+            store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
+        }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
             val skillRegistry = SkillRegistry.load(skillsDir, Path.of(".sophi", "skills"))
-            if (skillRegistry.all().isNotEmpty()) registry.register(SkillTool(skillRegistry))
+            if (skillRegistry.all().isNotEmpty()) registry.register(SkillTool(skillRegistry, topK = harnessConfig?.topKSkills))
             registry.register(InstallSkillTool())
             registry.register(WriteSkillTool())
         }
@@ -178,9 +181,6 @@ class RuntimeBuilder {
         val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers.filter { server -> server.enabled } } ?: emptyList()
         runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
         val sm = FileSessionManager(sessionsDir)
-        val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
-            store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
-        }
         val agentConfig = AgentConfig(
             model = model,
             maxTokens = harnessConfig?.maxTokens ?: maxTokens,
