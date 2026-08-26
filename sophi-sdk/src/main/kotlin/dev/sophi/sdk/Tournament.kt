@@ -36,6 +36,20 @@ private fun stddev(xs: List<Double>): Double {
 }
 
 /**
+ * Category names in [challengerScores] (excluding "overall") whose mean score is more than [cap]
+ * below the matching category in [baselineScores]. A category present only in [challengerScores]
+ * is ignored — there's nothing to compare it against. Shared by [evaluateAcceptance] and
+ * `SkillVerification.kt`'s `recommendFromScores`.
+ */
+fun regressedCategories(
+    baselineScores: Map<String, List<Double>>,
+    challengerScores: Map<String, List<Double>>,
+    cap: Double
+): List<String> = challengerScores.entries.filter { (category, scores) ->
+    category != "overall" && baselineScores[category]?.let { baseline -> mean(baseline) - mean(scores) > cap } == true
+}.map { it.key }
+
+/**
  * Pure function, no LLM/IO — deterministic math over repeated-run score samples. [incumbentScores]
  * and [challengerScores] map category name to that category's per-run scores; both must include an
  * `"overall"` entry (the headline score across repeated runs). A category present only in one map
@@ -59,16 +73,12 @@ fun evaluateAcceptance(
         )
     }
 
-    for ((category, challengerCategoryScores) in challengerScores) {
-        if (category == "overall") continue
-        val incumbentCategoryScores = incumbentScores[category] ?: continue
-        val regression = mean(incumbentCategoryScores) - mean(challengerCategoryScores)
-        if (regression > perCategoryRegressionCap) {
-            return TournamentResult(
-                accepted = false, reason = "category '$category' regressed beyond the cap",
-                requiresManualReview = requiresManualReview
-            )
-        }
+    val regressed = regressedCategories(incumbentScores, challengerScores, perCategoryRegressionCap)
+    if (regressed.isNotEmpty()) {
+        return TournamentResult(
+            accepted = false, reason = "category '${regressed.first()}' regressed beyond the cap",
+            requiresManualReview = requiresManualReview
+        )
     }
 
     return TournamentResult(

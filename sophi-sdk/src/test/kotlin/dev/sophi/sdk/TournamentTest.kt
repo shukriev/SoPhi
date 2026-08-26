@@ -50,4 +50,13 @@ class TournamentTest : FunSpec({
 
         result.accepted shouldBe true
     }
+
+    test("regressedCategories returns only categories that regressed beyond the cap") {
+        val baseline = mapOf("overall" to listOf(0.80), "coding" to listOf(0.90), "writing" to listOf(0.70))
+        val challenger = mapOf("overall" to listOf(0.85), "coding" to listOf(0.50), "writing" to listOf(0.69))
+
+        val regressed = regressedCategories(baseline, challenger, cap = 0.02)
+
+        regressed shouldBe listOf("coding")
+    }
 })
