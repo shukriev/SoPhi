@@ -18,6 +18,7 @@ fun main(args: Array<String>) = SophiCli()
         ProposalsCommand().subcommands(ProposalsListCommand(), ProposalsAcceptCommand(), ProposalsRejectCommand()),
         GoalCommand().subcommands(GoalRunCommand()),
         SkillCommand().subcommands(SkillInstallCommand(), SkillReviewCommand()),
-        VersionsCommand().subcommands(VersionsListCommand(), VersionsShowCommand(), VersionsRevertCommand())
+        VersionsCommand().subcommands(VersionsListCommand(), VersionsShowCommand(), VersionsRevertCommand()),
+        EvalsCommand().subcommands(EvalsRunCommand())
     )
     .main(args)
