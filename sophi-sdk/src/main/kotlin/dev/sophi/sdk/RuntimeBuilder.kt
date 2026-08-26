@@ -29,13 +29,17 @@ import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
 import dev.sophi.skills.SkillInvocationStore
 import dev.sophi.skills.SkillRegistry
+import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import java.nio.file.Path
 
 class RuntimeBuilder {
     var provider: LLMProvider? = null
     var model: String = "claude-sonnet-4-5"
     var maxTokens: Int = 4096
+    var temperature: Double = 0.7
     var systemPrompt: String? = null
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
@@ -59,6 +63,7 @@ class RuntimeBuilder {
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
     private var skillToolsEnabled: Boolean = false
+    private var configVersionRef: Pair<String, VersionStore>? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -108,6 +113,17 @@ class RuntimeBuilder {
      * unconditionally `install_skill`/`write_skill`.
      */
     fun skillTools(): RuntimeBuilder = apply { skillToolsEnabled = true }
+
+    /**
+     * Loads the [HarnessConfig] recorded as [id] in [versionStore] and applies whichever of its
+     * fields this builder can reach directly: [systemPrompt], [temperature], [maxTokens],
+     * and — when [learning] is also active — [LearningConfig.maxRecalledLessons]. The remaining
+     * `HarnessConfig` fields (`criticEnabled`, `topKSkills`, `toolDescriptionOverrides`) are read
+     * by other integration points, not applied here — see [HarnessConfig]'s own doc comment.
+     * An unknown [id] is silently ignored, leaving this builder's own fields in effect; omitting
+     * this call entirely preserves today's exact default behavior.
+     */
+    fun configVersion(id: String, versionStore: VersionStore): RuntimeBuilder = apply { configVersionRef = id to versionStore }
 
     /**
      * Total context window of [model], in tokens — required before [build]. Sophi compacts the
@@ -162,11 +178,16 @@ class RuntimeBuilder {
         val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers.filter { server -> server.enabled } } ?: emptyList()
         runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
         val sm = FileSessionManager(sessionsDir)
+        val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
+            store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
+        }
         val agentConfig = AgentConfig(
             model = model,
-            maxTokens = maxTokens,
-            systemPrompt = systemPrompt
+            maxTokens = harnessConfig?.maxTokens ?: maxTokens,
+            temperature = harnessConfig?.temperature ?: temperature,
+            systemPrompt = harnessConfig?.systemPrompt ?: systemPrompt
         )
+        val effectiveLearningConfig = harnessConfig?.let { hc -> learningConfig?.copy(maxRecalledLessons = hc.maxRecalledLessons) } ?: learningConfig
         val loop = AgentLoop(
             p, registry, sm,
             confirmationPolicy = confirmationPolicy, grants = grants,
@@ -177,13 +198,13 @@ class RuntimeBuilder {
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
             .also { pluginRegistry.register(it) }
 
-        val learningPlugin = learningConfig?.let { cfg ->
+        val learningPlugin = effectiveLearningConfig?.let { cfg ->
             LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p,
                 sessionManager = sm, embeddingProvider = learningEmbeddingProvider).also { plugin ->
                 pluginRegistry.register(plugin)
             }
         }
-        val learningSection = learningPlugin?.let { it.promptSections(learningConfig!!.scope) }
+        val learningSection = learningPlugin?.let { it.promptSections(effectiveLearningConfig!!.scope) }
 
         val memoryPlugin = memoryConfig?.let { mc ->
             val embeddingProvider = mc.embeddingProvider
