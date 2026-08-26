@@ -1,11 +1,16 @@
 package dev.sophi.learning
 
+import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ProducedBy
+import dev.sophi.versioning.VersionStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 
 class LessonStoreTest : FunSpec({
-    fun store(cap: Int = 50) = LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")), cap)
+    fun store(cap: Int = 50, versionStore: VersionStore? = null) =
+        LessonStore(JsonlLog(tempdir().toPath().resolve("l.jsonl")), cap, versionStore)
     fun lesson(id: String, scope: String = "/p", use: Int = 0) =
         Lesson(id, 1L, scope, "s", "text-$id", "environment", useCount = use)
 
@@ -15,6 +20,45 @@ class LessonStoreTest : FunSpec({
         s.archive("les_1")
         s.active("/p") shouldBe emptyList()
         s.archived("/p").single().id shouldBe "les_1"
+    }
+
+    test("add() records a Version when a VersionStore is provided") {
+        val versionStore = VersionStore(tempdir().toPath().resolve("versions"))
+        val s = store(versionStore = versionStore)
+
+        s.add(lesson("les_1"))
+
+        val history = versionStore.history(ArtifactType.LESSON, "les_1")
+        history shouldHaveSize 1
+        history.first().producedBy shouldBe ProducedBy.REFLECTION
+    }
+
+    test("archive() records a new Version reflecting the archived state") {
+        val versionStore = VersionStore(tempdir().toPath().resolve("versions"))
+        val s = store(versionStore = versionStore)
+        s.add(lesson("les_1"))
+
+        s.archive("les_1")
+
+        versionStore.history(ArtifactType.LESSON, "les_1") shouldHaveSize 2
+    }
+
+    test("bumpUse() records a new Version per bumped lesson") {
+        val versionStore = VersionStore(tempdir().toPath().resolve("versions"))
+        val s = store(versionStore = versionStore)
+        s.add(lesson("les_1"))
+
+        s.bumpUse(listOf(lesson("les_1")))
+
+        versionStore.history(ArtifactType.LESSON, "les_1") shouldHaveSize 2
+    }
+
+    test("LessonStore works exactly as before when no VersionStore is provided") {
+        val s = store()
+
+        s.add(lesson("les_1")) // must not throw
+
+        s.active("/p") shouldHaveSize 1
     }
 
     test("archive reports whether a matching lesson actually existed") {
