@@ -15,6 +15,11 @@ private const val FAIL_OPEN_CONFIDENCE = 1.0
 
 fun interface StepCritic {
     suspend fun judge(step: PlanStep, agentOutput: String): Double
+
+    companion object {
+        /** Always reports full confidence, skipping every escalation check — no LLM call at all. */
+        val ALWAYS_FULL_CONFIDENCE = StepCritic { _, _ -> FAIL_OPEN_CONFIDENCE }
+    }
 }
 
 /**

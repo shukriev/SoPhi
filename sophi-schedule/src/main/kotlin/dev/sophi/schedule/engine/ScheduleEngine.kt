@@ -10,6 +10,7 @@ import dev.sophi.core.agent.plan.LlmStepCritic
 import dev.sophi.core.agent.plan.PlanFinalStatus
 import dev.sophi.core.agent.plan.PlanRunner
 import dev.sophi.core.agent.plan.PlanRunnerConfig
+import dev.sophi.core.agent.plan.StepCritic
 import dev.sophi.core.agent.plan.TreePlanner
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.SessionIdContext
@@ -97,7 +98,10 @@ class ScheduleEngine(
     private val maxTokens: Int = 4096,
     /** Applied to every task's [AgentConfig]; the caller builds the full text. */
     private val systemPrompt: String? = null,
-    private val pluginRegistry: PluginRegistry? = null
+    private val pluginRegistry: PluginRegistry? = null,
+    /** false skips Goal-mode's step critic LLM call entirely — a HarnessConfig knob (Task 14+),
+     *  defaulted on so no existing caller needs updating. */
+    private val criticEnabled: Boolean = true
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
         val due = taskStore.list().filter { it.enabled && it.nextRunAtMs != null && it.nextRunAtMs <= nowMs }
@@ -175,13 +179,14 @@ class ScheduleEngine(
                             },
                             critic = LlmPlanCritic(provider, model, timeout = PLAN_CRITIC_TIMEOUT)
                         )
-                        val critic = LlmStepCritic(provider, model)
+                        val critic = if (criticEnabled) LlmStepCritic(provider, model) else StepCritic.ALWAYS_FULL_CONFIDENCE
                         // Scheduled runs are always unattended (DENY_ALL + per-task grants above),
                         // so overlapping confirmation prompts can never happen here — safe to
                         // parallelize independent plan steps (ADR-018).
                         val runnerConfig = PlanRunnerConfig(
                             model = model, maxTokens = maxTokens,
-                            maxStepExecutions = mode.maxIterations, allowParallelSteps = true
+                            maxStepExecutions = mode.maxIterations, allowParallelSteps = true,
+                            criticEnabled = criticEnabled
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
                         val result = withContext(SessionIdContext(session.id)) {
