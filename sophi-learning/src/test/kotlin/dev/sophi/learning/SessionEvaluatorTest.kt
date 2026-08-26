@@ -64,6 +64,25 @@ class SessionEvaluatorTest : FunSpec({
         outcomes.readAll().last() shouldContain "\"judgment\":\"failure\""
     }
 
+    test("a lesson with a failureModeSignature in the verdict carries it through to the stored Lesson") {
+        val verdictWithSignature = """{"judgment":"failure","reason":"tests never ran",
+            "lessons":[{"text":"Use -pl targeting","kind":"environment","global":false,
+            "supersedes":null,"failureModeSignature":"maven-module-not-targeted"}]}"""
+        val (eval, lessons, _) = fixture(LLMResponse.Text(verdictWithSignature, TokenUsage(1, 1)))
+
+        kotlinx.coroutines.runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+
+        lessons.active("/p").single().failureModeSignature shouldBe "maven-module-not-targeted"
+    }
+
+    test("a verdict lesson with no failureModeSignature still parses, storing null (backward-compatible)") {
+        val (eval, lessons, _) = fixture(LLMResponse.Text(verdict, TokenUsage(1, 1)))
+
+        kotlinx.coroutines.runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+
+        lessons.active("/p").single().failureModeSignature shouldBe null
+    }
+
     test("malformed then repaired: one retry succeeds") {
         val (eval, lessons, _) = fixture(
             LLMResponse.Text("sure! here you go:", TokenUsage(1, 1)),
