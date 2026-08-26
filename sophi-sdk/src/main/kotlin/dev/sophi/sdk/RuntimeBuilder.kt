@@ -259,9 +259,20 @@ class RuntimeBuilder {
             )
         }
 
+        // Applied last, after every other tool registration above, so an override reaches
+        // whichever tool ends up registered under that name regardless of registration order.
+        harnessConfig?.toolDescriptionOverrides?.forEach { (toolName, overrideDescription) ->
+            registry.getOrNull(toolName)?.let { original ->
+                registry.register(DescriptionOverrideTool(original, overrideDescription))
+            }
+        }
+
         return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, memoryPlugin, agentDefinitions)
     }
 }
+
+/** Substitutes [description] for [delegate]'s own, without changing the [Tool] SPI itself. */
+private class DescriptionOverrideTool(private val delegate: Tool, override val description: String) : Tool by delegate
 
 private data class AgentsDirConfig(val dir: Path, val onWarning: (String) -> Unit)
 
