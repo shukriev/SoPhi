@@ -5,7 +5,8 @@ data class ConfirmationRequest(
     val callId: String,
     val toolName: String,
     val argumentsJson: String,
-    val riskLevel: RiskLevel
+    val riskLevel: RiskLevel,
+    val preview: String? = null
 )
 
 fun interface ConfirmationPolicy {

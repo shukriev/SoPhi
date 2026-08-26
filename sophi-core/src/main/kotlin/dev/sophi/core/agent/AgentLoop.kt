@@ -290,7 +290,8 @@ class AgentLoop(
             val classified = toolCalls.map { call ->
                 val tool = registry.getOrNull(call.name)
                 val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
-                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier)
+                val preview = tool?.confirmationPreview(call.argumentsJson)
+                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview)
             }
             val needsDecision = classified.filter { (_, req) ->
                 req.riskLevel != RiskLevel.SAFE && req.toolName !in grants

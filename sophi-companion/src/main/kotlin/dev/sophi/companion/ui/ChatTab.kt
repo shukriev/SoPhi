@@ -118,6 +118,7 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Column(modifier = Modifier.padding(8.dp)) {
                     Text("Sophi wants to run: " + pending.requests.joinToString(", ") { "${it.toolName} (${it.riskLevel})" })
+                    pending.requests.forEach { r -> r.preview?.let { Text(it, style = MaterialTheme.typography.bodySmall) } }
                     Row {
                         Button(onClick = {
                             if (isRemote) {
