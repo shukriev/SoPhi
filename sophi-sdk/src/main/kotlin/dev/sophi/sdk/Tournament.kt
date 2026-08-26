@@ -17,6 +17,11 @@ import kotlin.math.sqrt
 
 private val tournamentJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+/** Fails toward OFF — a still-on-probation mutation mechanism must be explicitly opted into, the
+ *  same direction as `SOPHI_ORCHESTRATOR_ENABLED` (ADR-027), not `SOPHI_TOT_SEARCH_ENABLED`'s
+ *  fail-toward-ON. [env] is injectable for testing; System.getenv cannot be mutated in-process. */
+const val TOURNAMENT_ENABLED_ENV = "SOPHI_TOURNAMENT_ENABLED"
+
 /** A challenger scoring more than this far above the incumbent is flagged suspect regardless of
  *  statistical significance — the suite/grader is part of what can be gamed. */
 private const val REWARD_HACKING_JUMP_THRESHOLD = 0.10
@@ -91,8 +96,12 @@ suspend fun runTournament(
     model: String,
     unaddressedFailureModes: List<String>,
     toolStats: Map<String, ToolStats>,
-    runsPerConfig: Int = 3
+    runsPerConfig: Int = 3,
+    env: (String) -> String? = System::getenv
 ): TournamentRunResult {
+    check(env(TOURNAMENT_ENABLED_ENV)?.lowercase() == "true") {
+        "Tournament mutation is disabled by default (still on probation) -- set $TOURNAMENT_ENABLED_ENV=true to enable it."
+    }
     val incumbentVersion = versionStore.get(incumbentVersionId) ?: error("no such config version: $incumbentVersionId")
     val incumbent = tournamentJson.decodeFromString<HarnessConfig>(incumbentVersion.content)
     val challenger = proposeMutation(provider, model, incumbent, unaddressedFailureModes, toolStats)

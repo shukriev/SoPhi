@@ -54,7 +54,8 @@ class TournamentRunnerTest : FunSpec({
                 cases = cases, provider = provider, registry = ToolRegistry(),
                 sessionManager = FileSessionManager(createTempDirectory("tournament-test")),
                 contextWindowTokens = TEST_CONTEXT_WINDOW, model = "test-model",
-                unaddressedFailureModes = emptyList(), toolStats = emptyMap(), runsPerConfig = 1
+                unaddressedFailureModes = emptyList(), toolStats = emptyMap(), runsPerConfig = 1,
+                env = { "true" }
             )
         }
 

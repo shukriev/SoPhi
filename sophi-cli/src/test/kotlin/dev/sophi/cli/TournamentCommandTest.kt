@@ -108,10 +108,29 @@ class TournamentCommandTest : FunSpec({
             incumbentVersionId = incumbentVersion.id, versionStore = versionStore, scorecardStore = scorecardStore,
             cases = cases, provider = provider, registry = ToolRegistry(),
             sessionManager = FileSessionManager(createTempDirectory("tournament-cli-sessions")),
-            contextWindowTokens = TEST_CONTEXT_WINDOW, model = "test-model", runsPerConfig = 1
+            contextWindowTokens = TEST_CONTEXT_WINDOW, model = "test-model", runsPerConfig = 1,
+            env = { "true" }
         ) { lines.add(it) }.run()
 
         lines.joinToString("\n") shouldContain "challenger version:"
         lines.joinToString("\n") shouldContain "accepted="
+    }
+
+    test("TournamentRun reports a clear message when the kill switch is disabled, without crashing") {
+        val versionStore = VersionStore(createTempDirectory("tournament-cli-test"))
+        val incumbentVersion = versionStore.record(ArtifactType.CONFIG, "default", json.encodeToString(HarnessConfig.serializer(), HarnessConfig()), ProducedBy.HUMAN)
+        val cases = listOf(EvalCase("c1", "cat", EvalScenario("c1", "goal", StopCondition.ShellCheck("exit 0"), maxIterations = 1)))
+        val lines = mutableListOf<String>()
+
+        TournamentRun(
+            incumbentVersionId = incumbentVersion.id, versionStore = versionStore,
+            scorecardStore = ScorecardStore(createTempDirectory("tournament-cli-scores")), cases = cases,
+            provider = mockk<LLMProvider>(), registry = ToolRegistry(),
+            sessionManager = FileSessionManager(createTempDirectory("tournament-cli-sessions")),
+            contextWindowTokens = TEST_CONTEXT_WINDOW, model = "test-model", runsPerConfig = 1,
+            env = { null }
+        ) { lines.add(it) }.run()
+
+        lines.first() shouldContain "disabled"
     }
 })

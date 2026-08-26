@@ -38,6 +38,7 @@ class TournamentRun(
     private val runsPerConfig: Int,
     private val unaddressedFailureModes: List<String> = emptyList(),
     private val toolStats: Map<String, ToolStats> = emptyMap(),
+    private val env: (String) -> String? = System::getenv,
     private val echo: (String) -> Unit
 ) {
     fun run() {
@@ -45,13 +46,19 @@ class TournamentRun(
             echo("No eval cases found — nothing to score a tournament against.")
             return
         }
-        val outcome = runBlocking {
-            runTournament(
-                incumbentVersionId = incumbentVersionId, versionStore = versionStore, scorecardStore = scorecardStore,
-                cases = cases, provider = provider, registry = registry, sessionManager = sessionManager,
-                contextWindowTokens = contextWindowTokens, model = model,
-                unaddressedFailureModes = unaddressedFailureModes, toolStats = toolStats, runsPerConfig = runsPerConfig
-            )
+        val outcome = runCatching {
+            runBlocking {
+                runTournament(
+                    incumbentVersionId = incumbentVersionId, versionStore = versionStore, scorecardStore = scorecardStore,
+                    cases = cases, provider = provider, registry = registry, sessionManager = sessionManager,
+                    contextWindowTokens = contextWindowTokens, model = model,
+                    unaddressedFailureModes = unaddressedFailureModes, toolStats = toolStats,
+                    runsPerConfig = runsPerConfig, env = env
+                )
+            }
+        }.getOrElse { e ->
+            echo(e.message ?: "tournament run failed")
+            return
         }
         echo("challenger version: ${outcome.challengerVersionId}")
         echo("accepted=${outcome.result.accepted}  reason=${outcome.result.reason}")
