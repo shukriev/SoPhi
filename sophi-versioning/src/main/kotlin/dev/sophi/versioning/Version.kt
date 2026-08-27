@@ -1,6 +1,6 @@
 package dev.sophi.versioning
 
-enum class ArtifactType { SKILL, LESSON, CONFIG, AGENT_DEFINITION }
+enum class ArtifactType { SKILL, LESSON, CONFIG, AGENT_DEFINITION, MEMORY_CONSOLIDATION }
 
 enum class ProducedBy { HUMAN, WRITE_SKILL_TOOL, REFLECTION, TOURNAMENT, MIGRATION }
 

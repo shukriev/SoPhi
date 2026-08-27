@@ -17,6 +17,7 @@ private fun versionStoreHomeFor(type: ArtifactType, project: Boolean): Path = wh
     ArtifactType.LESSON -> Path.of(System.getProperty("user.home"), ".sophi", "learning", ".versions")
     ArtifactType.CONFIG -> Path.of(System.getProperty("user.home"), ".sophi", "versioning")
     ArtifactType.AGENT_DEFINITION -> Path.of(System.getProperty("user.home"), ".sophi", "agents", ".versions")
+    ArtifactType.MEMORY_CONSOLIDATION -> Path.of(System.getProperty("user.home"), ".sophi", "memory", ".versions")
 }
 
 private fun parseType(raw: String): ArtifactType =
@@ -94,7 +95,12 @@ class VersionsShowCommand : CliktCommand(name = "show", help = "Show a specific 
     }
 }
 
-class VersionsRevertCommand : CliktCommand(name = "revert", help = "Revert an artifact to a previously recorded version") {
+class VersionsRevertCommand : CliktCommand(
+    name = "revert",
+    help = "Revert an artifact to a previously recorded version. For MEMORY_CONSOLIDATION this " +
+        "only rewrites the audit record's stored content — it does not restore any actual memory; " +
+        "use `sophi memory consolidations restore <id>` for real recovery."
+) {
     private val type by argument()
     private val id by argument()
     private val versionId by argument(name = "version-id")
