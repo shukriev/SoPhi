@@ -9,12 +9,14 @@ import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
+import dev.sophi.memory.ConsolidationReport
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.NoopNotifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -743,6 +745,18 @@ class CompanionRuntimeTest : FunSpec({
         }
         notificationCenter.records.value.single().title shouldBe "Sophi: t"
         runtime.close()
+    }
+
+    test("consolidationNotificationBody returns null for an all-zero report") {
+        consolidationNotificationBody(ConsolidationReport(0, 0, 0, 0, 0)) shouldBe null
+    }
+
+    test("consolidationNotificationBody formats every count when the report is non-empty") {
+        val body = consolidationNotificationBody(ConsolidationReport(merged = 1, strengthened = 2, compressed = 0, pruned = 3, purged = 0))
+
+        body shouldContain "merged=1"
+        body shouldContain "strengthened=2"
+        body shouldContain "pruned=3"
     }
 })
 
