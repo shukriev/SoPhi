@@ -12,9 +12,13 @@ import dev.sophi.ai.providers.buildOpenAiCompatEmbeddingProvider
 import dev.sophi.memory.BrowseFilter
 import dev.sophi.memory.ForgetRequest
 import dev.sophi.memory.ProfileAction
+import dev.sophi.memory.jane.ConsolidationHistoryStore
+import dev.sophi.memory.jane.ConsolidationRecord
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
+import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Path
 
 /**
  * `sophi memory` — inspect and control Jane's Theory memory (spec §9). Operates directly
@@ -24,9 +28,53 @@ import kotlinx.coroutines.runBlocking
 class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control Sophi's long-term memory") {
     init {
         subcommands(MemoryList(), MemoryShow(), MemoryThreads(), MemoryProfile(),
-            MemoryForget(), MemoryWhy(), MemoryConsolidate(), MemoryRestore(), MemoryReset())
+            MemoryForget(), MemoryWhy(), MemoryConsolidate(), MemoryConsolidations(), MemoryRestore(), MemoryReset())
     }
     override fun run() = Unit
+}
+
+private fun consolidationHistoryHome(): Path =
+    Path.of(System.getProperty("user.home"), ".sophi", "memory", "consolidations.jsonl")
+
+private fun memoryVersioningHome(): Path =
+    Path.of(System.getProperty("user.home"), ".sophi", "memory", ".versions")
+
+internal fun renderConsolidationList(records: List<ConsolidationRecord>, targetId: String?, echo: (String) -> Unit) {
+    if (targetId == null) {
+        if (records.isEmpty()) return echo("(no consolidation runs recorded)")
+        records.forEach { r ->
+            echo("${r.id}  ts=${r.ts}  merged=${r.merged} strengthened=${r.strengthened} " +
+                "compressed=${r.compressed} pruned=${r.pruned} purged=${r.purgedIds.size}")
+        }
+        return
+    }
+    val record = records.find { it.id == targetId } ?: return echo("No consolidation run found with id $targetId")
+    echo("id=${record.id}  ts=${record.ts}  autoPurgeEnabled=${record.autoPurgeEnabled}")
+    echo("merged=${record.merged} strengthened=${record.strengthened} compressed=${record.compressed} pruned=${record.pruned}")
+    echo("softDeletedIds: " + record.softDeletedIds.ifEmpty { listOf("(none)") }.joinToString(", "))
+    echo("purgedIds: " + record.purgedIds.ifEmpty { listOf("(none)") }.joinToString(", "))
+}
+
+class MemoryConsolidations : CliktCommand(name = "consolidations", help = "Browse and bulk-recover consolidation-run history") {
+    init { subcommands(MemoryConsolidationsList(), MemoryConsolidationsRestore()) }
+    override fun run() = Unit
+}
+
+class MemoryConsolidationsList : CliktCommand(name = "list", help = "List consolidation runs, or show one run's full detail by id") {
+    private val id: String? by argument(help = "consolidation run id").optional()
+    override fun run() = renderConsolidationList(ConsolidationHistoryStore(consolidationHistoryHome()).all(), id) { echo(it) }
+}
+
+class MemoryConsolidationsRestore : CliktCommand(name = "restore", help = "Bulk-restore every memory a consolidation run soft-deleted") {
+    private val id: String by argument(help = "consolidation run id")
+    override fun run() = runBlocking {
+        val record = ConsolidationHistoryStore(consolidationHistoryHome()).all().find { it.id == id }
+            ?: return@runBlocking echo("No consolidation run found with id $id")
+        if (record.softDeletedIds.isEmpty()) return@runBlocking echo("Run $id soft-deleted nothing to restore.")
+        val p = palace()
+        val restored = record.softDeletedIds.count { p.restore(it) }
+        echo("Restored $restored/${record.softDeletedIds.size} memor${if (record.softDeletedIds.size == 1) "y" else "ies"} from run $id.")
+    }
 }
 
 internal fun palace(
@@ -39,7 +87,8 @@ internal fun palace(
         buildProvider("openai-compat", apiKey, baseUrl, chatModel, 60L, 2) else null
     return JanesPalace(
         JanesPalaceConfig(sessionModel = chatModel, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
-        llm, emb, embeddingModel ?: "unknown"
+        llm, emb, embeddingModel ?: "unknown",
+        versionStore = VersionStore(memoryVersioningHome())
     )
 }
 

@@ -1,8 +1,15 @@
 package dev.sophi.learning
 
+import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ProducedBy
+import dev.sophi.versioning.VersionStore
 import kotlinx.serialization.json.Json
 
-class LessonStore(private val log: JsonlLog, private val maxActivePerScope: Int = 50) {
+class LessonStore(
+    private val log: JsonlLog,
+    private val maxActivePerScope: Int = 50,
+    private val versionStore: VersionStore? = null
+) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     private fun fold(): Map<String, Lesson> =
@@ -20,6 +27,7 @@ class LessonStore(private val log: JsonlLog, private val maxActivePerScope: Int 
 
     fun add(lesson: Lesson) {
         append(lesson)
+        recordVersion(lesson, ProducedBy.REFLECTION)
         val actives = active(lesson.scope)
         if (actives.size > maxActivePerScope) {
             actives.minWithOrNull(compareBy({ it.useCount }, { it.ts }))?.let { archive(it.id) }
@@ -30,13 +38,23 @@ class LessonStore(private val log: JsonlLog, private val maxActivePerScope: Int 
     fun archive(id: String): Boolean {
         val current = fold()[id] ?: return false
         if (current.status != "active") return false
-        append(current.copy(status = "archived", ts = System.currentTimeMillis()))
+        val archived = current.copy(status = "archived", ts = System.currentTimeMillis())
+        append(archived)
+        recordVersion(archived, ProducedBy.HUMAN)
         return true
     }
 
     fun bumpUse(lessons: List<Lesson>) {
-        lessons.forEach { append(it.copy(useCount = it.useCount + 1)) }
+        lessons.forEach {
+            val bumped = it.copy(useCount = it.useCount + 1)
+            append(bumped)
+            recordVersion(bumped, ProducedBy.HUMAN)
+        }
     }
 
     private fun append(l: Lesson) = runCatching { log.append(json.encodeToString(Lesson.serializer(), l)) }
+
+    private fun recordVersion(lesson: Lesson, producedBy: ProducedBy) {
+        versionStore?.record(ArtifactType.LESSON, lesson.id, json.encodeToString(Lesson.serializer(), lesson), producedBy)
+    }
 }

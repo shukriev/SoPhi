@@ -39,7 +39,11 @@ data class PlanRunnerConfig(
     val maxStepExecutions: Int = 60,
     val allowParallelSteps: Boolean = false,
     /** 0 keeps plans flat; 2 allows a root plan plus two levels of sub-plans. */
-    val maxPlanDepth: Int = 2
+    val maxPlanDepth: Int = 2,
+    /** false skips the step critic's LLM call entirely (no escalation-confidence check ever
+     *  fires) — a HarnessConfig knob for the tournament (Task 14+), not something any existing
+     *  caller sets today. */
+    val criticEnabled: Boolean = true
 )
 
 /**
@@ -392,7 +396,7 @@ fun buildPlanRunner(
         sessionManager = sessionManager,
         provider = provider,
         planner = LlmPlanner(provider, config.model, contextProvider = contextProvider),
-        critic = LlmStepCritic(provider, config.model),
+        critic = if (config.criticEnabled) LlmStepCritic(provider, config.model) else StepCritic.ALWAYS_FULL_CONFIDENCE,
         config = config,
         onPlanComplete = onPlanComplete,
         planLog = planLog,

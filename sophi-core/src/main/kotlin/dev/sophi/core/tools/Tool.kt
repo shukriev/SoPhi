@@ -17,5 +17,10 @@ interface Tool {
      * means "no opinion, fall back to the LLM classifier."
      */
     fun ruleVerdict(argumentsJson: String): RuleVerdict = RuleVerdict.UNKNOWN
+    /**
+     * Optional human-readable preview shown instead of raw [argumentsJson] at confirmation time —
+     * e.g. a diff or a content summary. Returning null (the default) keeps today's raw-JSON display.
+     */
+    fun confirmationPreview(argumentsJson: String): String? = null
     suspend fun execute(argumentsJson: String): String
 }

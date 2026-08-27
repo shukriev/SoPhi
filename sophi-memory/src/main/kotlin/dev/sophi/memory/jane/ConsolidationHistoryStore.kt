@@ -6,6 +6,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
+import java.util.UUID
 
 @Serializable
 data class ConsolidationRecord(
@@ -16,7 +17,8 @@ data class ConsolidationRecord(
     val pruned: Int,
     val softDeletedIds: List<String>,
     val purgedIds: List<String>,
-    val autoPurgeEnabled: Boolean
+    val autoPurgeEnabled: Boolean,
+    val id: String = "consolidation_" + UUID.randomUUID()
 )
 
 class ConsolidationHistoryStore(path: Path) {

@@ -29,13 +29,17 @@ import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
 import dev.sophi.skills.SkillInvocationStore
 import dev.sophi.skills.SkillRegistry
+import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import java.nio.file.Path
 
 class RuntimeBuilder {
     var provider: LLMProvider? = null
     var model: String = "claude-sonnet-4-5"
     var maxTokens: Int = 4096
+    var temperature: Double = 0.7
     var systemPrompt: String? = null
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
@@ -59,6 +63,7 @@ class RuntimeBuilder {
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
     private var skillToolsEnabled: Boolean = false
+    private var configVersionRef: Pair<String, VersionStore>? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
@@ -110,6 +115,17 @@ class RuntimeBuilder {
     fun skillTools(): RuntimeBuilder = apply { skillToolsEnabled = true }
 
     /**
+     * Loads the [HarnessConfig] recorded as [id] in [versionStore] and applies whichever of its
+     * fields this builder can reach directly: [systemPrompt], [temperature], [maxTokens],
+     * and — when [learning] is also active — [LearningConfig.maxRecalledLessons]. The remaining
+     * `HarnessConfig` fields (`criticEnabled`, `topKSkills`, `toolDescriptionOverrides`) are read
+     * by other integration points, not applied here — see [HarnessConfig]'s own doc comment.
+     * An unknown [id] is silently ignored, leaving this builder's own fields in effect; omitting
+     * this call entirely preserves today's exact default behavior.
+     */
+    fun configVersion(id: String, versionStore: VersionStore): RuntimeBuilder = apply { configVersionRef = id to versionStore }
+
+    /**
      * Total context window of [model], in tokens — required before [build]. Sophi compacts the
      * turn's earlier tool rounds once 80% of this is used. There is deliberately no per-model
      * lookup: you pick the model, so you state its window.
@@ -146,10 +162,13 @@ class RuntimeBuilder {
             AgentDefinitionLoader().loadOrWarn(cfg.dir, cfg.onWarning)
         } ?: emptyList()
         val registry = (providedRegistry ?: ToolRegistry()).also { r -> tools.forEach { r.register(it) } }
+        val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
+            store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
+        }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
             val skillRegistry = SkillRegistry.load(skillsDir, Path.of(".sophi", "skills"))
-            if (skillRegistry.all().isNotEmpty()) registry.register(SkillTool(skillRegistry))
+            if (skillRegistry.all().isNotEmpty()) registry.register(SkillTool(skillRegistry, topK = harnessConfig?.topKSkills))
             registry.register(InstallSkillTool())
             registry.register(WriteSkillTool())
         }
@@ -164,9 +183,11 @@ class RuntimeBuilder {
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
             model = model,
-            maxTokens = maxTokens,
-            systemPrompt = systemPrompt
+            maxTokens = harnessConfig?.maxTokens ?: maxTokens,
+            temperature = harnessConfig?.temperature ?: temperature,
+            systemPrompt = harnessConfig?.systemPrompt ?: systemPrompt
         )
+        val effectiveLearningConfig = harnessConfig?.let { hc -> learningConfig?.copy(maxRecalledLessons = hc.maxRecalledLessons) } ?: learningConfig
         val loop = AgentLoop(
             p, registry, sm,
             confirmationPolicy = confirmationPolicy, grants = grants,
@@ -177,13 +198,13 @@ class RuntimeBuilder {
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
             .also { pluginRegistry.register(it) }
 
-        val learningPlugin = learningConfig?.let { cfg ->
+        val learningPlugin = effectiveLearningConfig?.let { cfg ->
             LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p,
                 sessionManager = sm, embeddingProvider = learningEmbeddingProvider).also { plugin ->
                 pluginRegistry.register(plugin)
             }
         }
-        val learningSection = learningPlugin?.let { it.promptSections(learningConfig!!.scope) }
+        val learningSection = learningPlugin?.let { it.promptSections(effectiveLearningConfig!!.scope) }
 
         val memoryPlugin = memoryConfig?.let { mc ->
             val embeddingProvider = mc.embeddingProvider
@@ -238,9 +259,20 @@ class RuntimeBuilder {
             )
         }
 
+        // Applied last, after every other tool registration above, so an override reaches
+        // whichever tool ends up registered under that name regardless of registration order.
+        harnessConfig?.toolDescriptionOverrides?.forEach { (toolName, overrideDescription) ->
+            registry.getOrNull(toolName)?.let { original ->
+                registry.register(DescriptionOverrideTool(original, overrideDescription))
+            }
+        }
+
         return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, memoryPlugin, agentDefinitions)
     }
 }
+
+/** Substitutes [description] for [delegate]'s own, without changing the [Tool] SPI itself. */
+private class DescriptionOverrideTool(private val delegate: Tool, override val description: String) : Tool by delegate
 
 private data class AgentsDirConfig(val dir: Path, val onWarning: (String) -> Unit)
 

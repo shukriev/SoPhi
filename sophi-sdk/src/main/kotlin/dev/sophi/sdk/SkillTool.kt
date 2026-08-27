@@ -9,11 +9,14 @@ import kotlinx.serialization.json.Json
 @Serializable
 private data class SkillArgs(val name: String? = null)
 
-class SkillTool(private val registry: SkillRegistry) : Tool {
+/** [topK] caps how many skills are listed in [description] — a HarnessConfig knob (Task 14+);
+ *  `null` (the default) lists every skill, today's exact behavior. */
+class SkillTool(private val registry: SkillRegistry, private val topK: Int? = null) : Tool {
     override val name = "skill"
     override val description: String =
         "Load a skill's instructions into context. Available skills:\n" +
-            registry.all().joinToString("\n") { (id, skill) -> "- $id: ${skill.metadata.description}" }
+            registry.all().let { all -> topK?.let { all.take(it) } ?: all }
+                .joinToString("\n") { (id, skill) -> "- $id: ${skill.metadata.description}" }
     override val parametersJson = """
         {"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}
     """.trimIndent()

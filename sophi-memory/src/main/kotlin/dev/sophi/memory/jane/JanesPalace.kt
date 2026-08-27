@@ -13,6 +13,7 @@ import dev.sophi.memory.ProfileAction
 import dev.sophi.memory.ProfileAttributeView
 import dev.sophi.memory.RecallQuery
 import dev.sophi.memory.TurnObservation
+import dev.sophi.versioning.VersionStore
 
 /**
  * The memory-palace implementation of MemoryTechnique — Jane (spec §3.3).
@@ -25,7 +26,8 @@ class JanesPalace(
     llmProvider: LLMProvider?,
     private val embeddingProvider: EmbeddingProvider?,
     embeddingModelName: String = "unknown",
-    onWarning: (String) -> Unit = {}
+    onWarning: (String) -> Unit = {},
+    versionStore: VersionStore? = null
 ) : MemoryTechnique {
     private val store = PalaceStore(config.home)
     private val profile = UserProfile(store)
@@ -38,7 +40,8 @@ class JanesPalace(
     private val forgetEngine = ForgetEngine(store, profile)
     private val consolidator = Consolidator(
         store, forgetEngine, llmProvider, config,
-        ConsolidationHistoryStore(config.home.resolve("consolidations.jsonl"))
+        ConsolidationHistoryStore(config.home.resolve("consolidations.jsonl")),
+        versionStore
     )
 
     override suspend fun recall(query: RecallQuery): MemoryBlock? {

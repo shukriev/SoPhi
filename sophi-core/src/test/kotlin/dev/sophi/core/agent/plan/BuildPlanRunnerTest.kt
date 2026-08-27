@@ -9,6 +9,7 @@ import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -64,5 +65,30 @@ class BuildPlanRunnerTest : FunSpec({
         runBlocking { runner.run("parent", "ship it", StopCondition.LlmJudged) }
 
         prompts.first().contains("the user hates long plans") shouldBe true
+    }
+
+    test("buildPlanRunner skips the step critic's LLM call entirely when criticEnabled is false") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("step done"))
+        // Only two complete() calls configured: plan generation, then the LlmJudged stop check.
+        // If the critic's confidence call fired, a third response would be consumed from this
+        // list for it instead of the stop check, and the stop check would get "1.0" (not "YES"),
+        // making finalStatus Exhausted instead of Met — that's the failure mode this test guards.
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+
+        val runner = buildPlanRunner(
+            provider = provider,
+            registry = ToolRegistry(),
+            sessionManager = FileSessionManager(createTempDirectory("build-plan-runner-no-critic")),
+            config = PlanRunnerConfig(model = "test-model", criticEnabled = false),
+            contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val outcome = runBlocking { runner.run("parent", "ship it", StopCondition.LlmJudged) }
+
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+        coVerify(exactly = 2) { provider.complete(any()) }
     }
 })

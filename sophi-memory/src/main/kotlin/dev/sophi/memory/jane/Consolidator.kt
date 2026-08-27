@@ -6,8 +6,15 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.memory.ConsolidationReport
+import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ProducedBy
+import dev.sophi.versioning.VersionStore
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 import kotlin.math.min
+
+private val consolidationRecordJson = Json { ignoreUnknownKeys = true }
 
 /**
  * The "sleep" cycle (spec §8): Merge -> Strengthen -> Compress -> Prune -> Purge.
@@ -20,7 +27,8 @@ class Consolidator(
     private val forgetEngine: ForgetEngine,
     private val provider: LLMProvider?,
     private val config: JanesPalaceConfig,
-    private val historyStore: ConsolidationHistoryStore
+    private val historyStore: ConsolidationHistoryStore,
+    private val versionStore: VersionStore? = null
 ) {
     fun isDue(nowMs: Long): Boolean =
         (store.lastConsolidationMs() ?: Long.MIN_VALUE) + config.consolidationIntervalMs <= nowMs
@@ -32,11 +40,16 @@ class Consolidator(
         val pruned = prune(nowMs)
         val purged = if (config.autoPurgeEnabled) forgetEngine.purgeSoftDeleted(nowMs - config.softDeleteGraceMs, nowMs) else emptyList()
         store.markConsolidation(nowMs)
-        historyStore.record(ConsolidationRecord(
+        val record = ConsolidationRecord(
             ts = nowMs, merged = merged.size, strengthened = strengthened, compressed = compressResult.threadsCompressed,
             pruned = pruned.size, softDeletedIds = merged + compressResult.softDeletedIds + pruned, purgedIds = purged,
             autoPurgeEnabled = config.autoPurgeEnabled
-        ))
+        )
+        historyStore.record(record)
+        versionStore?.record(
+            ArtifactType.MEMORY_CONSOLIDATION, record.id,
+            consolidationRecordJson.encodeToString(record), ProducedBy.REFLECTION
+        )
         return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size)
     }
 

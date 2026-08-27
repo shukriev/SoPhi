@@ -13,13 +13,13 @@ class TerminalConfirmationPolicy(
         if (requests.isEmpty()) return emptyMap()
         if (requests.size == 1) {
             val r = requests.single()
-            terminal.println(TextColors.yellow("Sophi wants to run '${r.toolName}' (${r.riskLevel}) with arguments: ${r.argumentsJson}"))
+            terminal.println(TextColors.yellow("Sophi wants to run '${r.toolName}' (${r.riskLevel}): ${r.preview ?: r.argumentsJson}"))
             terminal.print(TextColors.yellow("Allow? [y/N] "))
             return mapOf(r.callId to input.awaitYesNo())
         }
         terminal.println(TextColors.yellow("Sophi wants to run ${requests.size} actions this round:"))
         requests.forEach { r ->
-            terminal.println(TextColors.yellow("  - ${r.toolName} (${r.riskLevel}): ${r.argumentsJson}"))
+            terminal.println(TextColors.yellow("  - ${r.toolName} (${r.riskLevel}): ${r.preview ?: r.argumentsJson}"))
         }
         terminal.print(TextColors.yellow("Allow all? [y/N] "))
         val allowAll = input.awaitYesNo()

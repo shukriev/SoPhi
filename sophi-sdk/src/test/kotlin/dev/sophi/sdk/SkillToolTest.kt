@@ -48,4 +48,30 @@ class SkillToolTest : FunSpec({
         val tool = SkillTool(SkillRegistry(emptyMap()))
         tool.riskLevel("""{"name":"anything"}""") shouldBe RiskLevel.SAFE
     }
+
+    test("with a topK cap, the description lists at most that many skills") {
+        val registry = SkillRegistry(mapOf(
+            "a" to skill("A", "desc a", "body"),
+            "b" to skill("B", "desc b", "body"),
+            "c" to skill("C", "desc c", "body")
+        ))
+        val tool = SkillTool(registry, topK = 2)
+
+        val listedCount = tool.description.lines().count { it.trimStart().startsWith("- ") }
+
+        listedCount shouldBe 2
+    }
+
+    test("with no topK, every skill is listed (today's exact behavior, unchanged)") {
+        val registry = SkillRegistry(mapOf(
+            "a" to skill("A", "desc a", "body"),
+            "b" to skill("B", "desc b", "body"),
+            "c" to skill("C", "desc c", "body")
+        ))
+        val tool = SkillTool(registry)
+
+        val listedCount = tool.description.lines().count { it.trimStart().startsWith("- ") }
+
+        listedCount shouldBe 3
+    }
 })

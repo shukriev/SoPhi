@@ -1,10 +1,13 @@
 package dev.sophi.cli
 
 import com.github.ajalt.mordant.terminal.Terminal
+import com.github.ajalt.mordant.terminal.TerminalRecorder
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.runBlocking
 
 class TerminalConfirmationPolicyTest : FunSpec({
@@ -46,5 +49,16 @@ class TerminalConfirmationPolicyTest : FunSpec({
         )
         val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(false)))
         runBlocking { policy.confirm(requests) } shouldBe mapOf("c1" to false, "c2" to false)
+    }
+
+    test("confirm() shows a tool's preview instead of raw argumentsJson when one is provided") {
+        val recorder = TerminalRecorder()
+        val policy = TerminalConfirmationPolicy(Terminal(terminalInterface = recorder), ScriptedInputSource(emptyList(), listOf(false)))
+        val request = ConfirmationRequest("c1", "write_skill", """{"id":"site-x","body":"huge blob"}""", RiskLevel.DESTRUCTIVE, preview = "Write skill 'site-x' (new skill)")
+
+        runBlocking { policy.confirm(listOf(request)) }
+
+        recorder.output() shouldContain "Write skill 'site-x' (new skill)"
+        recorder.output() shouldNotContain "huge blob"
     }
 })

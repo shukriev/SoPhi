@@ -13,7 +13,8 @@ import java.util.UUID
 @Serializable
 internal data class VerdictLesson(
     val text: String, val kind: String = "approach",
-    val global: Boolean = false, val supersedes: String? = null
+    val global: Boolean = false, val supersedes: String? = null,
+    val failureModeSignature: String? = null
 )
 
 @Serializable
@@ -50,7 +51,8 @@ class SessionEvaluator(
                 lessons.add(Lesson(
                     id = "les_" + UUID.randomUUID(), ts = System.currentTimeMillis(),
                     scope = if (vl.global) "*" else config.scope,
-                    sessionId = sessionId, text = vl.text, kind = vl.kind
+                    sessionId = sessionId, text = vl.text, kind = vl.kind,
+                    failureModeSignature = vl.failureModeSignature
                 ))
             }
             if (config.implicitFeedback && preferences != null) {
@@ -90,10 +92,14 @@ class SessionEvaluator(
         return buildString {
             appendLine("You are evaluating a finished agent session. Respond with ONLY a JSON object:")
             appendLine("""{"judgment":"success|partial|failure","reason":"one sentence",""")
-            appendLine(""" "lessons":[{"text":"...","kind":"tool_usage|environment|approach|user_context","global":false,"supersedes":null}]}""")
+            appendLine(""" "lessons":[{"text":"...","kind":"tool_usage|environment|approach|user_context","global":false,"supersedes":null,"failureModeSignature":null}]}""")
             appendLine("Rules: emit only lessons NOT already covered below; if an existing lesson is wrong,")
             appendLine("emit a correction with \"supersedes\":\"<its id>\". Mark project-independent lessons \"global\":true.")
             appendLine("Do NOT re-emit archived lessons. Emit [] when there is nothing genuinely reusable.")
+            appendLine("For a lesson distilled from a failure, also set \"failureModeSignature\" to a short, " +
+                "normalized slug identifying the failure class (e.g. \"maven-module-not-targeted\", " +
+                "\"tool-timeout-network-call\") — not free text, a signature meant to match the SAME failure " +
+                "class across unrelated sessions/topics. Omit or use null when the lesson isn't failure-derived.")
             appendLine("\n## Existing active lessons\n" +
                 active.joinToString("\n") { "- [${it.id}] ${it.text}" }.ifEmpty { "(none)" })
             appendLine("\n## Archived (do not re-emit)\n" +

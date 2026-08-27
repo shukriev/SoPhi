@@ -41,7 +41,8 @@ class ScheduleEngineTest : FunSpec({
         notifier: Notifier = NoopNotifier,
         maxConcurrentTasks: Int = 4,
         taskTimeoutMs: Long = 300_000,
-        registry: ToolRegistry = ToolRegistry()
+        registry: ToolRegistry = ToolRegistry(),
+        criticEnabled: Boolean = true
     ): Triple<ScheduleEngine, TaskStore, RunLog> {
         val home = tempdir().toPath()
         val taskStore = TaskStore(home.resolve("tasks.json"))
@@ -50,7 +51,8 @@ class ScheduleEngineTest : FunSpec({
             taskStore, runLog, provider, registry,
             FileSessionManager(createTempDirectory("schedule-engine-test")),
             notifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
-            maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs
+            maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs,
+            criticEnabled = criticEnabled
         )
         return Triple(engine, taskStore, runLog)
     }
@@ -288,6 +290,24 @@ class ScheduleEngineTest : FunSpec({
         val (engine, taskStore, runLog) = engine(provider)
         val task = taskStore.add(ScheduledTask(
             name = "goal-task", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+        runLog.forTask(task.id).single().outcome shouldBe RunOutcome.GoalMet
+    }
+
+    test("a Goal-mode task with criticEnabled=false still runs successfully (step critic wiring doesn't break the path)") {
+        // The precise "the step critic's LLM call is actually skipped" verification lives in
+        // sophi-core's BuildPlanRunnerTest, where the call sequence is simple enough to pin down
+        // exactly. Goal-mode here also runs TreePlanner's multiple candidate planners plus
+        // LlmPlanCritic (unaffected by criticEnabled, which only gates the *step* critic), so an
+        // exact provider.complete() call count would be asserting on machinery this flag doesn't
+        // touch — this test only confirms the wiring doesn't break the path.
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("did the thing"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val (engine, taskStore, runLog) = engine(provider, criticEnabled = false)
+        val task = taskStore.add(ScheduledTask(
+            name = "goal-task-no-critic", trigger = Trigger.Once(atMs = 0L),
             mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "do it"))
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
         runLog.forTask(task.id).single().outcome shouldBe RunOutcome.GoalMet

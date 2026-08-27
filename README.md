@@ -34,6 +34,8 @@ app — same core, three ways to run it.
 | 📚 `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
 | 🔌 `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
 | 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
+| 🗄️ `sophi-store` | Embedded ArcadeDB (document+graph+vector) behind a generic `ArcadeStore` layer — the storage backend under memory and versioning |
+| 🕰️ `sophi-versioning` | Generic `Version`/`VersionStore` history + revert for skills, lessons, configs, and agent definitions, plus a config tournament mechanism (`sophi versions`, `sophi tournament`) |
 | 🏛️ `sophi-memory` | Long-term memory (Jane's Theory): a memory-palace store behind a technique-agnostic `MemoryTechnique` SPI |
 | 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
 | 📡 `sophi-hub` | Local WebSocket hub (`HubServer`/`HubClient`) — lets `sophi-companion` monitor and remote-control running `sophi-cli` sessions |
@@ -343,6 +345,12 @@ configure in `.sophi/mcp.json`, the same way it connects to any other MCP server
   Sophi to recall a site it's seen before (via a skill it wrote itself last time,
   through the `write_skill` tool) instead of re-exploring, and to record what it
   learns after each visit.
+- Every `write_skill`/`install_skill` call is gated: static content checks (secret
+  scan, size cap, and for `install_skill`'s third-party content, a prompt-injection
+  scan) run before anything lands, and the confirmation prompt shows a real diff or
+  source summary instead of raw JSON. A new write lands as a `trial` version;
+  `sophi skill verify <id>|--all` runs it through the eval suite and reports a
+  human-confirmed promote/revert recommendation.
 - **Trust boundary:** marking `navigate`/`screenshot` as safe means Sophi can navigate
   to any URL — including `file://` paths or internal-network addresses — without
   confirmation, since `safeTools` matches by tool name only, not by argument. If that's

@@ -3,6 +3,7 @@ package dev.sophi.companion
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.tools.ConfirmationRequest
+import dev.sophi.memory.ConsolidationReport
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.skills.InstallResult
 import dev.sophi.skills.Skill
@@ -22,6 +23,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+internal fun consolidationNotificationBody(report: ConsolidationReport): String? =
+    if (report.total == 0) null else
+        "Consolidated: merged=${report.merged} strengthened=${report.strengthened} " +
+            "compressed=${report.compressed} pruned=${report.pruned} purged=${report.purged}"
 
 class CompanionRuntime(
     private val sophiRuntime: SophiRuntime,
@@ -250,7 +256,11 @@ class CompanionRuntime(
                 scheduleEngine.tickOnce()
                 // A memory-store read failure here must not take scheduled-task polling down with it.
                 try {
-                    sophiRuntime.memoryPlugin?.consolidateIfDue()
+                    sophiRuntime.memoryPlugin?.consolidateIfDue()?.let { report ->
+                        consolidationNotificationBody(report)?.let { body ->
+                            notificationCenter.add(NotificationKind.Memory, "Sophi memory", body)
+                        }
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

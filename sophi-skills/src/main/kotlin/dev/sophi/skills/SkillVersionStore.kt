@@ -1,37 +1,57 @@
 package dev.sophi.skills
 
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import java.nio.file.Files
+import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ProducedBy
+import dev.sophi.versioning.Version
+import dev.sophi.versioning.VersionStore
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption.APPEND
-import java.nio.file.StandardOpenOption.CREATE
 
-class SkillVersionStore(private val path: Path) {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-
-    private fun fold(): Map<String, SkillVersion> =
-        if (!Files.exists(path)) emptyMap()
-        else Files.readAllLines(path).filter { it.isNotBlank() }
-            .mapNotNull { runCatching { json.decodeFromString<SkillVersion>(it) }.getOrNull() }
-            .associateBy { it.id }
-
-    // fold()'s LinkedHashMap preserves append (oldest-first) order; reverse before the stable sort
-    // so ties on `ts` (same millisecond) still resolve newest-recorded-first instead of file order.
-    fun history(skillId: String, project: Boolean): List<SkillVersion> =
-        fold().values.filter { it.skillId == skillId && it.project == project }
-            .asReversed().sortedByDescending { it.ts }
-
-    fun get(id: String): SkillVersion? = fold()[id]
-
-    fun all(): List<SkillVersion> = fold().values.toList()
-
-    @Synchronized
+/**
+ * [project] is fixed at construction — each instance represents exactly one scope (global or
+ * project-local skills), the same separation the pre-migration JSONL-per-directory design had.
+ * [Version] carries no project field of its own, so this class supplies it when reconstructing a
+ * [SkillVersion] from a generic [Version].
+ *
+ * [legacyJsonlPath], if given, is migrated into [versionStore] (once, idempotently) before every
+ * read — transparent migration on first use, with no separate migration step for a caller to
+ * remember to run.
+ */
+class SkillVersionStore(
+    private val versionStore: VersionStore,
+    private val project: Boolean,
+    private val legacyJsonlPath: Path? = null
+) {
     fun record(version: SkillVersion): SkillVersion {
-        path.parent?.let { Files.createDirectories(it) }
-        val line = json.encodeToString(version).replace("\n", " ")
-        Files.write(path, (line + "\n").toByteArray(), CREATE, APPEND)
-        return version
+        migrateIfNeeded()
+        val recorded = versionStore.record(
+            ArtifactType.SKILL, version.skillId, version.content,
+            if (version.trial) ProducedBy.WRITE_SKILL_TOOL else ProducedBy.HUMAN
+        )
+        return recorded.toSkillVersion(project)
     }
+
+    fun history(skillId: String, project: Boolean): List<SkillVersion> {
+        require(project == this.project) { "this store was constructed for project=${this.project}, not $project" }
+        migrateIfNeeded()
+        return versionStore.history(ArtifactType.SKILL, skillId).asReversed().map { it.toSkillVersion(project) }
+    }
+
+    fun get(id: String): SkillVersion? {
+        migrateIfNeeded()
+        return versionStore.get(id)?.takeIf { it.artifactType == ArtifactType.SKILL }?.toSkillVersion(project)
+    }
+
+    fun all(): List<SkillVersion> {
+        migrateIfNeeded()
+        return versionStore.allForType(ArtifactType.SKILL).map { it.toSkillVersion(project) }
+    }
+
+    private fun migrateIfNeeded() {
+        legacyJsonlPath?.let { migrateSkillVersions(it, versionStore) }
+    }
+
+    private fun Version.toSkillVersion(project: Boolean) = SkillVersion(
+        id = id, ts = createdAtMs, skillId = artifactId, project = project, content = content,
+        trial = producedBy == ProducedBy.WRITE_SKILL_TOOL
+    )
 }

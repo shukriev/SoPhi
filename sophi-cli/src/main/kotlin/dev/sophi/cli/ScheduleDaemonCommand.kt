@@ -43,6 +43,9 @@ class ScheduleDaemonCommand : CliktCommand(
             "summarised once 80% of this is used, instead of capping the number of rounds."
     ).int().default(200_000)
 
+    // If this daemon's runtime is ever given .memory(...), re-check ADR-026's single-process
+    // ArcadeDB lock constraint first — a memory-enabled interactive session or the companion
+    // could otherwise contend with this daemon for the same Jane's Palace database file.
     override fun run() = runBlocking {
         val engine = buildScheduleEngine(
             model, providerType, apiKeyOption, baseUrl,
