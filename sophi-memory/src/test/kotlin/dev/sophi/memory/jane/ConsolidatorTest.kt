@@ -4,6 +4,9 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.memory.FakeEmbeddingProvider
+import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ProducedBy
+import dev.sophi.versioning.VersionStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
@@ -17,11 +20,15 @@ private const val DAY = 24 * 3_600_000L
 class ConsolidatorTest : FunSpec({
     val fake = FakeEmbeddingProvider()
 
-    class Rig(provider: LLMProvider? = null, val config: JanesPalaceConfig = JanesPalaceConfig(sessionModel = "test-model")) {
+    class Rig(
+        provider: LLMProvider? = null,
+        val config: JanesPalaceConfig = JanesPalaceConfig(sessionModel = "test-model"),
+        val versionStore: VersionStore? = null
+    ) {
         val store = PalaceStore(tempdir().toPath())
         val engine = ForgetEngine(store, UserProfile(store))
         val historyStore = ConsolidationHistoryStore(tempdir().toPath().resolve("consolidations.jsonl"))
-        val consolidator = Consolidator(store, engine, provider, config, historyStore)
+        val consolidator = Consolidator(store, engine, provider, config, historyStore, versionStore)
         suspend fun add(id: String, text: String, room: Room = Room.EPISODES,
                         salience: Double = 0.8, at: Long = 0L, softDeletedAt: Long? = null): Memory {
             val m = Memory(id, text, room, salience, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
@@ -163,5 +170,25 @@ class ConsolidatorTest : FunSpec({
         r.consolidator.run(nowMs = now)
 
         r.historyStore.all().single().purgedIds shouldBe listOf("mem_old_soft")
+    }
+
+    test("run() records exactly one MEMORY_CONSOLIDATION Version when a VersionStore is supplied") {
+        val vs = VersionStore(tempdir().toPath())
+        val r = Rig(versionStore = vs)
+
+        r.consolidator.run(nowMs = 1_000L)
+
+        val versions = vs.allForType(ArtifactType.MEMORY_CONSOLIDATION)
+        versions shouldHaveSize 1
+        versions.single().producedBy shouldBe ProducedBy.REFLECTION
+        versions.single().artifactId shouldBe r.historyStore.all().single().id
+    }
+
+    test("run() records nothing extra when no VersionStore is supplied (existing default)") {
+        val r = Rig()
+
+        r.consolidator.run(nowMs = 1_000L)
+
+        r.historyStore.all() shouldHaveSize 1
     }
 })

@@ -45,6 +45,10 @@
             <artifactId>sophi-store</artifactId>
         </dependency>
         <dependency>
+            <groupId>dev.sophi</groupId>
+            <artifactId>sophi-versioning</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.kotest</groupId>
             <artifactId>kotest-runner-junit5</artifactId>
             <scope>test</scope>
