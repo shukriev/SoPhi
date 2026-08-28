@@ -42,7 +42,7 @@ class ScheduleRunDueCommand : CliktCommand(
     ).int().default(200_000)
 
     override fun run() = runBlocking {
-        val engine = buildScheduleEngine(
+        val (engine, _) = buildScheduleEngine(
             model, providerType, apiKeyOption, baseUrl,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
             contextWindowTokens, taskTimeoutSeconds, maxTokens

@@ -47,7 +47,7 @@ class ScheduleDaemonCommand : CliktCommand(
     // ArcadeDB lock constraint first — a memory-enabled interactive session or the companion
     // could otherwise contend with this daemon for the same Jane's Palace database file.
     override fun run() = runBlocking {
-        val engine = buildScheduleEngine(
+        val (engine, _) = buildScheduleEngine(
             model, providerType, apiKeyOption, baseUrl,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
             contextWindowTokens, taskTimeoutSeconds, maxTokens

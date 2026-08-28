@@ -24,7 +24,7 @@ import java.nio.file.Path
 
 private const val TOURNAMENT_CONTEXT_WINDOW = 100_000
 
-private val defaultVersioningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "versioning")
+internal val defaultVersioningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "versioning")
 
 class TournamentRun(
     private val incumbentVersionId: String,
