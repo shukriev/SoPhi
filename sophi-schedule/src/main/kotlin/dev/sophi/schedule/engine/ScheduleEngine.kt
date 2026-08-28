@@ -16,6 +16,8 @@ import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.schedule.model.RunOutcome
@@ -197,6 +199,12 @@ class ScheduleEngine(
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
                             result.finalOutput
                     }
+                }
+                runCatching {
+                    pluginRegistry?.dispatch(
+                        HookPoint.AFTER_TURN,
+                        HookContext(sessionId = session.id, userInput = task.prompt, assistantReply = summary)
+                    )
                 }
                 RunRecord(
                     task.id, startedAtMs, System.currentTimeMillis(), outcome, summary,
