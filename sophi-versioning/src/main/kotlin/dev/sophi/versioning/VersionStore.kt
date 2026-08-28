@@ -54,6 +54,16 @@ class VersionStore(private val home: Path) {
         }
     }
 
+    /**
+     * The newest version an unattended tournament should treat as "current" for [artifactId] —
+     * the newest [ProducedBy.HUMAN] record, not simply the newest record. A [ProducedBy.TOURNAMENT]
+     * entry is a proposal `history()` still returns (append-only, regardless of accept/reject);
+     * treating it as the baseline would let a rejected challenger silently become the next run's
+     * incumbent.
+     */
+    fun activeVersion(artifactType: ArtifactType, artifactId: String): Version? =
+        history(artifactType, artifactId).lastOrNull { it.producedBy == ProducedBy.HUMAN }
+
     fun allForType(artifactType: ArtifactType): List<Version> {
         val store = EmbeddedArcadeStore.open(home)
         try {
