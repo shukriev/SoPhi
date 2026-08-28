@@ -65,25 +65,6 @@ class TournamentRun(
     }
 }
 
-private val configSeedJson = kotlinx.serialization.json.Json { encodeDefaults = true }
-
-class ConfigSeed(
-    private val versionStore: VersionStore,
-    private val echo: (String) -> Unit
-) {
-    fun run() {
-        if (versionStore.history(ArtifactType.CONFIG, "default").isNotEmpty()) {
-            echo("A 'default' config version already exists — use `sophi config activate <id>` to change it.")
-            return
-        }
-        val content = configSeedJson.encodeToString(
-            dev.sophi.sdk.HarnessConfig.serializer(), dev.sophi.sdk.HarnessConfig()
-        )
-        val version = versionStore.record(ArtifactType.CONFIG, "default", content, ProducedBy.HUMAN, note = "seed")
-        echo("Seeded default config version ${version.id}")
-    }
-}
-
 class TournamentPromote(
     private val versionStore: VersionStore,
     private val versionId: String,
