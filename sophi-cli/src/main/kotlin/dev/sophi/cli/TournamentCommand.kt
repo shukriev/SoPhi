@@ -60,14 +60,7 @@ class TournamentRun(
             echo(e.message ?: "tournament run failed")
             return
         }
-        echo("challenger version: ${outcome.challengerVersionId}")
-        echo("accepted=${outcome.result.accepted}  reason=${outcome.result.reason}")
-        if (outcome.result.requiresManualReview) {
-            echo("MANUAL REVIEW REQUIRED: the score jump is large enough to be suspect regardless of the statistical result above.")
-        }
-        if (outcome.result.accepted) {
-            echo("Run `sophi tournament promote ${outcome.challengerVersionId}` to make it the active config.")
-        }
+        echo(dev.sophi.sdk.format(outcome))
     }
 }
 

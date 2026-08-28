@@ -89,6 +89,22 @@ fun evaluateAcceptance(
 
 data class TournamentRunResult(val challengerVersionId: String, val result: TournamentResult)
 
+/** Shared by `sophi tournament run`'s stdout output and [TournamentTool]'s tool output, so the
+ *  two can't drift apart. */
+fun format(outcome: TournamentRunResult): String = buildString {
+    appendLine("challenger version: ${outcome.challengerVersionId}")
+    appendLine("accepted=${outcome.result.accepted}  reason=${outcome.result.reason}")
+    if (outcome.result.requiresManualReview) {
+        appendLine(
+            "MANUAL REVIEW REQUIRED: the score jump is large enough to be suspect regardless " +
+                "of the statistical result above."
+        )
+    }
+    if (outcome.result.accepted) {
+        appendLine("Run `sophi tournament promote ${outcome.challengerVersionId}` to make it the active config.")
+    }
+}.trimEnd()
+
 /**
  * Proposes one challenger, records it (regardless of outcome — history is append-only), runs both
  * the incumbent and the challenger through [cases] [runsPerConfig] times each, and evaluates the
