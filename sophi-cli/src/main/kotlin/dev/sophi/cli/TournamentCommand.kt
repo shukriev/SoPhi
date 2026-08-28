@@ -130,7 +130,7 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
 
     override fun run() {
         val versionStore = VersionStore(Path.of(versioningHomeStr))
-        val incumbentVersionId = versionStore.history(ArtifactType.CONFIG, "default").lastOrNull()?.id
+        val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
             ?: run { echo("No config version found for 'default' — nothing to run a tournament against."); return }
         val cases = loadEvalCases(Path.of(evalsDirStr))
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
