@@ -16,6 +16,7 @@ import dev.sophi.sdk.activateConfigVersion
 import dev.sophi.sdk.runTournament
 import dev.sophi.sdk.tournamentStatus
 import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ProducedBy
 import dev.sophi.versioning.ScorecardStore
 import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
@@ -61,6 +62,25 @@ class TournamentRun(
             return
         }
         echo(dev.sophi.sdk.format(outcome))
+    }
+}
+
+private val configSeedJson = kotlinx.serialization.json.Json { encodeDefaults = true }
+
+class ConfigSeed(
+    private val versionStore: VersionStore,
+    private val echo: (String) -> Unit
+) {
+    fun run() {
+        if (versionStore.history(ArtifactType.CONFIG, "default").isNotEmpty()) {
+            echo("A 'default' config version already exists — use `sophi config activate <id>` to change it.")
+            return
+        }
+        val content = configSeedJson.encodeToString(
+            dev.sophi.sdk.HarnessConfig.serializer(), dev.sophi.sdk.HarnessConfig()
+        )
+        val version = versionStore.record(ArtifactType.CONFIG, "default", content, ProducedBy.HUMAN, note = "seed")
+        echo("Seeded default config version ${version.id}")
     }
 }
 
@@ -168,4 +188,14 @@ class ConfigActivateCommand : CliktCommand(name = "activate", help = "Instantly 
 
 class ConfigCommand : CliktCommand(name = "config", help = "Inspect and switch the active harness config") {
     override fun run() = Unit
+}
+
+class ConfigSeedCommand : CliktCommand(
+    name = "seed",
+    help = "Record the first 'default' config version, from HarnessConfig()'s defaults. Required " +
+        "once before `sophi tournament run` (or a scheduled tournament task) can find an incumbent."
+) {
+    private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
+
+    override fun run() = ConfigSeed(VersionStore(Path.of(versioningHomeStr))) { echo(it) }.run()
 }
