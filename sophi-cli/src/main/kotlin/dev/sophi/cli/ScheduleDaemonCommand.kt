@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
@@ -42,19 +43,66 @@ class ScheduleDaemonCommand : CliktCommand(
         help = "Total context window of --model, in tokens. The turn's earlier tool rounds are " +
             "summarised once 80% of this is used, instead of capping the number of rounds."
     ).int().default(200_000)
+    private val memoryEnabled: Boolean by option(
+        "--memory",
+        help = "Enable Jane's Theory long-term memory for scheduled task outcomes (experimental). " +
+            "Requires --embedding-model and --embedding-base-url. Defaults to a SEPARATE memory " +
+            "home from interactive `sophi`/`sophi-companion` (~/.sophi/memory-scheduled) to avoid " +
+            "ArcadeDB's single-process lock (ADR-026) — override with --memory-home if you want a " +
+            "single shared store and accept that constraint."
+    ).flag(default = false)
+    private val memoryHomeStr: String by option(
+        "--memory-home",
+        help = "Path for this daemon's memory store when --memory is set."
+    ).default("${System.getProperty("user.home")}/.sophi/memory-scheduled")
+    private val embeddingModel: String? by option(
+        "--embedding-model",
+        help = "Embedding model name for --memory, e.g. nomic-embed-text (Ollama) or text-embedding-3-small"
+    )
+    private val embeddingBaseUrl: String? by option(
+        "--embedding-base-url",
+        help = "Embeddings endpoint base URL (defaults to --base-url; e.g. http://localhost:11434/v1)"
+    )
+    private val embeddingDimensions: Int by option(
+        "--embedding-dimensions",
+        help = "Embedding vector dimensions (768 for nomic-embed-text, 1536 for text-embedding-3-small)"
+    ).int().default(1536)
 
-    // If this daemon's runtime is ever given .memory(...), re-check ADR-026's single-process
-    // ArcadeDB lock constraint first — a memory-enabled interactive session or the companion
-    // could otherwise contend with this daemon for the same Jane's Palace database file.
     override fun run() = runBlocking {
-        val engine = buildScheduleEngine(
-            model, providerType, apiKeyOption, baseUrl,
-            Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
-            contextWindowTokens, taskTimeoutSeconds, maxTokens
-        )
+        val scheduleRuntime = try {
+            buildScheduleEngine(
+                model, providerType, apiKeyOption, baseUrl,
+                Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
+                contextWindowTokens, taskTimeoutSeconds, maxTokens,
+                memoryHome = if (memoryEnabled) Path.of(memoryHomeStr) else null,
+                embeddingModel = embeddingModel,
+                embeddingBaseUrl = embeddingBaseUrl ?: baseUrl,
+                embeddingApiKey = apiKeyOption,
+                embeddingDimensions = embeddingDimensions,
+                onWarning = { echo(it) }
+            )
+        } catch (e: com.arcadedb.exception.DatabaseOperationException) {
+            echo(
+                "Cannot start with --memory: another instance in this JVM already has " +
+                    "$memoryHomeStr open. See ADR-026 (doc/adr/) — only one process may hold a " +
+                    "given memory home open at a time."
+            )
+            return@runBlocking
+        } catch (e: com.arcadedb.utility.LockException) {
+            echo(
+                "Cannot start with --memory: $memoryHomeStr is already locked by another process " +
+                    "(interactive sophi, sophi-companion, or another daemon instance). See ADR-026 " +
+                    "(doc/adr/) — only one process may hold a given memory home open at a time."
+            )
+            return@runBlocking
+        }
+        val engine = scheduleRuntime.engine
+        val memoryPlugin = scheduleRuntime.memoryPlugin
+        Runtime.getRuntime().addShutdownHook(Thread { memoryPlugin?.close() })
         bootstrapOrchestrator(dev.sophi.schedule.store.TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")))
         while (true) {
             runCatching { engine.tickOnce() }
+            memoryPlugin?.let { runCatching { it.consolidateIfDue() } }
             delay(intervalSeconds * 1000)
         }
     }

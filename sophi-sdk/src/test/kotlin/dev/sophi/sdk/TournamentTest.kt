@@ -2,8 +2,35 @@ package dev.sophi.sdk
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 
 class TournamentTest : FunSpec({
+    test("format() reports challenger id, accept/reject reason, and a promote hint when accepted") {
+        val outcome = TournamentRunResult(
+            "ver_123",
+            TournamentResult(accepted = true, reason = "clear win", requiresManualReview = false)
+        )
+
+        val text = format(outcome)
+
+        text shouldContain "challenger version: ver_123"
+        text shouldContain "accepted=true  reason=clear win"
+        text shouldContain "sophi tournament promote ver_123"
+    }
+
+    test("format() omits the promote hint and flags MANUAL REVIEW REQUIRED when rejected with a suspicious jump") {
+        val outcome = TournamentRunResult(
+            "ver_9",
+            TournamentResult(accepted = false, reason = "suspiciously large jump", requiresManualReview = true)
+        )
+
+        val text = format(outcome)
+
+        text shouldContain "accepted=false  reason=suspiciously large jump"
+        text shouldContain "MANUAL REVIEW REQUIRED"
+        (text.contains("promote")) shouldBe false
+    }
+
     test("a challenger scoring within the incumbent's noise floor is rejected") {
         val incumbentScores = mapOf("overall" to listOf(0.80, 0.82, 0.79))
         val challengerScores = mapOf("overall" to listOf(0.81, 0.83, 0.80))

@@ -15,7 +15,7 @@ class ScheduleWiringTest : FunSpec({
     test("buildScheduleEngine fails a task closed when its subagentType matches no definition loaded from agentsDir") {
         val agentsDir = createTempDirectory("agents-test-empty")
         val scheduleDir = createTempDirectory("schedule-test")
-        val engine = buildScheduleEngine(
+        val (engine, _) = buildScheduleEngine(
             model = "m", providerType = "claude", apiKeyOption = "test-key", baseUrl = null,
             scheduleDir = scheduleDir, sessionsDir = createTempDirectory("sessions-test"),
             agentsDir = agentsDir, braveApiKeyOption = null, contextWindowTokens = 100_000

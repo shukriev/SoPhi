@@ -36,6 +36,30 @@ class VersionStoreTest : FunSpec({
         history.map { it.id } shouldBe listOf(v1.id, v2.id)
     }
 
+    test("activeVersion() returns the newest HUMAN version, ignoring a newer TOURNAMENT-produced one") {
+        val store = VersionStore(createTempDirectory("versioning-test"))
+        val seed = store.record(ArtifactType.CONFIG, "default", "seed content", ProducedBy.HUMAN)
+        store.record(ArtifactType.CONFIG, "default", "rejected challenger content", ProducedBy.TOURNAMENT)
+
+        store.activeVersion(ArtifactType.CONFIG, "default")?.id shouldBe seed.id
+    }
+
+    test("activeVersion() picks up a later HUMAN promotion over an even-later TOURNAMENT proposal") {
+        val store = VersionStore(createTempDirectory("versioning-test"))
+        store.record(ArtifactType.CONFIG, "default", "seed content", ProducedBy.HUMAN)
+        val promoted = store.record(ArtifactType.CONFIG, "default", "promoted challenger content", ProducedBy.HUMAN)
+        store.record(ArtifactType.CONFIG, "default", "a later, unrelated rejected proposal", ProducedBy.TOURNAMENT)
+
+        store.activeVersion(ArtifactType.CONFIG, "default")?.id shouldBe promoted.id
+    }
+
+    test("activeVersion() returns null when no HUMAN version exists yet") {
+        val store = VersionStore(createTempDirectory("versioning-test"))
+        store.record(ArtifactType.CONFIG, "default", "proposal only", ProducedBy.TOURNAMENT)
+
+        store.activeVersion(ArtifactType.CONFIG, "default") shouldBe null
+    }
+
     test("history() is scoped to artifactType and artifactId — no cross-contamination") {
         val store = VersionStore(createTempDirectory("versioning-test"))
         store.record(ArtifactType.SKILL, "greet", "skill content", ProducedBy.HUMAN)

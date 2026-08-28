@@ -21,6 +21,6 @@ fun main(args: Array<String>) = SophiCli()
         VersionsCommand().subcommands(VersionsListCommand(), VersionsShowCommand(), VersionsRevertCommand()),
         EvalsCommand().subcommands(EvalsRunCommand()),
         TournamentCommand().subcommands(TournamentRunCommand(), TournamentPromoteCommand(), TournamentStatusCommand()),
-        ConfigCommand().subcommands(ConfigActivateCommand())
+        ConfigCommand().subcommands(ConfigActivateCommand(), ConfigSeedCommand())
     )
     .main(args)

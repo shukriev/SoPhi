@@ -20,6 +20,7 @@ import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -99,6 +100,75 @@ class ScheduleEngineTest : FunSpec({
         kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
 
         events.map { it.toolName } shouldContain "some_tool"
+    }
+
+    test("runNow() dispatches AFTER_TURN with the task's prompt and the run's summary, for Recurring mode") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("the answer", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("the answer"))
+
+        val seen = mutableListOf<dev.sophi.extensions.HookContext>()
+        val fakePlugin = object : dev.sophi.extensions.SophiPlugin {
+            override val name = "fake"
+            override fun hooks() = listOf(object : dev.sophi.extensions.AgentHook {
+                override val point = dev.sophi.extensions.HookPoint.AFTER_TURN
+                override suspend fun invoke(context: dev.sophi.extensions.HookContext) { seen += context }
+            })
+        }
+        val pluginRegistry = dev.sophi.extensions.PluginRegistry().register(fakePlugin)
+
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            pluginRegistry = pluginRegistry
+        )
+        val task = taskStore.add(
+            ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "do the thing")
+        )
+
+        engine.runNow(task.id)
+
+        seen shouldHaveSize 1
+        seen.single().userInput shouldBe "do the thing"
+        seen.single().assistantReply shouldBe "the answer"
+    }
+
+    test("a plugin's AFTER_TURN hook throwing does not turn a successful run into RunOutcome.Failed") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("fine", TokenUsage(1, 1))
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("fine"))
+
+        val throwingPlugin = object : dev.sophi.extensions.SophiPlugin {
+            override val name = "throws"
+            override fun hooks() = listOf(object : dev.sophi.extensions.AgentHook {
+                override val point = dev.sophi.extensions.HookPoint.AFTER_TURN
+                override suspend fun invoke(context: dev.sophi.extensions.HookContext) {
+                    error("boom")
+                }
+            })
+        }
+        val pluginRegistry = dev.sophi.extensions.PluginRegistry().register(throwingPlugin)
+
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val runLog = RunLog(home.resolve("runs.jsonl"))
+        val engine = ScheduleEngine(
+            taskStore, runLog, provider, ToolRegistry(),
+            FileSessionManager(createTempDirectory("schedule-engine-test")),
+            NoopNotifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
+            pluginRegistry = pluginRegistry
+        )
+        val task = taskStore.add(
+            ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "do the thing")
+        )
+
+        val record = engine.runNow(task.id)
+
+        record?.outcome shouldBe RunOutcome.Succeeded
     }
 
     test("a Recurring task's prompt includes plugin-contributed context (lessons, memory)") {

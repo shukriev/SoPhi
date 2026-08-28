@@ -16,6 +16,8 @@ import dev.sophi.versioning.ScorecardStore
 import dev.sophi.versioning.VersionStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
@@ -60,6 +62,29 @@ class TournamentCommandTest : FunSpec({
         ConfigActivate(versionStore, "does-not-exist") { lines.add(it) }.run()
 
         lines.first() shouldContain "No version found"
+    }
+
+    test("ConfigSeed records an initial HUMAN default-config version when none exists") {
+        val versionStore = VersionStore(createTempDirectory("tournament-cli-test"))
+        val lines = mutableListOf<String>()
+
+        ConfigSeed(versionStore) { lines.add(it) }.run()
+
+        val active = versionStore.activeVersion(ArtifactType.CONFIG, "default")
+        active shouldNotBe null
+        active!!.producedBy shouldBe ProducedBy.HUMAN
+        lines.joinToString("\n") shouldContain active.id
+    }
+
+    test("ConfigSeed refuses to overwrite an existing default-config version") {
+        val versionStore = VersionStore(createTempDirectory("tournament-cli-test"))
+        versionStore.record(ArtifactType.CONFIG, "default", "{}", ProducedBy.HUMAN)
+        val lines = mutableListOf<String>()
+
+        ConfigSeed(versionStore) { lines.add(it) }.run()
+
+        versionStore.history(ArtifactType.CONFIG, "default") shouldHaveSize 1
+        lines.joinToString("\n") shouldContain "already"
     }
 
     test("TournamentPromote does nothing when the confirmation is declined") {

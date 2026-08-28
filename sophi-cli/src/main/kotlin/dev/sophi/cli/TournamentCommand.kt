@@ -16,6 +16,7 @@ import dev.sophi.sdk.activateConfigVersion
 import dev.sophi.sdk.runTournament
 import dev.sophi.sdk.tournamentStatus
 import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ProducedBy
 import dev.sophi.versioning.ScorecardStore
 import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
@@ -23,7 +24,7 @@ import java.nio.file.Path
 
 private const val TOURNAMENT_CONTEXT_WINDOW = 100_000
 
-private val defaultVersioningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "versioning")
+internal val defaultVersioningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "versioning")
 
 class TournamentRun(
     private val incumbentVersionId: String,
@@ -60,14 +61,26 @@ class TournamentRun(
             echo(e.message ?: "tournament run failed")
             return
         }
-        echo("challenger version: ${outcome.challengerVersionId}")
-        echo("accepted=${outcome.result.accepted}  reason=${outcome.result.reason}")
-        if (outcome.result.requiresManualReview) {
-            echo("MANUAL REVIEW REQUIRED: the score jump is large enough to be suspect regardless of the statistical result above.")
+        echo(dev.sophi.sdk.format(outcome))
+    }
+}
+
+private val configSeedJson = kotlinx.serialization.json.Json { encodeDefaults = true }
+
+class ConfigSeed(
+    private val versionStore: VersionStore,
+    private val echo: (String) -> Unit
+) {
+    fun run() {
+        if (versionStore.history(ArtifactType.CONFIG, "default").isNotEmpty()) {
+            echo("A 'default' config version already exists — use `sophi config activate <id>` to change it.")
+            return
         }
-        if (outcome.result.accepted) {
-            echo("Run `sophi tournament promote ${outcome.challengerVersionId}` to make it the active config.")
-        }
+        val content = configSeedJson.encodeToString(
+            dev.sophi.sdk.HarnessConfig.serializer(), dev.sophi.sdk.HarnessConfig()
+        )
+        val version = versionStore.record(ArtifactType.CONFIG, "default", content, ProducedBy.HUMAN, note = "seed")
+        echo("Seeded default config version ${version.id}")
     }
 }
 
@@ -130,7 +143,7 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
 
     override fun run() {
         val versionStore = VersionStore(Path.of(versioningHomeStr))
-        val incumbentVersionId = versionStore.history(ArtifactType.CONFIG, "default").lastOrNull()?.id
+        val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
             ?: run { echo("No config version found for 'default' — nothing to run a tournament against."); return }
         val cases = loadEvalCases(Path.of(evalsDirStr))
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
@@ -175,4 +188,14 @@ class ConfigActivateCommand : CliktCommand(name = "activate", help = "Instantly 
 
 class ConfigCommand : CliktCommand(name = "config", help = "Inspect and switch the active harness config") {
     override fun run() = Unit
+}
+
+class ConfigSeedCommand : CliktCommand(
+    name = "seed",
+    help = "Record the first 'default' config version, from HarnessConfig()'s defaults. Required " +
+        "once before `sophi tournament run` (or a scheduled tournament task) can find an incumbent."
+) {
+    private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
+
+    override fun run() = ConfigSeed(VersionStore(Path.of(versioningHomeStr))) { echo(it) }.run()
 }
