@@ -98,7 +98,18 @@ class ScheduleDaemonCommand : CliktCommand(
         }
         val engine = scheduleRuntime.engine
         val memoryPlugin = scheduleRuntime.memoryPlugin
-        Runtime.getRuntime().addShutdownHook(Thread { memoryPlugin?.close() })
+        // MemoryPlugin.close() cancels its encodeScope outright — if a task's AFTER_TURN encode
+        // is still in flight when the daemon is stopped (a normal timing: SIGTERM shortly after
+        // a tick), close() alone silently discards that memory write. Drain in-flight encodes
+        // first, bounded so a stuck encode can't hang shutdown forever, then always close.
+        Runtime.getRuntime().addShutdownHook(Thread {
+            memoryPlugin?.let { plugin ->
+                runCatching {
+                    runBlocking { kotlinx.coroutines.withTimeoutOrNull(30_000) { plugin.drainEncodes() } }
+                }
+                plugin.close()
+            }
+        })
         bootstrapOrchestrator(dev.sophi.schedule.store.TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")))
         while (true) {
             runCatching { engine.tickOnce() }
