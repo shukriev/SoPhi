@@ -168,7 +168,7 @@ class RuntimeBuilder {
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
             val skillRegistry = SkillRegistry.load(skillsDir, Path.of(".sophi", "skills"))
-            if (skillRegistry.all().isNotEmpty()) registry.register(SkillTool(skillRegistry, topK = harnessConfig?.topKSkills))
+            if (skillRegistry.topLevel().isNotEmpty()) registry.register(SkillTool(skillRegistry, topK = harnessConfig?.topKSkills))
             registry.register(InstallSkillTool())
             registry.register(WriteSkillTool())
         }

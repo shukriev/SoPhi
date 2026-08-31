@@ -3,6 +3,8 @@ package dev.sophi.skills
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import java.nio.file.Path
+import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeText
 
@@ -77,5 +79,69 @@ class SkillRegistryTest : FunSpec({
     test("get() returns null for an unknown id") {
         val registry = SkillRegistry(emptyMap())
         registry.get("nonexistent") shouldBe null
+    }
+
+    fun skillFixture(title: String) = Skill(SkillMetadata(title = title), "body", Path.of("$title.md"))
+
+    test("load() treats a subdirectory with _index.md as a domain, its siblings as members") {
+        val dir = createTempDirectory("skills-domain")
+        try {
+            val domain = dir.resolve("site-maidplus-de").also { it.createDirectories() }
+            domain.resolve("_index.md").writeText("---\ntitle: MaidPlus\ndescription: MaidPlus platform\n---\n\nOrchestrator body.")
+            domain.resolve("companies.md").writeText("---\ntitle: Companies\ndescription: Companies page\n---\n\nCompanies body.")
+            val registry = SkillRegistry.load(dir.resolve("no-global"), dir)
+            registry.get("site-maidplus-de")?.metadata?.title shouldBe "MaidPlus"
+            registry.get("site-maidplus-de/companies")?.metadata?.title shouldBe "Companies"
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    test("load() loads domain members into all() even before _index.md exists, but keeps the domain out of topLevel()") {
+        val dir = createTempDirectory("skills-domain-orphan")
+        try {
+            val domain = dir.resolve("site-maidplus-de").also { it.createDirectories() }
+            domain.resolve("companies.md").writeText("---\ntitle: Companies\n---\n\nBody.")
+            val registry = SkillRegistry.load(dir.resolve("no-global"), dir)
+            registry.get("site-maidplus-de/companies")?.metadata?.title shouldBe "Companies"
+            registry.topLevel() shouldBe emptyList()
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    test("load() excludes a subdirectory that has a same-named flat sibling (installed bundle)") {
+        val dir = createTempDirectory("skills-bundle")
+        try {
+            dir.resolve("skill-creator.md").writeText("---\ntitle: Skill Creator\n---\n\nBody.")
+            val bundleDir = dir.resolve("skill-creator").also { it.createDirectories() }
+            bundleDir.resolve("README.md").writeText("---\ntitle: readme\n---\n\nnotes")
+            val registry = SkillRegistry.load(dir.resolve("no-global"), dir)
+            registry.all() shouldHaveSize 1
+            registry.get("skill-creator")?.metadata?.title shouldBe "Skill Creator"
+            registry.get("skill-creator/README") shouldBe null
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    test("topLevel() excludes domain members but includes domain roots and standalone skills") {
+        val registry = SkillRegistry(mapOf(
+            "standalone" to skillFixture("Standalone"),
+            "site-maidplus-de" to skillFixture("MaidPlus"),
+            "site-maidplus-de/companies" to skillFixture("Companies")
+        ))
+        registry.topLevel().map { it.first } shouldBe listOf("site-maidplus-de", "standalone")
+    }
+
+    test("childrenOf() returns a domain's members sorted, empty for a non-domain id") {
+        val registry = SkillRegistry(mapOf(
+            "site-maidplus-de" to skillFixture("MaidPlus"),
+            "site-maidplus-de/dashboard" to skillFixture("Dashboard"),
+            "site-maidplus-de/companies" to skillFixture("Companies")
+        ))
+        registry.childrenOf("site-maidplus-de").map { it.first } shouldBe
+            listOf("site-maidplus-de/companies", "site-maidplus-de/dashboard")
+        registry.childrenOf("standalone") shouldBe emptyList()
     }
 })

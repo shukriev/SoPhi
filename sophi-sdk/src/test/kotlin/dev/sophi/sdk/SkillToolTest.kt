@@ -74,4 +74,30 @@ class SkillToolTest : FunSpec({
 
         listedCount shouldBe 3
     }
+
+    test("description reflects topLevel(), not all() — domain members excluded from the top-level list") {
+        val registry = SkillRegistry(mapOf(
+            "standalone" to skill("Standalone", "desc", "body"),
+            "site-maidplus-de" to skill("MaidPlus", "MaidPlus platform", "orchestrator body"),
+            "site-maidplus-de/companies" to skill("Companies", "Companies page", "body")
+        ))
+        val tool = SkillTool(registry)
+        tool.description shouldContain "site-maidplus-de: MaidPlus platform"
+        tool.description shouldContain "standalone: desc"
+        (tool.description.contains("site-maidplus-de/companies")) shouldBe false
+    }
+
+    test("execute() on a domain-root id appends a generated child listing after the hand-authored body") {
+        val registry = SkillRegistry(mapOf(
+            "site-maidplus-de" to skill("MaidPlus", "MaidPlus platform", "Orchestrator body."),
+            "site-maidplus-de/companies" to skill("Companies", "Companies page", "body"),
+            "site-maidplus-de/dashboard" to skill("Dashboard", "Dashboard page", "body")
+        ))
+        val tool = SkillTool(registry)
+        val result = runBlocking { tool.execute("""{"name":"site-maidplus-de"}""") }
+        result shouldContain "Orchestrator body."
+        result shouldContain "Available in this domain:"
+        result shouldContain "site-maidplus-de/companies: Companies page"
+        result shouldContain "site-maidplus-de/dashboard: Dashboard page"
+    }
 })

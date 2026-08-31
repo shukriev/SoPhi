@@ -256,4 +256,21 @@ class SkillInstallerTest : FunSpec({
             target.toFile().deleteRecursively()
         }
     }
+
+    test("remove does not delete a same-named directory that has no bundle marker (not installer-owned)") {
+        val target = createTempDirectory("target")
+        try {
+            target.resolve("site-maidplus-de.md").writeText("---\ntitle: MaidPlus\n---\n\nFlat skill, coincidentally same name.")
+            val domainDir = target.resolve("site-maidplus-de").also { it.createDirectories() }
+            domainDir.resolve("_index.md").writeText("---\ntitle: MaidPlus domain\n---\n\nA real domain, not a bundle.")
+
+            val removed = installer.remove(target, "site-maidplus-de")
+
+            removed shouldBe true
+            target.resolve("site-maidplus-de.md").exists() shouldBe false
+            domainDir.resolve("_index.md").exists() shouldBe true // NOT deleted — no bundle marker present
+        } finally {
+            target.toFile().deleteRecursively()
+        }
+    }
 })

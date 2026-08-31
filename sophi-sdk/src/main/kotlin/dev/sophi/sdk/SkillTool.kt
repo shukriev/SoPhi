@@ -15,7 +15,7 @@ class SkillTool(private val registry: SkillRegistry, private val topK: Int? = nu
     override val name = "skill"
     override val description: String =
         "Load a skill's instructions into context. Available skills:\n" +
-            registry.all().let { all -> topK?.let { all.take(it) } ?: all }
+            registry.topLevel().let { all -> topK?.let { all.take(it) } ?: all }
                 .joinToString("\n") { (id, skill) -> "- $id: ${skill.metadata.description}" }
     override val parametersJson = """
         {"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}
@@ -28,6 +28,10 @@ class SkillTool(private val registry: SkillRegistry, private val topK: Int? = nu
     override suspend fun execute(argumentsJson: String): String {
         val args = runCatching { json.decodeFromString(SkillArgs.serializer(), argumentsJson) }.getOrNull()
         val skillName = args?.name ?: return "Error: missing 'name' argument"
-        return registry.get(skillName)?.body ?: "Error: skill not found: $skillName"
+        val skill = registry.get(skillName) ?: return "Error: skill not found: $skillName"
+        val children = registry.childrenOf(skillName)
+        if (children.isEmpty()) return skill.body
+        return skill.body + "\n\nAvailable in this domain:\n" +
+            children.joinToString("\n") { (id, child) -> "- $id: ${child.metadata.description}" }
     }
 }

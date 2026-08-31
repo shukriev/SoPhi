@@ -180,4 +180,68 @@ class WriteSkillToolTest : FunSpec({
 
         preview shouldContain "+ Step 2: click Sign in."
     }
+
+    test("execute() with domain=true writes to <id>/_index.md, creating the directory") {
+        val args = """{"id":"site-maidplus-de","title":"MaidPlus","description":"MaidPlus platform","body":"Orchestrator body.","domain":true}"""
+
+        val result = runBlocking { tool.execute(args) }
+
+        val written = globalDir.resolve("site-maidplus-de").resolve("_index.md")
+        written.exists() shouldBe true
+        SkillLoader().loadFile(written).body shouldContain "Orchestrator body."
+        result shouldContain "site-maidplus-de"
+    }
+
+    test("execute() with a member id writes to <domain>/<member>.md, creating the domain directory if absent") {
+        val args = """{"id":"site-maidplus-de/companies","title":"Companies","description":"Companies page","body":"Companies body."}"""
+
+        val result = runBlocking { tool.execute(args) }
+
+        val written = globalDir.resolve("site-maidplus-de").resolve("companies.md")
+        written.exists() shouldBe true
+        SkillLoader().loadFile(written).body shouldContain "Companies body."
+        result shouldContain "site-maidplus-de/companies"
+    }
+
+    test("execute() rejects domain=true combined with a member id") {
+        val args = """{"id":"site-maidplus-de/companies","title":"t","description":"d","body":"b","domain":true}"""
+
+        val result = runBlocking { tool.execute(args) }
+
+        result shouldContain "Error"
+        globalDir.resolve("site-maidplus-de").resolve("companies.md").exists() shouldBe false
+    }
+
+    test("execute() with domain=true rejects an id that already exists as a flat skill") {
+        runBlocking { tool.execute(VALID_ARGS) } // creates site-example-com.md
+        val args = """{"id":"site-example-com","title":"t","description":"d","body":"b","domain":true}"""
+
+        val result = runBlocking { tool.execute(args) }
+
+        result shouldContain "Error"
+        globalDir.resolve("site-example-com").exists() shouldBe false
+    }
+
+    test("execute() rejects an id with two slashes") {
+        val args = """{"id":"site-a/b/c","title":"t","description":"d","body":"b"}"""
+
+        val result = runBlocking { tool.execute(args) }
+
+        result shouldContain "Error"
+    }
+
+    test("confirmationPreview() for an existing domain root reflects it as not-new (proves it resolves the same path execute() writes to)") {
+        val args = """{"id":"site-maidplus-de","title":"MaidPlus","description":"d","body":"b","domain":true}"""
+        runBlocking { tool.execute(args) }
+
+        val preview = tool.confirmationPreview(args)
+
+        (preview?.contains("(new skill)") ?: true) shouldBe false
+    }
+
+    test("confirmationPreview() falls back to null for an invalid id instead of guessing a path") {
+        val args = """{"id":"not-a-site-id","title":"t","description":"d","body":"b"}"""
+
+        tool.confirmationPreview(args) shouldBe null
+    }
 })
