@@ -34,6 +34,8 @@ private data class ClaudeSkillFrontmatter(val name: String? = null, val descript
 
 private val permissiveYaml = Yaml(configuration = YamlConfiguration(strictMode = false))
 
+private const val BUNDLE_MARKER = ".sophi-bundle"
+
 class SkillInstaller {
     fun install(
         source: String,
@@ -74,7 +76,10 @@ class SkillInstaller {
         val mdFile = targetDir.resolve("$id.md")
         if (!mdFile.exists()) return false
         mdFile.deleteExisting()
-        targetDir.resolve(id).takeIf { it.isDirectory() }?.toFile()?.deleteRecursively()
+        val bundleDir = targetDir.resolve(id)
+        if (bundleDir.isDirectory() && bundleDir.resolve(BUNDLE_MARKER).exists()) {
+            bundleDir.toFile().deleteRecursively()
+        }
         return true
     }
 
@@ -116,6 +121,7 @@ class SkillInstaller {
         if (siblings.isNotEmpty()) {
             val bundleDir = targetDir.resolve(skillDir.id).also { it.createDirectories() }
             siblings.forEach { it.toFile().copyRecursively(bundleDir.resolve(it.name).toFile()) }
+            bundleDir.resolve(BUNDLE_MARKER).writeText("")
         }
     }
 }
