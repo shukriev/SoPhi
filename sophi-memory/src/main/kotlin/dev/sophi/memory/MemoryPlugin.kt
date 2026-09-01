@@ -53,6 +53,9 @@ class MemoryPlugin(
     /** Test hook: await all in-flight encodes. */
     suspend fun drainEncodes() { inFlight.toList().forEach { it.join() } }
 
+    /** The palace-specific read surface (browse/threads/profileView), or null for any other technique. */
+    fun palace(): dev.sophi.memory.jane.JanesPalace? = technique as? dev.sophi.memory.jane.JanesPalace
+
     fun close() {
         encodeScope.cancel()
         (technique as? dev.sophi.memory.jane.JanesPalace)?.close()
