@@ -151,6 +151,10 @@ class CompanionRuntime(
 
     suspend fun runTaskNow(taskId: String) { scheduleEngine.runNow(taskId) }
 
+    fun pauseTask(taskId: String): Boolean = taskStore.setEnabled(taskId, false)
+    fun resumeTask(taskId: String): Boolean = taskStore.setEnabled(taskId, true)
+    fun removeTask(taskId: String): Boolean = taskStore.remove(taskId)
+
     private fun stateFlowFor(sessionId: String): MutableStateFlow<SessionState> =
         sessionStates.getOrPut(sessionId) { MutableStateFlow(SessionState.Idle) }
 
