@@ -22,8 +22,25 @@ import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
 import dev.sophi.schedule.notify.NotificationText
 import dev.sophi.schedule.notify.Notifier
+import java.awt.Desktop
+import java.awt.desktop.AppReopenedEvent
+import java.awt.desktop.AppReopenedListener
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
+
+/**
+ * macOS sends a distinct "reopen" event on a Dock-icon click when the app has zero open windows
+ * — separate from Tray's onAction, and unhandled by default. Without this, the Dock icon is a
+ * dead click once the window's been closed (Tray still works, since its onAction is wired directly).
+ */
+private fun registerDockReopenHandler(onReopen: () -> Unit) {
+    if (!Desktop.isDesktopSupported()) return
+    val desktop = Desktop.getDesktop()
+    if (!desktop.isSupported(Desktop.Action.APP_EVENT_REOPENED)) return
+    desktop.addAppEventListener(object : AppReopenedListener {
+        override fun appReopened(e: AppReopenedEvent) = onReopen()
+    })
+}
 
 private fun buildRuntime(
     settings: CompanionSettings,
@@ -153,6 +170,7 @@ fun main() = application {
     var settings by remember { mutableStateOf(storedSettings?.takeIf { storedProblem == null }) }
     var runtime by remember { mutableStateOf<CompanionRuntime?>(null) }
     var isWindowVisible by remember { mutableStateOf(false) }
+    remember { registerDockReopenHandler { isWindowVisible = true } }
     val trayState = rememberTrayState()
     val baseTrayIcon = painterResource("icons/logo.png")
     val hasUnreadNotifications = runtime?.notificationCenter?.records?.collectAsState()?.value?.any { !it.read } ?: false
