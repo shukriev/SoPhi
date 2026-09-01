@@ -838,6 +838,78 @@ class CompanionRuntimeTest : FunSpec({
 
         runtime.consolidationHistory().map { it.id } shouldBe listOf("consolidation_1")
     }
+
+    test("pauseTask disables a task and resumeTask re-enables it") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+        val task = runtime.createTask("nightly digest", "summarize today")
+
+        runtime.pauseTask(task.id) shouldBe true
+        runtime.tasks().single { it.id == task.id }.enabled shouldBe false
+
+        runtime.resumeTask(task.id) shouldBe true
+        runtime.tasks().single { it.id == task.id }.enabled shouldBe true
+    }
+
+    test("pauseTask and resumeTask return false for an unknown task id") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+
+        runtime.pauseTask("task_unknown") shouldBe false
+        runtime.resumeTask("task_unknown") shouldBe false
+    }
+
+    test("removeTask deletes the task so it no longer appears in tasks()") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+        val task = runtime.createTask("one-off cleanup", "clean up temp files")
+
+        runtime.removeTask(task.id) shouldBe true
+
+        runtime.tasks().map { it.id } shouldBe emptyList()
+    }
 })
 
 private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }
