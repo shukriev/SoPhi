@@ -33,6 +33,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -138,25 +139,31 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
                 }
             }
         }
-        VoiceControls(voiceController, speechOutput)
+        val canSend = state != SessionState.Running && state !is SessionState.NeedsConfirmation && input.isNotBlank()
+        fun sendCurrentInput() {
+            if (isRemote) {
+                scope.launch { runtime.sendRemoteMessage(activeSessionId, input) }
+            } else {
+                runtime.sendMessage(activeSessionId, input)
+            }
+            input = ""
+        }
         Row {
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.weight(1f).onFocusChanged { textFieldFocused = it.isFocused },
+                modifier = Modifier.weight(1f)
+                    .onFocusChanged { textFieldFocused = it.isFocused }
+                    .onPreviewKeyEvent { event ->
+                        if (canSend && event.type == KeyEventType.KeyDown && event.key == Key.Enter && !event.isShiftPressed) {
+                            sendCurrentInput()
+                            true
+                        } else false
+                    },
                 enabled = state != SessionState.Running && state !is SessionState.NeedsConfirmation
             )
-            Button(
-                enabled = state != SessionState.Running && state !is SessionState.NeedsConfirmation && input.isNotBlank(),
-                onClick = {
-                    if (isRemote) {
-                        scope.launch { runtime.sendRemoteMessage(activeSessionId, input) }
-                    } else {
-                        runtime.sendMessage(activeSessionId, input)
-                    }
-                    input = ""
-                }
-            ) { Text("Send") }
+            VoiceControls(voiceController, speechOutput)
+            Button(enabled = canSend, onClick = { sendCurrentInput() }) { Text("Send") }
         }
     }
 }
