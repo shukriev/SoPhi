@@ -29,6 +29,9 @@ fun main() = runBlocking {
     server.addTool(name = "ping", description = "Replies pong") { _ ->
         CallToolResult(content = listOf(TextContent("pong")))
     }
+    server.addTool(name = "path", description = "Replies this process's PATH env var") { _ ->
+        CallToolResult(content = listOf(TextContent(System.getenv("PATH") ?: "")))
+    }
 
     val transport = StdioServerTransport(
         input = System.`in`.asSource().buffered(),

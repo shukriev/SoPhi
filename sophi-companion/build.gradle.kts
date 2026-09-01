@@ -60,6 +60,15 @@ compose.desktop {
             macOS {
                 iconFile.set(project.file("src/main/resources/icons/logo.icns"))
                 bundleID = "dev.sophi.companion"
+                // Without this, macOS TCC denies microphone access silently (javax.sound.sampled
+                // never throws — it just hands back empty/silent audio), so push-to-talk records
+                // nothing and whisper.cpp hallucinates on the silence (its well-known "you" artifact).
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>NSMicrophoneUsageDescription</key>
+                        <string>Sophi uses your microphone for push-to-talk voice input.</string>
+                    """.trimIndent()
+                }
             }
             windows {
                 iconFile.set(project.file("src/main/resources/icons/logo.ico"))
