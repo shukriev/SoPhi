@@ -758,6 +758,86 @@ class CompanionRuntimeTest : FunSpec({
         body shouldContain "strengthened=2"
         body shouldContain "pruned=3"
     }
+
+    test("memoryBrowse, memoryThreads, and memoryProfile return safe empty defaults when memory isn't enabled") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+
+        runtime.memoryBrowse() shouldBe emptyList()
+        runtime.memoryThreads() shouldBe emptyMap()
+        runtime.memoryProfile() shouldBe emptyList()
+    }
+
+    test("lessons returns active lessons for the given scope from the configured learning home") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val learningHome = dir.resolve("learning")
+        val lessonStore = dev.sophi.learning.LessonStore(dev.sophi.learning.JsonlLog(learningHome.resolve("lessons.jsonl")))
+        lessonStore.add(dev.sophi.learning.Lesson(
+            id = "les_1", ts = 1L, scope = "/project", sessionId = "s1", text = "use -pl for module tests", kind = "tool_usage"
+        ))
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
+            learningHome = learningHome
+        )
+
+        runtime.lessons("/project").map { it.id } shouldBe listOf("les_1")
+        runtime.lessons("/other-project") shouldBe emptyList()
+    }
+
+    test("consolidationHistory returns runs recorded at the configured consolidation history path") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val consolidationHistoryPath = dir.resolve("consolidations.jsonl")
+        dev.sophi.memory.jane.ConsolidationHistoryStore(consolidationHistoryPath).record(
+            dev.sophi.memory.jane.ConsolidationRecord(
+                ts = 1L, merged = 2, strengthened = 1, compressed = 0, pruned = 0,
+                softDeletedIds = emptyList(), purgedIds = emptyList(), autoPurgeEnabled = false, id = "consolidation_1"
+            )
+        )
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json"))),
+            consolidationHistoryPath = consolidationHistoryPath
+        )
+
+        runtime.consolidationHistory().map { it.id } shouldBe listOf("consolidation_1")
+    }
 })
 
 private fun freePort(): Int = java.net.ServerSocket(0).use { it.localPort }

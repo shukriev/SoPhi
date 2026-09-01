@@ -63,6 +63,7 @@ private sealed class Selection {
     object Mcp : Selection()
     object Goals : Selection()
     object Skills : Selection()
+    object Memory : Selection()
     object Notifications : Selection()
     object Settings : Selection()
 }
@@ -123,6 +124,7 @@ fun AppShell(
             onSelectMcp = { selected = Selection.Mcp },
             onSelectGoals = { selected = Selection.Goals },
             onSelectSkills = { selected = Selection.Skills },
+            onSelectMemory = { selected = Selection.Memory },
             onSelectNotifications = { selected = Selection.Notifications },
             onSelectSettings = { selected = Selection.Settings },
             hasUnreadNotifications = hasUnreadNotifications,
@@ -163,6 +165,7 @@ fun AppShell(
                 Selection.Mcp -> McpTab(runtime)
                 Selection.Goals -> GoalsTab(runtime)
                 Selection.Skills -> SkillsTab(runtime)
+                Selection.Memory -> MemoryTab(runtime)
                 Selection.Notifications -> NotificationsTab(runtime)
                 Selection.Settings -> SettingsTab(settings, onSettingsChanged, voiceInstaller)
                 null -> Text("Starting…")
@@ -179,6 +182,7 @@ private fun Sidebar(
     onSelectMcp: () -> Unit,
     onSelectGoals: () -> Unit,
     onSelectSkills: () -> Unit,
+    onSelectMemory: () -> Unit,
     onSelectNotifications: () -> Unit,
     onSelectSettings: () -> Unit,
     hasUnreadNotifications: Boolean,
@@ -217,6 +221,7 @@ private fun Sidebar(
         NavRow(label = "MCP", selected = selected == Selection.Mcp, onClick = onSelectMcp)
         NavRow(label = "Goals", selected = selected == Selection.Goals, onClick = onSelectGoals)
         NavRow(label = "Skills", selected = selected == Selection.Skills, onClick = onSelectSkills)
+        NavRow(label = "Memory", selected = selected == Selection.Memory, onClick = onSelectMemory)
         NavRow(
             label = "Notifications",
             selected = selected == Selection.Notifications,

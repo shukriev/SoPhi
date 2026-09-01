@@ -40,7 +40,11 @@ class CompanionRuntime(
     hubPort: Int = 8765,
     private val voiceConfig: dev.sophi.companion.voice.VoiceConfig? = null,
     private val sttEnabled: Boolean = false,
-    private val ttsEnabled: Boolean = false
+    private val ttsEnabled: Boolean = false,
+    private val learningHome: java.nio.file.Path =
+        java.nio.file.Path.of(System.getProperty("user.home"), ".sophi", "learning"),
+    private val consolidationHistoryPath: java.nio.file.Path =
+        java.nio.file.Path.of(System.getProperty("user.home"), ".sophi", "memory", "consolidations.jsonl")
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val scheduleEngine = sophiRuntime.scheduleEngine(taskStore, runLog, notifier)
@@ -55,6 +59,8 @@ class CompanionRuntime(
     private val mcpConfigWriter = dev.sophi.mcp.config.McpConfigWriter()
     private val hubServer = dev.sophi.hub.HubServer(hubPort)
     val remoteSessions = RemoteSessionRegistry()
+    private val lessonStore = dev.sophi.learning.LessonStore(dev.sophi.learning.JsonlLog(learningHome.resolve("lessons.jsonl")))
+    private val consolidationHistoryStore = dev.sophi.memory.jane.ConsolidationHistoryStore(consolidationHistoryPath)
 
     init {
         // Scope note (narrower than connecting as a client to an existing hub for a stale
@@ -94,6 +100,20 @@ class CompanionRuntime(
     fun skills(): List<Pair<String, Skill>> = sophiRuntime.skills()
     fun installSkill(source: String): InstallResult = sophiRuntime.installSkill(source)
     fun removeSkill(id: String): Boolean = sophiRuntime.removeSkill(id)
+
+    /** Read-only memory browsing — all empty/no-op when memory isn't enabled for this runtime. */
+    fun memoryBrowse(filter: dev.sophi.memory.BrowseFilter = dev.sophi.memory.BrowseFilter()): List<dev.sophi.memory.MemoryView> =
+        sophiRuntime.memoryPlugin?.palace()?.browse(filter) ?: emptyList()
+
+    fun memoryThreads(): Map<String, List<String>> = sophiRuntime.memoryPlugin?.palace()?.threads() ?: emptyMap()
+
+    fun memoryProfile(): List<dev.sophi.memory.ProfileAttributeView> =
+        sophiRuntime.memoryPlugin?.palace()?.profileView() ?: emptyList()
+
+    /** Active lessons for [scope] (default: current working directory), mirroring `sophi lessons list`. */
+    fun lessons(scope: String = System.getProperty("user.dir")): List<dev.sophi.learning.Lesson> = lessonStore.active(scope)
+
+    fun consolidationHistory(): List<dev.sophi.memory.jane.ConsolidationRecord> = consolidationHistoryStore.all()
 
     suspend fun addOrUpdateMcpServer(config: dev.sophi.mcp.config.McpServerConfig) {
         val current = mcpConfigLoader.load(mcpConfigPath)
