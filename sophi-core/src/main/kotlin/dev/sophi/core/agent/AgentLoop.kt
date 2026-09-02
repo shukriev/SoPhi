@@ -47,6 +47,18 @@ private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
 private const val MAX_COMPACTIONS_WITHOUT_RELIEF = 2
 private const val LOOP_GUARD_ROUND_BUDGET_MARGIN = 3
 private val SEARCH_TOOL_NAMES = setOf("glob", "grep")
+/**
+ * Built-in tools (BashTool, FetchUrlTool) cap their own output, but a tool provided by an MCP
+ * server — e.g. a browser snapshot — is outside our control and can return an arbitrarily large
+ * result. Compaction can't help here: it only reacts to the *previous* round's usage, so a single
+ * oversized result is already inside `messages` and about to be sent before compaction ever sees
+ * it. This is the one chokepoint every tool result passes through, so it's where the cap belongs.
+ */
+private const val MAX_TOOL_RESULT_CHARS = 100_000
+
+private fun truncateToolResult(result: String): String =
+    if (result.length <= MAX_TOOL_RESULT_CHARS) result
+    else result.take(MAX_TOOL_RESULT_CHARS) + "\n... output truncated"
 
 /**
  * Why a turn ended via [AgentLoop.finishEarly] rather than a normal completion. Callers (e.g.
@@ -338,7 +350,12 @@ class AgentLoop(
                         onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
                         ToolCallOutcome(
                             call,
-                            Message(role = MessageRole.TOOL, content = result, toolCallId = call.id, toolName = call.name),
+                            Message(
+                                role = MessageRole.TOOL,
+                                content = truncateToolResult(result),
+                                toolCallId = call.id,
+                                toolName = call.name
+                            ),
                             failed
                         )
                     }
