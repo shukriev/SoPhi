@@ -11,6 +11,7 @@ import dev.sophi.core.tools.ToolRegistry
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.Runs
@@ -262,6 +263,44 @@ class AgentLoopTest : FunSpec({
 
         val toolResultMsg = capturedRequests[1].messages.last()
         toolResultMsg.content shouldBe "Error: disk full"
+    }
+
+    test("turn() truncates an oversized tool result before it enters the conversation") {
+        // Reproduces the "LLM stream error: Stream failed" bug: an MCP tool we don't control
+        // (e.g. a browser snapshot) can return an arbitrarily large result. Built-in tools like
+        // BashTool/FetchUrlTool cap their own output, but MCP-provided tools don't — so AgentLoop
+        // must cap every tool result at the one point they all pass through, or a single huge
+        // result can blow straight past the model's real context window before compaction ever
+        // gets a chance to run (compaction only reacts to the *previous* round's usage).
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        val hugeResult = "x".repeat(500_000)
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "snapshot"
+            override val description = "Returns a huge snapshot"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = hugeResult
+        })
+        val loopWithTool = newLoop(toolRegistry)
+
+        val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            capturedRequests.add(firstArg())
+            if (capturedRequests.size == 1)
+                LLMResponse.ToolUse(
+                    calls = listOf(dev.sophi.ai.api.ToolCall("c1", "snapshot", "{}")),
+                    usage = TokenUsage(1, 0)
+                ).toStreamFlow()
+            else
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        }
+        every { sessionManager.save(any()) } just Runs
+
+        loopWithTool.turn(session, "snapshot the page", config)
+
+        val toolResultMsg = capturedRequests[1].messages.last()
+        toolResultMsg.content.length shouldBeLessThan hugeResult.length
+        toolResultMsg.content shouldContain "output truncated"
     }
 
     test("turn() stops gracefully at the maxToolRounds ceiling, persisting the rounds done so far") {
