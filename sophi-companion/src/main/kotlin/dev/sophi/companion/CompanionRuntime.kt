@@ -53,6 +53,9 @@ class CompanionRuntime(
     private val voiceControllers = mutableMapOf<String, dev.sophi.companion.voice.VoiceController>()
     private val speechOutputs = mutableMapOf<String, dev.sophi.companion.voice.SpeechOutput>()
     private val confirmationDeferreds = mutableMapOf<String, CompletableDeferred<Map<String, Boolean>>>()
+    // Tool names a session has been told to stop asking about, via "Approve for session" — cleared
+    // when the session ends (this map simply never gets an entry for a new session id).
+    private val sessionApprovedTools = mutableMapOf<String, MutableSet<String>>()
     private val pendingConfirmationSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private var pollingJob: Job? = null
     private val mcpConfigLoader = dev.sophi.mcp.config.McpConfigLoader()
@@ -79,10 +82,42 @@ class CompanionRuntime(
             }
         }
         scope.launch {
-            mcpServers().filter { it.enabled }.forEach { config ->
-                runCatching { sophiRuntime.connectMcpServer(config) }
-            }
+            mcpServers().filter { it.enabled }.forEach { config -> connectMcpServerNotifying(config) }
         }
+    }
+
+    /**
+     * [SophiRuntime.connectMcpServer] never throws for an ordinary connect failure — the SDK's
+     * [dev.sophi.mcp.McpClientManager] already catches spawn/handshake errors internally and logs
+     * them to `System.err`, which is invisible for a Dock/Finder-launched app (no terminal to see
+     * it in) and easy to miss even from `./gradlew run`. Surface both outcomes here instead, the
+     * same way hub-server startup failures already are, so a misconfigured or hung MCP server
+     * (locked `--user-data-dir`, stalled first-run `npx -y` fetch, wrong executable path) shows up
+     * in the Notifications tab rather than silently leaving tools missing from every chat turn.
+     */
+    private suspend fun connectMcpServerNotifying(config: dev.sophi.mcp.config.McpServerConfig) {
+        // McpClientManager.connectOne catches connect/handshake/listTools failures itself and
+        // returns emptyList() rather than throwing (connect-all callers need a broken server to
+        // not block the rest) — so the real cause never reaches here as a thrown exception. This
+        // callback is the only way to recover it for display instead of falling back to a generic
+        // message.
+        var cause: Throwable? = null
+        runCatching { sophiRuntime.connectMcpServer(config) { e -> cause = e } }
+            .onSuccess { tools ->
+                if (tools.isEmpty()) {
+                    notificationCenter.add(
+                        NotificationKind.Mcp, "MCP server '${config.name}' failed to connect",
+                        cause?.message
+                            ?: "Connected but registered no tools. Check that the server command starts correctly outside sophi-companion too."
+                    )
+                }
+            }
+            .onFailure { e ->
+                notificationCenter.add(
+                    NotificationKind.Mcp, "MCP server '${config.name}' failed to connect",
+                    e.message ?: "unknown error"
+                )
+            }
     }
 
     fun isRemote(sessionId: String): Boolean = sessionId in remoteSessions.remoteSessionIds()
@@ -120,7 +155,7 @@ class CompanionRuntime(
         val updated = current.servers.filterNot { it.name == config.name } + config
         mcpConfigWriter.write(mcpConfigPath, current.copy(servers = updated))
         sophiRuntime.disconnectMcpServer(config.name)
-        if (config.enabled) sophiRuntime.connectMcpServer(config)
+        if (config.enabled) connectMcpServerNotifying(config)
     }
 
     suspend fun removeMcpServer(name: String) {
@@ -134,7 +169,7 @@ class CompanionRuntime(
         val config = current.servers.find { it.name == name } ?: return
         val updated = config.copy(enabled = enabled)
         mcpConfigWriter.write(mcpConfigPath, current.copy(servers = current.servers.map { if (it.name == name) updated else it }))
-        if (enabled) sophiRuntime.connectMcpServer(updated) else sophiRuntime.disconnectMcpServer(name)
+        if (enabled) connectMcpServerNotifying(updated) else sophiRuntime.disconnectMcpServer(name)
     }
 
     fun tasks(): List<dev.sophi.schedule.model.ScheduledTask> = taskStore.list()
@@ -251,6 +286,12 @@ class CompanionRuntime(
     }
 
     suspend fun awaitConfirmation(sessionId: String, requests: List<ConfirmationRequest>): Map<String, Boolean> {
+        val approvedTools = sessionApprovedTools[sessionId] ?: emptySet()
+        val (autoApproved, needsPrompt) = requests.partition { it.toolName in approvedTools }
+        // Every request already covered by a prior "Approve for session" — skip the card
+        // entirely rather than showing a confirmation the user already said to stop asking about.
+        if (needsPrompt.isEmpty()) return requests.associate { it.callId to true }
+
         val state = stateFlowFor(sessionId)
         // .update{} (atomic read-modify-write) rather than .value = .value + x — concurrent
         // sessions each awaiting confirmation race on this same StateFlow, and a plain
@@ -259,18 +300,28 @@ class CompanionRuntime(
         // Updated before state.value so a poller observing NeedsConfirmation also sees this
         // session's id already present in pendingConfirmations.
         pendingConfirmationSessionIds.update { it + sessionId }
-        state.value = SessionState.NeedsConfirmation(requests)
+        state.value = SessionState.NeedsConfirmation(needsPrompt)
         val deferred = CompletableDeferred<Map<String, Boolean>>()
         confirmationDeferreds[sessionId] = deferred
         val result = deferred.await()
         state.value = SessionState.Running
-        return result
+        return autoApproved.associate { it.callId to true } + result
     }
 
     fun respondToConfirmation(sessionId: String, approved: Boolean) {
         val requests = (stateFlowFor(sessionId).value as? SessionState.NeedsConfirmation)?.requests ?: return
         pendingConfirmationSessionIds.update { it - sessionId }
         confirmationDeferreds.remove(sessionId)?.complete(requests.associate { it.callId to approved })
+    }
+
+    /** Approves the currently pending request(s) and remembers their tool names so this session
+     *  stops asking about those specific tools again — until the session ends or companion
+     *  restarts. Other sessions, and other tools within this session, are unaffected. */
+    fun approveForSession(sessionId: String) {
+        val requests = (stateFlowFor(sessionId).value as? SessionState.NeedsConfirmation)?.requests ?: return
+        sessionApprovedTools.getOrPut(sessionId) { mutableSetOf() }.addAll(requests.map { it.toolName })
+        pendingConfirmationSessionIds.update { it - sessionId }
+        confirmationDeferreds.remove(sessionId)?.complete(requests.associate { it.callId to true })
     }
 
     fun startSchedulePolling(intervalMs: Long = 30_000) {

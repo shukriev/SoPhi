@@ -42,4 +42,13 @@ class NotificationCenterTest : FunSpec({
 
         c.records.value shouldBe listOf(existing)
     }
+
+    test("clear empties records and persists the clear") {
+        val c = center()
+        c.add(NotificationKind.Schedule, "t", "b")
+
+        c.clear()
+
+        c.records.value shouldBe emptyList()
+    }
 })

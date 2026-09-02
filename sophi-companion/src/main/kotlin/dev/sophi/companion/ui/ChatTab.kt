@@ -128,6 +128,12 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
                                 runtime.respondToConfirmation(activeSessionId, true)
                             }
                         }) { Text("Approve") }
+                        if (!isRemote) {
+                            // Remote (CLI) sessions have no equivalent of CompanionRuntime's
+                            // per-session approved-tools memory — they go through the hub's
+                            // one-shot respondToRemoteConfirmation instead.
+                            Button(onClick = { runtime.approveForSession(activeSessionId) }) { Text("Approve for session") }
+                        }
                         Button(onClick = {
                             if (isRemote) {
                                 scope.launch { pending.requests.forEach { runtime.respondToRemoteConfirmation(activeSessionId, it.callId, false) } }

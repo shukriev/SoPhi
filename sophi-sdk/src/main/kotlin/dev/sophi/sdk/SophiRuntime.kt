@@ -163,11 +163,11 @@ class SophiRuntime internal constructor(
         }
     }
 
-    suspend fun connectMcpServer(config: McpServerConfig): List<String> {
+    suspend fun connectMcpServer(config: McpServerConfig, onFailure: (Throwable) -> Unit = {}): List<String> {
         val manager = requireNotNull(mcpClientManager) {
             "MCP not configured for this runtime — build it via RuntimeBuilder.mcpConfig(...)"
         }
-        return manager.connectOne(config).map { tool ->
+        return manager.connectOne(config, onFailure).map { tool ->
             toolRegistry.register(tool)
             tool.name
         }

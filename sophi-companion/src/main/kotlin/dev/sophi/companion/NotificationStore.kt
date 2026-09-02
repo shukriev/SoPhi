@@ -21,6 +21,8 @@ class NotificationStore(private val path: Path, private val maxRecords: Int = 20
         writeAll(readAll().map { it.copy(read = true) })
     }
 
+    fun clear() = synchronized(lock) { writeAll(emptyList()) }
+
     private fun readAll(): List<NotificationRecord> {
         if (!Files.exists(path)) return emptyList()
         val text = Files.readString(path)

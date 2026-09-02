@@ -44,4 +44,13 @@ class NotificationStoreTest : FunSpec({
         updated.id shouldBe record.id
         updated.title shouldBe record.title
     }
+
+    test("clear removes every record") {
+        val s = store()
+        s.add(NotificationRecord(kind = NotificationKind.Schedule, title = "t", body = "b"))
+
+        s.clear()
+
+        s.list() shouldBe emptyList()
+    }
 })

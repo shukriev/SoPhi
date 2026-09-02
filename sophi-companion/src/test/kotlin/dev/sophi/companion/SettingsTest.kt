@@ -261,4 +261,56 @@ class SettingsTest : FunSpec({
         store.save(CompanionSettings(providerType = ProviderTypes.CLAUDE, model = "m", workspaceDir = "/tmp/workspace"))
         store.load()?.workspaceDir shouldBe "/tmp/workspace"
     }
+
+    test("profiles defaults to empty, so a file written before profiles existed still loads") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val path = dir.resolve("companion.json")
+        path.writeText("""{"providerType":"claude","model":"claude-sonnet-4-5"}""")
+
+        SettingsStore(path).load()?.profiles shouldBe emptyList()
+    }
+
+    test("profiles round-trip through SettingsStore save/load") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        val profile = LlmProfile(
+            name = "Local Ollama",
+            providerType = ProviderTypes.OPENAI_COMPAT,
+            model = "qwen3:8b",
+            baseUrl = "http://localhost:11434/v1",
+            contextWindowTokens = 32768
+        )
+        store.save(CompanionSettings(profiles = listOf(profile)))
+
+        store.load()?.profiles shouldBe listOf(profile)
+    }
+
+    test("applyProfile copies the profile's provider fields but leaves other settings alone") {
+        val settings = CompanionSettings(
+            providerType = ProviderTypes.CLAUDE,
+            model = "claude-sonnet-4-5",
+            workspaceDir = "/keep/me",
+            profiles = listOf(
+                LlmProfile(
+                    name = "Local Ollama",
+                    providerType = ProviderTypes.OPENAI_COMPAT,
+                    model = "qwen3:8b",
+                    baseUrl = "http://localhost:11434/v1",
+                    apiKey = null,
+                    contextWindowTokens = 32768,
+                    maxTokens = 2048
+                )
+            )
+        )
+
+        val switched = settings.applyProfile(settings.profiles.single())
+
+        switched.providerType shouldBe ProviderTypes.OPENAI_COMPAT
+        switched.model shouldBe "qwen3:8b"
+        switched.baseUrl shouldBe "http://localhost:11434/v1"
+        switched.contextWindowTokens shouldBe 32768
+        switched.maxTokens shouldBe 2048
+        switched.workspaceDir shouldBe "/keep/me"
+        switched.profiles shouldBe settings.profiles
+    }
 })

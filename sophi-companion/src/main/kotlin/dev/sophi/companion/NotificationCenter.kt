@@ -18,4 +18,9 @@ class NotificationCenter(private val store: NotificationStore) {
         store.markAllRead()
         _records.value = store.list().reversed()
     }
+
+    fun clear() {
+        store.clear()
+        _records.value = emptyList()
+    }
 }

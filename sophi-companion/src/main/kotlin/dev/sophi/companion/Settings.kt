@@ -18,6 +18,13 @@ object ProviderTypes {
     val ALL = setOf(CLAUDE, OPENAI_COMPAT)
 }
 
+/** Human-readable label for a [ProviderTypes] value, for display in the profile list. */
+fun providerDisplayName(providerType: String): String = when (providerType) {
+    ProviderTypes.CLAUDE -> "Claude"
+    ProviderTypes.OPENAI_COMPAT -> "OpenAI-compatible"
+    else -> providerType
+}
+
 @Serializable
 data class CompanionSettings(
     val providerType: String = ProviderTypes.CLAUDE,
@@ -72,7 +79,33 @@ data class CompanionSettings(
      *  companion is an always-running background app, and some tool calls can fire from
      *  unattended scheduled/goal-mode runs with nobody watching; point this at a real projects
      *  folder for CLI-equivalent reach, opted into explicitly rather than granted by accident. */
-    val workspaceDir: String = System.getProperty("user.home") + "/.sophi/workspace"
+    val workspaceDir: String = System.getProperty("user.home") + "/.sophi/workspace",
+    /** Named provider configs saved from the Settings tab so you can flip between e.g. a remote
+     *  Claude setup and a local Ollama one without re-typing model/baseUrl/apiKey each time. */
+    val profiles: List<LlmProfile> = emptyList()
+)
+
+/** A saved snapshot of the provider fields, switchable via [CompanionSettings.applyProfile]. */
+@Serializable
+data class LlmProfile(
+    val name: String,
+    val providerType: String,
+    val model: String,
+    val baseUrl: String? = null,
+    val apiKey: String? = null,
+    val contextWindowTokens: Int = 200_000,
+    val maxTokens: Int = 4096
+)
+
+/** Copies [profile]'s provider fields onto these settings, leaving everything else (voice, memory,
+ *  workspace, other saved profiles) untouched. */
+fun CompanionSettings.applyProfile(profile: LlmProfile): CompanionSettings = copy(
+    providerType = profile.providerType,
+    model = profile.model,
+    baseUrl = profile.baseUrl,
+    apiKey = profile.apiKey,
+    contextWindowTokens = profile.contextWindowTokens,
+    maxTokens = profile.maxTokens
 )
 
 /**

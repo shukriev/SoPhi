@@ -7,6 +7,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.memory.ConsolidationReport
@@ -508,6 +509,75 @@ class CompanionRuntimeTest : FunSpec({
         runtime.respondToConfirmation(sessionId, true)
         runBlocking { waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value == SessionState.Idle } }
         runtime.pendingConfirmations.value shouldBe emptySet()
+    }
+
+    test("approveForSession remembers a tool so a later request for it auto-approves without prompting") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+        val first = ConfirmationRequest(callId = "call-1", toolName = "risky_tool", argumentsJson = "{}", riskLevel = RiskLevel.DESTRUCTIVE)
+
+        runBlocking {
+            val firstResult = async { runtime.awaitConfirmation(sessionId, listOf(first)) }
+            waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value is SessionState.NeedsConfirmation }
+
+            runtime.approveForSession(sessionId)
+
+            firstResult.await() shouldBe mapOf("call-1" to true)
+
+            // A later request for the same tool name must resolve immediately — no card, no wait.
+            val second = ConfirmationRequest(callId = "call-2", toolName = "risky_tool", argumentsJson = "{}", riskLevel = RiskLevel.DESTRUCTIVE)
+            val secondResult = withTimeout(2000) { runtime.awaitConfirmation(sessionId, listOf(second)) }
+            secondResult shouldBe mapOf("call-2" to true)
+        }
+    }
+
+    test("approveForSession only covers the tool names it was asked about, not every future tool") {
+        val dir = createTempDirectory("companion-runtime-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = SlowFakeProvider(delayMs = 0)
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val runtime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        )
+        val sessionId = runBlocking { sophiRuntime.newSession() }
+        val first = ConfirmationRequest(callId = "call-1", toolName = "risky_tool", argumentsJson = "{}", riskLevel = RiskLevel.DESTRUCTIVE)
+
+        runBlocking {
+            val firstResult = async { runtime.awaitConfirmation(sessionId, listOf(first)) }
+            waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value is SessionState.NeedsConfirmation }
+            runtime.approveForSession(sessionId)
+            firstResult.await()
+
+            val otherTool = ConfirmationRequest(callId = "call-2", toolName = "other_tool", argumentsJson = "{}", riskLevel = RiskLevel.DESTRUCTIVE)
+            val otherResult = async { runtime.awaitConfirmation(sessionId, listOf(otherTool)) }
+            waitUntil(timeoutMs = 2000) { runtime.sessionState(sessionId).value is SessionState.NeedsConfirmation }
+            runtime.respondToConfirmation(sessionId, true)
+            otherResult.await() shouldBe mapOf("call-2" to true)
+        }
     }
 
     test("pendingConfirmations tracks two sessions independently") {
