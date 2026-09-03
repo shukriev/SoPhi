@@ -62,7 +62,9 @@ fun ProviderFieldsForm(
     contextWindowTokens: String,
     onContextWindowTokensChange: (String) -> Unit,
     maxTokens: String,
-    onMaxTokensChange: (String) -> Unit
+    onMaxTokensChange: (String) -> Unit,
+    requestTimeoutSeconds: String,
+    onRequestTimeoutSecondsChange: (String) -> Unit
 ) {
     val isLocal = providerType == ProviderTypes.OPENAI_COMPAT
     var providerMenuExpanded by remember { mutableStateOf(false) }
@@ -114,6 +116,19 @@ fun ProviderFieldsForm(
         Text(
             "Local: Ollama $OLLAMA_BASE_URL, vLLM http://localhost:8000/v1   ·   " +
                 "Hosted: OpenAI https://api.openai.com/v1, or any other OpenAI-compatible endpoint",
+            style = MaterialTheme.typography.bodySmall
+        )
+
+        OutlinedTextField(
+            value = requestTimeoutSeconds,
+            onValueChange = onRequestTimeoutSecondsChange,
+            label = { Text("Request timeout (seconds)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "How long to wait for the next chunk of a response before giving up. Local reasoning " +
+                "models can spend well over a minute \"thinking\" before producing any output — too " +
+                "short a value cuts the request off mid-generation instead of one that's truly stuck.",
             style = MaterialTheme.typography.bodySmall
         )
     }
@@ -169,6 +184,7 @@ fun FirstRunSettingsScreen(
     var apiKey by remember { mutableStateOf(existing?.apiKey ?: "") }
     var contextWindowTokens by remember { mutableStateOf((existing?.contextWindowTokens ?: 200_000).toString()) }
     var maxTokens by remember { mutableStateOf((existing?.maxTokens ?: 4096).toString()) }
+    var requestTimeoutSeconds by remember { mutableStateOf((existing?.requestTimeoutSeconds ?: 300).toString()) }
 
     // Switching provider resets the fields to that provider's sensible starting values.
     fun selectProvider(type: String) {
@@ -187,6 +203,7 @@ fun FirstRunSettingsScreen(
         apiKey = apiKey.ifBlank { null },
         contextWindowTokens = contextWindowTokens.trim().toIntOrNull() ?: 0,
         maxTokens = maxTokens.trim().toIntOrNull() ?: 0,
+        requestTimeoutSeconds = requestTimeoutSeconds.trim().toIntOrNull() ?: 0,
         // Preserve any custom paths from the existing file rather than resetting them to defaults.
         sessionsDir = existing?.sessionsDir ?: CompanionSettings().sessionsDir,
         mcpConfigPath = existing?.mcpConfigPath ?: CompanionSettings().mcpConfigPath,
@@ -195,6 +212,7 @@ fun FirstRunSettingsScreen(
     val error = when {
         contextWindowTokens.trim().toIntOrNull() == null -> "Context window must be a whole number"
         maxTokens.trim().toIntOrNull() == null -> "Max tokens must be a whole number"
+        requestTimeoutSeconds.trim().toIntOrNull() == null -> "Request timeout must be a whole number"
         else -> draft.validationError()
     }
 
@@ -223,7 +241,9 @@ fun FirstRunSettingsScreen(
             contextWindowTokens = contextWindowTokens,
             onContextWindowTokensChange = { contextWindowTokens = it },
             maxTokens = maxTokens,
-            onMaxTokensChange = { maxTokens = it }
+            onMaxTokensChange = { maxTokens = it },
+            requestTimeoutSeconds = requestTimeoutSeconds,
+            onRequestTimeoutSecondsChange = { requestTimeoutSeconds = it }
         )
 
         Spacer(Modifier.height(12.dp))

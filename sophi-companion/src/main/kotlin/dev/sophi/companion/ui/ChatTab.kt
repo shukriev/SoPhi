@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -106,13 +107,15 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
         if (state is SessionState.Error) {
             Text((state as SessionState.Error).message, color = MaterialTheme.colorScheme.error)
         }
-        LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-            items(history, key = { it.id }) { entry ->
-                TranscriptRow(
-                    entry = entry,
-                    expanded = expandedIds[entry.id] == true,
-                    onToggle = { expandedIds[entry.id] = expandedIds[entry.id] != true }
-                )
+        SelectionContainer(modifier = Modifier.weight(1f)) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                items(history, key = { it.id }) { entry ->
+                    TranscriptRow(
+                        entry = entry,
+                        expanded = expandedIds[entry.id] == true,
+                        onToggle = { expandedIds[entry.id] = expandedIds[entry.id] != true }
+                    )
+                }
             }
         }
         if (pending != null) {

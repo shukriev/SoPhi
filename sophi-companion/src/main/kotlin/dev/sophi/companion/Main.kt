@@ -26,6 +26,7 @@ import java.awt.Desktop
 import java.awt.desktop.AppReopenedEvent
 import java.awt.desktop.AppReopenedListener
 import java.nio.file.Path
+import java.time.Duration
 import kotlin.io.path.createDirectories
 
 /**
@@ -54,6 +55,7 @@ private fun buildRuntime(
     val provider = try {
         buildProviderFromType(
             settings.providerType, apiKey, settings.baseUrl, settings.model,
+            requestTimeout = Duration.ofSeconds(settings.requestTimeoutSeconds.toLong()),
             missingApiKeyMessage = "apiKey is required for provider type claude",
             missingBaseUrlMessage = "baseUrl is required for provider type openai-compat"
         )

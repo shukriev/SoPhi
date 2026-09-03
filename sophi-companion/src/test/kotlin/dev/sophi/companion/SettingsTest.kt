@@ -298,7 +298,8 @@ class SettingsTest : FunSpec({
                     baseUrl = "http://localhost:11434/v1",
                     apiKey = null,
                     contextWindowTokens = 32768,
-                    maxTokens = 2048
+                    maxTokens = 2048,
+                    requestTimeoutSeconds = 600
                 )
             )
         )
@@ -310,7 +311,24 @@ class SettingsTest : FunSpec({
         switched.baseUrl shouldBe "http://localhost:11434/v1"
         switched.contextWindowTokens shouldBe 32768
         switched.maxTokens shouldBe 2048
+        switched.requestTimeoutSeconds shouldBe 600
         switched.workspaceDir shouldBe "/keep/me"
         switched.profiles shouldBe settings.profiles
+    }
+
+    test("requestTimeoutSeconds defaults to 300, long enough for a local reasoning model's hidden thinking") {
+        CompanionSettings().requestTimeoutSeconds shouldBe 300
+    }
+
+    test("a non-positive requestTimeoutSeconds is rejected") {
+        CompanionSettings(requestTimeoutSeconds = 0).validationError() shouldContain "requestTimeoutSeconds"
+    }
+
+    test("a file written before requestTimeoutSeconds existed still loads, defaulting it to 300") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val path = dir.resolve("companion.json")
+        path.writeText("""{"providerType":"claude","model":"claude-sonnet-4-5"}""")
+
+        SettingsStore(path).load()?.requestTimeoutSeconds shouldBe 300
     }
 })

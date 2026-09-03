@@ -217,11 +217,27 @@ class RuntimeBuilder {
                 )
                 null
             } else {
-                val palace = JanesPalace(
-                    JanesPalaceConfig(home = memoryHome, sessionModel = model, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
-                    p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
+                // ArcadeDB locks its database directory to one process (see PalaceStore's class
+                // doc) — opening it while another Sophi process (CLI, another companion instance)
+                // already holds memoryHome throws here. Degrade the same way a failed embeddings
+                // probe does, rather than letting an uncaught exception crash the whole build().
+                runCatching {
+                    JanesPalace(
+                        JanesPalaceConfig(home = memoryHome, sessionModel = model, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
+                        p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
+                    )
+                }.fold(
+                    onSuccess = { palace -> MemoryPlugin(palace).also { pluginRegistry.register(it) } },
+                    onFailure = { e ->
+                        mc.onWarning(
+                            "memory: disabled — couldn't open the memory database at $memoryHome " +
+                                "(${e.message ?: "unknown error"}). Another Sophi process (CLI or another " +
+                                "companion instance) may already have it open — only one process can use " +
+                                "a given memory directory at a time."
+                        )
+                        null
+                    }
                 )
-                MemoryPlugin(palace).also { pluginRegistry.register(it) }
             }
         }
         val memorySection = if (memoryPlugin != null) MemoryPromptSection.TEXT else null
