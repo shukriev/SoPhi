@@ -241,7 +241,7 @@ private fun NavRow(label: String, selected: Boolean, onClick: () -> Unit, hasBad
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 9.dp)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         if (hasBadge) {

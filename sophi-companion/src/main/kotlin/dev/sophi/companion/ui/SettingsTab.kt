@@ -82,6 +82,7 @@ fun SettingsTab(
         var apiKey by remember(settings) { mutableStateOf(settings.apiKey ?: "") }
         var contextWindowTokens by remember(settings) { mutableStateOf(settings.contextWindowTokens.toString()) }
         var maxTokens by remember(settings) { mutableStateOf(settings.maxTokens.toString()) }
+        var requestTimeoutSeconds by remember(settings) { mutableStateOf(settings.requestTimeoutSeconds.toString()) }
 
         val draft = settings.copy(
             providerType = providerType,
@@ -89,11 +90,13 @@ fun SettingsTab(
             baseUrl = baseUrl.trim().ifBlank { null },
             apiKey = apiKey.ifBlank { null },
             contextWindowTokens = contextWindowTokens.trim().toIntOrNull() ?: 0,
-            maxTokens = maxTokens.trim().toIntOrNull() ?: 0
+            maxTokens = maxTokens.trim().toIntOrNull() ?: 0,
+            requestTimeoutSeconds = requestTimeoutSeconds.trim().toIntOrNull() ?: 0
         )
         val draftError = when {
             contextWindowTokens.trim().toIntOrNull() == null -> "Context window must be a whole number"
             maxTokens.trim().toIntOrNull() == null -> "Max tokens must be a whole number"
+            requestTimeoutSeconds.trim().toIntOrNull() == null -> "Request timeout must be a whole number"
             else -> draft.validationError()
         }
 
@@ -109,7 +112,9 @@ fun SettingsTab(
             contextWindowTokens = contextWindowTokens,
             onContextWindowTokensChange = { contextWindowTokens = it },
             maxTokens = maxTokens,
-            onMaxTokensChange = { maxTokens = it }
+            onMaxTokensChange = { maxTokens = it },
+            requestTimeoutSeconds = requestTimeoutSeconds,
+            onRequestTimeoutSecondsChange = { requestTimeoutSeconds = it }
         )
         if (draftError != null) {
             Text(draftError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -151,6 +156,7 @@ fun SettingsTab(
             var newApiKey by remember { mutableStateOf("") }
             var newContextWindowTokens by remember { mutableStateOf(newDefaults.contextWindowTokens) }
             var newMaxTokens by remember { mutableStateOf("4096") }
+            var newRequestTimeoutSeconds by remember { mutableStateOf("300") }
 
             val newProfileDraft = LlmProfile(
                 name = newName.trim(),
@@ -159,13 +165,15 @@ fun SettingsTab(
                 baseUrl = newBaseUrl.trim().ifBlank { null },
                 apiKey = newApiKey.ifBlank { null },
                 contextWindowTokens = newContextWindowTokens.trim().toIntOrNull() ?: 0,
-                maxTokens = newMaxTokens.trim().toIntOrNull() ?: 0
+                maxTokens = newMaxTokens.trim().toIntOrNull() ?: 0,
+                requestTimeoutSeconds = newRequestTimeoutSeconds.trim().toIntOrNull() ?: 0
             )
             val newProfileError = when {
                 newName.isBlank() -> "Name must not be blank"
                 settings.profiles.any { it.name == newProfileDraft.name } -> "A profile named '${newProfileDraft.name}' already exists"
                 newContextWindowTokens.trim().toIntOrNull() == null -> "Context window must be a whole number"
                 newMaxTokens.trim().toIntOrNull() == null -> "Max tokens must be a whole number"
+                newRequestTimeoutSeconds.trim().toIntOrNull() == null -> "Request timeout must be a whole number"
                 else ->
                     // Reuses CompanionSettings.validationError() for the provider fields it shares
                     // with LlmProfile, by checking them against a throwaway settings copy.
@@ -174,7 +182,8 @@ fun SettingsTab(
                         model = newProfileDraft.model,
                         baseUrl = newProfileDraft.baseUrl,
                         contextWindowTokens = newProfileDraft.contextWindowTokens,
-                        maxTokens = newProfileDraft.maxTokens
+                        maxTokens = newProfileDraft.maxTokens,
+                        requestTimeoutSeconds = newProfileDraft.requestTimeoutSeconds
                     ).validationError()
             }
 
@@ -203,7 +212,9 @@ fun SettingsTab(
                     contextWindowTokens = newContextWindowTokens,
                     onContextWindowTokensChange = { newContextWindowTokens = it },
                     maxTokens = newMaxTokens,
-                    onMaxTokensChange = { newMaxTokens = it }
+                    onMaxTokensChange = { newMaxTokens = it },
+                    requestTimeoutSeconds = newRequestTimeoutSeconds,
+                    onRequestTimeoutSecondsChange = { newRequestTimeoutSeconds = it }
                 )
                 if (newProfileError != null) {
                     Text(newProfileError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -265,6 +276,75 @@ fun SettingsTab(
             }
             InstallState.Ready, InstallState.Idle -> Unit
         }
+
+        Text("Memory", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+        Text(
+            "Jane's Theory long-term memory (experimental) — recalls facts and lessons across sessions. " +
+                "Requires an embedding model, separate from the chat model above.",
+            style = MaterialTheme.typography.bodySmall
+        )
+
+        var memoryEnabled by remember(settings) { mutableStateOf(settings.memoryEnabled) }
+        var embeddingModel by remember(settings) { mutableStateOf(settings.embeddingModel ?: "") }
+        var embeddingBaseUrl by remember(settings) { mutableStateOf(settings.embeddingBaseUrl ?: "") }
+        var embeddingApiKey by remember(settings) { mutableStateOf(settings.embeddingApiKey ?: "") }
+        var embeddingDimensions by remember(settings) { mutableStateOf(settings.embeddingDimensions.toString()) }
+
+        val memoryDraft = settings.copy(
+            memoryEnabled = memoryEnabled,
+            embeddingModel = embeddingModel.trim().ifBlank { null },
+            embeddingBaseUrl = embeddingBaseUrl.trim().ifBlank { null },
+            embeddingApiKey = embeddingApiKey.ifBlank { null },
+            embeddingDimensions = embeddingDimensions.trim().toIntOrNull() ?: 0
+        )
+        val memoryError = when {
+            embeddingDimensions.trim().toIntOrNull() == null -> "Embedding dimensions must be a whole number"
+            else -> memoryDraft.validationError()
+        }
+
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Switch(checked = memoryEnabled, onCheckedChange = { memoryEnabled = it })
+            Text(
+                if (memoryEnabled) "Enabled" else "Disabled",
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+        if (memoryEnabled) {
+            OutlinedTextField(
+                value = embeddingModel,
+                onValueChange = { embeddingModel = it },
+                label = { Text("Embedding model") },
+                placeholder = { Text("nomic-embed-text (Ollama) or text-embedding-3-small (OpenAI)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = embeddingBaseUrl,
+                onValueChange = { embeddingBaseUrl = it },
+                label = { Text("Embedding base URL") },
+                placeholder = { Text(OLLAMA_BASE_URL) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = embeddingApiKey,
+                onValueChange = { embeddingApiKey = it },
+                label = { Text("Embedding API key (optional — blank is fine for a local Ollama/vLLM server)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = embeddingDimensions,
+                onValueChange = { embeddingDimensions = it },
+                label = { Text("Embedding dimensions") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        if (memoryError != null) {
+            Text(memoryError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        Button(
+            modifier = Modifier.padding(top = 8.dp),
+            enabled = memoryError == null,
+            onClick = { onSettingsChanged(memoryDraft) }
+        ) { Text("Apply") }
 
         Text("Workspace", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
         OutlinedTextField(

@@ -41,6 +41,14 @@ data class CompanionSettings(
     val contextWindowTokens: Int = 200_000,
     /** Max tokens the model may generate per response — the equivalent of `sophi --max-tokens`. */
     val maxTokens: Int = 4096,
+    /**
+     * How long to wait for the next chunk of a streaming response before giving up, for
+     * [ProviderTypes.OPENAI_COMPAT]. Local reasoning models can spend well over a minute on hidden
+     * chain-of-thought before emitting any content — too short a value aborts the request out from
+     * under a model that's still generating rather than one that's actually stuck. Not used for
+     * Claude (Anthropic's client manages its own timeout).
+     */
+    val requestTimeoutSeconds: Int = 300,
     val sessionsDir: String = System.getProperty("user.home") + "/.sophi/sessions",
     val mcpConfigPath: String = System.getProperty("user.home") + "/.sophi/mcp.json",
     /** Directory of `*.md` AgentDefinition files this companion's scheduled tasks may delegate
@@ -94,7 +102,8 @@ data class LlmProfile(
     val baseUrl: String? = null,
     val apiKey: String? = null,
     val contextWindowTokens: Int = 200_000,
-    val maxTokens: Int = 4096
+    val maxTokens: Int = 4096,
+    val requestTimeoutSeconds: Int = 300
 )
 
 /** Copies [profile]'s provider fields onto these settings, leaving everything else (voice, memory,
@@ -105,7 +114,8 @@ fun CompanionSettings.applyProfile(profile: LlmProfile): CompanionSettings = cop
     baseUrl = profile.baseUrl,
     apiKey = profile.apiKey,
     contextWindowTokens = profile.contextWindowTokens,
-    maxTokens = profile.maxTokens
+    maxTokens = profile.maxTokens,
+    requestTimeoutSeconds = profile.requestTimeoutSeconds
 )
 
 /**
@@ -124,6 +134,7 @@ fun CompanionSettings.validationError(): String? = when {
     maxTokens <= 0 -> "maxTokens must be greater than 0"
     maxTokens > contextWindowTokens ->
         "maxTokens ($maxTokens) must not exceed contextWindowTokens ($contextWindowTokens)"
+    requestTimeoutSeconds <= 0 -> "requestTimeoutSeconds must be greater than 0"
     memoryEnabled && embeddingModel.isNullOrBlank() -> "embeddingModel is required when memoryEnabled is true"
     memoryEnabled && embeddingBaseUrl.isNullOrBlank() -> "embeddingBaseUrl is required when memoryEnabled is true"
     else -> null

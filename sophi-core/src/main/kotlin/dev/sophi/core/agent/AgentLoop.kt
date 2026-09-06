@@ -47,18 +47,17 @@ private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
 private const val MAX_COMPACTIONS_WITHOUT_RELIEF = 2
 private const val LOOP_GUARD_ROUND_BUDGET_MARGIN = 3
 private val SEARCH_TOOL_NAMES = setOf("glob", "grep")
+/** No tokenizer is available here, so this is a rough, provider-agnostic stand-in — good enough
+ *  to keep a request roughly under budget without needing a real tokenizer per model. */
+private const val CHARS_PER_TOKEN_ESTIMATE = 4
 /**
  * Built-in tools (BashTool, FetchUrlTool) cap their own output, but a tool provided by an MCP
  * server — e.g. a browser snapshot — is outside our control and can return an arbitrarily large
- * result. Compaction can't help here: it only reacts to the *previous* round's usage, so a single
- * oversized result is already inside `messages` and about to be sent before compaction ever sees
- * it. This is the one chokepoint every tool result passes through, so it's where the cap belongs.
+ * result. A flat char cap can't be safe for every profile (100k chars is nothing against a 200k-
+ * token Claude window but is most of a 32k-token local Ollama window), so this scales with the
+ * actual configured window instead.
  */
-private const val MAX_TOOL_RESULT_CHARS = 100_000
-
-private fun truncateToolResult(result: String): String =
-    if (result.length <= MAX_TOOL_RESULT_CHARS) result
-    else result.take(MAX_TOOL_RESULT_CHARS) + "\n... output truncated"
+private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
 
 /**
  * Why a turn ended via [AgentLoop.finishEarly] rather than a normal completion. Callers (e.g.
@@ -131,6 +130,13 @@ class AgentLoop(
     /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
     private val compactionThreshold: Double = 0.8
 ) {
+    /** Scaled to [contextWindowTokens] so no single tool result can claim more than
+     *  [MAX_TOOL_RESULT_FRACTION_OF_WINDOW] of whatever window this loop's model actually has. */
+    private fun truncateToolResult(result: String): String {
+        val maxChars = (contextWindowTokens * MAX_TOOL_RESULT_FRACTION_OF_WINDOW * CHARS_PER_TOKEN_ESTIMATE).toInt()
+        return if (result.length <= maxChars) result else result.take(maxChars) + "\n... output truncated"
+    }
+
     /**
      * The one way a turn ends early. Emits the stop message as a token, persists this turn's
      * user input and every round accumulated so far, records why it stopped, and saves.
@@ -376,7 +382,15 @@ class AgentLoop(
                 return finishEarly(session, userInput, pendingRounds, guardReason, TurnStopReason.LoopGuard, onEvent)
             }
 
-            if ((roundUsage?.inputTokens ?: 0) < compactionTriggerTokens) {
+            // roundUsage reflects the request that *asked for* these tool calls — sent before any
+            // of their results existed — so it alone can't see what was just appended. A round can
+            // call several tools at once (e.g. a browsing task firing off a few browser_* calls
+            // together), and their combined results can cross the budget even though none of them
+            // individually hit truncateToolResult's cap. Add a rough estimate of what just landed
+            // so the gate reacts to what's about to be sent next, not to stale pre-append usage.
+            val projectedInputTokens = (roundUsage?.inputTokens ?: 0) +
+                toolResults.sumOf { it.content.length } / CHARS_PER_TOKEN_ESTIMATE
+            if (projectedInputTokens < compactionTriggerTokens) {
                 // Relief can only ever be observed on a later round's usage, never on the same
                 // value that just triggered compaction — so the reset lives here, not inline.
                 compactionsWithoutRelief = 0

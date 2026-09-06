@@ -277,6 +277,9 @@ class CompanionRuntime(
                 speech?.onTurnEnd()
                 onTurnEnd()
             } catch (e: Exception) {
+                // Only e.message reaches the UI below — print the full cause chain/stack trace so
+                // a turn failure is diagnosable from the console instead of a one-line guess.
+                e.printStackTrace()
                 builder.endTurn()
                 state.value = SessionState.Error(e.message ?: "unknown error")
                 speech?.onTurnEnd()

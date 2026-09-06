@@ -35,8 +35,8 @@ private val ROOMS = listOf(null, "entities", "tasks", "episodes", "knowledge", "
 fun MemoryTab(runtime: CompanionRuntime) {
     var section by remember { mutableStateOf(MemorySection.Browse) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        Text("Memory", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Memory", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
         Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
             MemorySection.entries.forEach { s ->
                 FilterChip(

@@ -37,6 +37,43 @@ class SessionTranscriptBuilderTest : FunSpec({
         )
     }
 
+    test("onToken splits an inline <think>...</think> block into a Reasoning entry, separate from the answer") {
+        // Some local models (e.g. Qwen3 via Ollama/vLLM) have no separate reasoning-content
+        // field — they emit their thinking inline as <think>...</think> in the plain content
+        // stream, which would otherwise show up as raw tags in the middle of the chat reply.
+        val builder = SessionTranscriptBuilder()
+        builder.startTurn("hi")
+        builder.onToken("<think>the user said hi, I should greet back</think>\n\nHello!")
+        builder.transcript.value shouldBe listOf(
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Reasoning(1, "the user said hi, I should greet back"),
+            TranscriptEntry.Answer(2, "Hello!")
+        )
+    }
+
+    test("onToken splits <think> across chunks, so a tag boundary split mid-token still parses") {
+        val builder = SessionTranscriptBuilder()
+        builder.startTurn("hi")
+        builder.onToken("<thi")
+        builder.onToken("nk>reasoning here</thi")
+        builder.onToken("nk>answer here")
+        builder.transcript.value shouldBe listOf(
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Reasoning(1, "reasoning here"),
+            TranscriptEntry.Answer(2, "answer here")
+        )
+    }
+
+    test("onToken shows an unclosed <think> as reasoning-in-progress, with no answer entry yet") {
+        val builder = SessionTranscriptBuilder()
+        builder.startTurn("hi")
+        builder.onToken("<think>still thinking")
+        builder.transcript.value shouldBe listOf(
+            TranscriptEntry.UserMessage(0, "hi"),
+            TranscriptEntry.Reasoning(1, "still thinking")
+        )
+    }
+
     test("onToolCallStarted/onToolCallFinished merge into one ToolInvocation entry and end the current answer segment") {
         val builder = SessionTranscriptBuilder()
         builder.startTurn("hi")

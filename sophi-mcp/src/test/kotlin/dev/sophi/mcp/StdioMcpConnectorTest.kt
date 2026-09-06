@@ -155,8 +155,11 @@ class StdioMcpConnectorTest : FunSpec({
     test("connect times out and kills the process when the server never completes the handshake") {
         val config = McpServerConfig(
             name = "hanging", transport = McpTransport.STDIO,
-            // A real process that starts but never speaks the MCP protocol on stdout — the
-            // handshake never completes, so without a timeout this would hang forever.
+            // A real process that starts but never writes anything to stdout at all -- not slow,
+            // silent. That's the scenario a watchdog is needed for: withTimeout's cooperative
+            // cancellation alone can't interrupt the blocking native read this leaves stuck, so
+            // without a mechanism that force-kills the process at the deadline, this test would
+            // take the full 30s (matching the child process's own lifetime) instead of ~1s.
             command = listOf("sleep", "30")
         )
         val connector = StdioMcpConnector(connectTimeoutSeconds = 1)
@@ -168,7 +171,10 @@ class StdioMcpConnectorTest : FunSpec({
             error.message shouldContain "hanging"
         }
 
-        (elapsed.inWholeSeconds < 5) shouldBe true
+        // Tight enough to catch a regression back to "wait for the blocked read to unblock on its
+        // own" (which would take ~30s here, matching sleep's own duration) while leaving headroom
+        // for process-kill/reap overhead on a loaded CI runner.
+        (elapsed.inWholeSeconds < 3) shouldBe true
     }
 
     test("connect lets config.env override the resolved login-shell PATH") {

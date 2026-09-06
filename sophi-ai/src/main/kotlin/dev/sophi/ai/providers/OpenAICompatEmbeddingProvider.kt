@@ -45,7 +45,15 @@ class OpenAICompatEmbeddingProvider(
     override val dimensions: Int,
     requestTimeout: Duration
 ) : EmbeddingProvider {
-    private val httpClient: HttpClient = HttpClient.newBuilder().connectTimeout(requestTimeout).build()
+    // Forced to HTTP/1.1: java.net.http.HttpClient defaults to preferring HTTP/2, attempting a
+    // cleartext (h2c) upgrade even over plain http://. Some HTTP/1.1-only servers (e.g. uvicorn,
+    // which vLLM's OpenAI-compatible server runs on) don't handle that upgrade attempt cleanly,
+    // and the request can arrive with an empty body — surfacing as a generic Pydantic "body:
+    // field required" 400 with no indication the body was ever the problem. The chat-completions
+    // path doesn't hit this because it goes through OkHttp (via the openai-java SDK), not this
+    // client. HTTP/1.1 is what curl uses by default too, and is universally supported.
+    private val httpClient: HttpClient =
+        HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(requestTimeout).build()
     private val timeout = requestTimeout
 
     override suspend fun embed(texts: List<String>): List<FloatArray> = withContext(Dispatchers.IO) {

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +29,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -38,7 +41,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionRuntime
 import dev.sophi.companion.SessionState
@@ -78,7 +84,7 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(8.dp)
+            .padding(16.dp)
             .focusRequester(chatFocusRequester)
             .focusable()
             .onPreviewKeyEvent { event ->
@@ -91,8 +97,11 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
                 }
             }
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             Text(
                 when (state) {
                     SessionState.Idle -> "Idle"
@@ -103,16 +112,24 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
                 color = statusColor(state, MaterialTheme.colorScheme)
             )
         }
-        if (state is SessionState.Error) {
-            Text((state as SessionState.Error).message, color = MaterialTheme.colorScheme.error)
-        }
-        LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-            items(history, key = { it.id }) { entry ->
-                TranscriptRow(
-                    entry = entry,
-                    expanded = expandedIds[entry.id] == true,
-                    onToggle = { expandedIds[entry.id] = expandedIds[entry.id] != true }
-                )
+        SelectionContainer(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (state is SessionState.Error) {
+                    Text((state as SessionState.Error).message, color = MaterialTheme.colorScheme.error)
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    items(history, key = { it.id }) { entry ->
+                        TranscriptRow(
+                            entry = entry,
+                            expanded = expandedIds[entry.id] == true,
+                            onToggle = { expandedIds[entry.id] = expandedIds[entry.id] != true }
+                        )
+                    }
+                }
             }
         }
         if (pending != null) {
@@ -154,7 +171,11 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
             }
             input = ""
         }
-        Row {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+        ) {
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
@@ -177,14 +198,20 @@ fun ChatTab(runtime: CompanionRuntime, activeSessionId: String, title: String, p
 @Composable
 private fun TranscriptRow(entry: TranscriptEntry, expanded: Boolean, onToggle: () -> Unit) {
     when (entry) {
+        // Plain prose (no monospace) for the actual conversation — monospace stays reserved for
+        // the reasoning/tool-call cards below, where it helps read structured/code-like content.
         is TranscriptEntry.UserMessage -> Text(
-            "you: ${entry.text}",
-            fontFamily = FontFamily.Monospace,
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("You  ") }
+                append(entry.text)
+            },
             style = MaterialTheme.typography.bodySmall,
         )
         is TranscriptEntry.Answer -> Text(
-            "sophi: ${entry.text}",
-            fontFamily = FontFamily.Monospace,
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("Sophi  ") }
+                append(entry.text)
+            },
             style = MaterialTheme.typography.bodySmall,
         )
         is TranscriptEntry.Reasoning -> CollapsibleCard(

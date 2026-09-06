@@ -5,6 +5,9 @@ import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.asSink
 import kotlinx.io.asSource
@@ -106,18 +109,41 @@ class StdioMcpConnector(
         }
 
         val client = connectOrDestroy(process) {
-            try {
-                withTimeout(connectTimeoutSeconds * 1000) {
-                    val transport = StdioClientTransport(
-                        input = process.inputStream.asSource().buffered(),
-                        output = process.outputStream.asSink().buffered()
-                    )
-                    val client = Client(clientInfo = Implementation(name = "sophi", version = "1.0.0"))
-                    client.connect(transport)
-                    client
+            coroutineScope {
+                // withTimeout's cancellation is cooperative -- it can't interrupt the genuinely
+                // blocking native read StdioClientTransport does on process.inputStream. A server
+                // that never writes anything at all (not slow, silent) leaves that read with no
+                // suspension point to cancel at, so withTimeout alone never actually fires until
+                // the blocked read unblocks on its own. This watchdog runs independently and
+                // force-kills the process at the deadline regardless -- closing its stdout pipe
+                // is what actually unblocks a stuck read, rather than waiting for it to notice
+                // cancellation that it's structurally unable to observe.
+                val watchdog = launch {
+                    delay(connectTimeoutSeconds * 1000)
+                    process.destroyForcibly()
                 }
-            } catch (e: TimeoutCancellationException) {
-                throw McpConnectTimeoutException(config.name, connectTimeoutSeconds)
+                try {
+                    withTimeout(connectTimeoutSeconds * 1000) {
+                        val transport = StdioClientTransport(
+                            input = process.inputStream.asSource().buffered(),
+                            output = process.outputStream.asSink().buffered()
+                        )
+                        val client = Client(clientInfo = Implementation(name = "sophi", version = "1.0.0"))
+                        client.connect(transport)
+                        client
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    throw McpConnectTimeoutException(config.name, connectTimeoutSeconds)
+                } catch (e: Exception) {
+                    // The watchdog firing (not withTimeout's own cancellation reaching a
+                    // suspension point) is what unblocked the read in this case -- surfaces as
+                    // some other I/O exception, not TimeoutCancellationException, but it's still
+                    // a timeout from the caller's perspective when the watchdog is the cause.
+                    if (!watchdog.isActive) throw McpConnectTimeoutException(config.name, connectTimeoutSeconds)
+                    throw e
+                } finally {
+                    watchdog.cancel()
+                }
             }
         }
         return SdkMcpSession(client, process)

@@ -303,6 +303,86 @@ class AgentLoopTest : FunSpec({
         toolResultMsg.content shouldContain "output truncated"
     }
 
+    test("turn() scales the tool-result truncation cap down for a smaller context window") {
+        // A fixed cap can't be safe for every profile: on a 200k-token Claude window, 100k chars
+        // is a small fraction; on a 32k-token local Ollama window (this app's own default for
+        // openai-compat), it's most of the whole budget. The cap must scale with the configured
+        // window, not be a flat constant.
+        suspend fun truncatedLengthFor(contextWindowTokens: Int): Int {
+            val session = AgentSession(id = "s1")
+            val toolRegistry = ToolRegistry()
+            val hugeResult = "x".repeat(500_000)
+            toolRegistry.register(object : dev.sophi.core.tools.Tool {
+                override val name = "snapshot"
+                override val description = "Returns a huge snapshot"
+                override val parametersJson = "{}"
+                override suspend fun execute(argumentsJson: String) = hugeResult
+            })
+            val scopedLoop = newLoop(toolRegistry, contextWindowTokens = contextWindowTokens)
+
+            val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+            every { provider.stream(any()) } answers {
+                capturedRequests.add(firstArg())
+                if (capturedRequests.size == 1)
+                    LLMResponse.ToolUse(
+                        calls = listOf(dev.sophi.ai.api.ToolCall("c1", "snapshot", "{}")),
+                        usage = TokenUsage(1, 0)
+                    ).toStreamFlow()
+                else
+                    LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+            }
+            coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+            every { sessionManager.save(any()) } just Runs
+
+            scopedLoop.turn(session, "snapshot the page", config)
+            return capturedRequests[1].messages.last().content.length
+        }
+
+        truncatedLengthFor(32_768) shouldBeLessThan truncatedLengthFor(TEST_CONTEXT_WINDOW)
+    }
+
+    test("turn() proactively compacts based on a round's newly-appended tool results, not stale prior-round usage") {
+        // Reproduces the recurrence of "LLM stream error: Stream failed" after the per-result cap
+        // alone: a single round can call several tools in parallel (e.g. a browsing task firing
+        // off a few browser_* calls at once), and their combined results can still blow the budget
+        // even though none of them individually hit the truncation cap. The usage this checks was
+        // measured for the *request that asked for the tool calls* — sent before any of those
+        // results existed — so gating on it alone can never see this coming. The gate must also
+        // account for what was just appended.
+        val session = AgentSession(id = "s1")
+        val toolRegistry = ToolRegistry()
+        val chunk = "x".repeat(700) // under the per-result cap at this window, so not itself truncated
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "peek"
+            override val description = "Returns a chunk"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = chunk
+        })
+        val loopWithTool = newLoop(toolRegistry, contextWindowTokens = 1000)
+
+        val capturedRequests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            capturedRequests.add(firstArg())
+            if (capturedRequests.size == 1)
+                LLMResponse.ToolUse(
+                    calls = (1..5).map { dev.sophi.ai.api.ToolCall("c$it", "peek", "{}") },
+                    usage = TokenUsage(50, 0)
+                ).toStreamFlow()
+            else
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        }
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+        every { sessionManager.save(any()) } just Runs
+
+        val result = loopWithTool.turn(session, "peek 5 times", config)
+
+        // Only round 1 was ever sent — the projected size after appending its 5 results tripped
+        // the gate before a second request could go out, and with just one round done there's
+        // nothing yet for compactInPlace to summarise, so the turn stops rather than overflowing.
+        capturedRequests shouldHaveSize 1
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.ContextExhausted.name
+    }
+
     test("turn() stops gracefully at the maxToolRounds ceiling, persisting the rounds done so far") {
         val session = AgentSession(id = "s1")
         val toolRegistry = ToolRegistry()
