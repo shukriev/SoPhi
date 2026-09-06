@@ -24,7 +24,10 @@ fun main(args: Array<String>) {
                 SchedulePauseCommand(), ScheduleResumeCommand(), ScheduleRemoveCommand(),
                 ScheduleInstallLaunchdCommand()
             ),
-            ProposalsCommand().subcommands(ProposalsListCommand(), ProposalsAcceptCommand(), ProposalsRejectCommand()),
+            ProposalsCommand().subcommands(
+                ProposalsListCommand(), ProposalsAcceptCommand(), ProposalsRejectCommand(),
+                ProposalImplementCommand(), ProposalCleanupCommand()
+            ),
             GoalCommand().subcommands(GoalRunCommand()),
             SkillCommand().subcommands(SkillInstallCommand(), SkillReviewCommand(), SkillVerifyCommand()),
             VersionsCommand().subcommands(VersionsListCommand(), VersionsShowCommand(), VersionsRevertCommand()),
