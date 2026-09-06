@@ -35,9 +35,12 @@ fun NotificationsTab(runtime: CompanionRuntime) {
 
     LaunchedEffect(Unit) { runtime.notificationCenter.markAllRead() }
 
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text("Notifications", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        ) {
+            Text("Notifications", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             TextButton(onClick = { runtime.notificationCenter.clear() }, enabled = notifications.isNotEmpty()) {
                 Text("Clear")
             }

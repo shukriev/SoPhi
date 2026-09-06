@@ -74,9 +74,16 @@ class SessionTranscriptBuilder {
     private var nextId = 0
 
     private var answerId: Int? = null
-    private var answerBuffer: StringBuilder? = null
     private var reasoningId: Int? = null
-    private var reasoningBuffer: StringBuilder? = null
+    // Some local models (e.g. Qwen3 served via Ollama/vLLM) have no separate reasoning-content
+    // field — they emit their thinking inline as <think>...</think> in the ordinary content
+    // stream, which onReasoningToken/StreamEvent.Reasoning never sees. rawContentBuffer holds
+    // everything onToken has received this segment so splitThink can be re-run on the whole
+    // thing each call, so a <think>/</think> boundary split across two chunks is still caught.
+    private var rawContentBuffer: StringBuilder? = null
+    // Separate from rawContentBuffer: this is for providers with a genuine reasoning-content
+    // field (StreamEvent.Reasoning), independent of the inline-<think>-tag path onToken handles.
+    private var explicitReasoningBuffer: StringBuilder? = null
     // FIFO of in-flight tool invocation ids, per tool name. TurnEvent.ToolCallStarted/Finished
     // (sophi-core) carry only a tool name, no call id, so concurrent same-named calls can only
     // be matched by arrival order — the same ambiguity the prior string-based implementation
@@ -107,19 +114,33 @@ class SessionTranscriptBuilder {
     }
 
     fun onToken(text: String) {
-        val buf = (answerBuffer ?: StringBuilder().also { answerBuffer = it }).append(text)
-        val id = answerId
-        if (id == null) {
-            val newId = nextId++
-            answerId = newId
-            append(TranscriptEntry.Answer(newId, buf.toString()))
-        } else {
-            replaceAt(id) { TranscriptEntry.Answer(id, buf.toString()) }
+        val raw = (rawContentBuffer ?: StringBuilder().also { rawContentBuffer = it }).append(text)
+        val split = splitThink(raw.toString())
+
+        if (split.reasoning.isNotEmpty()) {
+            val id = reasoningId
+            if (id == null) {
+                val newId = nextId++
+                reasoningId = newId
+                append(TranscriptEntry.Reasoning(newId, split.reasoning))
+            } else {
+                replaceAt(id) { TranscriptEntry.Reasoning(id, split.reasoning) }
+            }
+        }
+        if (split.answer.isNotEmpty()) {
+            val id = answerId
+            if (id == null) {
+                val newId = nextId++
+                answerId = newId
+                append(TranscriptEntry.Answer(newId, split.answer))
+            } else {
+                replaceAt(id) { TranscriptEntry.Answer(id, split.answer) }
+            }
         }
     }
 
     fun onReasoningToken(text: String) {
-        val buf = (reasoningBuffer ?: StringBuilder().also { reasoningBuffer = it }).append(text)
+        val buf = (explicitReasoningBuffer ?: StringBuilder().also { explicitReasoningBuffer = it }).append(text)
         val id = reasoningId
         if (id == null) {
             val newId = nextId++
@@ -159,9 +180,64 @@ class SessionTranscriptBuilder {
     }
 
     private fun resetStreamingState() {
-        reasoningBuffer = null
-        answerBuffer = null
+        explicitReasoningBuffer = null
+        rawContentBuffer = null
         reasoningId = null
         answerId = null
     }
+}
+
+private data class ThinkSplit(val reasoning: String, val answer: String)
+
+private const val THINK_OPEN = "<think>"
+private const val THINK_CLOSE = "</think>"
+
+/**
+ * Longest suffix of [text] that is a proper prefix of [tag] — e.g. text ending in "<thi" holds
+ * back 4 chars of a possible "<think>", ending in "<think" holds back 6, no overlap holds back 0.
+ * Used to avoid leaking a tag fragment as visible text just because it happened to land at a
+ * chunk boundary before the rest of the tag arrived in a later token.
+ */
+private fun partialTagPrefixLenAtEnd(text: String, tag: String): Int {
+    for (len in minOf(text.length, tag.length - 1) downTo 1) {
+        if (text.endsWith(tag.substring(0, len))) return len
+    }
+    return 0
+}
+
+/**
+ * Splits <think>...</think> spans out of [raw] into [ThinkSplit.reasoning], leaving everything
+ * else as [ThinkSplit.answer]. An unclosed trailing <think> (still streaming in) counts as
+ * reasoning-so-far rather than being held back until </think> arrives — otherwise a model's whole
+ * thinking phase would show nothing at all until it finishes. Re-run on the whole accumulated
+ * buffer on every call (not just the latest chunk), so a tag split across two onToken calls (e.g.
+ * "<thi" then "nk>...") still parses correctly instead of leaking "<thi" as answer text for one
+ * frame. answer is left-trimmed since models typically leave a blank line right after </think>
+ * before the real answer starts.
+ */
+private fun splitThink(raw: String): ThinkSplit {
+    val reasoning = StringBuilder()
+    val answer = StringBuilder()
+    var i = 0
+    while (i < raw.length) {
+        val start = raw.indexOf(THINK_OPEN, i)
+        if (start < 0) {
+            val tail = raw.substring(i)
+            val holdBack = partialTagPrefixLenAtEnd(tail, THINK_OPEN)
+            answer.append(tail, 0, tail.length - holdBack)
+            break
+        }
+        answer.append(raw, i, start)
+        val contentStart = start + THINK_OPEN.length
+        val end = raw.indexOf(THINK_CLOSE, contentStart)
+        if (end < 0) {
+            val tail = raw.substring(contentStart)
+            val holdBack = partialTagPrefixLenAtEnd(tail, THINK_CLOSE)
+            reasoning.append(tail, 0, tail.length - holdBack)
+            break
+        }
+        reasoning.append(raw, contentStart, end)
+        i = end + THINK_CLOSE.length
+    }
+    return ThinkSplit(reasoning.toString(), answer.toString().trimStart('\n', ' '))
 }

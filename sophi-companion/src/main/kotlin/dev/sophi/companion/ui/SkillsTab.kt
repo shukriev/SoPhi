@@ -35,9 +35,12 @@ fun SkillsTab(runtime: CompanionRuntime) {
     fun refresh() { skills = runtime.skills() }
     LaunchedEffect(Unit) { refresh() }
 
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text("Skills", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        ) {
+            Text("Skills", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             TextButton(onClick = { showAddDialog = true }) { Text("+ Add skill") }
         }
         LazyColumn {

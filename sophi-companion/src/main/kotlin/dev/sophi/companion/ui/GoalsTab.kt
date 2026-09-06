@@ -57,8 +57,8 @@ fun GoalsTab(runtime: CompanionRuntime) {
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-        Text("Goals / Tasks", style = MaterialTheme.typography.titleMedium)
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Goals / Tasks", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
         CreateTaskForm(onCreate = { name, prompt, trigger, mode ->
             runtime.createTask(name, prompt, mode, trigger)
             refresh()
@@ -93,7 +93,7 @@ private fun TaskDetail(
     onRemove: () -> Unit,
     onBack: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         TextButton(onClick = onBack) { Text("Back") }
         Text(task.name, style = MaterialTheme.typography.titleMedium)
         Text(task.prompt, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 8.dp))
