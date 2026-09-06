@@ -31,15 +31,23 @@ class ProposalStore(private val path: Path) {
 
     @Synchronized
     fun accept(id: String): Boolean =
-        transition(id) { it.copy(status = "accepted", reviewedAtMs = System.currentTimeMillis()) }
+        transition(id, "pending") { it.copy(status = "accepted", reviewedAtMs = System.currentTimeMillis()) }
 
     @Synchronized
     fun reject(id: String, reason: String): Boolean =
-        transition(id) { it.copy(status = "rejected", reviewedAtMs = System.currentTimeMillis(), reviewReason = reason) }
+        transition(id, "pending") { it.copy(status = "rejected", reviewedAtMs = System.currentTimeMillis(), reviewReason = reason) }
 
-    private fun transition(id: String, update: (Proposal) -> Proposal): Boolean {
+    @Synchronized
+    fun markPrOpened(id: String, prUrl: String): Boolean =
+        transition(id, "accepted") { it.copy(status = "pr-opened", implementedAtMs = System.currentTimeMillis(), implementedDetail = prUrl) }
+
+    @Synchronized
+    fun markImplementationFailed(id: String, reason: String): Boolean =
+        transition(id, "accepted") { it.copy(status = "implementation-failed", implementedAtMs = System.currentTimeMillis(), implementedDetail = reason) }
+
+    private fun transition(id: String, fromStatus: String, update: (Proposal) -> Proposal): Boolean {
         val current = fold()[id] ?: return false
-        if (current.status != "pending") return false
+        if (current.status != fromStatus) return false
         append(update(current))
         return true
     }

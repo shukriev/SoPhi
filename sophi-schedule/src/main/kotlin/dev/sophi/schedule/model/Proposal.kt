@@ -14,5 +14,7 @@ data class Proposal(
     val suggestedAction: String,
     val status: String = "pending",
     val reviewedAtMs: Long? = null,
-    val reviewReason: String? = null
+    val reviewReason: String? = null,
+    val implementedAtMs: Long? = null,
+    val implementedDetail: String? = null
 )
