@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| Current milestone | M7 — Jane's Theory memory (palace v1) complete; Phase 1 of the autonomous self-improvement roadmap (ADR-027) complete; `sophi-companion`/`sophi-cli` tool parity (ADR-028) complete; Phase 1.5 — eval/versioning/config tournament substrate (ADR-029) complete; Phase 2 — skill-write admission gate (ADR-030) complete; Phase 3 — memory consolidation visibility, bulk recovery & audit consistency (ADR-031) complete |
+| Current milestone | M7 — Jane's Theory memory (palace v1) complete; Phase 1 of the autonomous self-improvement roadmap (ADR-027) complete; `sophi-companion`/`sophi-cli` tool parity (ADR-028) complete; Phase 1.5 — eval/versioning/config tournament substrate (ADR-029) complete; Phase 2 — skill-write admission gate (ADR-030) complete; Phase 3 — memory consolidation visibility, bulk recovery & audit consistency (ADR-031) complete; Shadow-PR self-modification (ADR-032) complete |
 | Modules complete | sophi-ai, sophi-core (session, loop + tools, subagents), sophi-cli (print mode, full TUI), sophi-skills, sophi-extensions, sophi-mcp, sophi-hub, sophi-learning, sophi-web, sophi-sdk, sophi-companion, sophi-infra, sophi-memory, sophi-store, sophi-schedule, sophi-versioning |
 | Modules in progress | sophi-calendar (native OS calendar integration — macOS only; Windows/Linux deferred) |
-| Designs approved, not yet implemented | Shadow-PR self-modification (ADR-032) |
+| Designs approved, not yet implemented | None currently |
 | Last updated | 2026-09-06 |
 
 ---
