@@ -80,4 +80,41 @@ class ProposalStoreTest : FunSpec({
 
         results.count { it } shouldBe 1
     }
+
+    test("markPrOpened transitions an accepted proposal and records the PR url") {
+        val store = ProposalStore(tempdir().toPath().resolve("proposals.jsonl"))
+        val p = store.add(Proposal(sessionId = "s1", title = "A", category = "process", rationale = "r", suggestedAction = "x"))
+        store.accept(p.id)
+
+        store.markPrOpened(p.id, "https://github.com/shukriev/SoPhi/pull/1") shouldBe true
+        val updated = store.get(p.id)!!
+        updated.status shouldBe "pr-opened"
+        updated.implementedDetail shouldBe "https://github.com/shukriev/SoPhi/pull/1"
+        updated.implementedAtMs.shouldNotBeNull()
+    }
+
+    test("markImplementationFailed transitions an accepted proposal and records the reason") {
+        val store = ProposalStore(tempdir().toPath().resolve("proposals.jsonl"))
+        val p = store.add(Proposal(sessionId = "s1", title = "A", category = "process", rationale = "r", suggestedAction = "x"))
+        store.accept(p.id)
+
+        store.markImplementationFailed(p.id, "build failed") shouldBe true
+        val updated = store.get(p.id)!!
+        updated.status shouldBe "implementation-failed"
+        updated.implementedDetail shouldBe "build failed"
+    }
+
+    test("markPrOpened on a pending (not yet accepted) proposal fails, leaving it unchanged") {
+        val store = ProposalStore(tempdir().toPath().resolve("proposals.jsonl"))
+        val p = store.add(Proposal(sessionId = "s1", title = "A", category = "process", rationale = "r", suggestedAction = "x"))
+
+        store.markPrOpened(p.id, "https://example.invalid/pull/1") shouldBe false
+        store.get(p.id)!!.status shouldBe "pending"
+    }
+
+    test("markImplementationFailed on an unknown id returns false") {
+        val store = ProposalStore(tempdir().toPath().resolve("proposals.jsonl"))
+
+        store.markImplementationFailed("no-such-id", "whatever") shouldBe false
+    }
 })
