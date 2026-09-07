@@ -133,6 +133,9 @@ class CompanionRuntime(
     fun mcpServers(): List<dev.sophi.mcp.config.McpServerConfig> = mcpConfigLoader.load(mcpConfigPath).servers
 
     fun skills(): List<Pair<String, Skill>> = sophiRuntime.skills()
+    fun proposals(status: String? = null): List<dev.sophi.schedule.model.Proposal> = sophiRuntime.proposals(status)
+    fun acceptProposal(id: String): Boolean = sophiRuntime.acceptProposal(id)
+    fun rejectProposal(id: String, reason: String): Boolean = sophiRuntime.rejectProposal(id, reason)
     fun installSkill(source: String): InstallResult = sophiRuntime.installSkill(source)
     fun removeSkill(id: String): Boolean = sophiRuntime.removeSkill(id)
 
