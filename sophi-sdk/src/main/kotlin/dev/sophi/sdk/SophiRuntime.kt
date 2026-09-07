@@ -18,7 +18,9 @@ import dev.sophi.memory.MemoryPlugin
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpServerConfig
 import dev.sophi.schedule.engine.ScheduleEngine
+import dev.sophi.schedule.model.Proposal
 import dev.sophi.schedule.notify.Notifier
+import dev.sophi.schedule.store.ProposalStore
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.skills.InstallResult
@@ -50,7 +52,8 @@ class SophiRuntime internal constructor(
     private val contextWindowTokens: Int = 0,
     private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
     val memoryPlugin: MemoryPlugin? = null,
-    internal val agentDefinitions: List<AgentDefinition> = emptyList()
+    internal val agentDefinitions: List<AgentDefinition> = emptyList(),
+    private val schedulesDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule")
 ) {
     private val skillInstaller = SkillInstaller()
 
@@ -64,6 +67,12 @@ class SophiRuntime internal constructor(
     fun skills(): List<Pair<String, Skill>> = SkillRegistry.load(skillsDir, skillsDir).all()
     fun installSkill(source: String): InstallResult = skillInstaller.install(source, skillsDir)
     fun removeSkill(id: String): Boolean = skillInstaller.remove(skillsDir, id)
+
+    fun proposals(status: String? = null): List<Proposal> =
+        ProposalStore(schedulesDir.resolve("proposals.jsonl")).list(status)
+    fun acceptProposal(id: String): Boolean = ProposalStore(schedulesDir.resolve("proposals.jsonl")).accept(id)
+    fun rejectProposal(id: String, reason: String): Boolean =
+        ProposalStore(schedulesDir.resolve("proposals.jsonl")).reject(id, reason)
 
     suspend fun newSession(title: String? = null): String =
         sessionManager.create(title).also { sessionManager.save(it) }.id.also { id ->
