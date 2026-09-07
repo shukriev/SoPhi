@@ -283,7 +283,11 @@ class RuntimeBuilder {
             }
         }
 
-        return SophiRuntime(loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window, skillsDir, memoryPlugin, agentDefinitions)
+        val schedulesDir = scheduleDir ?: Path.of(System.getProperty("user.home"), ".sophi", "schedule")
+        return SophiRuntime(
+            loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
+            skillsDir, memoryPlugin, agentDefinitions, schedulesDir
+        )
     }
 }
 

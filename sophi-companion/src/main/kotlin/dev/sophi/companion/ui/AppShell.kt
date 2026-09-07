@@ -64,6 +64,7 @@ private sealed class Selection {
     object Goals : Selection()
     object Skills : Selection()
     object Memory : Selection()
+    object Proposals : Selection()
     object Notifications : Selection()
     object Settings : Selection()
 }
@@ -125,6 +126,7 @@ fun AppShell(
             onSelectGoals = { selected = Selection.Goals },
             onSelectSkills = { selected = Selection.Skills },
             onSelectMemory = { selected = Selection.Memory },
+            onSelectProposals = { selected = Selection.Proposals },
             onSelectNotifications = { selected = Selection.Notifications },
             onSelectSettings = { selected = Selection.Settings },
             hasUnreadNotifications = hasUnreadNotifications,
@@ -166,6 +168,7 @@ fun AppShell(
                 Selection.Goals -> GoalsTab(runtime)
                 Selection.Skills -> SkillsTab(runtime)
                 Selection.Memory -> MemoryTab(runtime)
+                Selection.Proposals -> ProposalsTab(runtime)
                 Selection.Notifications -> NotificationsTab(runtime)
                 Selection.Settings -> SettingsTab(settings, onSettingsChanged, voiceInstaller)
                 null -> Text("Starting…")
@@ -183,6 +186,7 @@ private fun Sidebar(
     onSelectGoals: () -> Unit,
     onSelectSkills: () -> Unit,
     onSelectMemory: () -> Unit,
+    onSelectProposals: () -> Unit,
     onSelectNotifications: () -> Unit,
     onSelectSettings: () -> Unit,
     hasUnreadNotifications: Boolean,
@@ -222,6 +226,7 @@ private fun Sidebar(
         NavRow(label = "Goals", selected = selected == Selection.Goals, onClick = onSelectGoals)
         NavRow(label = "Skills", selected = selected == Selection.Skills, onClick = onSelectSkills)
         NavRow(label = "Memory", selected = selected == Selection.Memory, onClick = onSelectMemory)
+        NavRow(label = "Proposals", selected = selected == Selection.Proposals, onClick = onSelectProposals)
         NavRow(
             label = "Notifications",
             selected = selected == Selection.Notifications,
