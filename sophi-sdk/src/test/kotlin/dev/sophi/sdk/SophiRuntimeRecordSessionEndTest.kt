@@ -1,6 +1,5 @@
 package dev.sophi.sdk
 
-import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
@@ -13,11 +12,6 @@ import io.mockk.mockk
 import kotlin.io.path.createTempDirectory
 
 private const val TEST_CONTEXT_WINDOW = 100_000
-
-private class StubEmbeddingProvider : EmbeddingProvider {
-    override val dimensions = 4
-    override suspend fun embed(texts: List<String>): List<FloatArray> = texts.map { FloatArray(dimensions) }
-}
 
 private fun stubProvider(): LLMProvider {
     val provider = mockk<LLMProvider>()

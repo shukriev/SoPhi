@@ -1,6 +1,5 @@
 package dev.sophi.sdk
 
-import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.learning.Lesson
@@ -12,11 +11,6 @@ import kotlin.io.path.createTempDirectory
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
-private class NoopEmbeddingProvider : EmbeddingProvider {
-    override val dimensions = 4
-    override suspend fun embed(texts: List<String>): List<FloatArray> = texts.map { FloatArray(dimensions) }
-}
-
 class RuntimeBuilderLearningTest : FunSpec({
     test("learning() with an embeddingProvider registers a LearningPlugin whose contribute() runs") {
         val provider = mockk<dev.sophi.ai.api.LLMProvider>()
@@ -26,7 +20,7 @@ class RuntimeBuilderLearningTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-learning-test")
         val learningHome = createTempDirectory("sophi-sdk-learning-home-test")
         val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW)
-            .learning(dev.sophi.learning.LearningConfig(home = learningHome, scope = "/p"), NoopEmbeddingProvider())
+            .learning(dev.sophi.learning.LearningConfig(home = learningHome, scope = "/p"), StubEmbeddingProvider())
             .build()
 
         rt.learningPlugin!!.lessonStore.add(Lesson("les_1", 1L, "/p", "s", "database rollback plan", "approach"))

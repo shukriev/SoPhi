@@ -83,11 +83,9 @@ class LearningPlugin(
             planningNote = acc.planningNotes.takeIf { it.isNotEmpty() }?.joinToString("\n")
         )
         runCatching { outcomes.append(json.encodeToString(SessionOutcome.serializer(), mechanical)) }
-        val sm = sessionManager
-        val eval = evaluator
-        if (sm != null && eval != null) {
-            runCatching { eval.evaluate(sessionId, sm.load(sessionId).entries, mechanical) }
-        }
+        val sm = sessionManager ?: return mechanical
+        val eval = evaluator ?: return mechanical
+        runCatching { eval.evaluate(sessionId, sm.load(sessionId).entries, mechanical) }
         return mechanical
     }
 
