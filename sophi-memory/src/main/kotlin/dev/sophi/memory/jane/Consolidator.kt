@@ -154,7 +154,10 @@ class Consolidator(
     private fun prune(nowMs: Long): List<String> {
         val linked = store.edges().flatMap { listOf(it.fromId, it.toId) }.toSet()
         return store.memories().values
-            .filter { it.active && it.id !in linked && priority(it, nowMs, config.halfLifeMs) < config.pruneFloor }
+            .filter {
+                it.active && it.id !in linked &&
+                    priority(it, nowMs, config.halfLifeMs) < config.pruneFloor / worthMultiplier(it, config)
+            }
             .onEach { store.upsertMemory(it.copy(softDeletedAt = nowMs)) }
             .map { it.id }
     }

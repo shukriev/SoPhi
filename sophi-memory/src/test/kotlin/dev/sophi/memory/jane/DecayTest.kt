@@ -36,5 +36,10 @@ class DecayTest : FunSpec({
         cfg.beta1 shouldBe 0.45
         cfg.mergeThreshold shouldBe 0.92
         cfg.halfLifeMs.getValue(Room.NARRATIVE) shouldBe 365L * 24 * 3600 * 1000
+        cfg.worthMinEvidence shouldBe 10
+        cfg.worthHighThreshold shouldBe 0.60
+        cfg.worthLowThreshold shouldBe 0.40
+        cfg.worthBoostMultiplier shouldBe 1.2
+        cfg.worthSuppressMultiplier shouldBe 0.5
     }
 })

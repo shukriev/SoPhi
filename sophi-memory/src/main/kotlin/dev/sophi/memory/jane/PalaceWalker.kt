@@ -42,8 +42,8 @@ class PalaceWalker(
                 else -> config.relevanceFloor
             }
             if (sem < floor) return@mapNotNull null
-            val score = config.beta1 * sem + config.beta2 * priority(m, query.nowMs, config.halfLifeMs) +
-                config.beta3 * resonance(m.id)
+            val score = (config.beta1 * sem + config.beta2 * priority(m, query.nowMs, config.halfLifeMs) +
+                config.beta3 * resonance(m.id)) * worthMultiplier(m, config)
             Hit(m, score, direct = true, semantic = sem)
         }.sortedByDescending { it.score }.take(config.directK)
         // Profile-only recall: preferences and other stable traits may never accumulate a matching

@@ -103,7 +103,8 @@ class PalaceStore(
         "sigAff" to signals.aff, "sigRec" to signals.rec,
         "sensitivity" to sensitivity.name, "provenance" to provenance.name,
         "createdAt" to createdAt, "reinforcedAt" to reinforcedAt, "sourceSessionId" to sourceSessionId,
-        "supersededBy" to supersededBy, "softDeletedAt" to softDeletedAt
+        "supersededBy" to supersededBy, "softDeletedAt" to softDeletedAt,
+        "hitsPositive" to hitsPositive, "hitsNegative" to hitsNegative
     )
     private fun Map<String, Any?>.toMemory(): Memory = Memory(
         id = memoryId(), text = get("text") as String, room = Room.valueOf(get("room") as String),
@@ -118,7 +119,9 @@ class PalaceStore(
         createdAt = (get("createdAt") as Number).toLong(), reinforcedAt = (get("reinforcedAt") as Number).toLong(),
         sourceSessionId = get("sourceSessionId") as String,
         supersededBy = get("supersededBy") as String?,
-        softDeletedAt = (get("softDeletedAt") as Number?)?.toLong()
+        softDeletedAt = (get("softDeletedAt") as Number?)?.toLong(),
+        hitsPositive = (get("hitsPositive") as? Number)?.toInt() ?: 0,
+        hitsNegative = (get("hitsNegative") as? Number)?.toInt() ?: 0
     )
 
     private fun CausalEdge.toProperties(): Map<String, Any?> =

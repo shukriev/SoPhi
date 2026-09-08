@@ -37,6 +37,15 @@ data class JanesPalaceConfig(
     val compressAgeMs: Long = 90 * DAY,
     val compressPriorityCeiling: Double = 0.1,
     val pruneFloor: Double = 0.02,
+    // Outcome-driven worth (see MemoryWorth.kt): below worthMinEvidence total hits, a memory's
+    // hitsPositive/hitsNegative ratio is withheld from judgment regardless of how lopsided it
+    // looks -- too little evidence to trust. Boost/suppress multipliers are deliberately
+    // asymmetric (1.2 vs 0.5): a bad memory should fade faster than a good one gets amplified.
+    val worthMinEvidence: Int = 10,
+    val worthHighThreshold: Double = 0.60,
+    val worthLowThreshold: Double = 0.40,
+    val worthBoostMultiplier: Double = 1.2,
+    val worthSuppressMultiplier: Double = 0.5,
     val softDeleteGraceMs: Long = 30 * DAY,
     val consolidationIntervalMs: Long = 24 * HOUR,
     val recallTimeoutMs: Long = 2_000,

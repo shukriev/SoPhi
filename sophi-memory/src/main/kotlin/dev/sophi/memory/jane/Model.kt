@@ -22,7 +22,12 @@ data class Memory(
     val reinforcedAt: Long,
     val sourceSessionId: String,
     val supersededBy: String? = null,
-    val softDeletedAt: Long? = null
+    val softDeletedAt: Long? = null,
+    /** Outcome-attribution counters (see [worthClass]): how many times this memory was recalled
+     *  in a session later judged successful vs. failed. Correlation, not causation -- see
+     *  [worthClass]'s evidence-floor guard before either count moves anything. */
+    val hitsPositive: Int = 0,
+    val hitsNegative: Int = 0
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null

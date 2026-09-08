@@ -143,6 +143,27 @@ class PalaceWalkerTest : FunSpec({
         r.store.readLastRecall()!! shouldContain "grocery"
     }
 
+    test("HIGH-worth memory outranks an otherwise-equal MIXED one, both direct hits") {
+        val r = Rig()
+        val a = r.add("mem_a", "quarterly budget review meeting notes", Room.TASKS, salience = 0.5, at = 0L)
+        val b = r.add("mem_b", "quarterly budget review meeting notes", Room.TASKS, salience = 0.5, at = 0L)
+        r.store.upsertMemory(a.copy(hitsPositive = 8, hitsNegative = 2)) // HIGH: 0.80 > 0.60
+        r.store.upsertMemory(b.copy(hitsPositive = 5, hitsNegative = 5)) // MIXED: 0.50
+        val block = r.walk("quarterly budget review", nowMs = 0L)!!
+        // Both are near-identical text/salience/age, so worth alone should decide the ordering.
+        block.memoryIds.first() shouldBe "mem_a"
+    }
+
+    test("LOW-worth memory can drop out of the injection cap in favor of a MIXED one") {
+        val r = Rig()
+        val a = r.add("mem_a", "quarterly budget review meeting notes", Room.TASKS, salience = 0.5, at = 0L)
+        val b = r.add("mem_b", "quarterly budget review meeting notes", Room.TASKS, salience = 0.5, at = 0L)
+        r.store.upsertMemory(a.copy(hitsPositive = 2, hitsNegative = 8)) // LOW: 0.20 < 0.40
+        r.store.upsertMemory(b.copy(hitsPositive = 5, hitsNegative = 5)) // MIXED: 0.50
+        val block = r.walk("quarterly budget review", nowMs = 0L)!!
+        block.memoryIds.first() shouldBe "mem_b"
+    }
+
     test("memory text containing % renders without crashing") {
         val r = Rig()
         r.add("mem_1", "user got a 20% raise at work salary increase", Room.EPISODES)
