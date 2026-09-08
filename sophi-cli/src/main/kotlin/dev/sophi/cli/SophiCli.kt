@@ -356,7 +356,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             engine.run(session)
         } finally {
             // TuiEngine.run returns on both exit paths (exit/quit and EOF); record the outcome once.
-            runCatching { learningPlugin?.recordSessionEnd(session.id) }
+            // Goes through SophiRuntime.recordSessionEnd, not learningPlugin directly, so memory's
+            // outcome-driven forgetting gets the same signal without this host wiring it itself.
+            runCatching { cli.runtime.recordSessionEnd(session.id) }
             runCatching {
                 hubClient?.publish(HubEvent.SessionClosed(session.id)) // no-op if never connected
                 hubClient?.close()

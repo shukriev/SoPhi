@@ -171,6 +171,19 @@ class SophiRuntime internal constructor(
         }
     }
 
+    /**
+     * The one thing a host calls when a session/conversation is over — instead of separately
+     * wiring [learningPlugin] and [memoryPlugin] itself. Derives memory's outcome-attribution
+     * success signal from learning's cheap mechanical outcome ("completed" vs "error"), not the
+     * optional LLM-judged verdict, since the mechanical signal is always available regardless of
+     * whether that (LLM-cost) evaluator is configured. A no-op for memory when [learningPlugin]
+     * isn't configured — there is no outcome signal to give it, so none is fabricated.
+     */
+    suspend fun recordSessionEnd(sessionId: String) {
+        val mechanical = learningPlugin?.let { runCatching { it.recordSessionEnd(sessionId) }.getOrNull() }
+        mechanical?.let { memoryPlugin?.recordSessionEnd(sessionId, success = it.outcome == "completed") }
+    }
+
     suspend fun connectMcpServer(config: McpServerConfig, onFailure: (Throwable) -> Unit = {}): List<String> {
         val manager = requireNotNull(mcpClientManager) {
             "MCP not configured for this runtime — build it via RuntimeBuilder.mcpConfig(...)"

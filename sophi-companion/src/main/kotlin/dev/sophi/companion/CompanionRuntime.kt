@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 internal fun consolidationNotificationBody(report: ConsolidationReport): String? =
     if (report.total == 0) null else
@@ -355,6 +356,12 @@ class CompanionRuntime(
     fun close() {
         pollingJob?.cancel()
         hubServer.stop()
+        // Companion has no per-tab-close lifecycle today (every open ChatTab lives until the app
+        // quits), so app shutdown is the only point any of these sessions' outcomes ever get
+        // recorded — companion's first session-end wiring of any kind (previously none at all,
+        // unlike sophi-cli's per-session-exit call). Synchronous: scope.cancel() right after this
+        // would kill an async attempt before it finished, and this is a one-time app-quit cost.
+        runBlocking { sessionStates.keys.forEach { id -> runCatching { sophiRuntime.recordSessionEnd(id) } } }
         scope.cancel()
         sophiRuntime.close()
     }

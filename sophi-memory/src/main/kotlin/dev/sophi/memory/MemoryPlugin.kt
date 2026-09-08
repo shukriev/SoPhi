@@ -42,6 +42,16 @@ class MemoryPlugin(
         }
     })
 
+    /**
+     * Attributes [success] to every memory recalled during [sessionId] (see
+     * [dev.sophi.memory.jane.JanesPalace.recordOutcome]) when the underlying technique is a
+     * JanesPalace; a silent no-op for any other [MemoryTechnique], same as [palace] itself.
+     * Memory must never break a caller's session-end housekeeping, so failures are swallowed.
+     */
+    fun recordSessionEnd(sessionId: String, success: Boolean) {
+        runCatching { palace()?.recordOutcome(sessionId, success) }
+    }
+
     /** Session-end housekeeping: run the sleep cycle when >24h since the last one. */
     suspend fun consolidateIfDue(): ConsolidationReport? {
         val palace = technique as? dev.sophi.memory.jane.JanesPalace ?: return null
