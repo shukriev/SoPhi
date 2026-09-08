@@ -121,6 +121,33 @@ class ConsolidatorTest : FunSpec({
         r.store.memories().getValue("mem_live").active shouldBe true
     }
 
+    test("HIGH-worth memory resists pruning even when its raw priority is below the ordinary floor") {
+        val r = Rig()
+        // salience/age chosen so raw priority sits just below the default 0.02 floor -- WOULD
+        // prune on decay alone, but HIGH worth (1.2x multiplier) shrinks the effective floor
+        // enough that this priority clears it.
+        val m = r.add("mem_valuable", "valuable old note", at = 0L, salience = 1.0)
+        val hl = r.config.halfLifeMs.getValue(Room.EPISODES)
+        val now = (hl * 5.72).toLong() // priority ≈ 1.0 * 2^-5.72 ≈ 0.019, just below 0.02
+        r.store.upsertMemory(m.copy(hitsPositive = 9, hitsNegative = 1)) // HIGH: 0.90 > 0.60
+        val report = r.consolidator.run(nowMs = now)
+        report.pruned shouldBe 0
+        r.store.memories().getValue("mem_valuable").active shouldBe true
+    }
+
+    test("LOW-worth memory prunes sooner, before its raw priority alone would cross the floor") {
+        val r = Rig()
+        // salience/age chosen so raw priority sits just above the default 0.02 floor -- would
+        // NOT prune on decay alone, but LOW worth (0.5x multiplier) doubles the effective floor.
+        val m = r.add("mem_marginal", "marginal old note", at = 0L, salience = 1.0)
+        val hl = r.config.halfLifeMs.getValue(Room.EPISODES)
+        val now = (hl * 5.6).toLong() // priority ≈ 1.0 * 2^-5.6 ≈ 0.0206, just above 0.02
+        r.store.upsertMemory(m.copy(hitsPositive = 1, hitsNegative = 9)) // LOW: 0.10 < 0.40
+        val report = r.consolidator.run(nowMs = now)
+        report.pruned shouldBe 1
+        r.store.memories().getValue("mem_marginal").active shouldBe false
+    }
+
     test("isDue respects the 24h marker") {
         val r = Rig()
         r.consolidator.isDue(nowMs = 0L) shouldBe true

@@ -78,4 +78,22 @@ class MemoryPluginTest : FunSpec({
 
         plugin.palace() shouldBe null
     }
+
+    test("recordSessionEnd is a silent no-op when the technique is not a JanesPalace") {
+        val plugin = MemoryPlugin(ScriptedTechnique())
+
+        plugin.recordSessionEnd("s1", success = true) // must not throw
+    }
+
+    test("recordSessionEnd on an empty JanesPalace (no recalls for the session) does not throw") {
+        val palace = JanesPalace(
+            JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model"),
+            llmProvider = null, embeddingProvider = null
+        )
+        val plugin = MemoryPlugin(palace)
+
+        plugin.recordSessionEnd("s_never_recalled", success = true)
+
+        plugin.close()
+    }
 })

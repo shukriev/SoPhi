@@ -62,6 +62,15 @@ class JanesPalace(
 
     override suspend fun consolidate(nowMs: Long): ConsolidationReport = consolidator.run(nowMs)
 
+    /**
+     * Attributes [success] to every memory recalled during [sessionId] (see [applyOutcome]).
+     * Not part of [MemoryTechnique] -- callers decide what "success" means (mechanical turn
+     * outcome, an LLM-judged verdict, or something else) and call this once they know; wiring an
+     * actual caller is a separate follow-up, tracked alongside sophi-web/sophi-sdk's existing
+     * MemoryPlugin gap.
+     */
+    fun recordOutcome(sessionId: String, success: Boolean) = applyOutcome(store, sessionId, success)
+
     fun consolidationDue(nowMs: Long): Boolean = consolidator.isDue(nowMs)
 
     /** Releases the underlying database (see [PalaceStore.close]). */

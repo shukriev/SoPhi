@@ -66,7 +66,14 @@ class LearningPlugin(
         hook(HookPoint.ON_ERROR) { ctx: HookContext -> accs.getOrPut(ctx.sessionId) { Acc() }.errored = true }
     )
 
-    suspend fun recordSessionEnd(sessionId: String) {
+    /**
+     * Finalizes [sessionId]'s outcome and returns the mechanical [SessionOutcome] (outcome =
+     * "completed"|"error") — cheap, always computed, independent of whether the optional LLM
+     * [evaluator] runs. Callers that need a success signal without paying for or requiring the
+     * (optional) LLM judgment — e.g. [dev.sophi.sdk.SophiRuntime.recordSessionEnd] feeding
+     * outcome-driven memory forgetting — can use this return value directly.
+     */
+    suspend fun recordSessionEnd(sessionId: String): SessionOutcome {
         val acc = accs.remove(sessionId) ?: Acc()
         val mechanical = SessionOutcome(
             ts = System.currentTimeMillis(), scope = config.scope, sessionId = sessionId,
@@ -76,9 +83,10 @@ class LearningPlugin(
             planningNote = acc.planningNotes.takeIf { it.isNotEmpty() }?.joinToString("\n")
         )
         runCatching { outcomes.append(json.encodeToString(SessionOutcome.serializer(), mechanical)) }
-        val sm = sessionManager ?: return
-        val eval = evaluator ?: return
+        val sm = sessionManager ?: return mechanical
+        val eval = evaluator ?: return mechanical
         runCatching { eval.evaluate(sessionId, sm.load(sessionId).entries, mechanical) }
+        return mechanical
     }
 
     /** Records a plan-driven episode's outcome; folded into SessionOutcome.planningNote when

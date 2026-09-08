@@ -1,6 +1,5 @@
 package dev.sophi.sdk
 
-import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
@@ -15,14 +14,6 @@ import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeText
 
 private const val TEST_CONTEXT_WINDOW = 100_000
-
-private class FakeEmbeddingProvider(private val shouldFail: Boolean) : EmbeddingProvider {
-    override val dimensions = 4
-    override suspend fun embed(texts: List<String>): List<FloatArray> {
-        if (shouldFail) error("no route to embeddings host")
-        return texts.map { FloatArray(dimensions) }
-    }
-}
 
 private fun stubProvider(): LLMProvider {
     val provider = mockk<LLMProvider>()
@@ -55,7 +46,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
-                embeddingProvider = FakeEmbeddingProvider(shouldFail = false)
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false)
             )
             .build()
 
@@ -75,7 +66,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
-                embeddingProvider = FakeEmbeddingProvider(shouldFail = false)
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false)
             )
             .build()
 
@@ -93,7 +84,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://unreachable",
-                onWarning = { warnings.add(it) }, embeddingProvider = FakeEmbeddingProvider(shouldFail = true)
+                onWarning = { warnings.add(it) }, embeddingProvider = StubEmbeddingProvider(shouldFail = true)
             )
             .build()
 
@@ -119,7 +110,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
-                onWarning = { warnings.add(it) }, embeddingProvider = FakeEmbeddingProvider(shouldFail = false)
+                onWarning = { warnings.add(it) }, embeddingProvider = StubEmbeddingProvider(shouldFail = false)
             )
             .build()
 
@@ -137,7 +128,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .contextWindowTokens(TEST_CONTEXT_WINDOW)
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
-                embeddingProvider = FakeEmbeddingProvider(shouldFail = false)
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false)
             )
             .build()
 
