@@ -50,13 +50,14 @@ private fun buildRuntime(
     voiceInstaller: dev.sophi.companion.voice.VoiceInstaller
 ): CompanionRuntime {
     settings.validationError()?.let { error("Invalid ~/.sophi/companion.json: $it") }
+    val activeProfile = settings.activeProfile()
     val tasksDir = Path.of(System.getProperty("user.home"), ".sophi", "companion")
     val workspaceDir = Path.of(settings.workspaceDir).also { it.createDirectories() }
     val notificationCenter = NotificationCenter(NotificationStore(tasksDir.resolve("notifications.json")))
     val provider = try {
         buildProviderFromType(
-            settings.providerType, apiKey, settings.baseUrl, settings.model,
-            requestTimeout = Duration.ofSeconds(settings.requestTimeoutSeconds.toLong()),
+            activeProfile.providerType, apiKey, activeProfile.baseUrl, activeProfile.model,
+            requestTimeout = Duration.ofSeconds(activeProfile.requestTimeoutSeconds.toLong()),
             missingApiKeyMessage = "apiKey is required for provider type claude",
             missingBaseUrlMessage = "baseUrl is required for provider type openai-compat"
         )
@@ -71,9 +72,9 @@ private fun buildRuntime(
     val checkInRuntime: SophiRuntime? = settings.obsidianVaultPath?.takeUnless { it.isBlank() }?.let { vaultPath ->
         Sophi.runtime {
             this.provider = provider
-            model = settings.model
-            maxTokens = settings.maxTokens
-            contextWindowTokens(settings.contextWindowTokens)
+            model = activeProfile.model
+            maxTokens = activeProfile.maxTokens
+            contextWindowTokens(activeProfile.contextWindowTokens)
             sessionsDir = Path.of(settings.sessionsDir)
             builtinTools(root = Path.of(vaultPath))
             skillTools()
@@ -83,9 +84,9 @@ private fun buildRuntime(
     lateinit var companionRuntime: CompanionRuntime
     val sophiRuntime = Sophi.runtime {
         this.provider = provider
-        model = settings.model
-        maxTokens = settings.maxTokens
-        contextWindowTokens(settings.contextWindowTokens)
+        model = activeProfile.model
+        maxTokens = activeProfile.maxTokens
+        contextWindowTokens(activeProfile.contextWindowTokens)
         sessionsDir = Path.of(settings.sessionsDir)
         // Deliberately not calling .mcpConfig(path) here: Task 13 connects only the servers
         // marked enabled in .sophi/mcp.json, via SophiRuntime.connectMcpServer, instead of
@@ -99,10 +100,10 @@ private fun buildRuntime(
         ))
         // settings.validationError() (checked above) already guarantees embeddingModel/
         // embeddingBaseUrl are non-blank whenever memoryEnabled is true.
-        if (settings.memoryEnabled) {
+        if (activeProfile.memoryEnabled) {
             memory(
-                settings.embeddingModel!!, settings.embeddingBaseUrl!!, settings.embeddingApiKey,
-                settings.embeddingDimensions,
+                activeProfile.embeddingModel!!, activeProfile.embeddingBaseUrl!!, activeProfile.embeddingApiKey,
+                activeProfile.embeddingDimensions,
                 onWarning = { msg -> notificationCenter.add(NotificationKind.Memory, "Sophi memory", msg) }
             )
         }
