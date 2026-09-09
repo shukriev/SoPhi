@@ -15,6 +15,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionSettings
+import dev.sophi.companion.LlmProfile
 import dev.sophi.companion.ProviderTypes
 import dev.sophi.companion.providerDisplayName
 import dev.sophi.companion.validationError
@@ -166,6 +168,58 @@ fun ProviderFieldsForm(
 }
 
 /**
+ * Memory (embedding) fields — shared by the in-app Settings tab's profile editor. Extracted from
+ * what used to be an inline, profile-independent "Memory" section so it can be embedded per
+ * profile without duplicating the field list.
+ */
+@Composable
+fun MemoryFieldsForm(
+    memoryEnabled: Boolean,
+    onMemoryEnabledChange: (Boolean) -> Unit,
+    embeddingModel: String,
+    onEmbeddingModelChange: (String) -> Unit,
+    embeddingBaseUrl: String,
+    onEmbeddingBaseUrlChange: (String) -> Unit,
+    embeddingApiKey: String,
+    onEmbeddingApiKeyChange: (String) -> Unit,
+    embeddingDimensions: String,
+    onEmbeddingDimensionsChange: (String) -> Unit
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Switch(checked = memoryEnabled, onCheckedChange = onMemoryEnabledChange)
+        Text(if (memoryEnabled) "Enabled" else "Disabled", modifier = Modifier.padding(start = 8.dp))
+    }
+    if (memoryEnabled) {
+        OutlinedTextField(
+            value = embeddingModel,
+            onValueChange = onEmbeddingModelChange,
+            label = { Text("Embedding model") },
+            placeholder = { Text("nomic-embed-text (Ollama) or text-embedding-3-small (OpenAI)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = embeddingBaseUrl,
+            onValueChange = onEmbeddingBaseUrlChange,
+            label = { Text("Embedding base URL") },
+            placeholder = { Text(OLLAMA_BASE_URL) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = embeddingApiKey,
+            onValueChange = onEmbeddingApiKeyChange,
+            label = { Text("Embedding API key (optional — blank is fine for a local Ollama/vLLM server)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = embeddingDimensions,
+            onValueChange = onEmbeddingDimensionsChange,
+            label = { Text("Embedding dimensions") },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+/**
  * Provider setup. Shown on first run, and also when an existing `~/.sophi/companion.json`
  * fails validation — [existing] pre-fills the form and [problem] explains what was wrong, so a
  * broken config can be repaired in-app instead of dead-ending on a startup error.
@@ -176,15 +230,22 @@ fun FirstRunSettingsScreen(
     existing: CompanionSettings? = null,
     problem: String? = null
 ) {
-    var providerType by remember {
-        mutableStateOf(existing?.providerType?.takeIf { it in ProviderTypes.ALL } ?: ProviderTypes.CLAUDE)
+    // Not existing?.activeProfile() — existing may have failed validation precisely because
+    // profiles is empty (that's one of the repair scenarios this screen handles), and
+    // activeProfile() throws on an empty list. Look it up directly instead.
+    val existingProfile = existing?.profiles?.let { profiles ->
+        profiles.find { it.name == existing.activeProfileName } ?: profiles.firstOrNull()
     }
-    var model by remember { mutableStateOf(existing?.model ?: "claude-sonnet-4-5") }
-    var baseUrl by remember { mutableStateOf(existing?.baseUrl ?: "") }
-    var apiKey by remember { mutableStateOf(existing?.apiKey ?: "") }
-    var contextWindowTokens by remember { mutableStateOf((existing?.contextWindowTokens ?: 200_000).toString()) }
-    var maxTokens by remember { mutableStateOf((existing?.maxTokens ?: 4096).toString()) }
-    var requestTimeoutSeconds by remember { mutableStateOf((existing?.requestTimeoutSeconds ?: 300).toString()) }
+
+    var providerType by remember {
+        mutableStateOf(existingProfile?.providerType?.takeIf { it in ProviderTypes.ALL } ?: ProviderTypes.CLAUDE)
+    }
+    var model by remember { mutableStateOf(existingProfile?.model ?: "claude-sonnet-4-5") }
+    var baseUrl by remember { mutableStateOf(existingProfile?.baseUrl ?: "") }
+    var apiKey by remember { mutableStateOf(existingProfile?.apiKey ?: "") }
+    var contextWindowTokens by remember { mutableStateOf((existingProfile?.contextWindowTokens ?: 200_000).toString()) }
+    var maxTokens by remember { mutableStateOf((existingProfile?.maxTokens ?: 4096).toString()) }
+    var requestTimeoutSeconds by remember { mutableStateOf((existingProfile?.requestTimeoutSeconds ?: 300).toString()) }
 
     // Switching provider resets the fields to that provider's sensible starting values.
     fun selectProvider(type: String) {
@@ -196,7 +257,12 @@ fun FirstRunSettingsScreen(
         contextWindowTokens = defaults.contextWindowTokens
     }
 
-    val draft = CompanionSettings(
+    // Preserves the existing profile's own name when repairing a broken config (fixes that
+    // profile in place, leaving any other saved profiles untouched) — defaults to "Default" only
+    // for a true first run (existing == null).
+    val activeName = existing?.activeProfileName ?: "Default"
+    val draftProfile = LlmProfile(
+        name = activeName,
         providerType = providerType,
         model = model.trim(),
         baseUrl = baseUrl.trim().ifBlank { null },
@@ -204,10 +270,18 @@ fun FirstRunSettingsScreen(
         contextWindowTokens = contextWindowTokens.trim().toIntOrNull() ?: 0,
         maxTokens = maxTokens.trim().toIntOrNull() ?: 0,
         requestTimeoutSeconds = requestTimeoutSeconds.trim().toIntOrNull() ?: 0,
+        memoryEnabled = existingProfile?.memoryEnabled ?: false,
+        embeddingModel = existingProfile?.embeddingModel,
+        embeddingBaseUrl = existingProfile?.embeddingBaseUrl,
+        embeddingApiKey = existingProfile?.embeddingApiKey,
+        embeddingDimensions = existingProfile?.embeddingDimensions ?: 1536
+    )
+    val draft = CompanionSettings(
         // Preserve any custom paths from the existing file rather than resetting them to defaults.
         sessionsDir = existing?.sessionsDir ?: CompanionSettings().sessionsDir,
         mcpConfigPath = existing?.mcpConfigPath ?: CompanionSettings().mcpConfigPath,
-        profiles = existing?.profiles ?: emptyList()
+        profiles = listOf(draftProfile) + (existing?.profiles?.filterNot { it.name == activeName } ?: emptyList()),
+        activeProfileName = activeName
     )
     val error = when {
         contextWindowTokens.trim().toIntOrNull() == null -> "Context window must be a whole number"

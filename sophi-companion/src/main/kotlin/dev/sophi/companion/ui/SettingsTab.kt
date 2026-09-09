@@ -8,11 +8,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,14 +32,14 @@ import androidx.compose.ui.unit.dp
 import dev.sophi.companion.CompanionSettings
 import dev.sophi.companion.LlmProfile
 import dev.sophi.companion.ProviderTypes
-import dev.sophi.companion.applyProfile
-import dev.sophi.companion.providerDisplayName
+import dev.sophi.companion.activeProfile
 import dev.sophi.companion.validationError
 import dev.sophi.companion.voice.InstallState
 import dev.sophi.companion.voice.VoiceInstaller
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsTab(
     settings: CompanionSettings,
@@ -46,8 +50,6 @@ fun SettingsTab(
     var isInstalled by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // isInstalled() is the read-only, network-free check — used once on entry so each row shows
-    // "Installed"/"Not installed" correctly without ever calling install() just to find out.
     LaunchedEffect(Unit) { isInstalled = voiceInstaller.isInstalled() }
 
     val installBusy = installState is InstallState.Downloading ||
@@ -55,10 +57,6 @@ fun SettingsTab(
         installState is InstallState.Extracting ||
         installState is InstallState.CheckingExisting
 
-    // Both rows share one VoiceInstaller (STT/TTS install together as one bundle regardless of
-    // which was flipped on) — install() is a no-op if already running/installed. Only the flag
-    // for the row actually clicked gets set on success, so enabling one doesn't silently enable
-    // the other.
     fun enable(apply: (CompanionSettings) -> CompanionSettings) {
         scope.launch {
             voiceInstaller.install()
@@ -71,38 +69,146 @@ fun SettingsTab(
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Settings", style = MaterialTheme.typography.titleLarge)
 
-        Text("Active connection", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+        Text("Profile", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+        Text(
+            "A profile is one full connection — LLM provider and memory config together. " +
+                "Pick one from the dropdown to view/edit it, or create a new one.",
+            style = MaterialTheme.typography.bodySmall
+        )
 
-        // Keyed on `settings` (not Unit) so a profile Use/Delete elsewhere in this tab — which
-        // replaces `settings` via onSettingsChanged — refreshes these drafts. Typing here only
-        // touches the local vars, so it doesn't retrigger this block on every keystroke.
-        var providerType by remember(settings) { mutableStateOf(settings.providerType) }
-        var model by remember(settings) { mutableStateOf(settings.model) }
-        var baseUrl by remember(settings) { mutableStateOf(settings.baseUrl ?: "") }
-        var apiKey by remember(settings) { mutableStateOf(settings.apiKey ?: "") }
-        var contextWindowTokens by remember(settings) { mutableStateOf(settings.contextWindowTokens.toString()) }
-        var maxTokens by remember(settings) { mutableStateOf(settings.maxTokens.toString()) }
-        var requestTimeoutSeconds by remember(settings) { mutableStateOf(settings.requestTimeoutSeconds.toString()) }
+        var selectedProfileName by remember(settings) { mutableStateOf(settings.activeProfileName) }
+        var isNewProfile by remember(settings) { mutableStateOf(false) }
+        var pendingSelection by remember { mutableStateOf<String?>(null) }
+        var pendingIsNew by remember { mutableStateOf(false) }
+        var showDiscardDialog by remember { mutableStateOf(false) }
 
-        val draft = settings.copy(
+        val newDefaults = remember { defaultsForProvider(ProviderTypes.CLAUDE) }
+        val selectedProfile = settings.profiles.find { it.name == selectedProfileName } ?: settings.activeProfile()
+
+        fun blankNewProfile() = LlmProfile(
+            name = "", providerType = ProviderTypes.CLAUDE, model = newDefaults.model,
+            baseUrl = newDefaults.baseUrl.ifBlank { null },
+            contextWindowTokens = newDefaults.contextWindowTokens.toIntOrNull() ?: 200_000
+        )
+
+        // The snapshot to diff drafts against for dirty-tracking — re-captured only when
+        // (selectedProfileName, isNewProfile) changes (a different profile picked, or
+        // entering/leaving "new" mode; remember's two-key overload avoids needing a combined
+        // sentinel key that could theoretically collide with a real profile name), and explicitly
+        // reassigned after a successful Save (see below) so Save immediately clears the dirty flag
+        // instead of it staying stuck true until the next selection change.
+        var savedBaseline by remember(selectedProfileName, isNewProfile) {
+            mutableStateOf(if (isNewProfile) blankNewProfile() else selectedProfile)
+        }
+
+        var name by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.name) }
+        var providerType by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.providerType) }
+        var model by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.model) }
+        var baseUrl by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.baseUrl ?: "") }
+        var apiKey by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.apiKey ?: "") }
+        var contextWindowTokens by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.contextWindowTokens.toString()) }
+        var maxTokens by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.maxTokens.toString()) }
+        var requestTimeoutSeconds by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.requestTimeoutSeconds.toString()) }
+        var memoryEnabled by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.memoryEnabled) }
+        var embeddingModel by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.embeddingModel ?: "") }
+        var embeddingBaseUrl by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.embeddingBaseUrl ?: "") }
+        var embeddingApiKey by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.embeddingApiKey ?: "") }
+        var embeddingDimensions by remember(selectedProfileName, isNewProfile) { mutableStateOf(savedBaseline.embeddingDimensions.toString()) }
+
+        val draftProfile = LlmProfile(
+            name = name.trim(),
             providerType = providerType,
             model = model.trim(),
             baseUrl = baseUrl.trim().ifBlank { null },
             apiKey = apiKey.ifBlank { null },
             contextWindowTokens = contextWindowTokens.trim().toIntOrNull() ?: 0,
             maxTokens = maxTokens.trim().toIntOrNull() ?: 0,
-            requestTimeoutSeconds = requestTimeoutSeconds.trim().toIntOrNull() ?: 0
+            requestTimeoutSeconds = requestTimeoutSeconds.trim().toIntOrNull() ?: 0,
+            memoryEnabled = memoryEnabled,
+            embeddingModel = embeddingModel.trim().ifBlank { null },
+            embeddingBaseUrl = embeddingBaseUrl.trim().ifBlank { null },
+            embeddingApiKey = embeddingApiKey.ifBlank { null },
+            embeddingDimensions = embeddingDimensions.trim().toIntOrNull() ?: 0
         )
-        val draftError = when {
-            contextWindowTokens.trim().toIntOrNull() == null -> "Context window must be a whole number"
-            maxTokens.trim().toIntOrNull() == null -> "Max tokens must be a whole number"
-            requestTimeoutSeconds.trim().toIntOrNull() == null -> "Request timeout must be a whole number"
-            else -> draft.validationError()
+        val isDirty = draftProfile != savedBaseline
+
+        fun applySelection(profileName: String?, isNew: Boolean) {
+            if (!isNew) selectedProfileName = profileName!!
+            isNewProfile = isNew
         }
 
+        fun requestSelect(profileName: String?, isNew: Boolean) {
+            if (isDirty) {
+                pendingSelection = profileName
+                pendingIsNew = isNew
+                showDiscardDialog = true
+            } else {
+                applySelection(profileName, isNew)
+            }
+        }
+
+        if (showDiscardDialog) {
+            AlertDialog(
+                onDismissRequest = { showDiscardDialog = false },
+                title = { Text("Discard unsaved changes?") },
+                text = { Text("You have unsaved changes to '${if (isNewProfile) "new profile" else selectedProfileName}'.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        applySelection(pendingSelection, pendingIsNew)
+                        showDiscardDialog = false
+                    }) { Text("Discard") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDiscardDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
+
+        var providerMenuExpanded by remember { mutableStateOf(false) }
+        ExposedDropdownMenuBox(
+            expanded = providerMenuExpanded,
+            onExpandedChange = { providerMenuExpanded = it },
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            OutlinedTextField(
+                value = if (isNewProfile) "New profile…" else selectedProfileName,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Profile") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerMenuExpanded) },
+                modifier = Modifier.fillMaxWidth().menuAnchor()
+            )
+            ExposedDropdownMenu(expanded = providerMenuExpanded, onDismissRequest = { providerMenuExpanded = false }) {
+                settings.profiles.forEach { profile ->
+                    DropdownMenuItem(
+                        text = { Text(profile.name + if (profile.name == settings.activeProfileName) " (active)" else "") },
+                        onClick = {
+                            providerMenuExpanded = false
+                            requestSelect(profile.name, isNew = false)
+                        }
+                    )
+                }
+            }
+        }
+
+        Text("Connection", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+        if (isNewProfile) {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Profile name") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         ProviderFieldsForm(
             providerType = providerType,
-            onProviderTypeChange = { providerType = it },
+            onProviderTypeChange = { type ->
+                providerType = type
+                val defaults = defaultsForProvider(type)
+                model = defaults.model
+                baseUrl = defaults.baseUrl
+                contextWindowTokens = defaults.contextWindowTokens
+            },
             model = model,
             onModelChange = { model = it },
             baseUrl = baseUrl,
@@ -116,125 +222,73 @@ fun SettingsTab(
             requestTimeoutSeconds = requestTimeoutSeconds,
             onRequestTimeoutSecondsChange = { requestTimeoutSeconds = it }
         )
-        if (draftError != null) {
-            Text(draftError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        Button(
-            modifier = Modifier.padding(top = 8.dp),
-            enabled = draftError == null,
-            onClick = { onSettingsChanged(draft) }
-        ) { Text("Apply") }
 
-        Text("Saved profiles", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
+        Text("Memory", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
         Text(
-            "Each profile is a name plus its own full connection setup — switch the active " +
-                "connection to one with a click, without disturbing the others.",
+            "Jane's Theory long-term memory (experimental) — recalls facts and lessons across sessions.",
             style = MaterialTheme.typography.bodySmall
         )
-        settings.profiles.forEach { profile ->
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(
-                    "${profile.name} — ${providerDisplayName(profile.providerType)} / ${profile.model}",
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = { onSettingsChanged(settings.applyProfile(profile)) }) { Text("Use") }
-                TextButton(onClick = {
-                    onSettingsChanged(settings.copy(profiles = settings.profiles.filterNot { it.name == profile.name }))
-                }) { Text("Delete") }
-            }
+        MemoryFieldsForm(
+            memoryEnabled = memoryEnabled,
+            onMemoryEnabledChange = { memoryEnabled = it },
+            embeddingModel = embeddingModel,
+            onEmbeddingModelChange = { embeddingModel = it },
+            embeddingBaseUrl = embeddingBaseUrl,
+            onEmbeddingBaseUrlChange = { embeddingBaseUrl = it },
+            embeddingApiKey = embeddingApiKey,
+            onEmbeddingApiKeyChange = { embeddingApiKey = it },
+            embeddingDimensions = embeddingDimensions,
+            onEmbeddingDimensionsChange = { embeddingDimensions = it }
+        )
+
+        val nameCollision = isNewProfile && settings.profiles.any { it.name == draftProfile.name }
+        val saveError = when {
+            draftProfile.name.isBlank() -> "Profile name must not be blank"
+            nameCollision -> "A profile named '${draftProfile.name}' already exists"
+            contextWindowTokens.trim().toIntOrNull() == null -> "Context window must be a whole number"
+            maxTokens.trim().toIntOrNull() == null -> "Max tokens must be a whole number"
+            requestTimeoutSeconds.trim().toIntOrNull() == null -> "Request timeout must be a whole number"
+            embeddingDimensions.trim().toIntOrNull() == null -> "Embedding dimensions must be a whole number"
+            else -> CompanionSettings(profiles = listOf(draftProfile), activeProfileName = draftProfile.name).validationError()
+        }
+        if (saveError != null) {
+            Text(saveError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
 
-        // A standalone form, independent of the "Active connection" drafts above — adding a
-        // profile here never touches what's currently active.
-        var addingProfile by remember { mutableStateOf(false) }
-        if (addingProfile) {
-            var newName by remember { mutableStateOf("") }
-            var newProviderType by remember { mutableStateOf(ProviderTypes.CLAUDE) }
-            val newDefaults = remember { defaultsForProvider(ProviderTypes.CLAUDE) }
-            var newModel by remember { mutableStateOf(newDefaults.model) }
-            var newBaseUrl by remember { mutableStateOf(newDefaults.baseUrl) }
-            var newApiKey by remember { mutableStateOf("") }
-            var newContextWindowTokens by remember { mutableStateOf(newDefaults.contextWindowTokens) }
-            var newMaxTokens by remember { mutableStateOf("4096") }
-            var newRequestTimeoutSeconds by remember { mutableStateOf("300") }
+        val isActive = !isNewProfile && selectedProfileName == settings.activeProfileName
+        val canDelete = !isNewProfile && !isActive && settings.profiles.size > 1
 
-            val newProfileDraft = LlmProfile(
-                name = newName.trim(),
-                providerType = newProviderType,
-                model = newModel.trim(),
-                baseUrl = newBaseUrl.trim().ifBlank { null },
-                apiKey = newApiKey.ifBlank { null },
-                contextWindowTokens = newContextWindowTokens.trim().toIntOrNull() ?: 0,
-                maxTokens = newMaxTokens.trim().toIntOrNull() ?: 0,
-                requestTimeoutSeconds = newRequestTimeoutSeconds.trim().toIntOrNull() ?: 0
-            )
-            val newProfileError = when {
-                newName.isBlank() -> "Name must not be blank"
-                settings.profiles.any { it.name == newProfileDraft.name } -> "A profile named '${newProfileDraft.name}' already exists"
-                newContextWindowTokens.trim().toIntOrNull() == null -> "Context window must be a whole number"
-                newMaxTokens.trim().toIntOrNull() == null -> "Max tokens must be a whole number"
-                newRequestTimeoutSeconds.trim().toIntOrNull() == null -> "Request timeout must be a whole number"
-                else ->
-                    // Reuses CompanionSettings.validationError() for the provider fields it shares
-                    // with LlmProfile, by checking them against a throwaway settings copy.
-                    CompanionSettings(
-                        providerType = newProfileDraft.providerType,
-                        model = newProfileDraft.model,
-                        baseUrl = newProfileDraft.baseUrl,
-                        contextWindowTokens = newProfileDraft.contextWindowTokens,
-                        maxTokens = newProfileDraft.maxTokens,
-                        requestTimeoutSeconds = newProfileDraft.requestTimeoutSeconds
-                    ).validationError()
-            }
+        Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                enabled = saveError == null,
+                onClick = {
+                    val updatedProfiles = if (isNewProfile) settings.profiles + draftProfile
+                        else settings.profiles.map { if (it.name == selectedProfileName) draftProfile else it }
+                    onSettingsChanged(settings.copy(profiles = updatedProfiles))
+                    selectedProfileName = draftProfile.name
+                    isNewProfile = false
+                    savedBaseline = draftProfile
+                }
+            ) { Text("Save") }
 
-            Column(modifier = Modifier.padding(top = 8.dp)) {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("Profile name") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                ProviderFieldsForm(
-                    providerType = newProviderType,
-                    onProviderTypeChange = { type ->
-                        newProviderType = type
-                        val defaults = defaultsForProvider(type)
-                        newModel = defaults.model
-                        newBaseUrl = defaults.baseUrl
-                        newContextWindowTokens = defaults.contextWindowTokens
-                    },
-                    model = newModel,
-                    onModelChange = { newModel = it },
-                    baseUrl = newBaseUrl,
-                    onBaseUrlChange = { newBaseUrl = it },
-                    apiKey = newApiKey,
-                    onApiKeyChange = { newApiKey = it },
-                    contextWindowTokens = newContextWindowTokens,
-                    onContextWindowTokensChange = { newContextWindowTokens = it },
-                    maxTokens = newMaxTokens,
-                    onMaxTokensChange = { newMaxTokens = it },
-                    requestTimeoutSeconds = newRequestTimeoutSeconds,
-                    onRequestTimeoutSecondsChange = { newRequestTimeoutSeconds = it }
-                )
-                if (newProfileError != null) {
-                    Text(newProfileError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Button(
+                enabled = !isDirty && !isNewProfile && !isActive,
+                onClick = { onSettingsChanged(settings.copy(activeProfileName = selectedProfileName)) }
+            ) { Text(if (isActive) "Active" else "Set Active") }
+
+            TextButton(onClick = { requestSelect(null, isNew = true) }) { Text("+ New") }
+
+            TextButton(
+                enabled = canDelete,
+                onClick = {
+                    onSettingsChanged(settings.copy(profiles = settings.profiles.filterNot { it.name == selectedProfileName }))
+                    selectedProfileName = settings.activeProfileName
+                    isNewProfile = false
                 }
-                Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        enabled = newProfileError == null,
-                        onClick = {
-                            onSettingsChanged(settings.copy(profiles = settings.profiles + newProfileDraft))
-                            addingProfile = false
-                        }
-                    ) { Text("Add profile") }
-                    TextButton(onClick = { addingProfile = false }) { Text("Cancel") }
-                }
-            }
-        } else {
-            TextButton(modifier = Modifier.padding(top = 8.dp), onClick = { addingProfile = true }) { Text("+ New profile") }
+            ) { Text("Delete") }
         }
 
-        Text("Voice mode", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+        Text("Voice mode", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
 
         VoiceToggleRow(
             label = "Speech-to-text",
@@ -277,75 +331,6 @@ fun SettingsTab(
             InstallState.Ready, InstallState.Idle -> Unit
         }
 
-        Text("Memory", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-        Text(
-            "Jane's Theory long-term memory (experimental) — recalls facts and lessons across sessions. " +
-                "Requires an embedding model, separate from the chat model above.",
-            style = MaterialTheme.typography.bodySmall
-        )
-
-        var memoryEnabled by remember(settings) { mutableStateOf(settings.memoryEnabled) }
-        var embeddingModel by remember(settings) { mutableStateOf(settings.embeddingModel ?: "") }
-        var embeddingBaseUrl by remember(settings) { mutableStateOf(settings.embeddingBaseUrl ?: "") }
-        var embeddingApiKey by remember(settings) { mutableStateOf(settings.embeddingApiKey ?: "") }
-        var embeddingDimensions by remember(settings) { mutableStateOf(settings.embeddingDimensions.toString()) }
-
-        val memoryDraft = settings.copy(
-            memoryEnabled = memoryEnabled,
-            embeddingModel = embeddingModel.trim().ifBlank { null },
-            embeddingBaseUrl = embeddingBaseUrl.trim().ifBlank { null },
-            embeddingApiKey = embeddingApiKey.ifBlank { null },
-            embeddingDimensions = embeddingDimensions.trim().toIntOrNull() ?: 0
-        )
-        val memoryError = when {
-            embeddingDimensions.trim().toIntOrNull() == null -> "Embedding dimensions must be a whole number"
-            else -> memoryDraft.validationError()
-        }
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Switch(checked = memoryEnabled, onCheckedChange = { memoryEnabled = it })
-            Text(
-                if (memoryEnabled) "Enabled" else "Disabled",
-                modifier = Modifier.padding(start = 8.dp)
-            )
-        }
-        if (memoryEnabled) {
-            OutlinedTextField(
-                value = embeddingModel,
-                onValueChange = { embeddingModel = it },
-                label = { Text("Embedding model") },
-                placeholder = { Text("nomic-embed-text (Ollama) or text-embedding-3-small (OpenAI)") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = embeddingBaseUrl,
-                onValueChange = { embeddingBaseUrl = it },
-                label = { Text("Embedding base URL") },
-                placeholder = { Text(OLLAMA_BASE_URL) },
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = embeddingApiKey,
-                onValueChange = { embeddingApiKey = it },
-                label = { Text("Embedding API key (optional — blank is fine for a local Ollama/vLLM server)") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = embeddingDimensions,
-                onValueChange = { embeddingDimensions = it },
-                label = { Text("Embedding dimensions") },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-        if (memoryError != null) {
-            Text(memoryError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        Button(
-            modifier = Modifier.padding(top = 8.dp),
-            enabled = memoryError == null,
-            onClick = { onSettingsChanged(memoryDraft) }
-        ) { Text("Apply") }
-
         Text("Workspace", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
         OutlinedTextField(
             value = settings.workspaceDir,
@@ -371,7 +356,7 @@ private fun VoiceToggleRow(
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(modifier = Modifier.fillMaxWidth()) {
-        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         Text(
             "$label — " + when {
                 checked -> "Enabled"
