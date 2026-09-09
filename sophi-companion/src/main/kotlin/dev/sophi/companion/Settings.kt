@@ -1,5 +1,6 @@
 package dev.sophi.companion
 
+import dev.sophi.schedule.model.CronSchedules
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -88,9 +89,30 @@ data class CompanionSettings(
      *  unattended scheduled/goal-mode runs with nobody watching; point this at a real projects
      *  folder for CLI-equivalent reach, opted into explicitly rather than granted by accident. */
     val workspaceDir: String = System.getProperty("user.home") + "/.sophi/workspace",
+    /** Root of an Obsidian vault (or any plain-markdown notes folder) that scheduled check-ins
+     *  write into — a second, separate tool root from [workspaceDir]. Unset (the default, or
+     *  blank) disables check-in scheduling entirely. */
+    val obsidianVaultPath: String? = null,
+    /** Used by the obsidian-worklog skill to turn a bare Jira ticket ID (e.g. PROJ-123) into a
+     *  markdown link. Unset leaves ticket IDs as plain text. */
+    val jiraBaseUrl: String? = null,
+    /** Periodic check-in prompts. Inert unless [obsidianVaultPath] is also set and non-blank. */
+    val checkIns: List<CheckIn> = listOf(
+        CheckIn("work-log", "What have you worked on since last check-in?", "0 11,14,17 * * *")
+    ),
     /** Named provider configs saved from the Settings tab so you can flip between e.g. a remote
      *  Claude setup and a local Ollama one without re-typing model/baseUrl/apiKey each time. */
     val profiles: List<LlmProfile> = emptyList()
+)
+
+/** One periodic "what have you worked on" prompt. [cronExpression] is validated the same way
+ *  `dev.sophi.schedule.model.Trigger.Cron` expressions are (`CronSchedules.validate`) — only cron
+ *  scheduling is supported here, not the full Trigger sealed class. */
+@Serializable
+data class CheckIn(
+    val name: String,
+    val question: String,
+    val cronExpression: String
 )
 
 /** A saved snapshot of the provider fields, switchable via [CompanionSettings.applyProfile]. */
@@ -137,6 +159,11 @@ fun CompanionSettings.validationError(): String? = when {
     requestTimeoutSeconds <= 0 -> "requestTimeoutSeconds must be greater than 0"
     memoryEnabled && embeddingModel.isNullOrBlank() -> "embeddingModel is required when memoryEnabled is true"
     memoryEnabled && embeddingBaseUrl.isNullOrBlank() -> "embeddingBaseUrl is required when memoryEnabled is true"
+    checkIns.any { it.name.isBlank() } -> "each checkIns entry must have a non-blank name"
+    checkIns.any { it.question.isBlank() } -> "each checkIns entry must have a non-blank question"
+    checkIns.mapNotNull { ci -> CronSchedules.validate(ci.cronExpression)?.let { "${ci.name}: $it" } }.firstOrNull() != null ->
+        "invalid checkIns cronExpression — " +
+            checkIns.mapNotNull { ci -> CronSchedules.validate(ci.cronExpression)?.let { "${ci.name}: $it" } }.first()
     else -> null
 }
 
