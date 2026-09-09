@@ -15,6 +15,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -164,6 +165,58 @@ fun ProviderFieldsForm(
         label = { Text("Max tokens per response") },
         modifier = Modifier.fillMaxWidth()
     )
+}
+
+/**
+ * Memory (embedding) fields — shared by the in-app Settings tab's profile editor. Extracted from
+ * what used to be an inline, profile-independent "Memory" section so it can be embedded per
+ * profile without duplicating the field list.
+ */
+@Composable
+fun MemoryFieldsForm(
+    memoryEnabled: Boolean,
+    onMemoryEnabledChange: (Boolean) -> Unit,
+    embeddingModel: String,
+    onEmbeddingModelChange: (String) -> Unit,
+    embeddingBaseUrl: String,
+    onEmbeddingBaseUrlChange: (String) -> Unit,
+    embeddingApiKey: String,
+    onEmbeddingApiKeyChange: (String) -> Unit,
+    embeddingDimensions: String,
+    onEmbeddingDimensionsChange: (String) -> Unit
+) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Switch(checked = memoryEnabled, onCheckedChange = onMemoryEnabledChange)
+        Text(if (memoryEnabled) "Enabled" else "Disabled", modifier = Modifier.padding(start = 8.dp))
+    }
+    if (memoryEnabled) {
+        OutlinedTextField(
+            value = embeddingModel,
+            onValueChange = onEmbeddingModelChange,
+            label = { Text("Embedding model") },
+            placeholder = { Text("nomic-embed-text (Ollama) or text-embedding-3-small (OpenAI)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = embeddingBaseUrl,
+            onValueChange = onEmbeddingBaseUrlChange,
+            label = { Text("Embedding base URL") },
+            placeholder = { Text(OLLAMA_BASE_URL) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = embeddingApiKey,
+            onValueChange = onEmbeddingApiKeyChange,
+            label = { Text("Embedding API key (optional — blank is fine for a local Ollama/vLLM server)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = embeddingDimensions,
+            onValueChange = onEmbeddingDimensionsChange,
+            label = { Text("Embedding dimensions") },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
 
 /**
