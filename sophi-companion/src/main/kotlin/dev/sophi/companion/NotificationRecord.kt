@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import java.util.UUID
 
 @Serializable
-enum class NotificationKind { Schedule, Confirmation, Memory, Mcp }
+enum class NotificationKind { Schedule, Confirmation, Memory, Mcp, CheckIn }
 
 @Serializable
 data class NotificationRecord(

@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 internal fun consolidationNotificationBody(report: ConsolidationReport): String? =
     if (report.total == 0) null else
@@ -59,6 +60,7 @@ class CompanionRuntime(
     private val sessionApprovedTools = mutableMapOf<String, MutableSet<String>>()
     private val pendingConfirmationSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private var pollingJob: Job? = null
+    private var checkInJob: Job? = null
     private val mcpConfigLoader = dev.sophi.mcp.config.McpConfigLoader()
     private val mcpConfigWriter = dev.sophi.mcp.config.McpConfigWriter()
     private val hubServer = dev.sophi.hub.HubServer(hubPort)
@@ -353,8 +355,56 @@ class CompanionRuntime(
         }
     }
 
+    /**
+     * Starts periodic check-in prompts (see docs/superpowers/specs/2026-09-09-companion-checkin-
+     * design.md). [checkInRuntime] is a separate, vault-scoped [SophiRuntime] the caller builds
+     * via `RuntimeBuilder.builtinTools(root = obsidianVaultPath)` + `.grants(setOf("write_file"))`
+     * — entirely independent of this CompanionRuntime's own chat-tool root ([CompanionSettings.
+     * workspaceDir]). A no-op (cancels any previous job, starts nothing new) when [checkIns] is
+     * empty. [nowMs] and [promptText] are test seams.
+     */
+    fun startCheckInScheduling(
+        checkIns: List<CheckIn>,
+        jiraBaseUrl: String?,
+        checkInRuntime: SophiRuntime,
+        intervalMs: Long = 60_000,
+        nowMs: () -> Long = System::currentTimeMillis,
+        promptText: (String, String) -> String? = { title, message -> NativeDialogs.promptText(title, message) }
+    ) {
+        checkInJob?.cancel()
+        if (checkIns.isEmpty()) return
+        val scheduler = CheckInScheduler(checkIns)
+        checkInJob = scope.launch {
+            while (isActive) {
+                scheduler.checkAndFire(nowMs()).forEach { checkIn ->
+                    handleCheckIn(checkIn, jiraBaseUrl, checkInRuntime, promptText)
+                }
+                delay(intervalMs)
+            }
+        }
+    }
+
+    /** [NativeDialogs.promptText] blocks the calling thread waiting for the user to respond (or
+     *  cancel) the dialog — run on [Dispatchers.IO], not this class's [Dispatchers.Default] scope,
+     *  so a slow reply doesn't tie up the shared Default thread pool. */
+    private suspend fun handleCheckIn(
+        checkIn: CheckIn,
+        jiraBaseUrl: String?,
+        checkInRuntime: SophiRuntime,
+        promptText: (String, String) -> String?
+    ) {
+        val text = withContext(Dispatchers.IO) { promptText(checkIn.name, checkIn.question) } ?: return
+        val sessionId = checkInRuntime.newSession(title = "checkin:${checkIn.name}")
+        runCatching { checkInRuntime.turn(sessionId, buildCheckInPrompt(checkIn.name, text, jiraBaseUrl)) }
+            .onSuccess { notificationCenter.add(NotificationKind.CheckIn, "Logged: ${checkIn.name}", text.take(140)) }
+            .onFailure { e ->
+                notificationCenter.add(NotificationKind.CheckIn, "Check-in failed: ${checkIn.name}", e.message ?: "unknown error")
+            }
+    }
+
     fun close() {
         pollingJob?.cancel()
+        checkInJob?.cancel()
         hubServer.stop()
         // Companion has no per-tab-close lifecycle today (every open ChatTab lives until the app
         // quits), so app shutdown is the only point any of these sessions' outcomes ever get
