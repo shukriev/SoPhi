@@ -428,9 +428,10 @@ How it works, per turn:
 
 Sensitive topics (health, finances, relationships) are tier-guarded: never
 volunteered, only surfaced when you raise the topic, and every access is
-audited. Everything lives in plain JSONL under `~/.sophi/memory/`
-(user-global — your life isn't per-project), and like learning it is strictly
-best-effort: memory can never fail or slow down a turn.
+audited. Storage is an embedded ArcadeDB database (document+graph+vector)
+under `~/.sophi/memory/` (user-global — your life isn't per-project), and
+like learning it is strictly best-effort: memory can never fail or slow down
+a turn.
 
 Everything remembered is inspectable and truly deletable:
 

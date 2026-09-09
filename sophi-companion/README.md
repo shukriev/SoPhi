@@ -12,8 +12,9 @@ anything needing attention floats to the top, then by most recently active. Belo
 session list, fixed nav items open **MCP** (configured servers — enable/disable, remove),
 **Goals** (scheduled tasks — create, run now), and **Skills** (installed skills — add
 from a local path or git URL, remove). Selecting a session opens its chat in the main
-panel. A **Settings** tab holds the speech-to-text/text-to-speech toggles and
-`workspaceDir` (see [Configuration](#configuration) and [Tools](#tools) below).
+panel. A **Settings** tab holds the profile editor (LLM + memory connections —
+see [Configuration](#configuration)), the speech-to-text/text-to-speech
+toggles, and `workspaceDir` (see [Tools](#tools) below).
 
 Local sessions stream live, token by token — same as CLI sessions.
 
@@ -62,14 +63,29 @@ OpenAI-compatible**, fill in the fields, and it writes `~/.sophi/companion.json`
 The same screen reappears if the saved file is ever unusable, pre-filled and
 explaining what was wrong, so a broken config can be repaired in-app.
 
-| Field | Meaning |
+**A profile is one full connection: LLM provider + memory config together.**
+`~/.sophi/companion.json` holds a list of them (`profiles`) plus which one is
+currently running (`activeProfileName`) — switch, edit, or add profiles from
+the Settings tab's profile editor (a dropdown selector, a unified Connection +
+Memory form, and Save / Set Active / **+ New** / Delete actions) instead of
+hand-editing the file. Picking a different profile from the dropdown loads it
+into the form for editing without switching to it; **Set Active** is a
+separate step, disabled while the form has unsaved edits. Deleting is blocked
+for the currently-active profile and for the last remaining profile.
+
+| Profile field | Meaning |
 |---|---|
+| `name` | Fixed at creation — no rename yet |
 | `providerType` | `claude` or `openai-compat` |
 | `model` | Model id — e.g. `claude-sonnet-4-5`, or `qwen3:8b` for Ollama |
 | `baseUrl` | Required for `openai-compat`; ignored for `claude` |
 | `apiKey` | Optional. `null` + `claude` falls back to `ANTHROPIC_API_KEY` |
 | `contextWindowTokens` | Your model's real context window (see below) |
 | `maxTokens` | Max tokens generated per response |
+| `memoryEnabled` / `embeddingModel` / `embeddingBaseUrl` / `embeddingApiKey` / `embeddingDimensions` | Jane's Theory long-term memory for this profile (experimental, off by default) |
+
+| Top-level field | Meaning |
+|---|---|
 | `sessionsDir` / `mcpConfigPath` | Default to the `sophi-cli` locations |
 | `hubPort` | Port the embedded hub listens on for CLI sessions to register with (default `8765`) |
 | `workspaceDir` | Root directory the `bash`/`write_file`/`edit_file` tools are confined to (default `~/.sophi/workspace`) — see [Tools](#tools) below |
@@ -78,10 +94,16 @@ explaining what was wrong, so a broken config can be repaired in-app.
 
 ```json
 {
-  "providerType": "claude",
-  "model": "claude-sonnet-4-5",
-  "contextWindowTokens": 200000,
-  "maxTokens": 4096
+  "profiles": [
+    {
+      "name": "Default",
+      "providerType": "claude",
+      "model": "claude-sonnet-4-5",
+      "contextWindowTokens": 200000,
+      "maxTokens": 4096
+    }
+  ],
+  "activeProfileName": "Default"
 }
 ```
 
@@ -89,16 +111,25 @@ explaining what was wrong, so a broken config can be repaired in-app.
 
 ```json
 {
-  "providerType": "openai-compat",
-  "model": "qwen3:8b",
-  "baseUrl": "http://localhost:11434/v1",
-  "apiKey": null,
-  "contextWindowTokens": 32768,
-  "maxTokens": 8192
+  "profiles": [
+    {
+      "name": "Local Ollama",
+      "providerType": "openai-compat",
+      "model": "qwen3:8b",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKey": null,
+      "contextWindowTokens": 32768,
+      "maxTokens": 8192
+    }
+  ],
+  "activeProfileName": "Local Ollama"
 }
 ```
 
-Omitted keys fall back to defaults, so a partial file is valid.
+Omitted keys fall back to defaults, so a partial file is valid. A file saved
+before profiles existed (a flat top-level `providerType`/`model`/... shape)
+is migrated automatically on load into a single `"Default"` profile — nothing
+to do by hand.
 
 > **Set `contextWindowTokens` to your model's real window.** It defaults to
 > `200000`, a Claude-sized number. Sophi compacts a turn's earlier tool rounds at
@@ -113,7 +144,44 @@ the variable is exported. Set `apiKey` explicitly if your vLLM server is behind 
 Sessions and MCP servers are shared with `sophi-cli` by default, so sessions you
 started in the terminal show up in the Sessions tab.
 
-Settings are read once at startup — editing the file requires a restart.
+Settings are read once at startup — hand-editing the file requires a restart;
+changes made through the Settings tab's profile editor apply immediately.
+
+## Check-ins → Obsidian time log
+
+Companion can periodically pop a native macOS dialog asking what you've
+worked on, and record the reply into an Obsidian vault. Config-file only for
+now — there's no Settings-tab UI for this yet:
+
+```json
+{
+  "obsidianVaultPath": "/Users/you/Documents/YourVault",
+  "jiraBaseUrl": "https://your-org.atlassian.net",
+  "checkIns": [
+    {
+      "name": "work-log",
+      "question": "What have you worked on since last check-in?",
+      "cronExpression": "0 11,14,17 * * *"
+    }
+  ]
+}
+```
+
+- `obsidianVaultPath` unset (or blank) disables the feature entirely — nothing
+  fires. It's a separate tool root from `workspaceDir`, and isn't
+  pre-created — it's expected to already exist as your real vault.
+- `checkIns` is a list of independently-scheduled prompts (standard 5-field
+  cron in `cronExpression`); each fires its own dialog on its own schedule.
+  A cancelled or blank reply is skipped silently, no retry until the next
+  scheduled occurrence.
+- A captured reply runs a one-off, vault-scoped agent turn (`write_file`-only
+  grant, unattended-DENY_ALL like scheduled tasks) that appends a formatted
+  entry to today's daily note, per the `obsidian-worklog` skill installed at
+  `~/.sophi/skills/obsidian-worklog.md`. `jiraBaseUrl` (optional) turns a bare
+  Jira ticket ID in your reply into a markdown link.
+- Requires companion's window to have been opened at least once after launch
+  (the scheduler starts inside `buildRuntime`) and the app to stay running —
+  no catch-up for a missed/asleep period.
 
 ## Tools
 
