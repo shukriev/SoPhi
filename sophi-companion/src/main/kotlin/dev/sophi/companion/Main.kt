@@ -20,6 +20,7 @@ import dev.sophi.calendar.tools.buildCalendarProvider
 import dev.sophi.calendar.tools.calendarTools
 import dev.sophi.companion.ui.AppShell
 import dev.sophi.sdk.Sophi
+import dev.sophi.sdk.SophiRuntime
 import dev.sophi.schedule.notify.NotificationText
 import dev.sophi.schedule.notify.Notifier
 import java.awt.Desktop
@@ -61,6 +62,23 @@ private fun buildRuntime(
         )
     } catch (e: ProviderConfigException) {
         error(e.message ?: "Invalid provider configuration")
+    }
+    // Deliberately not pre-creating vaultPath the way workspaceDir is above (.also {
+    // it.createDirectories() }) — the vault is expected to already exist as the user's real
+    // Obsidian vault; silently materializing a stray empty directory for a typo'd path would
+    // hide a config mistake instead of surfacing it. FileWriteTool still creates subdirectories
+    // (e.g. Daily/) under an existing root as needed.
+    val checkInRuntime: SophiRuntime? = settings.obsidianVaultPath?.takeUnless { it.isBlank() }?.let { vaultPath ->
+        Sophi.runtime {
+            this.provider = provider
+            model = settings.model
+            maxTokens = settings.maxTokens
+            contextWindowTokens(settings.contextWindowTokens)
+            sessionsDir = Path.of(settings.sessionsDir)
+            builtinTools(root = Path.of(vaultPath))
+            skillTools()
+            grants(setOf("write_file"))
+        }
     }
     lateinit var companionRuntime: CompanionRuntime
     val sophiRuntime = Sophi.runtime {
@@ -135,6 +153,7 @@ private fun buildRuntime(
         ttsEnabled = settings.ttsEnabled
     )
     companionRuntime.startSchedulePolling()
+    checkInRuntime?.let { companionRuntime.startCheckInScheduling(settings.checkIns, settings.jiraBaseUrl, it) }
     return companionRuntime
 }
 
