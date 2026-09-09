@@ -331,4 +331,60 @@ class SettingsTest : FunSpec({
 
         SettingsStore(path).load()?.requestTimeoutSeconds shouldBe 300
     }
+
+    test("checkIns defaults to one work-log entry, obsidianVaultPath and jiraBaseUrl default to null") {
+        val settings = CompanionSettings()
+
+        settings.obsidianVaultPath shouldBe null
+        settings.jiraBaseUrl shouldBe null
+        settings.checkIns shouldBe listOf(
+            CheckIn("work-log", "What have you worked on since last check-in?", "0 11,14,17 * * *")
+        )
+        settings.validationError() shouldBe null
+    }
+
+    test("a blank checkIns name is rejected") {
+        val settings = CompanionSettings(checkIns = listOf(CheckIn("  ", "question?", "0 11 * * *")))
+
+        settings.validationError() shouldContain "non-blank name"
+    }
+
+    test("a blank checkIns question is rejected") {
+        val settings = CompanionSettings(checkIns = listOf(CheckIn("work-log", "  ", "0 11 * * *")))
+
+        settings.validationError() shouldContain "non-blank question"
+    }
+
+    test("an invalid checkIns cronExpression is rejected with the check-in's name in the message") {
+        val settings = CompanionSettings(checkIns = listOf(CheckIn("work-log", "question?", "not a cron")))
+
+        settings.validationError() shouldContain "work-log"
+    }
+
+    test("obsidianVaultPath, jiraBaseUrl, and checkIns round-trip through SettingsStore save/load") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        val settings = CompanionSettings(
+            obsidianVaultPath = "/Users/me/vault",
+            jiraBaseUrl = "https://jira.example.com",
+            checkIns = listOf(
+                CheckIn("work-log", "What have you worked on?", "0 11,14,17 * * *"),
+                CheckIn("weekly-review", "How was your week?", "0 9 * * MON")
+            )
+        )
+
+        store.save(settings)
+
+        store.load() shouldBe settings
+    }
+
+    test("a file written before checkIns existed still loads, defaulting to the one work-log entry") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val path = dir.resolve("companion.json")
+        path.writeText("""{"providerType":"claude","model":"claude-sonnet-4-5"}""")
+
+        SettingsStore(path).load()?.checkIns shouldBe listOf(
+            CheckIn("work-log", "What have you worked on since last check-in?", "0 11,14,17 * * *")
+        )
+    }
 })
