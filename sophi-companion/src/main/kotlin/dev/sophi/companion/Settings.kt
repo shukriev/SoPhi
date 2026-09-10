@@ -126,7 +126,12 @@ data class CompanionSettings(
     ),
     /** Which of [profiles] is currently running. Must match one of their [LlmProfile.name]s —
      *  [validationError] rejects a mismatch. */
-    val activeProfileName: String = "Default"
+    val activeProfileName: String = "Default",
+    /** Passively listens while the app window is open, storing notable ambient speech as
+     *  memory (see docs/superpowers/specs/2026-09-10-ambient-listening-design.md) and creating
+     *  reminders/tasks it hears. Requires the same voice-tools bundle as [sttEnabled]/[ttsEnabled]
+     *  (whisper only is actually used). Off by default. */
+    val ambientListeningEnabled: Boolean = false
 )
 
 /** One periodic "what have you worked on" prompt. [cronExpression] is validated the same way
