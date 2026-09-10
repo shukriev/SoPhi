@@ -107,6 +107,52 @@ class ConsolidatorTest : FunSpec({
         r.consolidator.run(nowMs = now).compressed shouldBe 0
     }
 
+    test("classifyPatterns tags only candidates at or above the repetition threshold") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("""["mem_repeated"]""", TokenUsage(1, 1))
+        val r = Rig(provider)
+        val repeated = Memory(
+            "mem_repeated", "always forgets passport before flights", Room.EPISODES, 0.6,
+            SalienceSignals(rep = 0.9, emph = 0.0, nov = 0.0, aff = 0.0, rec = 1.0),
+            Sensitivity.PERSONAL, Provenance.USER_DIRECT, 0L, 0L, "s"
+        )
+        val onceOff = Memory(
+            "mem_onceoff", "mentioned liking coffee", Room.KNOWLEDGE, 0.6,
+            SalienceSignals(rep = 0.1, emph = 0.0, nov = 0.0, aff = 0.0, rec = 1.0),
+            Sensitivity.PERSONAL, Provenance.USER_DIRECT, 0L, 0L, "s"
+        )
+        r.store.upsertMemory(repeated)
+        r.store.upsertMemory(onceOff)
+
+        val report = r.consolidator.run(nowMs = 1_000L)
+
+        report.classified shouldBe 1
+        r.store.memories().getValue("mem_repeated").actionablePattern shouldBe true
+        r.store.memories().getValue("mem_onceoff").actionablePattern shouldBe false
+    }
+
+    test("classifyPatterns is skipped without a provider, same as compress") {
+        val r = Rig(provider = null)
+        val repeated = Memory(
+            "mem_repeated", "always forgets passport before flights", Room.EPISODES, 0.6,
+            SalienceSignals(rep = 0.9, emph = 0.0, nov = 0.0, aff = 0.0, rec = 1.0),
+            Sensitivity.PERSONAL, Provenance.USER_DIRECT, 0L, 0L, "s"
+        )
+        r.store.upsertMemory(repeated)
+        r.consolidator.run(nowMs = 1_000L).classified shouldBe 0
+    }
+
+    test("classifyPatterns failure doesn't break the rest of the consolidation cycle") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } throws RuntimeException("boom")
+        val r = Rig(provider)
+        r.add("mem_a", "dentist appointment thursday fourteen", at = 0L, salience = 0.6)
+        r.add("mem_b", "dentist appointment thursday fourteen", at = 100L, salience = 0.5)
+        val report = r.consolidator.run(nowMs = 1_000L)
+        report.classified shouldBe 0
+        report.merged shouldBe 1
+    }
+
     test("prune soft-deletes orphans below the floor; purge drops soft-deleted past grace") {
         val r = Rig()
         val now = 400 * DAY

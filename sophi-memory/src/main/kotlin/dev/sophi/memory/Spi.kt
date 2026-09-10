@@ -4,8 +4,9 @@ data class RecallQuery(val sessionId: String, val userInput: String, val nowMs: 
 data class TurnObservation(val sessionId: String, val userInput: String, val assistantReply: String, val nowMs: Long)
 data class MemoryBlock(val rendered: String, val memoryIds: List<String>)
 data class ConsolidationReport(
-    val merged: Int, val strengthened: Int, val compressed: Int, val pruned: Int, val purged: Int
-) { val total: Int get() = merged + strengthened + compressed + pruned + purged }
+    val merged: Int, val strengthened: Int, val compressed: Int, val pruned: Int, val purged: Int,
+    val classified: Int = 0
+) { val total: Int get() = merged + strengthened + compressed + pruned + purged + classified }
 
 sealed interface ForgetRequest {
     data class ById(val id: String) : ForgetRequest
