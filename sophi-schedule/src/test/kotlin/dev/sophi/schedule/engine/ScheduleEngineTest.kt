@@ -25,6 +25,7 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -251,6 +252,46 @@ class ScheduleEngineTest : FunSpec({
 
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
         runLog.forTask(task.id).single().outcome shouldBe RunOutcome.Succeeded
+    }
+
+    test("notifier is not called when a Recurring task's summary is the NO_RESCUE_NEEDED sentinel") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("NO_RESCUE_NEEDED"))
+        val notified = mutableListOf<RunRecord>()
+        val recordingNotifier = Notifier { _, run -> notified.add(run) }
+        val (engine, taskStore, _) = engine(provider, notifier = recordingNotifier)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "check"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        notified shouldBe emptyList()
+    }
+
+    test("notifier still fires for a Recurring task with real content") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Flight tomorrow — you usually forget your passport"))
+        val notified = mutableListOf<RunRecord>()
+        val recordingNotifier = Notifier { _, run -> notified.add(run) }
+        val (engine, taskStore, _) = engine(provider, notifier = recordingNotifier)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "check"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        notified shouldHaveSize 1
+    }
+
+    test("notifier still fires on a Failed run even if summary happens to be empty") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } throws RuntimeException("boom")
+        val notified = mutableListOf<RunRecord>()
+        val recordingNotifier = Notifier { _, run -> notified.add(run) }
+        val (engine, taskStore, _) = engine(provider, notifier = recordingNotifier)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "check"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        notified shouldHaveSize 1
+        notified.single().outcome.shouldBeInstanceOf<RunOutcome.Failed>()
     }
 
     test("tickOnce skips a task whose nextRunAtMs is in the future") {
