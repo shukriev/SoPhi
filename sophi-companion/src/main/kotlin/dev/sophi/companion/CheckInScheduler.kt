@@ -13,12 +13,26 @@ import java.time.format.DateTimeFormatter
 class CheckInScheduler(private val checkIns: List<CheckIn>) {
     private val lastFiredAtMs = mutableMapOf<String, Long>()
 
+    /** The [nowMs] of the previous [checkAndFire] call, or null before the first one. Anchors
+     *  the "haven't fired yet" fallback below to a stable point in time instead of recomputing it
+     *  from the current tick — see that fallback's doc for why that recomputation was a bug. */
+    private var lastCheckedMs: Long? = null
+
     /** Returns the [CheckIn]s whose next cron occurrence has arrived by [nowMs] and hasn't
      *  already been returned by an earlier call. */
     fun checkAndFire(nowMs: Long): List<CheckIn> {
+        // Production polling calls this on a fixed wall-clock interval unrelated to any cron
+        // schedule's phase, so nowMs almost never lands exactly on a fire boundary. Before a
+        // check-in has fired even once, its fallback reference point must be the last time this
+        // was CALLED (lastCheckedMs), not (nowMs - 1) recomputed from the CURRENT call: the old
+        // (nowMs - 1) fallback made "next occurrence" always resolve to something already in the
+        // future relative to that same nowMs, so a boundary that passed between two ticks could
+        // never be observed — the check-in would never fire, ever.
+        val since = lastCheckedMs ?: (nowMs - 1)
+        lastCheckedMs = nowMs
         val fired = mutableListOf<CheckIn>()
         for (checkIn in checkIns) {
-            val after = lastFiredAtMs[checkIn.name] ?: (nowMs - 1)
+            val after = lastFiredAtMs[checkIn.name] ?: since
             val next = CronSchedules.nextFireTimeAfter(checkIn.cronExpression, after)
             if (next != null && next <= nowMs) {
                 lastFiredAtMs[checkIn.name] = next
