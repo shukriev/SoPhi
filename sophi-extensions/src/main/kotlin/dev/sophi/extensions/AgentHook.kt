@@ -17,7 +17,8 @@ data class HookContext(
     val toolResult: String? = null,
     val success: Boolean? = null,
     val durationMillis: Long? = null,
-    val assistantReply: String? = null
+    val assistantReply: String? = null,
+    val ambient: Boolean = false
 )
 
 interface AgentHook {

@@ -49,6 +49,11 @@ class CollectContextTest : FunSpec({
         HookContext("s1", assistantReply = "done").assistantReply shouldBe "done"
     }
 
+    test("ambient defaults to false, and can be set explicitly") {
+        HookContext("s1").ambient shouldBe false
+        HookContext("s1", ambient = true).ambient shouldBe true
+    }
+
     test("external cancellation stops the chain instead of continuing to the next contributor") {
         var secondRan = false
         val registry = PluginRegistry()
