@@ -27,7 +27,11 @@ data class Memory(
      *  in a session later judged successful vs. failed. Correlation, not causation -- see
      *  [worthClass]'s evidence-floor guard before either count moves anything. */
     val hitsPositive: Int = 0,
-    val hitsNegative: Int = 0
+    val hitsNegative: Int = 0,
+    /** Set by [dev.sophi.memory.jane.Consolidator]'s classification step, never at per-turn
+     *  encode time — a single utterance is evidence of one incident, not a recurring pattern.
+     *  Gates [dev.sophi.memory.jane.JanesPalace.actionablePatterns]'s read surface. */
+    val actionablePattern: Boolean = false
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null
