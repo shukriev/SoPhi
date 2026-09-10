@@ -44,6 +44,19 @@ class CheckInSchedulerTest : FunSpec({
         scheduler.checkAndFire(secondFireAt) shouldBe listOf(checkIn)
     }
 
+    test("fires even when polling ticks never land exactly on the cron boundary") {
+        // Real production polling calls checkAndFire(System.currentTimeMillis()) on a fixed
+        // interval unrelated to the cron schedule's phase, so a tick almost never lands exactly
+        // on the boundary the way the tests above (which pass fireAt itself) do. This reproduces
+        // that shape: one tick before the boundary, one tick some seconds after it.
+        val checkIn = CheckIn("work-log", "What have you worked on?", "0 * * * *")
+        val scheduler = CheckInScheduler(listOf(checkIn))
+        val fireAt = CronSchedules.nextFireTimeAfter(checkIn.cronExpression, System.currentTimeMillis() - 1)!!
+
+        scheduler.checkAndFire(fireAt - 5_000) shouldBe emptyList()
+        scheduler.checkAndFire(fireAt + 23_000) shouldBe listOf(checkIn)
+    }
+
     test("multiple check-ins on the same schedule fire together and are both suppressed afterward") {
         val a = CheckIn("a", "question a?", "0 * * * *")
         val b = CheckIn("b", "question b?", "0 * * * *")
