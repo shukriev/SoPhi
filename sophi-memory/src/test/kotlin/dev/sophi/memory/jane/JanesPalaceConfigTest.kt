@@ -19,4 +19,8 @@ class JanesPalaceConfigTest : FunSpec({
             JanesPalaceConfig.autoPurgeEnabledFromEnv { value } shouldBe true
         }
     }
+
+    test("patternRepThreshold defaults to 0.5") {
+        JanesPalaceConfig().patternRepThreshold shouldBe 0.5
+    }
 })

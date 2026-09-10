@@ -34,6 +34,10 @@ data class JanesPalaceConfig(
     val repetitionThreshold: Double = 0.80,
     val recentWindow: Int = 20,
     val strengthenRecalls: Int = 2,
+    /** Minimum [SalienceSignals.rep] for a memory to be considered for [Consolidator.classifyPatterns]
+     *  — repetition evidence a single-turn judgment can't have. 0.5 is the repetition midpoint;
+     *  [repetitionThreshold]'s 0.80 is a much stricter bar for outright dedupe-merging. */
+    val patternRepThreshold: Double = 0.5,
     val compressAgeMs: Long = 90 * DAY,
     val compressPriorityCeiling: Double = 0.1,
     val pruneFloor: Double = 0.02,
