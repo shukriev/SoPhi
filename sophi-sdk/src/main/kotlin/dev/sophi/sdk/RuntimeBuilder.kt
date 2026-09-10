@@ -25,6 +25,7 @@ import dev.sophi.memory.MemoryPlugin
 import dev.sophi.memory.MemoryPromptSection
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
+import dev.sophi.memory.tools.ListActionablePatternsTool
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
 import dev.sophi.skills.SkillInvocationStore
@@ -240,6 +241,7 @@ class RuntimeBuilder {
                 )
             }
         }
+        memoryPlugin?.palace()?.let { palace -> registry.register(ListActionablePatternsTool(palace)) }
         val memorySection = if (memoryPlugin != null) MemoryPromptSection.TEXT else null
 
         val effectiveConfig = agentConfig.copy(
