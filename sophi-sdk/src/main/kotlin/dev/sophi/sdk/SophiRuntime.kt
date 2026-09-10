@@ -144,9 +144,10 @@ class SophiRuntime internal constructor(
         sessionId: String,
         userInput: String,
         assistantReply: String,
-        error: Throwable? = null
+        error: Throwable? = null,
+        ambient: Boolean = false
     ) {
-        runCatching { settleOutcome(sessionId, userInput, assistantReply, error) }
+        runCatching { settleOutcome(sessionId, userInput, assistantReply, error, ambient) }
     }
 
     /**
@@ -158,14 +159,14 @@ class SophiRuntime internal constructor(
      * and assistantReply are populated on that path: AFTER_TURN hooks that encode the exchange
      * (MemoryPlugin) bail out on either being null, so an empty context silently drops the turn.
      */
-    private suspend fun settleOutcome(sessionId: String, input: String, reply: String, error: Throwable?) {
+    private suspend fun settleOutcome(sessionId: String, input: String, reply: String, error: Throwable?, ambient: Boolean = false) {
         if (error != null) {
             pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(sessionId, error = error))
         } else {
             withContext(NonCancellable) {
                 pluginRegistry.dispatch(
                     HookPoint.AFTER_TURN,
-                    HookContext(sessionId, userInput = input, assistantReply = reply)
+                    HookContext(sessionId, userInput = input, assistantReply = reply, ambient = ambient)
                 )
             }
         }
