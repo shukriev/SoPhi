@@ -1,7 +1,13 @@
 package dev.sophi.memory
 
 data class RecallQuery(val sessionId: String, val userInput: String, val nowMs: Long)
-data class TurnObservation(val sessionId: String, val userInput: String, val assistantReply: String, val nowMs: Long)
+data class TurnObservation(
+    val sessionId: String,
+    val userInput: String,
+    val assistantReply: String,
+    val nowMs: Long,
+    val ambient: Boolean = false
+)
 data class MemoryBlock(val rendered: String, val memoryIds: List<String>)
 data class ConsolidationReport(
     val merged: Int, val strengthened: Int, val compressed: Int, val pruned: Int, val purged: Int,

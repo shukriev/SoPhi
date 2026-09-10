@@ -18,6 +18,11 @@ class MemoryWriterTest : FunSpec({
     fun vm(text: String, room: String = "EPISODES", emph: Double = 0.0, aff: Double = 0.0) =
         VerdictMemory(text = text, room = room, emph = emph, aff = aff)
 
+    test("TurnObservation.ambient defaults to false") {
+        TurnObservation("s1", "u", "a", 1_000L).ambient shouldBe false
+        TurnObservation("s1", "u", "a", 1_000L, ambient = true).ambient shouldBe true
+    }
+
     test("high-signal memory is stored with blended salience; embedding is retrievable") {
         val (store, writer) = rig()
         // rep=0, nov=1 (empty room), rec=1: α = 0.25*0.8 + 0.15*1 + 0.30*0.9 + 0.10*1 = 0.72
