@@ -2,6 +2,7 @@ package dev.sophi.companion.voice
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -87,6 +88,29 @@ class VoiceControllerTest : FunSpec({
         runBlocking { withTimeout(2000) { waitUntil { controller.state.value is VoiceState.Error } } }
         (controller.state.value as VoiceState.Error).message shouldBe "whisper.cpp not found"
         sendMessageCalls shouldBe 0
+    }
+
+    test("onPttPress recovers from a recorder that fails to start, instead of wedging forever") {
+        val wavFile = Files.createTempFile("voice-controller-test", ".wav")
+        var failNext = true
+        val recorder = object : AudioRecorder {
+            override fun start() { if (failNext) { failNext = false; error("line unavailable") } }
+            override fun stop(): Path = wavFile
+        }
+        val transcriber = FakeWhisperTranscriber(Result.success("hello"))
+        val sent = mutableListOf<String>()
+        val controller = VoiceController(
+            sessionId = "s1",
+            sendMessage = { _, text, onTurnEnd -> sent.add(text); onTurnEnd() },
+            recorder = recorder,
+            transcriber = transcriber
+        )
+
+        controller.onPttPress() // recorder throws
+        controller.state.value.shouldBeInstanceOf<VoiceState.Error>()
+
+        controller.onPttPress() // must be able to try again, not stay wedged
+        controller.state.value shouldBe VoiceState.Recording
     }
 
     test("a PTT press while a turn is already in flight is ignored") {

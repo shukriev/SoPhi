@@ -40,6 +40,16 @@ class SettingsTest : FunSpec({
         store.load() shouldBe settings
     }
 
+    test("ambientListeningEnabled defaults to false") {
+        val dir = createTempDirectory("sophi-companion-settings-test")
+        val store = SettingsStore(dir.resolve("companion.json"))
+        val settings = singleProfileSettings(LlmProfile(name = "Default", providerType = "claude", model = "claude-sonnet-4-5"))
+
+        store.save(settings)
+
+        store.load()!!.ambientListeningEnabled shouldBe false
+    }
+
     test("save() creates parent directories if they don't exist") {
         val dir = createTempDirectory("sophi-companion-settings-test")
         val store = SettingsStore(dir.resolve("nested/dir/companion.json"))

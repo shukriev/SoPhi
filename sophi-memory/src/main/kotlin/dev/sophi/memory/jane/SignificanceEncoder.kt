@@ -63,8 +63,15 @@ class SignificanceEncoder(
     }
 
     internal fun buildPrompt(turn: TurnObservation, recent: List<Memory>): String = buildString {
-        appendLine("You maintain long-term memory for a personal assistant. Decide what from this")
-        appendLine("exchange deserves remembering. Respond with ONLY a JSON object:")
+        if (turn.ambient) {
+            appendLine("You maintain long-term memory for a personal assistant. The exchange below is")
+            appendLine("overheard ambient conversation, not directed at you — possibly multiple speakers,")
+            appendLine("and 'ASSISTANT' will be empty. Decide what deserves remembering. Respond with ONLY")
+            appendLine("a JSON object:")
+        } else {
+            appendLine("You maintain long-term memory for a personal assistant. Decide what from this")
+            appendLine("exchange deserves remembering. Respond with ONLY a JSON object:")
+        }
         appendLine("""{"memories":[{"text":"normalized third-person fact","room":"ENTITIES|TASKS|EPISODES|KNOWLEDGE|NARRATIVE",""")
         appendLine(""" "emph":0.0,"aff":0.0,"sensitivity":"PUBLIC|PERSONAL|SENSITIVE|RESTRICTED",""")
         appendLine(""" "provenance":"USER_DIRECT|USER_ARTIFACT|THIRD_PARTY|SYSTEM_INFERRED",""")
@@ -79,6 +86,12 @@ class SignificanceEncoder(
         appendLine("- Rooms: ENTITIES people/orgs/pets/places; TASKS errands/appointments/deadlines;")
         appendLine("  EPISODES events/decisions reported; KNOWLEDGE durable facts of the user's world;")
         appendLine("  NARRATIVE only for explicit cause-effect story beats.")
+        if (turn.ambient) {
+            appendLine("- provenance: THIRD_PARTY when the content is about someone other than the user")
+            appendLine("  (a named third party speaking, or being spoken about); USER_DIRECT only when the")
+            appendLine("  user is clearly the one speaking about themselves. Prefer room ENTITIES for facts")
+            appendLine("  about a named person.")
+        }
         appendLine("- NEVER store credentials, passwords, payment card or government ID numbers.")
         appendLine("- Facts about third parties' health/legal matters: generalized form only.")
         appendLine("- 'RESTRICTED' only when the user says to keep it private.")

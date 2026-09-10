@@ -1,7 +1,13 @@
 package dev.sophi.memory
 
 data class RecallQuery(val sessionId: String, val userInput: String, val nowMs: Long)
-data class TurnObservation(val sessionId: String, val userInput: String, val assistantReply: String, val nowMs: Long)
+data class TurnObservation(
+    val sessionId: String,
+    val userInput: String,
+    val assistantReply: String,
+    val nowMs: Long,
+    val ambient: Boolean = false
+)
 data class MemoryBlock(val rendered: String, val memoryIds: List<String>)
 data class ConsolidationReport(
     val merged: Int, val strengthened: Int, val compressed: Int, val pruned: Int, val purged: Int,
@@ -14,7 +20,7 @@ sealed interface ForgetRequest {
 }
 data class ForgetResult(val removedIds: List<String>, val relinkedEdges: Int, val affectedProfilePaths: List<String>)
 
-data class BrowseFilter(val room: String? = null, val includeHidden: Boolean = false)
+data class BrowseFilter(val room: String? = null, val provenance: String? = null, val includeHidden: Boolean = false)
 data class MemoryView(val id: String, val text: String, val metadata: Map<String, String>)
 data class ProfileAttributeView(val path: String, val value: String, val confidence: Double)
 

@@ -40,7 +40,10 @@ class VoiceController(
         if (!turnInFlight.compareAndSet(false, true)) return
         onBargeIn() // barge-in: talking again interrupts whatever Sophi is still saying
         _state.value = VoiceState.Recording
-        recorder.start()
+        runCatching { recorder.start() }.onFailure { e ->
+            turnInFlight.set(false)
+            _state.value = VoiceState.Error(e.message ?: "microphone unavailable")
+        }
     }
 
     fun onPttRelease() {

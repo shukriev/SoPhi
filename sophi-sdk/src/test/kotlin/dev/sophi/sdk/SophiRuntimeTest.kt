@@ -344,6 +344,22 @@ class SophiRuntimeTest : FunSpec({
         seen[0].second.assistantReply shouldBe "done"
     }
 
+    test("settleExternalTurn threads ambient=true onto the dispatched HookContext") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "external-settle-ambient-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+
+        rt.settleExternalTurn("s1", "overheard text", "", ambient = true)
+
+        seen.single().ambient shouldBe true
+    }
+
     test("settleExternalTurn with an error dispatches ON_ERROR only, never AFTER_TURN") {
         val seen = mutableListOf<HookPoint>()
         val spy = object : SophiPlugin {

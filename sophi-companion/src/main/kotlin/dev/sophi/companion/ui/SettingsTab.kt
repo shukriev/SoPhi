@@ -310,6 +310,22 @@ fun SettingsTab(
                 else onSettingsChanged(settings.copy(ttsEnabled = false))
             }
         )
+        VoiceToggleRow(
+            label = "Ambient listening",
+            checked = settings.ambientListeningEnabled,
+            enabled = !installBusy,
+            installed = isInstalled,
+            onCheckedChange = { checked ->
+                if (checked) enable { it.copy(ambientListeningEnabled = true) }
+                else onSettingsChanged(settings.copy(ambientListeningEnabled = false))
+            }
+        )
+        Text(
+            "Passively listens while this window is open and stores notable ambient speech as " +
+                "memory, including facts about people other than you. No consent prompt is shown to " +
+                "anyone else present — that's on you to handle. Review what it captured in the Memory tab.",
+            style = MaterialTheme.typography.bodySmall
+        )
 
         when (val s = installState) {
             is InstallState.Downloading -> {

@@ -81,6 +81,22 @@ private fun buildRuntime(
             grants(setOf("write_file"))
         }
     }
+    val ambientReminderRuntime: SophiRuntime? = if (settings.ambientListeningEnabled) {
+        Sophi.runtime {
+            this.provider = provider
+            model = activeProfile.model
+            maxTokens = activeProfile.maxTokens
+            contextWindowTokens(activeProfile.contextWindowTokens)
+            sessionsDir = Path.of(settings.sessionsDir)
+            // Deliberately no builtinTools/skillTools/memory() — the only tool this runtime needs
+            // is manage_scheduled_task (registered by schedule(tasksDir) alone), and it must never
+            // be memory-enabled: the same ambient text is already recorded correctly via
+            // sophiRuntime.settleExternalTurn in CompanionRuntime.startAmbientListening, so a second
+            // memory-enabled runtime here would both violate the ArcadeDB single-open constraint and
+            // double-encode this turn's synthetic instruction prompt as if the user said it.
+            schedule(tasksDir)
+        }
+    } else null
     lateinit var companionRuntime: CompanionRuntime
     val sophiRuntime = Sophi.runtime {
         this.provider = provider
@@ -124,7 +140,7 @@ private fun buildRuntime(
         val (title, body) = NotificationText.forTaskRun(task, run)
         notificationCenter.add(NotificationKind.Schedule, title, body)
     }
-    val voiceConfig = if (settings.sttEnabled || settings.ttsEnabled) {
+    val voiceConfig = if (settings.sttEnabled || settings.ttsEnabled || settings.ambientListeningEnabled) {
         val whisperBinaryPath = settings.whisperBinaryPath ?: voiceInstaller.whisperBinaryPath.toString()
         val whisperModelPath = settings.whisperModelPath ?: voiceInstaller.modelPath("ggml-base.en.bin").toString()
         val piperPythonPath = settings.piperPythonPath ?: voiceInstaller.piperPythonPath.toString()
@@ -155,6 +171,9 @@ private fun buildRuntime(
     )
     companionRuntime.startSchedulePolling()
     checkInRuntime?.let { companionRuntime.startCheckInScheduling(settings.checkIns, settings.jiraBaseUrl, it) }
+    if (settings.ambientListeningEnabled && voiceConfig != null && ambientReminderRuntime != null) {
+        companionRuntime.startAmbientListening(ambientReminderRuntime, voiceConfig)
+    }
     return companionRuntime
 }
 

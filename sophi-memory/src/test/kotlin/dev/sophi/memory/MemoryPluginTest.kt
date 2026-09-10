@@ -49,6 +49,15 @@ class MemoryPluginTest : FunSpec({
         }
     }
 
+    test("AFTER_TURN forwards ambient=true onto the TurnObservation") {
+        val t = ScriptedTechnique()
+        val plugin = MemoryPlugin(t, clock = { 42L })
+        val hook = plugin.hooks().single { it.point == HookPoint.AFTER_TURN }
+        hook.invoke(HookContext("s1", userInput = "u", assistantReply = "a", ambient = true))
+        plugin.drainEncodes()
+        t.observed.single().ambient shouldBe true
+    }
+
     test("AFTER_TURN without a reply does not observe; a throwing observe is swallowed") {
         val t = ScriptedTechnique()
         val plugin = MemoryPlugin(t)

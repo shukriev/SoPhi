@@ -25,6 +25,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlin.io.path.deleteIfExists
 
 internal fun consolidationNotificationBody(report: ConsolidationReport): String? =
     if (report.total == 0) null else
@@ -61,6 +62,7 @@ class CompanionRuntime(
     private val pendingConfirmationSessionIds = MutableStateFlow<Set<String>>(emptySet())
     private var pollingJob: Job? = null
     private var checkInJob: Job? = null
+    private var ambientJob: Job? = null
     private val mcpConfigLoader = dev.sophi.mcp.config.McpConfigLoader()
     private val mcpConfigWriter = dev.sophi.mcp.config.McpConfigWriter()
     private val hubServer = dev.sophi.hub.HubServer(hubPort)
@@ -402,9 +404,71 @@ class CompanionRuntime(
             }
     }
 
+    /**
+     * Starts passive ambient listening (see docs/superpowers/specs/2026-09-10-ambient-listening-
+     * design.md). Memory writes for every batch go through [sophiRuntime] (the existing,
+     * memory-enabled runtime) via [SophiRuntime.settleExternalTurn] — never a second memory-enabled
+     * runtime. [ambientReminderRuntime] is a separate, memory-disabled [SophiRuntime] whose only
+     * registered tool is `manage_scheduled_task` (built via `Sophi.runtime { schedule(tasksDir) }`,
+     * no `.memory(...)` call) — used only for batches that look reminder-shaped, so the same text
+     * is never encoded twice through two different paths. [recorder]/[transcriber]/[nowMs] are test
+     * seams, matching [startCheckInScheduling]'s [nowMs]/[promptText] pattern.
+     */
+    fun startAmbientListening(
+        ambientReminderRuntime: SophiRuntime,
+        voiceConfig: dev.sophi.companion.voice.VoiceConfig,
+        clipMs: Long = 45_000,
+        flushIntervalMs: Long = 180_000,
+        pollMs: Long = 5_000,
+        nowMs: () -> Long = System::currentTimeMillis,
+        recorder: dev.sophi.companion.voice.AudioRecorder = dev.sophi.companion.voice.JavaSoundAudioRecorder(),
+        transcriber: dev.sophi.companion.voice.WhisperTranscriber = dev.sophi.companion.voice.ProcessWhisperTranscriber(voiceConfig)
+    ) {
+        ambientJob?.cancel()
+        val listener = dev.sophi.companion.voice.AmbientListener(flushIntervalMs)
+        ambientJob = scope.launch {
+            while (isActive) {
+                if (anyVoiceInputActive()) { delay(pollMs); continue }
+                recorder.start()
+                delay(clipMs)
+                val wavFile = runCatching { recorder.stop() }.getOrNull()
+                val text = wavFile?.let { f ->
+                    val transcribed = transcriber.transcribe(f).getOrNull()
+                    runCatching { f.deleteIfExists() }
+                    transcribed
+                }
+                if (!text.isNullOrBlank() && !listener.isHallucination(text)) listener.accumulate(text)
+                if (listener.shouldFlush(nowMs())) {
+                    listener.flush(nowMs())?.let { batch -> settleAmbientBatch(batch, ambientReminderRuntime) }
+                }
+            }
+        }
+    }
+
+    private suspend fun settleAmbientBatch(batch: dev.sophi.companion.voice.AmbientBatch, ambientReminderRuntime: SophiRuntime) {
+        batch.chunks.forEach { chunk ->
+            runCatching { sophiRuntime.settleExternalTurn("ambient", chunk, "", ambient = true) }
+        }
+        if (batch.looksLikeReminder) {
+            runCatching {
+                val sid = ambientReminderRuntime.newSession(title = "ambient-reminder-check")
+                ambientReminderRuntime.turn(sid, dev.sophi.companion.voice.buildAmbientReminderPrompt(batch.chunks.joinToString(" ")))
+            }
+        }
+    }
+
+    /** True while push-to-talk is actively recording on any session, or a reply is being spoken —
+     *  ambient capture must never open a second TargetDataLine or re-encode Sophi's own TTS. */
+    private fun anyVoiceInputActive(): Boolean =
+        voiceControllers.values.any { it.state.value == dev.sophi.companion.voice.VoiceState.Recording } ||
+            speechOutputs.values.any { it.isSpeaking.value }
+
+    fun stopAmbientListening() { ambientJob?.cancel() }
+
     fun close() {
         pollingJob?.cancel()
         checkInJob?.cancel()
+        ambientJob?.cancel()
         hubServer.stop()
         // Companion has no per-tab-close lifecycle today (every open ChatTab lives until the app
         // quits), so app shutdown is the only point any of these sessions' outcomes ever get

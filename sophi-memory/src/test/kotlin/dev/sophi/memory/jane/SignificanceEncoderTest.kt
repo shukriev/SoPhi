@@ -8,6 +8,7 @@ import dev.sophi.memory.TurnObservation
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.mockk.slot
@@ -91,6 +92,32 @@ class SignificanceEncoderTest : FunSpec({
         val warnings = mutableListOf<String>()
         SignificanceEncoder(provider, cfg, onWarning = { warnings.add(it) }).encode(turn, emptyList())
         warnings.single() shouldContain "encoder call failed on retry"
+    }
+
+    test("an ambient turn's prompt frames the input as overheard, not-directed-at-Sophi speech") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+        val ambientTurn = TurnObservation("s1", "overheard chatter", "", 1_000L, ambient = true)
+
+        SignificanceEncoder(provider, cfg).encode(ambientTurn, emptyList())
+
+        val prompt = captured.captured.messages.single().content
+        prompt shouldContain "overheard"
+        prompt shouldContain "not directed at you"
+        prompt shouldContain "THIRD_PARTY"
+    }
+
+    test("a non-ambient turn's prompt is unchanged (no overheard framing)") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+
+        SignificanceEncoder(provider, cfg).encode(turn, emptyList())
+
+        captured.captured.messages.single().content shouldNotContain "overheard"
     }
 
     test("warns when both attempts return output that doesn't match the expected schema") {

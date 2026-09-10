@@ -30,6 +30,7 @@ private enum class MemorySection(val label: String) {
 }
 
 private val ROOMS = listOf(null, "entities", "tasks", "episodes", "knowledge", "narrative")
+private val PROVENANCES = listOf(null, "user_direct", "user_artifact", "third_party", "system_inferred")
 
 @Composable
 fun MemoryTab(runtime: CompanionRuntime) {
@@ -59,11 +60,12 @@ fun MemoryTab(runtime: CompanionRuntime) {
 @Composable
 private fun BrowseSection(runtime: CompanionRuntime) {
     var room by remember { mutableStateOf<String?>(null) }
+    var provenance by remember { mutableStateOf<String?>(null) }
     var memories by remember { mutableStateOf(listOf<MemoryView>()) }
     var selected by remember { mutableStateOf<MemoryView?>(null) }
 
-    fun refresh() { memories = runtime.memoryBrowse(BrowseFilter(room = room)) }
-    LaunchedEffect(room) { refresh() }
+    fun refresh() { memories = runtime.memoryBrowse(BrowseFilter(room = room, provenance = provenance)) }
+    LaunchedEffect(room, provenance) { refresh() }
 
     if (selected != null) {
         val m = selected!!
@@ -82,6 +84,16 @@ private fun BrowseSection(runtime: CompanionRuntime) {
                 selected = room == r,
                 onClick = { room = r },
                 label = { Text(r ?: "all") },
+                modifier = Modifier.padding(end = 6.dp)
+            )
+        }
+    }
+    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        PROVENANCES.forEach { p ->
+            FilterChip(
+                selected = provenance == p,
+                onClick = { provenance = p },
+                label = { Text(p ?: "all sources") },
                 modifier = Modifier.padding(end = 6.dp)
             )
         }

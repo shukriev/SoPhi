@@ -35,7 +35,7 @@ class MemoryPlugin(
         override suspend fun invoke(context: HookContext) {
             val input = context.userInput ?: return
             val reply = context.assistantReply ?: return
-            val turn = TurnObservation(context.sessionId, input, reply, clock())
+            val turn = TurnObservation(context.sessionId, input, reply, clock(), ambient = context.ambient)
             val job = encodeScope.launch { runCatching { technique.observe(turn) } }
             inFlight += job
             job.invokeOnCompletion { inFlight -= job }

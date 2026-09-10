@@ -2,8 +2,13 @@ package dev.sophi.memory
 
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.memory.jane.EncoderVerdict
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
+import dev.sophi.memory.jane.MemoryWriter
+import dev.sophi.memory.jane.PalaceStore
+import dev.sophi.memory.jane.UserProfile
+import dev.sophi.memory.jane.VerdictMemory
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
@@ -16,6 +21,28 @@ import io.mockk.mockk
  * observe -> recall -> forget loop through MemoryTechnique alone.
  */
 class SpiSubstitutabilityTest : FunSpec({
+    test("browse filters by provenance") {
+        val home = tempdir().toPath()
+        val embeddings = FakeEmbeddingProvider()
+        val store = PalaceStore(home)
+        val writer = MemoryWriter(store, UserProfile(store), embeddings, "fake", JanesPalaceConfig())
+        writer.write(
+            TurnObservation("s1", "u", "a", 1_000L),
+            EncoderVerdict(listOf(
+                VerdictMemory(text = "Alex moved to Denver", room = "ENTITIES", emph = 0.8, aff = 0.6, provenance = "THIRD_PARTY"),
+                VerdictMemory(text = "I have a dentist appointment", room = "TASKS", emph = 0.8, aff = 0.6, provenance = "USER_DIRECT")
+            ))
+        )
+        store.close() // ArcadeDB is single-open — JanesPalace below opens its own PalaceStore on the same home path
+
+        val palace = JanesPalace(
+            JanesPalaceConfig(home = home, sessionModel = "test-model"), llmProvider = null, embeddingProvider = embeddings
+        )
+
+        palace.browse(BrowseFilter(provenance = "THIRD_PARTY")).map { it.text } shouldBe listOf("Alex moved to Denver")
+        palace.browse(BrowseFilter()).size shouldBe 2
+    }
+
     test("JanesPalace end-to-end through the SPI: observe, recall, forget-all") {
         val llm = mockk<dev.sophi.ai.api.LLMProvider>()
         coEvery { llm.complete(any()) } returns LLMResponse.Text(

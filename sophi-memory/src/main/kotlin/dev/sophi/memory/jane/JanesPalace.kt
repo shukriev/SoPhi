@@ -103,6 +103,7 @@ class JanesPalace(
         return store.memories().values
             .filter { filter.includeHidden || it.active }
             .filter { filter.room == null || it.room.name.equals(filter.room, ignoreCase = true) }
+            .filter { filter.provenance == null || it.provenance.name.equals(filter.provenance, ignoreCase = true) }
             .sortedByDescending { it.createdAt }
             .map { view(it, nowMs) }
     }
