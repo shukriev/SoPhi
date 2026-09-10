@@ -20,7 +20,7 @@ sealed interface ForgetRequest {
 }
 data class ForgetResult(val removedIds: List<String>, val relinkedEdges: Int, val affectedProfilePaths: List<String>)
 
-data class BrowseFilter(val room: String? = null, val includeHidden: Boolean = false)
+data class BrowseFilter(val room: String? = null, val provenance: String? = null, val includeHidden: Boolean = false)
 data class MemoryView(val id: String, val text: String, val metadata: Map<String, String>)
 data class ProfileAttributeView(val path: String, val value: String, val confidence: Double)
 
