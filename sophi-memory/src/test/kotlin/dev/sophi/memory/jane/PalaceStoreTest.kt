@@ -89,6 +89,15 @@ class PalaceStoreTest : FunSpec({
         s.nearest(floatArrayOf(1f, 0f), 1).map { it.id } shouldBe listOf("mem_1")
     }
 
+    test("actionablePattern round-trips through storage, defaulting to false") {
+        val s = store()
+        s.upsertMemory(mem("mem_plain"))
+        s.upsertMemory(mem("mem_tagged").copy(actionablePattern = true))
+
+        s.memories().getValue("mem_plain").actionablePattern shouldBe false
+        s.memories().getValue("mem_tagged").actionablePattern shouldBe true
+    }
+
     test("wipe clears memories, edges, attributes, embeddings, and last-recall state") {
         val s = store()
         s.upsertMemory(mem("mem_1"))

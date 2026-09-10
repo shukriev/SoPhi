@@ -9,6 +9,7 @@ import dev.sophi.memory.ConsolidationReport
 import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.ProducedBy
 import dev.sophi.versioning.VersionStore
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -36,6 +37,7 @@ class Consolidator(
     suspend fun run(nowMs: Long): ConsolidationReport {
         val merged = merge(nowMs)
         val strengthened = strengthen(nowMs)
+        val classified = classifyPatterns(nowMs)
         val compressResult = compress(nowMs)
         val pruned = prune(nowMs)
         val purged = if (config.autoPurgeEnabled) forgetEngine.purgeSoftDeleted(nowMs - config.softDeleteGraceMs, nowMs) else emptyList()
@@ -43,14 +45,61 @@ class Consolidator(
         val record = ConsolidationRecord(
             ts = nowMs, merged = merged.size, strengthened = strengthened, compressed = compressResult.threadsCompressed,
             pruned = pruned.size, softDeletedIds = merged + compressResult.softDeletedIds + pruned, purgedIds = purged,
-            autoPurgeEnabled = config.autoPurgeEnabled
+            autoPurgeEnabled = config.autoPurgeEnabled, classified = classified
         )
         historyStore.record(record)
         versionStore?.record(
             ArtifactType.MEMORY_CONSOLIDATION, record.id,
             consolidationRecordJson.encodeToString(record), ProducedBy.REFLECTION
         )
-        return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size)
+        return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size, classified)
+    }
+
+    /**
+     * Tags memories as [Memory.actionablePattern] — a recurring personal tendency tied to a
+     * future-triggerable situation. Classification happens here, at consolidation time, not at
+     * per-turn encode time: a single utterance is evidence of one incident, not a pattern.
+     * [SalienceSignals.rep] (already computed by MemoryWriter from similarity to recent memories
+     * in the same room) is the repetition evidence a single turn can't have. Non-fatal on
+     * failure, same shape as [compress] — a broken classification call skips this step only.
+     */
+    private suspend fun classifyPatterns(nowMs: Long): Int {
+        val llm = provider ?: return 0
+        val model = config.encoderModel ?: config.sessionModel ?: return 0
+        val candidates = store.memories().values.filter {
+            it.active && !it.actionablePattern && it.signals.rep >= config.patternRepThreshold
+        }
+        if (candidates.isEmpty()) return 0
+
+        val prompt = buildString {
+            appendLine("Which of these recurring facts describe a personal pattern worth a future")
+            appendLine("proactive reminder — a recurring tendency tied to a future-triggerable situation")
+            appendLine("(e.g. \"user always forgets X before Y\", \"user is anxious before Z\") — as opposed")
+            appendLine("to a one-off fact or a stable preference? Respond with ONLY a JSON array of the")
+            appendLine("matching memory ids, e.g. [\"mem_a\"]. Respond [] if none qualify.")
+            appendLine()
+            candidates.forEach { appendLine("- [${it.id}] ${it.text}") }
+        }
+
+        val ids = runCatching {
+            val text = when (val r = llm.complete(CompletionRequest(
+                messages = listOf(Message(MessageRole.USER, prompt)),
+                model = model, maxTokens = 500, temperature = 0.0, reasoningEffort = "none"
+            ))) {
+                is LLMResponse.Text -> r.content
+                else -> return@runCatching emptyList<String>()
+            }
+            val start = text.indexOf('['); val end = text.lastIndexOf(']')
+            if (start < 0 || end <= start) emptyList()
+            else consolidationRecordJson.decodeFromString<List<String>>(text.substring(start, end + 1))
+        }.getOrDefault(emptyList())
+
+        var count = 0
+        val byId = candidates.associateBy { it.id }
+        ids.forEach { id ->
+            byId[id]?.let { m -> store.upsertMemory(m.copy(actionablePattern = true)); count++ }
+        }
+        return count
     }
 
     private fun merge(nowMs: Long): List<String> {

@@ -368,7 +368,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                     mp.consolidateIfDue()?.let { report ->
                         if (report.total > 0) mordantTerminal.println(
                             "memory: consolidated (merged=${report.merged} strengthened=${report.strengthened} " +
-                            "compressed=${report.compressed} pruned=${report.pruned} purged=${report.purged})")
+                            "compressed=${report.compressed} pruned=${report.pruned} purged=${report.purged} " +
+                            "classified=${report.classified})")
                     }
                     mp.close()
                 }

@@ -118,6 +118,15 @@ class JanesPalace(
 
     override fun explainLastRecall(): String? = store.readLastRecall()
 
+    /**
+     * Active, tagged memories eligible for a proactive rescue nudge. The sensitivity ceiling is
+     * unconditional, not a caller-supplied parameter: this feed ultimately reaches an OS
+     * notification banner, a more exposed surface than a chat reply, so SENSITIVE/RESTRICTED
+     * patterns never reach it regardless of how the caller asks.
+     */
+    fun actionablePatterns(): List<Memory> =
+        store.memories().values.filter { it.active && it.actionablePattern && it.sensitivity <= Sensitivity.PERSONAL }
+
     fun threads(): Map<String, List<String>> {
         val all = store.memories()
         return store.edges().groupBy { it.threadLabel }.mapValues { (_, edges) ->

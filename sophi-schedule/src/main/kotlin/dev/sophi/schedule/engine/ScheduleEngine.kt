@@ -221,7 +221,7 @@ class ScheduleEngine(
 
         runLog.append(record)
         taskStore.recordRun(task.id, record.finishedAtMs)
-        notifier.notify(task, record)
+        if (!record.summary.trim().equals("NO_RESCUE_NEEDED", ignoreCase = true)) notifier.notify(task, record)
         return record
     }
 

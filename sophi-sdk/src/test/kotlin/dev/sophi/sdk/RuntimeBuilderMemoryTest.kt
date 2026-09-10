@@ -4,6 +4,8 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -72,6 +74,32 @@ class RuntimeBuilderMemoryTest : FunSpec({
 
         rt.memoryPlugin.shouldNotBeNull()
         rt.config.systemPrompt.shouldNotBeNull() shouldContain "## Memory"
+    }
+
+    test("memory() with a successful probe also registers list_actionable_patterns") {
+        val builder = RuntimeBuilder()
+        builder.provider = stubProvider()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        val rt = builder
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false)
+            )
+            .build()
+
+        rt.toolNames() shouldContain "list_actionable_patterns"
+    }
+
+    test("memory() left uncalled does not register list_actionable_patterns") {
+        val builder = RuntimeBuilder()
+        builder.provider = stubProvider()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+
+        rt.toolNames() shouldNotContain "list_actionable_patterns"
     }
 
     test("memory() with a failing probe disables memory and fires onWarning instead of throwing") {
