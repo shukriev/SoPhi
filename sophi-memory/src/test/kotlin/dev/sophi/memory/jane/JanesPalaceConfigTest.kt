@@ -23,4 +23,8 @@ class JanesPalaceConfigTest : FunSpec({
     test("patternRepThreshold defaults to 0.5") {
         JanesPalaceConfig().patternRepThreshold shouldBe 0.5
     }
+
+    test("commitmentExpiryMs defaults to 30 days") {
+        JanesPalaceConfig().commitmentExpiryMs shouldBe 30 * 24 * 3_600_000L
+    }
 })

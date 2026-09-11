@@ -38,6 +38,10 @@ data class JanesPalaceConfig(
      *  — repetition evidence a single-turn judgment can't have. 0.5 is the repetition midpoint;
      *  [repetitionThreshold]'s 0.80 is a much stricter bar for outright dedupe-merging. */
     val patternRepThreshold: Double = 0.5,
+    /** How long an unresolved commitment keeps being surfaced/drafted by the daily rescue-style
+     *  task before it stops nagging (ADR-035). It stays listable via [JanesPalace.browse] past
+     *  this point — expiry only caps the nudge, it never claims the commitment was kept. */
+    val commitmentExpiryMs: Long = 30 * DAY,
     val compressAgeMs: Long = 90 * DAY,
     val compressPriorityCeiling: Double = 0.1,
     val pruneFloor: Double = 0.02,
