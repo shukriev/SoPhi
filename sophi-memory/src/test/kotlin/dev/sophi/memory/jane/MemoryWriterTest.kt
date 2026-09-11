@@ -90,6 +90,33 @@ class MemoryWriterTest : FunSpec({
         store.attributes().getValue("work.location").confidence shouldBe 0.5
     }
 
+    test("a USER_DIRECT commitment is flagged isCommitment") {
+        val (_, writer) = rig()
+        val stored = writer.write(turn, EncoderVerdict(listOf(
+            VerdictMemory(text = "User will call Mark back", room = "TASKS", emph = 0.8,
+                commitment = true, provenance = "USER_DIRECT")
+        )))
+        stored.single().isCommitment shouldBe true
+    }
+
+    test("a THIRD_PARTY commitment is never flagged, even if the encoder said commitment=true") {
+        val (_, writer) = rig()
+        val stored = writer.write(turn, EncoderVerdict(listOf(
+            VerdictMemory(text = "Mark will call the user back", room = "TASKS", emph = 0.8,
+                commitment = true, provenance = "THIRD_PARTY")
+        )))
+        stored.single().isCommitment shouldBe false
+    }
+
+    test("commitment=false from the encoder never sets isCommitment") {
+        val (_, writer) = rig()
+        val stored = writer.write(turn, EncoderVerdict(listOf(
+            VerdictMemory(text = "User called Mark back already", room = "TASKS", emph = 0.8,
+                commitment = false, provenance = "USER_DIRECT")
+        )))
+        stored.single().isCommitment shouldBe false
+    }
+
     test("unknown room or causedBy id degrades gracefully (skip memory / skip link)") {
         val (store, writer) = rig()
         writer.write(turn, EncoderVerdict(listOf(vm("x", room = "GARAGE", emph = 0.9)))) shouldBe emptyList()
