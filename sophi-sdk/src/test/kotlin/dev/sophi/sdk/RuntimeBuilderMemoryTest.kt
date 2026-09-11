@@ -102,6 +102,32 @@ class RuntimeBuilderMemoryTest : FunSpec({
         rt.toolNames() shouldNotContain "list_actionable_patterns"
     }
 
+    test("memory() with a successful probe also registers list_open_commitments") {
+        val builder = RuntimeBuilder()
+        builder.provider = stubProvider()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        val rt = builder
+            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false)
+            )
+            .build()
+
+        rt.toolNames() shouldContain "list_open_commitments"
+    }
+
+    test("memory() left uncalled does not register list_open_commitments") {
+        val builder = RuntimeBuilder()
+        builder.provider = stubProvider()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+
+        rt.toolNames() shouldNotContain "list_open_commitments"
+    }
+
     test("memory() with a failing probe disables memory and fires onWarning instead of throwing") {
         val warnings = mutableListOf<String>()
         val builder = RuntimeBuilder()
