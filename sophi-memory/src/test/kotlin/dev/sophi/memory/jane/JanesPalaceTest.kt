@@ -45,4 +45,31 @@ class JanesPalaceTest : FunSpec({
         ids shouldBe setOf("mem_ok", "mem_public")
         palace.close()
     }
+
+    test("openCommitments returns only active, flagged, unexpired commitments at or below PERSONAL sensitivity") {
+        val home = tempdir().toPath()
+        val seed = PalaceStore(home)
+        val dayMs = 24 * 3_600_000L
+        val nowMs = 1_000_000_000L
+        val base = Memory(
+            "x", "text", Room.TASKS, 0.5, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
+            Sensitivity.PERSONAL, Provenance.USER_DIRECT, nowMs, nowMs, "s", isCommitment = true
+        )
+        seed.upsertMemory(base.copy(id = "mem_ok", sensitivity = Sensitivity.PERSONAL))
+        seed.upsertMemory(base.copy(id = "mem_public", sensitivity = Sensitivity.PUBLIC))
+        seed.upsertMemory(base.copy(id = "mem_sensitive", sensitivity = Sensitivity.SENSITIVE))
+        seed.upsertMemory(base.copy(id = "mem_restricted", sensitivity = Sensitivity.RESTRICTED))
+        seed.upsertMemory(base.copy(id = "mem_untagged", isCommitment = false))
+        seed.upsertMemory(base.copy(id = "mem_deleted", softDeletedAt = 1L))
+        seed.upsertMemory(base.copy(id = "mem_expired", createdAt = nowMs - 31 * dayMs))
+        seed.close()
+
+        val palace = JanesPalace(
+            JanesPalaceConfig(home = home, sessionModel = "test-model", commitmentExpiryMs = 30 * dayMs),
+            llmProvider = null, embeddingProvider = null
+        )
+        val ids = palace.openCommitments(nowMs).map { it.id }.toSet()
+        ids shouldBe setOf("mem_ok", "mem_public")
+        palace.close()
+    }
 })
