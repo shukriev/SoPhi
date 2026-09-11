@@ -426,10 +426,26 @@ class CompanionRuntime(
     ) {
         ambientJob?.cancel()
         val listener = dev.sophi.companion.voice.AmbientListener(flushIntervalMs)
+        var notifiedStartFailure = false
         ambientJob = scope.launch {
             while (isActive) {
                 if (anyVoiceInputActive()) { delay(pollMs); continue }
-                recorder.start()
+                val started = runCatching { recorder.start() }
+                if (started.isFailure) {
+                    // Without this, a single throw here (most commonly denied mic permission)
+                    // silently kills this whole loop forever — no notification, nothing in the
+                    // Memory tab, no visible sign ambient listening ever stopped working.
+                    if (!notifiedStartFailure) {
+                        notifiedStartFailure = true
+                        notificationCenter.add(
+                            NotificationKind.Memory, "Ambient listening failed",
+                            started.exceptionOrNull()?.message
+                                ?: "Microphone unavailable — check System Settings > Privacy & Security > Microphone."
+                        )
+                    }
+                    delay(pollMs)
+                    continue
+                }
                 delay(clipMs)
                 val wavFile = runCatching { recorder.stop() }.getOrNull()
                 val text = wavFile?.let { f ->

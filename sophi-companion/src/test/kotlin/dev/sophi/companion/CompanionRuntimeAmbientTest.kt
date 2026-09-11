@@ -126,4 +126,52 @@ class CompanionRuntimeAmbientTest : FunSpec({
         reminderProvider.capturedPrompts.first() shouldBe
             buildAmbientReminderPrompt("remind me to call the dentist")
     }
+
+    test("a recorder that always fails to start notifies once instead of silently killing the loop") {
+        val dir = createTempDirectory("companion-runtime-ambient-test")
+        val sophiRuntime = Sophi.runtime {
+            provider = NoopFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("sessions")
+        }
+        val notificationCenter = NotificationCenter(NotificationStore(dir.resolve("notifications.json")))
+        val companionRuntime = CompanionRuntime(
+            sophiRuntime = sophiRuntime,
+            sessionManager = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions")),
+            mcpConfigPath = dir.resolve("mcp.json"),
+            taskStore = TaskStore(dir.resolve("tasks.json")),
+            runLog = RunLog(dir.resolve("runs.jsonl")),
+            notifier = NoopNotifier,
+            notificationCenter = notificationCenter
+        )
+        val ambientReminderRuntime = Sophi.runtime {
+            provider = NoopFakeProvider()
+            model = "fake-model"
+            contextWindowTokens(200_000)
+            sessionsDir = dir.resolve("reminder-sessions")
+        }
+        var startCalls = 0
+        val failingRecorder = object : AudioRecorder {
+            override fun start() { startCalls++; error("microphone unavailable") }
+            override fun stop(): Path = error("never reached — start() always throws first")
+        }
+
+        companionRuntime.startAmbientListening(
+            ambientReminderRuntime = ambientReminderRuntime,
+            voiceConfig = VoiceConfig("w", "m", "p", "v"),
+            clipMs = 1, flushIntervalMs = 1, pollMs = 1,
+            recorder = failingRecorder, transcriber = ScriptedAmbientTranscriber(mutableListOf())
+        )
+
+        runBlocking {
+            waitUntil { notificationCenter.records.value.isNotEmpty() }
+            // Proves the loop survives the failure and keeps retrying, rather than dying after one throw.
+            waitUntil { startCalls >= 2 }
+        }
+        companionRuntime.stopAmbientListening()
+
+        // Notified once, not spammed on every retry.
+        notificationCenter.records.value.size shouldBe 1
+    }
 })
