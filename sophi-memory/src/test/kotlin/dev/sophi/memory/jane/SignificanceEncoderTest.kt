@@ -30,6 +30,39 @@ class SignificanceEncoderTest : FunSpec({
         verdict.profile.single().path shouldBe "family.daughter.name"
     }
 
+    test("parses the commitment field from a well-formed verdict") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text(
+            """{"memories":[{"text":"User will call Mark back","room":"TASKS",
+               "emph":0.0,"aff":0.0,"commitment":true,"sensitivity":"PERSONAL","provenance":"USER_DIRECT",
+               "causedBy":[],"thread":null,"supersedes":null}],"profile":[]}""",
+            TokenUsage(1, 1))
+        val verdict = SignificanceEncoder(provider, cfg).encode(turn, emptyList())!!
+        verdict.memories.single().commitment shouldBe true
+    }
+
+    test("commitment defaults to false when the field is absent") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text(
+            """{"memories":[{"text":"weather was fine","room":"EPISODES",
+               "emph":0.0,"aff":0.0,"sensitivity":"PERSONAL","provenance":"USER_DIRECT",
+               "causedBy":[],"thread":null,"supersedes":null}],"profile":[]}""",
+            TokenUsage(1, 1))
+        val verdict = SignificanceEncoder(provider, cfg).encode(turn, emptyList())!!
+        verdict.memories.single().commitment shouldBe false
+    }
+
+    test("prompt teaches the model what counts as a commitment") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+        SignificanceEncoder(provider, cfg).encode(turn, emptyList())
+        val prompt = captured.captured.messages.single().content
+        prompt shouldContain "commitment"
+        prompt shouldContain "promise or obligation"
+    }
+
     test("retries once with a stricter instruction when the first response is prose") {
         val provider = mockk<LLMProvider>()
         coEvery { provider.complete(any()) } returnsMany listOf(
