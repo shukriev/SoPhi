@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 ### Removed
+- `sophi-companion` is no longer part of this repo — it's moved to a private repo as a commercial, direct-sale product. The engine it's built on (`sophi-sdk`, `sophi-hub`, `sophi-core`, etc.) is unaffected and stays open. Last open-source snapshot: tag `companion-last-oss`.
 
 ### Security
 

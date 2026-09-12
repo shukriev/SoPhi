@@ -1,1 +1,0 @@
-rootProject.name = "sophi-companion"
