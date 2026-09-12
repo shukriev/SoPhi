@@ -107,6 +107,15 @@ SoPhi uses [Semantic Versioning](https://semver.org/):
 
 SoPhi welcomes contributions in all areas, with different review intensity depending on scope:
 
+### ⚫ Out of Scope
+
+**`sophi-companion`** — the desktop tray app is now a private, commercial
+product and is no longer developed in this repo. Its last open-source
+snapshot is preserved at the `companion-last-oss` tag. Everything else
+(`sophi-sdk`, `sophi-hub`, `sophi-core`, `sophi-cli`, and the rest of the
+engine) remains fully open under Apache 2.0 and open to contribution as
+described below.
+
 ### 🟢 Open — Lightweight Review
 
 **Tools & plugins:** New tools, plugins following existing patterns
