@@ -128,6 +128,19 @@ class JanesPalace(
     fun actionablePatterns(): List<Memory> =
         store.memories().values.filter { it.active && it.actionablePattern && it.sensitivity <= Sensitivity.PERSONAL }
 
+    /**
+     * Active, flagged, not-yet-expired commitments eligible for follow-up drafting. Same
+     * unconditional PERSONAL-or-below sensitivity ceiling as [actionablePatterns] — this feed
+     * reaches the same notification surface (see ADR-033). Commitments older than
+     * [JanesPalaceConfig.commitmentExpiryMs] stop being surfaced here so an undismissed one
+     * doesn't nag forever; they remain visible via [browse].
+     */
+    fun openCommitments(nowMs: Long = System.currentTimeMillis()): List<Memory> =
+        store.memories().values.filter {
+            it.active && it.isCommitment && it.sensitivity <= Sensitivity.PERSONAL &&
+                it.createdAt >= nowMs - config.commitmentExpiryMs
+        }
+
     fun threads(): Map<String, List<String>> {
         val all = store.memories()
         return store.edges().groupBy { it.threadLabel }.mapValues { (_, edges) ->

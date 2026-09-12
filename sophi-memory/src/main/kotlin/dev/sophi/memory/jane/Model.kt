@@ -31,7 +31,12 @@ data class Memory(
     /** Set by [dev.sophi.memory.jane.Consolidator]'s classification step, never at per-turn
      *  encode time — a single utterance is evidence of one incident, not a recurring pattern.
      *  Gates [dev.sophi.memory.jane.JanesPalace.actionablePatterns]'s read surface. */
-    val actionablePattern: Boolean = false
+    val actionablePattern: Boolean = false,
+    /** Set by [dev.sophi.memory.jane.MemoryWriter] at write time from the encoder's judgment,
+     *  gated to [Provenance.USER_DIRECT] regardless of what the encoder said — commitment
+     *  tracking is chat-only in v1 (see ADR-035). Gates [dev.sophi.memory.jane.JanesPalace.openCommitments]'s
+     *  read surface. */
+    val isCommitment: Boolean = false
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null

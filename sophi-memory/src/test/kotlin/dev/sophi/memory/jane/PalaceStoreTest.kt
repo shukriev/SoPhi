@@ -98,6 +98,15 @@ class PalaceStoreTest : FunSpec({
         s.memories().getValue("mem_tagged").actionablePattern shouldBe true
     }
 
+    test("isCommitment round-trips through storage, defaulting to false") {
+        val s = store()
+        s.upsertMemory(mem("mem_plain"))
+        s.upsertMemory(mem("mem_commitment").copy(isCommitment = true))
+
+        s.memories().getValue("mem_plain").isCommitment shouldBe false
+        s.memories().getValue("mem_commitment").isCommitment shouldBe true
+    }
+
     test("wipe clears memories, edges, attributes, embeddings, and last-recall state") {
         val s = store()
         s.upsertMemory(mem("mem_1"))

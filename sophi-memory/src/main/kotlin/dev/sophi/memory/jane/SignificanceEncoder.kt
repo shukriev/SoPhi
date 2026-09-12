@@ -15,6 +15,7 @@ internal data class VerdictMemory(
     val room: String,
     val emph: Double = 0.0,
     val aff: Double = 0.0,
+    val commitment: Boolean = false,
     val sensitivity: String = "PERSONAL",
     val provenance: String = "USER_DIRECT",
     val causedBy: List<String> = emptyList(),
@@ -73,7 +74,7 @@ class SignificanceEncoder(
             appendLine("exchange deserves remembering. Respond with ONLY a JSON object:")
         }
         appendLine("""{"memories":[{"text":"normalized third-person fact","room":"ENTITIES|TASKS|EPISODES|KNOWLEDGE|NARRATIVE",""")
-        appendLine(""" "emph":0.0,"aff":0.0,"sensitivity":"PUBLIC|PERSONAL|SENSITIVE|RESTRICTED",""")
+        appendLine(""" "emph":0.0,"aff":0.0,"commitment":false,"sensitivity":"PUBLIC|PERSONAL|SENSITIVE|RESTRICTED",""")
         appendLine(""" "provenance":"USER_DIRECT|USER_ARTIFACT|THIRD_PARTY|SYSTEM_INFERRED",""")
         appendLine(""" "causedBy":["<existing memory id>"],"thread":"short thread label or null","supersedes":"<id or null>"}],""")
         appendLine(""" "profile":[{"path":"dotted.trait.path","value":"...","explicit":false}]}""")
@@ -81,6 +82,9 @@ class SignificanceEncoder(
         appendLine("Rules:")
         appendLine("- Emit [] for trivial exchanges (small talk, generic Q&A). Most turns store NOTHING.")
         appendLine("- emph: did the user stress it or say to remember it (0..1)? aff: emotional weight (0..1).")
+        appendLine("- commitment: true when the user states they will do something for someone else or")
+        appendLine("  themselves — a promise or obligation (\"I'll call him back\", \"I need to renew my")
+        appendLine("  passport\") — not a bare fact or something already done.")
         appendLine("- profile.explicit: true ONLY if the user directly asked you to remember/note this fact")
         appendLine("  (e.g. \"remember that I...\", \"please note...\"), not merely mentioned it in passing.")
         appendLine("- Rooms: ENTITIES people/orgs/pets/places; TASKS errands/appointments/deadlines;")
