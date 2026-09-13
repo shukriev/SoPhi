@@ -37,7 +37,8 @@ class DecomposeGoalTool(
     private val planLog: PlanLog? = null,
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val depth: Int = 0,
-    private val maxToolDepth: Int = 1
+    private val maxToolDepth: Int = 1,
+    private val onProgress: suspend (PlanProgressEvent) -> Unit = {}
 ) : Tool {
 
     override val name = DECOMPOSE_GOAL_TOOL_NAME
@@ -74,7 +75,8 @@ class DecomposeGoalTool(
                     planLog = planLog,
                     confirmationPolicy = confirmationPolicy,
                     depth = depth + 1,
-                    maxToolDepth = maxToolDepth
+                    maxToolDepth = maxToolDepth,
+                    onProgress = onProgress
                 )
             )
         }
@@ -92,7 +94,8 @@ class DecomposeGoalTool(
             contextWindowTokens = contextWindowTokens,
             confirmationPolicy = confirmationPolicy,
             grants = fullRegistry.safeGrantsFrom(args.expectedTools),
-            planLog = planLog
+            planLog = planLog,
+            onProgress = onProgress
         )
         val outcome = runner.run(parentSessionId, args.goal, StopCondition.LlmJudged)
         val summary = renderOutcome(outcome)

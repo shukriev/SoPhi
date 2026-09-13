@@ -14,6 +14,7 @@ import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
@@ -31,14 +32,16 @@ class DecomposeGoalToolTest : FunSpec({
     fun tool(
         provider: LLMProvider,
         registry: ToolRegistry = ToolRegistry(),
-        depth: Int = 0
+        depth: Int = 0,
+        onProgress: suspend (PlanProgressEvent) -> Unit = {}
     ) = DecomposeGoalTool(
         provider = provider,
         fullRegistry = registry,
         sessionManager = FileSessionManager(createTempDirectory("decompose-goal-tool-test")),
         parentConfig = AgentConfig(model = "test-model"),
         contextWindowTokens = TEST_CONTEXT_WINDOW,
-        depth = depth
+        depth = depth,
+        onProgress = onProgress
     )
 
     test("a met goal returns the final output and a per-step summary") {
@@ -55,6 +58,24 @@ class DecomposeGoalToolTest : FunSpec({
         result shouldContain "branch created"
         result shouldContain "[s1]"
         result shouldContain "Done"
+    }
+
+    test("onProgress receives PlanReady and a StepFinished for a met goal") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("branch created"))
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"cut a release branch"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+        val events = mutableListOf<PlanProgressEvent>()
+
+        runBlocking(SessionIdContext("parent")) {
+            tool(provider, onProgress = { events.add(it) }).execute("""{"goal":"ship the release"}""")
+        }
+
+        events.filterIsInstance<PlanProgressEvent.PlanReady>() shouldHaveSize 1
+        events.filterIsInstance<PlanProgressEvent.StepFinished>().single().step.id shouldBe "s1"
     }
 
     test("an exhausted goal reports a handled error rather than throwing") {
