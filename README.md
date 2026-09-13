@@ -42,7 +42,7 @@ app — same core, three ways to run it.
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
-| 🖥️ `sophi-companion` | OS tray / menu-bar desktop app (Compose Multiplatform) embedding `sophi-sdk` in-process — chat, sessions, MCP servers, goals; shares `sophi-cli`'s full tool surface (file/bash/fetch, calendar, skills, subagent delegation, goal decomposition) |
+| 🖥️ `sophi-companion` | *(moved)* OS tray / menu-bar desktop app — now a commercial, direct-sale product built on `sophi-sdk`/`sophi-hub`. Last open-source snapshot: tag [`companion-last-oss`](../../tree/companion-last-oss/sophi-companion). |
 | 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `MetricsPlugin` |
 
 They all sit on the same core, so switching between them later is a
@@ -245,59 +245,16 @@ dashboard, batch job) without standing up a separate service.
 
 ## 🖥️ Use case 4: Desktop tray companion (`sophi-companion`)
 
-A native menu-bar / system-tray app that embeds `sophi-sdk` **in-process** — no
-HTTP hop through `sophi-web`. Click the tray icon and you get Chat, Sessions,
-MCP, Goals, and Settings tabs. Multiple sessions run concurrently in the
-background, and finished turns and scheduled tasks post native OS
-notifications. Companion registers the same tool surface `sophi-cli` does
-(ADR-028) — builtin file/bash/fetch tools sandboxed to a configurable
-`workspaceDir` (default `~/.sophi/workspace`), calendar, skill invocation,
-subagent delegation, and goal decomposition — so a chat turn or a scheduled
-task here can do everything a `sophi-cli` session can.
+`sophi-companion` — the OS tray / menu-bar desktop app embedding `sophi-sdk`
+in-process, with Chat, Sessions, MCP, Goals, and Settings tabs — is now a
+commercial, direct-sale product and no longer developed in this repo. It
+still shares `sophi-cli`'s full tool surface and talks to CLI sessions over
+the same open `sophi-hub` protocol described above; only the companion
+app's own source has moved.
 
-`sophi-companion` is a standalone Gradle project (Compose Multiplatform Desktop),
-deliberately outside the Maven reactor — so install the reactor to `mavenLocal()`
-first, then run it:
-
-```bash
-mvn install -DskipTests            # from the repo root
-cd sophi-companion
-./gradlew run
-```
-
-On first launch it asks for a model and API key and writes
-`~/.sophi/companion.json`; leave the key blank to fall back to
-`ANTHROPIC_API_KEY`. It reuses your existing `~/.sophi/sessions` and
-`~/.sophi/mcp.json`, so sessions you started in `sophi-cli` show up in the
-Sessions tab, and MCP servers can be enabled/disabled live without a restart.
-It also embeds a small local hub (ADR-023): any `sophi-cli` session you run
-while the companion is open registers with it automatically (no setup, no
-flag) and streams its live status, tokens, and confirmation prompts into the
-same Sessions/Chat tabs — you can send it a message or approve/deny its
-confirmation prompts from the companion, same as a session you started
-there. Pass `--no-remote` to a `sophi-cli` invocation to keep it fully local
-instead.
-
-Build a native bundle (`.dmg` on macOS, `.deb`/AppImage on Linux, `.msi` on
-Windows) with `jpackage`:
-
-```bash
-cd sophi-companion
-./gradlew packageDistributionForCurrentOS
-```
-
-On macOS a bundled `.app` is effectively required, not optional — a bare
-`java -jar` process can't reliably post to Notification Center.
-
-One caveat worth knowing up front: only the macOS bundle has actually been
-built and launched; the Linux and Windows targets are configured but
-unverified. Tool confirmation routes through a real per-session Approve/Deny
-UI in the Chat tab — a DESTRUCTIVE-tier call (e.g. `bash`, `write_file`)
-pauses that turn and posts a notification until you respond, same risk-tier
-gating as `sophi-cli` (see ADR-028).
-
-Full setup, packaging details, build gotchas, and known limitations live in
-[`sophi-companion/README.md`](sophi-companion/README.md).
+The last open-source snapshot is preserved at the
+[`companion-last-oss`](../../tree/companion-last-oss/sophi-companion) tag
+for anyone who wants to build or fork it as it stood before the move.
 
 **Good for:** keeping an agent one click away while you work — background goals,
 long-running sessions, and OS notifications, without a terminal or a browser tab.
@@ -459,7 +416,7 @@ greps every file on disk to assert zero traces.
 | Poke at the agent yourself, or script one-off tasks | **`sophi-cli`** |
 | Let a frontend, bot, or service talk to the agent | **`sophi-web`** |
 | Add agent capability inside an existing JVM app | **`sophi-sdk`** |
-| Keep the agent in your menu bar, working in the background | **`sophi-companion`** |
+| Keep the agent in your menu bar, working in the background | **`sophi-companion`** *(commercial — see Use case 4)* |
 
 They all share the same `sophi-core` agent loop and session format, so
 switching between them later doesn't change how sessions or tools work —
