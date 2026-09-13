@@ -11,6 +11,7 @@ import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.agent.plan.PlanLog
+import dev.sophi.core.agent.plan.PlanProgressEvent
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
@@ -64,6 +65,7 @@ class RuntimeBuilder {
     private var builtinToolsConfig: BuiltinToolsConfig? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
+    private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
     private var skillToolsEnabled: Boolean = false
     private var configVersionRef: Pair<String, VersionStore>? = null
 
@@ -107,7 +109,13 @@ class RuntimeBuilder {
     fun subagentDelegation(): RuntimeBuilder = apply { subagentDelegationEnabled = true }
 
     /** Registers a `decompose_goal` tool; every plan version is logged under [plansDir] ([PlanLog] creates it if missing). */
-    fun goalDecomposition(plansDir: Path): RuntimeBuilder = apply { goalDecompositionPlansDir = plansDir }
+    fun goalDecomposition(
+        plansDir: Path,
+        onProgress: suspend (PlanProgressEvent) -> Unit = {}
+    ): RuntimeBuilder = apply {
+        goalDecompositionPlansDir = plansDir
+        goalDecompositionOnProgress = onProgress
+    }
 
     /**
      * Registers `skill` (only when [skillsDir] plus this project's `.sophi/skills` together yield
@@ -274,7 +282,8 @@ class RuntimeBuilder {
                     parentConfig = effectiveConfig,
                     contextWindowTokens = window,
                     planLog = PlanLog(dir),
-                    confirmationPolicy = confirmationPolicy
+                    confirmationPolicy = confirmationPolicy,
+                    onProgress = goalDecompositionOnProgress
                 )
             )
         }
