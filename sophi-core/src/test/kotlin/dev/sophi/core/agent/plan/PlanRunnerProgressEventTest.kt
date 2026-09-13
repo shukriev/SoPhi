@@ -123,6 +123,7 @@ class PlanRunnerProgressEventTest : FunSpec({
         runBlocking { runner.run("parent", "goal", StopCondition.LlmJudged) }
 
         val escalating = events.filterIsInstance<PlanProgressEvent.Escalating>().single()
+        escalating.planId shouldBe "plan_1"
         escalating.toModel shouldBe "strong"
         escalating.confidence shouldBe 0.2
         val attempts = events.filterIsInstance<PlanProgressEvent.StepAttempt>()
@@ -189,6 +190,7 @@ class PlanRunnerProgressEventTest : FunSpec({
 
         val decomposed = events.filterIsInstance<PlanProgressEvent.Decomposed>()
         decomposed shouldHaveSize 1
+        decomposed.single().planId shouldBe "plan_1"
         decomposed.single().stepId shouldBe "s1"
         decomposed.single().childPlanId shouldBe "plan_2"
     }

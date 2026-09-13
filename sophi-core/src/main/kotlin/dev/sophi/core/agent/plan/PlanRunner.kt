@@ -215,7 +215,7 @@ class PlanRunner(
         decompositions.add(
             DecompositionEvent(step.id, outcome.planId, outcome.totalSteps, outcome.finalStatus, trigger)
         )
-        onProgress(PlanProgressEvent.Decomposed(step.id, outcome.planId, trigger))
+        onProgress(PlanProgressEvent.Decomposed(plan.id, step.id, outcome.planId, trigger))
         stepOutputs[step.id] = outcome.finalOutput
         return step.id to step.copy(
             status = if (met) StepStatus.Done else StepStatus.Failed,
@@ -299,7 +299,7 @@ class PlanRunner(
         var usedModel = step.modelOverride
 
         if (confidence < config.escalationThreshold && step.modelOverride == null && config.escalationModel != null) {
-            onProgress(PlanProgressEvent.Escalating(step.id, confidence, config.escalationModel))
+            onProgress(PlanProgressEvent.Escalating(plan.id, step.id, confidence, config.escalationModel))
             val escalated =
                 executeOnce(plan, step, instruction, config.escalationModel, parentSessionId, budget, attempt = 2)
             if (escalated.ok) {

@@ -48,14 +48,14 @@ class GoalRendererTest : FunSpec({
     test("Escalating prints the confidence and the model being escalated to") {
         val output = mutableListOf<String>()
         val r = renderer(AgentSession(id = "s"), output)
-        runBlocking { r.handle(PlanProgressEvent.Escalating("s1", 0.2, "strong-model")) }
+        runBlocking { r.handle(PlanProgressEvent.Escalating("plan_1", "s1", 0.2, "strong-model")) }
         output.single() shouldContain "escalating to strong-model"
     }
 
     test("Decomposed reports the sub-plan a step expanded into") {
         val output = mutableListOf<String>()
         val r = renderer(AgentSession(id = "s"), output)
-        runBlocking { r.handle(PlanProgressEvent.Decomposed("s1", "plan_2", DecompositionTrigger.Declared)) }
+        runBlocking { r.handle(PlanProgressEvent.Decomposed("plan_1", "s1", "plan_2", DecompositionTrigger.Declared)) }
         output.single() shouldContain "plan_2"
     }
 

@@ -99,7 +99,7 @@ class PlanProgressRendererTest : FunSpec({
 
         runBlocking {
             renderer(output).onProgress(
-                PlanProgressEvent.Decomposed("s1", "plan_2", DecompositionTrigger.Declared)
+                PlanProgressEvent.Decomposed("plan_1", "s1", "plan_2", DecompositionTrigger.Declared)
             )
         }
 
