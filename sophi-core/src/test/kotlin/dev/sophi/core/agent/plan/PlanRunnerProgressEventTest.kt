@@ -12,6 +12,7 @@ import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -56,6 +57,7 @@ class PlanRunnerProgressEventTest : FunSpec({
         val finished = events[3] as PlanProgressEvent.StepFinished
         finished.step.id shouldBe "s1"
         finished.step.status shouldBe StepStatus.Done
+        finished.output shouldBe "done"
     }
 
     test("no PlanReady is emitted for a caller-supplied initialPlan, and planner.plan is never called") {
@@ -165,6 +167,12 @@ class PlanRunnerProgressEventTest : FunSpec({
         // and appends the new version to its PlanLog off this event.
         replanned.single().plan.version shouldBe 2
         replanned.single().plan.steps.single().id shouldBe "s1b"
+
+        // The failed step's StepFinished must carry why it failed, not just that it did — this
+        // is the only place the UI (or any consumer) can learn the failure reason.
+        val failedFinished = events.filterIsInstance<PlanProgressEvent.StepFinished>()
+            .first { it.step.id == "s1" && it.step.status == StepStatus.Failed }
+        failedFinished.output shouldContain "boom"
     }
 
     test("a step marked decompose fires a Decomposed progress event") {

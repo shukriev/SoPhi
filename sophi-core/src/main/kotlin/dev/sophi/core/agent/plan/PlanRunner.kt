@@ -258,7 +258,7 @@ class PlanRunner(
     ): Pair<String, PlanStep> {
         onProgress(PlanProgressEvent.StepStarted(plan.id, step, plan.version))
         val result = runStepBody(step, plan, parentSessionId, stepOutputs, depth, budget, decompositions)
-        onProgress(PlanProgressEvent.StepFinished(plan.id, result.second, plan.version))
+        onProgress(PlanProgressEvent.StepFinished(plan.id, result.second, plan.version, stepOutputs.getValue(result.first)))
         return result
     }
 

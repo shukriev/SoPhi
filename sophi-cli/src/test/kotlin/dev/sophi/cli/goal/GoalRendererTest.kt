@@ -67,7 +67,7 @@ class GoalRendererTest : FunSpec({
             r.handle(PlanProgressEvent.StepStarted("plan_1", plan().steps[0], 1))
             r.handleTurnEvent(TurnEvent.Token("all done"))
             r.handle(
-                PlanProgressEvent.StepFinished("plan_1", plan().steps[0].copy(status = StepStatus.Done, confidence = 0.9), 1)
+                PlanProgressEvent.StepFinished("plan_1", plan().steps[0].copy(status = StepStatus.Done, confidence = 0.9), 1, "output")
             )
         }
         r.lastStepOutput shouldBe "all done"

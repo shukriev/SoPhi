@@ -31,7 +31,7 @@ class PlanProgressRendererTest : FunSpec({
         val output = mutableListOf<String>()
         val step = PlanStep(id = "s1", instruction = "ship it", status = StepStatus.Done, confidence = 0.9)
 
-        runBlocking { renderer(output).onProgress(PlanProgressEvent.StepFinished("plan_1", step, 1)) }
+        runBlocking { renderer(output).onProgress(PlanProgressEvent.StepFinished("plan_1", step, 1, "output")) }
 
         output shouldBe listOf(TextColors.gray("  [s1] Done (0.9)"))
     }
@@ -43,7 +43,7 @@ class PlanProgressRendererTest : FunSpec({
 
         runBlocking {
             r.onTurnEvent(TurnEvent.ReasoningToken("thinking about it"))
-            r.onProgress(PlanProgressEvent.StepFinished("plan_1", step, 1))
+            r.onProgress(PlanProgressEvent.StepFinished("plan_1", step, 1, "output"))
         }
 
         output shouldBe listOf(
@@ -58,10 +58,10 @@ class PlanProgressRendererTest : FunSpec({
 
         runBlocking {
             r.onTurnEvent(TurnEvent.ReasoningToken("first step thoughts"))
-            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s1", instruction = "a", status = StepStatus.Done), 1))
+            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s1", instruction = "a", status = StepStatus.Done), 1, "output"))
             output.clear()
             r.onProgress(PlanProgressEvent.StepStarted("plan_1", PlanStep(id = "s2", instruction = "b"), 1))
-            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s2", instruction = "b", status = StepStatus.Done), 1))
+            r.onProgress(PlanProgressEvent.StepFinished("plan_1", PlanStep(id = "s2", instruction = "b", status = StepStatus.Done), 1, "output"))
         }
 
         output shouldBe listOf(
