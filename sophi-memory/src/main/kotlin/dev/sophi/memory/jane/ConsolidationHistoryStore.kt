@@ -19,7 +19,8 @@ data class ConsolidationRecord(
     val purgedIds: List<String>,
     val autoPurgeEnabled: Boolean,
     val id: String = "consolidation_" + UUID.randomUUID(),
-    val classified: Int = 0
+    val classified: Int = 0,
+    val classifiedHabits: Int = 0
 )
 
 class ConsolidationHistoryStore(path: Path) {

@@ -152,6 +152,56 @@ class ConsolidatorTest : FunSpec({
         r.store.memories().getValue("mem_onceoff").actionablePattern shouldBe false
     }
 
+    test("classifyHabits tags a memory whose occurrences cluster tightly around one hour") {
+        val r = Rig()
+        // Three occurrences exactly 24h apart always land on the same LOCAL hour regardless of
+        // the test runner's timezone (classifyHabits converts via ZoneId.systemDefault()) -- so
+        // the expected hour is computed the same way the implementation does, not hardcoded, to
+        // keep this test portable across machines/CI.
+        val baseMs = 8 * 3_600_000L
+        val expectedHour = java.time.Instant.ofEpochMilli(baseMs).atZone(java.time.ZoneId.systemDefault()).hour
+        val clustered = Memory(
+            "mem_clustered", "checks budget dashboard", Room.EPISODES, 0.6,
+            SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0), Sensitivity.PERSONAL, Provenance.USER_DIRECT,
+            0L, 0L, "s", occurrences = listOf(baseMs, baseMs + 24 * 3_600_000L, baseMs + 48 * 3_600_000L)
+        )
+        r.store.upsertMemory(clustered)
+
+        val report = r.consolidator.run(nowMs = 1_000L)
+
+        report.classifiedHabits shouldBe 1
+        val tagged = r.store.memories().getValue("mem_clustered")
+        tagged.habitPreferredHour shouldBe expectedHour
+        (tagged.habitConfidence > 0.0) shouldBe true
+    }
+
+    test("classifyHabits does not tag a memory below habitMinOccurrences") {
+        val r = Rig()
+        r.store.upsertMemory(Memory(
+            "mem_sparse", "one-off event", Room.EPISODES, 0.6,
+            SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0), Sensitivity.PERSONAL, Provenance.USER_DIRECT,
+            0L, 0L, "s", occurrences = listOf(0L, 100L)
+        ))
+
+        val report = r.consolidator.run(nowMs = 1_000L)
+
+        report.classifiedHabits shouldBe 0
+        r.store.memories().getValue("mem_sparse").habitPreferredHour shouldBe null
+    }
+
+    test("classifyHabits does not tag a memory whose occurrences are scattered across hours") {
+        val r = Rig()
+        r.store.upsertMemory(Memory(
+            "mem_scattered", "no fixed time", Room.EPISODES, 0.6,
+            SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0), Sensitivity.PERSONAL, Provenance.USER_DIRECT,
+            0L, 0L, "s", occurrences = listOf(1 * 3_600_000L, 7 * 3_600_000L, 13 * 3_600_000L, 19 * 3_600_000L)
+        ))
+
+        val report = r.consolidator.run(nowMs = 1_000L)
+
+        report.classifiedHabits shouldBe 0
+    }
+
     test("classifyPatterns is skipped without a provider, same as compress") {
         val r = Rig(provider = null)
         val repeated = Memory(

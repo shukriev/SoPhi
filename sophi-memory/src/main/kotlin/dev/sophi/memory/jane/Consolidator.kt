@@ -38,6 +38,7 @@ class Consolidator(
         val merged = merge(nowMs)
         val strengthened = strengthen(nowMs)
         val classified = classifyPatterns(nowMs)
+        val classifiedHabits = classifyHabits()
         val compressResult = compress(nowMs)
         val pruned = prune(nowMs)
         val purged = if (config.autoPurgeEnabled) forgetEngine.purgeSoftDeleted(nowMs - config.softDeleteGraceMs, nowMs) else emptyList()
@@ -45,14 +46,14 @@ class Consolidator(
         val record = ConsolidationRecord(
             ts = nowMs, merged = merged.size, strengthened = strengthened, compressed = compressResult.threadsCompressed,
             pruned = pruned.size, softDeletedIds = merged + compressResult.softDeletedIds + pruned, purgedIds = purged,
-            autoPurgeEnabled = config.autoPurgeEnabled, classified = classified
+            autoPurgeEnabled = config.autoPurgeEnabled, classified = classified, classifiedHabits = classifiedHabits
         )
         historyStore.record(record)
         versionStore?.record(
             ArtifactType.MEMORY_CONSOLIDATION, record.id,
             consolidationRecordJson.encodeToString(record), ProducedBy.REFLECTION
         )
-        return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size, classified)
+        return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size, classified, classifiedHabits)
     }
 
     /**
@@ -98,6 +99,34 @@ class Consolidator(
         val byId = candidates.associateBy { it.id }
         ids.forEach { id ->
             byId[id]?.let { m -> store.upsertMemory(m.copy(actionablePattern = true)); count++ }
+        }
+        return count
+    }
+
+    /**
+     * Tags memories with a consistent time-of-day/day-of-week, deterministically -- no LLM call,
+     * unlike [classifyPatterns], so this runs unconditionally on every consolidation cycle. See
+     * habit-model design spec for why [merge]'s existing duplicate-grouping is the right source
+     * of [Memory.occurrences].
+     */
+    private fun classifyHabits(): Int {
+        val candidates = store.memories().values.filter {
+            it.active && it.occurrences.size >= config.habitMinOccurrences
+        }
+        var count = 0
+        val zone = java.time.ZoneId.systemDefault()
+        candidates.forEach { m ->
+            val times = m.occurrences.map { java.time.Instant.ofEpochMilli(it).atZone(zone) }
+            val (hour, hourConfidence) = circularHourConcentration(times.map { it.hour })
+            if (hourConfidence >= config.habitConcentrationThreshold) {
+                val (day, dayConfidence) = modalDayConcentration(times.map { it.dayOfWeek.value })
+                store.upsertMemory(m.copy(
+                    habitConfidence = hourConfidence,
+                    habitPreferredHour = hour,
+                    habitPreferredDayOfWeek = day.takeIf { dayConfidence >= config.habitConcentrationThreshold }
+                ))
+                count++
+            }
         }
         return count
     }

@@ -42,6 +42,12 @@ data class JanesPalaceConfig(
      *  daily habit. [dev.sophi.memory.jane.Consolidator.classifyHabits] only needs a representative
      *  recent sample, not every occurrence ever. */
     val habitMaxOccurrencesStored: Int = 200,
+    /** Minimum sample size before a time pattern means anything. */
+    val habitMinOccurrences: Int = 3,
+    /** Fraction of occurrences that must cluster around one hour/day for
+     *  [dev.sophi.memory.jane.Consolidator.classifyHabits] to tag a memory as habitual -- a clear
+     *  majority, not just a plurality. */
+    val habitConcentrationThreshold: Double = 0.6,
     /** How long an unresolved commitment keeps being surfaced/drafted by the daily rescue-style
      *  task before it stops nagging (ADR-035). It stays listable via [JanesPalace.browse] past
      *  this point — expiry only caps the nudge, it never claims the commitment was kept. */
