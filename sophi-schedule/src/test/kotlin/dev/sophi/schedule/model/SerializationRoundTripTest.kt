@@ -68,6 +68,21 @@ class SerializationRoundTripTest : FunSpec({
         json.decodeFromString<RunRecord>(encoded) shouldBe record
     }
 
+    test("RunRecord with a planId round-trips") {
+        val record = RunRecord(
+            taskId = "task_1", startedAtMs = 1L, finishedAtMs = 2L,
+            outcome = RunOutcome.GoalMet, summary = "done",
+            replans = 0, decompositions = 0, sessionId = "s1", planId = "plan_1"
+        )
+        val encoded = json.encodeToString(record)
+        json.decodeFromString<RunRecord>(encoded) shouldBe record
+    }
+
+    test("RunRecord defaults planId to null") {
+        val record = RunRecord(taskId = "task_1", startedAtMs = 1L, finishedAtMs = 2L, outcome = RunOutcome.GoalMet, summary = "done")
+        record.planId shouldBe null
+    }
+
     test("ScheduledTask default id is unique per instance") {
         val a = ScheduledTask(name = "a", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p")
         val b = ScheduledTask(name = "b", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p")
