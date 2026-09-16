@@ -112,15 +112,18 @@ class Consolidator(
                 val a = actives[i]
                 if (a.id in absorbed) continue
                 var survivorSalience = a.salience
+                var survivorOccurrences = a.occurrences
                 for (j in i + 1 until actives.size) {
                     val b = actives[j]
                     if (b.id in absorbed) continue
                     val va = store.vectorFor(a.id) ?: continue; val vb = store.vectorFor(b.id) ?: continue
                     if (cosine(va, vb) >= config.mergeThreshold) {
                         survivorSalience = min(1.0, maxOf(survivorSalience, b.salience) + 0.05)
+                        survivorOccurrences = (survivorOccurrences + b.occurrences).takeLast(config.habitMaxOccurrencesStored)
                         store.upsertMemory(a.copy(
                             salience = survivorSalience,
-                            reinforcedAt = nowMs))
+                            reinforcedAt = nowMs,
+                            occurrences = survivorOccurrences))
                         store.upsertMemory(b.copy(softDeletedAt = nowMs))
                         // Absorbed memory's edges move to the survivor.
                         store.edges().filter { it.fromId == b.id || it.toId == b.id }.forEach { e ->

@@ -52,6 +52,27 @@ class ConsolidatorTest : FunSpec({
         survivors.single().reinforcedAt shouldBe 1_000L
     }
 
+    test("merge accumulates occurrence timestamps onto the survivor instead of discarding them") {
+        val r = Rig()
+        r.add("mem_a", "dentist appointment thursday fourteen", at = 0L, salience = 0.6)
+        r.add("mem_b", "dentist appointment thursday fourteen", at = 100L, salience = 0.5)
+        r.consolidator.run(nowMs = 1_000L)
+
+        val survivor = r.store.memories().values.single { it.active }
+        survivor.occurrences shouldBe listOf(0L, 100L)
+    }
+
+    test("merge caps accumulated occurrences at habitMaxOccurrencesStored, keeping the most recent") {
+        val r = Rig(config = JanesPalaceConfig(sessionModel = "test-model", habitMaxOccurrencesStored = 2))
+        r.add("mem_a", "same text", at = 0L, salience = 0.6)
+        r.add("mem_b", "same text", at = 100L, salience = 0.5)
+        r.add("mem_c", "same text", at = 200L, salience = 0.4)
+        r.consolidator.run(nowMs = 1_000L)
+
+        val survivor = r.store.memories().values.single { it.active }
+        survivor.occurrences shouldBe listOf(100L, 200L)
+    }
+
     test("merge: 3-way chain accumulates salience bumps on the running survivor, not the stale snapshot") {
         val r = Rig()
         r.add("mem_a", "dentist appointment thursday fourteen", at = 0L, salience = 0.5)
