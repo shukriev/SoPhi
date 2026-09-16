@@ -610,6 +610,21 @@ class SophiRuntimeTest : FunSpec({
         engine.shouldNotBeNull()
     }
 
+    test("scheduleEngine threads plansDir into a PlanLog the engine can persist Goal-mode plans to") {
+        val rt = SophiRuntime(
+            agentLoop, sessionManager, PluginRegistry(), config,
+            provider = mockk<LLMProvider>(), contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val dir = createTempDirectory("schedule-engine-plansdir-test")
+
+        val engine = rt.scheduleEngine(
+            TaskStore(dir.resolve("tasks.json")), RunLog(dir.resolve("runs.jsonl")), NoopNotifier,
+            plansDir = dir.resolve("plans")
+        )
+
+        engine.shouldNotBeNull()
+    }
+
     test("scheduleEngine throws when this runtime has no provider configured") {
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config)
         val dir = createTempDirectory("schedule-engine-test")
