@@ -8,6 +8,7 @@ import dev.sophi.core.agent.plan.LlmPlanCritic
 import dev.sophi.core.agent.plan.LlmPlanner
 import dev.sophi.core.agent.plan.LlmStepCritic
 import dev.sophi.core.agent.plan.PlanFinalStatus
+import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.agent.plan.PlanRunner
 import dev.sophi.core.agent.plan.PlanRunnerConfig
 import dev.sophi.core.agent.plan.StepCritic
@@ -103,7 +104,12 @@ class ScheduleEngine(
     private val pluginRegistry: PluginRegistry? = null,
     /** false skips Goal-mode's step critic LLM call entirely — a HarnessConfig knob (Task 14+),
      *  defaulted on so no existing caller needs updating. */
-    private val criticEnabled: Boolean = true
+    private val criticEnabled: Boolean = true,
+    /** Persists every Goal-mode run's plan versions, or null to skip persistence entirely
+     *  (matches every existing caller's behavior — no live observation here, only history:
+     *  scheduled runs use allowParallelSteps = true, which the chat path's live-attachment
+     *  logic doesn't support). */
+    private val planLog: PlanLog? = null
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
         val due = taskStore.list().filter { it.enabled && it.nextRunAtMs != null && it.nextRunAtMs <= nowMs }
@@ -160,6 +166,7 @@ class ScheduleEngine(
                 // stay distinguishable.
                 var replans: Int? = null
                 var decompositions: Int? = null
+                var planId: String? = null
 
                 // SessionIdContext scopes only the actual turn/plan-run call below — SubagentTool and
                 // DecomposeGoalTool are the only readers, and everything else in this function (config
@@ -190,12 +197,13 @@ class ScheduleEngine(
                             maxStepExecutions = mode.maxIterations, allowParallelSteps = true,
                             criticEnabled = criticEnabled
                         )
-                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge)
+                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge, planLog = planLog)
                         val result = withContext(SessionIdContext(session.id)) {
                             runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
                         }
                         replans = result.replans.size
                         decompositions = result.decompositions.size
+                        planId = result.planId
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
                             result.finalOutput
                     }
@@ -208,7 +216,7 @@ class ScheduleEngine(
                 }
                 RunRecord(
                     task.id, startedAtMs, System.currentTimeMillis(), outcome, summary,
-                    replans = replans, decompositions = decompositions, sessionId = sessionId
+                    replans = replans, decompositions = decompositions, sessionId = sessionId, planId = planId
                 )
             }
         } catch (e: TimeoutCancellationException) {
