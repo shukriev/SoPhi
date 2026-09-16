@@ -33,15 +33,17 @@ sealed class PlanProgressEvent {
     ) : PlanProgressEvent()
 
     /** Confidence came back under the threshold and an escalationModel is configured. */
-    data class Escalating(val stepId: String, val confidence: Double, val toModel: String) : PlanProgressEvent()
+    data class Escalating(val planId: String, val stepId: String, val confidence: Double, val toModel: String) : PlanProgressEvent()
 
-    /** step carries the final status, confidence and modelOverride. */
-    data class StepFinished(val planId: String, val step: PlanStep, val planVersion: Int) : PlanProgressEvent()
+    /** step carries the final status, confidence and modelOverride. [output] is the step's
+     *  result text on success, or its failure/error message on failure — always populated,
+     *  since every path through PlanRunner sets it before a step finishes. */
+    data class StepFinished(val planId: String, val step: PlanStep, val planVersion: Int, val output: String) : PlanProgressEvent()
 
     /** [plan] is the replacement plan, already version-bumped. */
     data class Replanned(val plan: Plan, val stepId: String, val reason: String) : PlanProgressEvent()
 
     data class Decomposed(
-        val stepId: String, val childPlanId: String, val trigger: DecompositionTrigger
+        val planId: String, val stepId: String, val childPlanId: String, val trigger: DecompositionTrigger
     ) : PlanProgressEvent()
 }

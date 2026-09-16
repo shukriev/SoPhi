@@ -19,6 +19,17 @@ class RuntimeBuilderGoalDecompositionTest : FunSpec({
         runtime.toolNames() shouldContain "decompose_goal"
     }
 
+    test("goalDecomposition() accepts an onProgress callback without changing registration") {
+        val runtime = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            sessionsDir = tempdir().toPath()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .goalDecomposition(tempdir().toPath(), onProgress = {})
+            .build()
+
+        runtime.toolNames() shouldContain "decompose_goal"
+    }
+
     test("without goalDecomposition(), decompose_goal is not registered") {
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()

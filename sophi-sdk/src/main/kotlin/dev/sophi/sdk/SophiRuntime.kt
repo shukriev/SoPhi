@@ -5,6 +5,7 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinition
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
@@ -211,7 +212,12 @@ class SophiRuntime internal constructor(
         notifier: Notifier,
         maxConcurrentTasks: Int = 4,
         taskTimeoutMs: Long = 300_000,
-        maxTokens: Int = 4096
+        maxTokens: Int = 4096,
+        /** Directory Goal-mode runs persist their plan history to, or null to skip persistence —
+         *  mirrors goalDecomposition(plansDir)'s own parameter. Pass the same directory as
+         *  goalDecomposition(...) if you want both the chat and scheduled paths' plans in one
+         *  PlanLog. */
+        plansDir: Path? = null
     ): ScheduleEngine {
         val p = requireNotNull(provider) {
             "provider was not set on this SophiRuntime — build it via RuntimeBuilder"
@@ -233,7 +239,8 @@ class SophiRuntime internal constructor(
             taskTimeoutMs = taskTimeoutMs,
             maxTokens = maxTokens,
             systemPrompt = listOfNotNull(config.systemPrompt, DefaultPrompt.UNATTENDED).joinToString("\n\n"),
-            pluginRegistry = pluginRegistry
+            pluginRegistry = pluginRegistry,
+            planLog = plansDir?.let { PlanLog(it) }
         )
     }
 }

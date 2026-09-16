@@ -28,5 +28,11 @@ data class RunRecord(
      * before session creation. Needed to trace a run's outcome back to its tool-round trajectory
      * (ADR-009) and any lessons recalled during it.
      */
-    val sessionId: String? = null
+    val sessionId: String? = null,
+    /**
+     * The PlanOutcome.planId this run's PlanRunner produced, or null when the run had no plan at
+     * all (Recurring mode, or a Goal run that died before a plan was ever generated). Needed to
+     * look the run's plan history back up via PlanLog.
+     */
+    val planId: String? = null
 )

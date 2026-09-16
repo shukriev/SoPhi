@@ -44,7 +44,8 @@ class ScheduleEngineTest : FunSpec({
         maxConcurrentTasks: Int = 4,
         taskTimeoutMs: Long = 300_000,
         registry: ToolRegistry = ToolRegistry(),
-        criticEnabled: Boolean = true
+        criticEnabled: Boolean = true,
+        planLog: dev.sophi.core.agent.plan.PlanLog? = null
     ): Triple<ScheduleEngine, TaskStore, RunLog> {
         val home = tempdir().toPath()
         val taskStore = TaskStore(home.resolve("tasks.json"))
@@ -54,7 +55,7 @@ class ScheduleEngineTest : FunSpec({
             FileSessionManager(createTempDirectory("schedule-engine-test")),
             notifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
             maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs,
-            criticEnabled = criticEnabled
+            criticEnabled = criticEnabled, planLog = planLog
         )
         return Triple(engine, taskStore, runLog)
     }
@@ -101,6 +102,31 @@ class ScheduleEngineTest : FunSpec({
         kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
 
         events.map { it.toolName } shouldContain "some_tool"
+    }
+
+    test("a Goal-mode run persists its plan to PlanLog and records the planId on RunRecord") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+        val plansDir = tempdir().toPath()
+        val planLog = dev.sophi.core.agent.plan.PlanLog(plansDir)
+        val (engine, taskStore, _) = engine(provider, planLog = planLog)
+        val task = taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L),
+            mode = TaskMode.Goal(stopCondition = StopCondition.LlmJudged, maxIterations = 3),
+            prompt = "ship it"
+        ))
+
+        val record = kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        record?.planId shouldNotBe null
+        val versions = planLog.versions(record!!.planId!!)
+        versions shouldHaveSize 1
+        versions.single().steps.single().id shouldBe "s1"
     }
 
     test("runNow() dispatches AFTER_TURN with the task's prompt and the run's summary, for Recurring mode") {
