@@ -105,7 +105,9 @@ class PalaceStore(
         "createdAt" to createdAt, "reinforcedAt" to reinforcedAt, "sourceSessionId" to sourceSessionId,
         "supersededBy" to supersededBy, "softDeletedAt" to softDeletedAt,
         "hitsPositive" to hitsPositive, "hitsNegative" to hitsNegative,
-        "actionablePattern" to actionablePattern, "isCommitment" to isCommitment
+        "actionablePattern" to actionablePattern, "isCommitment" to isCommitment,
+        "occurrences" to occurrences, "habitConfidence" to habitConfidence,
+        "habitPreferredHour" to habitPreferredHour, "habitPreferredDayOfWeek" to habitPreferredDayOfWeek
     )
     private fun Map<String, Any?>.toMemory(): Memory = Memory(
         id = memoryId(), text = get("text") as String, room = Room.valueOf(get("room") as String),
@@ -124,7 +126,12 @@ class PalaceStore(
         hitsPositive = (get("hitsPositive") as? Number)?.toInt() ?: 0,
         hitsNegative = (get("hitsNegative") as? Number)?.toInt() ?: 0,
         actionablePattern = get("actionablePattern") as? Boolean ?: false,
-        isCommitment = get("isCommitment") as? Boolean ?: false
+        isCommitment = get("isCommitment") as? Boolean ?: false,
+        occurrences = (get("occurrences") as? List<*>)?.map { (it as Number).toLong() }
+            ?: listOf((get("createdAt") as Number).toLong()),
+        habitConfidence = (get("habitConfidence") as? Number)?.toDouble() ?: 0.0,
+        habitPreferredHour = (get("habitPreferredHour") as? Number)?.toInt(),
+        habitPreferredDayOfWeek = (get("habitPreferredDayOfWeek") as? Number)?.toInt()
     )
 
     private fun CausalEdge.toProperties(): Map<String, Any?> =

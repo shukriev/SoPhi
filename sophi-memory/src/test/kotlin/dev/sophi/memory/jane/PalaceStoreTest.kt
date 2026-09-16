@@ -107,6 +107,31 @@ class PalaceStoreTest : FunSpec({
         s.memories().getValue("mem_commitment").isCommitment shouldBe true
     }
 
+    test("occurrences round-trips through storage, defaulting to [createdAt]") {
+        val s = store()
+        s.upsertMemory(mem("mem_plain"))
+        s.upsertMemory(mem("mem_multi").copy(occurrences = listOf(1L, 100L, 200L)))
+
+        s.memories().getValue("mem_plain").occurrences shouldBe listOf(1L)
+        s.memories().getValue("mem_multi").occurrences shouldBe listOf(1L, 100L, 200L)
+    }
+
+    test("habit fields round-trip through storage, defaulting to unset") {
+        val s = store()
+        s.upsertMemory(mem("mem_plain"))
+        s.upsertMemory(mem("mem_habit").copy(habitConfidence = 0.8, habitPreferredHour = 8, habitPreferredDayOfWeek = 1))
+
+        val plain = s.memories().getValue("mem_plain")
+        plain.habitConfidence shouldBe 0.0
+        plain.habitPreferredHour shouldBe null
+        plain.habitPreferredDayOfWeek shouldBe null
+
+        val habit = s.memories().getValue("mem_habit")
+        habit.habitConfidence shouldBe 0.8
+        habit.habitPreferredHour shouldBe 8
+        habit.habitPreferredDayOfWeek shouldBe 1
+    }
+
     test("wipe clears memories, edges, attributes, embeddings, and last-recall state") {
         val s = store()
         s.upsertMemory(mem("mem_1"))
