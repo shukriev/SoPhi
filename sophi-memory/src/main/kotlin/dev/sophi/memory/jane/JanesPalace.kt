@@ -141,6 +141,14 @@ class JanesPalace(
                 it.createdAt >= nowMs - config.commitmentExpiryMs
         }
 
+    /**
+     * Active, timing-classified memories eligible for a proactively-timed nudge. Same
+     * unconditional PERSONAL-or-below sensitivity ceiling as [actionablePatterns] and
+     * [openCommitments] -- this feed reaches the same notification surface (see ADR-033).
+     */
+    fun habits(): List<Memory> =
+        store.memories().values.filter { it.active && it.habitConfidence > 0.0 && it.sensitivity <= Sensitivity.PERSONAL }
+
     fun threads(): Map<String, List<String>> {
         val all = store.memories()
         return store.edges().groupBy { it.threadLabel }.mapValues { (_, edges) ->
