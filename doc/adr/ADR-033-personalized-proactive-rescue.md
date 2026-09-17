@@ -70,6 +70,12 @@ ceiling on the read surface rather than a caller-configurable one.
   the last constructor parameter, defaulted to `0`) so every existing positional call site kept
   compiling unchanged. The CLI's session-exit consolidation summary line now also prints
   `classified=N`.
+- A later habit-model addition (see the habit-model design spec) gives the rescue task a second,
+  timing-aware input: `list_habits` alongside `list_actionable_patterns`. When a habit's
+  confidence is high, the rescue task's own `manage_scheduled_task` call can set a `Trigger.Cron`
+  timed to the learned hour instead of relying purely on textual-pattern judgment or a fixed poll
+  cadence — no scheduling-engine change was needed for this, it reuses the exact self-scheduling
+  mechanism this ADR already established.
 - Sentinel matching is deliberately lenient (trim + case-insensitive), not exact-string, since
   `PlanRunner`'s `finalOutput` is free-form LLM text. Whether the model reliably emits the bare
   sentinel with no stray punctuation has not been empirically verified against real runs yet —

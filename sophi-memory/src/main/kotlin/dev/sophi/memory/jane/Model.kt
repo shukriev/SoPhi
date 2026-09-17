@@ -36,7 +36,22 @@ data class Memory(
      *  gated to [Provenance.USER_DIRECT] regardless of what the encoder said — commitment
      *  tracking is chat-only in v1 (see ADR-035). Gates [dev.sophi.memory.jane.JanesPalace.openCommitments]'s
      *  read surface. */
-    val isCommitment: Boolean = false
+    val isCommitment: Boolean = false,
+    /** Every occurrence timestamp of "the same recurring thing," accumulated by
+     *  [dev.sophi.memory.jane.Consolidator.merge] each time a near-duplicate is absorbed into this
+     *  survivor -- FIFO-capped at [dev.sophi.memory.jane.JanesPalaceConfig.habitMaxOccurrencesStored].
+     *  Feeds [dev.sophi.memory.jane.Consolidator.classifyHabits]. */
+    val occurrences: List<Long> = listOf(createdAt),
+    /** Set by [dev.sophi.memory.jane.Consolidator.classifyHabits] -- fraction of [occurrences]
+     *  clustered around [habitPreferredHour]. 0.0 means not (yet) classified as habitual. */
+    val habitConfidence: Double = 0.0,
+    /** Local hour-of-day (0-23, [java.time.ZoneId.systemDefault]) this memory's occurrences
+     *  cluster around, once [habitConfidence] clears [dev.sophi.memory.jane.JanesPalaceConfig.habitConcentrationThreshold]. */
+    val habitPreferredHour: Int? = null,
+    /** ISO day-of-week (1=Monday..7=Sunday) this memory's occurrences cluster around, only when
+     *  day concentration ALSO clears the threshold -- null means "habitual but not day-specific"
+     *  (e.g. a daily habit). */
+    val habitPreferredDayOfWeek: Int? = null
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null

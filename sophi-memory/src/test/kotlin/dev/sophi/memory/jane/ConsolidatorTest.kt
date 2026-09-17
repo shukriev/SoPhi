@@ -52,6 +52,27 @@ class ConsolidatorTest : FunSpec({
         survivors.single().reinforcedAt shouldBe 1_000L
     }
 
+    test("merge accumulates occurrence timestamps onto the survivor instead of discarding them") {
+        val r = Rig()
+        r.add("mem_a", "dentist appointment thursday fourteen", at = 0L, salience = 0.6)
+        r.add("mem_b", "dentist appointment thursday fourteen", at = 100L, salience = 0.5)
+        r.consolidator.run(nowMs = 1_000L)
+
+        val survivor = r.store.memories().values.single { it.active }
+        survivor.occurrences shouldBe listOf(0L, 100L)
+    }
+
+    test("merge caps accumulated occurrences at habitMaxOccurrencesStored, keeping the most recent") {
+        val r = Rig(config = JanesPalaceConfig(sessionModel = "test-model", habitMaxOccurrencesStored = 2))
+        r.add("mem_a", "same text", at = 0L, salience = 0.6)
+        r.add("mem_b", "same text", at = 100L, salience = 0.5)
+        r.add("mem_c", "same text", at = 200L, salience = 0.4)
+        r.consolidator.run(nowMs = 1_000L)
+
+        val survivor = r.store.memories().values.single { it.active }
+        survivor.occurrences shouldBe listOf(100L, 200L)
+    }
+
     test("merge: 3-way chain accumulates salience bumps on the running survivor, not the stale snapshot") {
         val r = Rig()
         r.add("mem_a", "dentist appointment thursday fourteen", at = 0L, salience = 0.5)
@@ -129,6 +150,56 @@ class ConsolidatorTest : FunSpec({
         report.classified shouldBe 1
         r.store.memories().getValue("mem_repeated").actionablePattern shouldBe true
         r.store.memories().getValue("mem_onceoff").actionablePattern shouldBe false
+    }
+
+    test("classifyHabits tags a memory whose occurrences cluster tightly around one hour") {
+        val r = Rig()
+        // Three occurrences exactly 24h apart always land on the same LOCAL hour regardless of
+        // the test runner's timezone (classifyHabits converts via ZoneId.systemDefault()) -- so
+        // the expected hour is computed the same way the implementation does, not hardcoded, to
+        // keep this test portable across machines/CI.
+        val baseMs = 8 * 3_600_000L
+        val expectedHour = java.time.Instant.ofEpochMilli(baseMs).atZone(java.time.ZoneId.systemDefault()).hour
+        val clustered = Memory(
+            "mem_clustered", "checks budget dashboard", Room.EPISODES, 0.6,
+            SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0), Sensitivity.PERSONAL, Provenance.USER_DIRECT,
+            0L, 0L, "s", occurrences = listOf(baseMs, baseMs + 24 * 3_600_000L, baseMs + 48 * 3_600_000L)
+        )
+        r.store.upsertMemory(clustered)
+
+        val report = r.consolidator.run(nowMs = 1_000L)
+
+        report.classifiedHabits shouldBe 1
+        val tagged = r.store.memories().getValue("mem_clustered")
+        tagged.habitPreferredHour shouldBe expectedHour
+        (tagged.habitConfidence > 0.0) shouldBe true
+    }
+
+    test("classifyHabits does not tag a memory below habitMinOccurrences") {
+        val r = Rig()
+        r.store.upsertMemory(Memory(
+            "mem_sparse", "one-off event", Room.EPISODES, 0.6,
+            SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0), Sensitivity.PERSONAL, Provenance.USER_DIRECT,
+            0L, 0L, "s", occurrences = listOf(0L, 100L)
+        ))
+
+        val report = r.consolidator.run(nowMs = 1_000L)
+
+        report.classifiedHabits shouldBe 0
+        r.store.memories().getValue("mem_sparse").habitPreferredHour shouldBe null
+    }
+
+    test("classifyHabits does not tag a memory whose occurrences are scattered across hours") {
+        val r = Rig()
+        r.store.upsertMemory(Memory(
+            "mem_scattered", "no fixed time", Room.EPISODES, 0.6,
+            SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0), Sensitivity.PERSONAL, Provenance.USER_DIRECT,
+            0L, 0L, "s", occurrences = listOf(1 * 3_600_000L, 7 * 3_600_000L, 13 * 3_600_000L, 19 * 3_600_000L)
+        ))
+
+        val report = r.consolidator.run(nowMs = 1_000L)
+
+        report.classifiedHabits shouldBe 0
     }
 
     test("classifyPatterns is skipped without a provider, same as compress") {
