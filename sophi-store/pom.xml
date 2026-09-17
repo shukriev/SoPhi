@@ -25,6 +25,27 @@
             <!-- Single source of truth for the ArcadeDB version now that sophi-memory's own
                  copy of this dependency is removed in Task 2. -->
             <version>26.5.1</version>
+            <exclusions>
+                <!-- ~62 MB of GraalVM (js-language 25 MB, icu4j 17 MB, truffle-api 13 MB, regex
+                     3.7 MB, polyglot, truffle-runtime), pulled in only for ArcadeDB's JavaScript
+                     query engine and polyglot stored functions — nothing here runs either; every
+                     query goes through the SQL engine. Safe to drop: GraalPolyglotEngine's static
+                     init catches Throwable and falls back to an empty supported-language set, so
+                     QueryEngineManager just registers no polyglot engine. Also skips Truffle's
+                     runtime init (~200 classes) at first database open. -->
+                <exclusion>
+                    <groupId>org.graalvm.polyglot</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.graalvm.js</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.graalvm.sdk</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>io.kotest</groupId>

@@ -9,6 +9,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.runBlocking
+import kotlin.io.path.createTempDirectory
 import kotlin.io.path.createTempFile
 import kotlin.io.path.setPosixFilePermissions
 import kotlin.io.path.writeText
@@ -136,7 +137,10 @@ class StdioMcpConnectorTest : FunSpec({
     }
 
     test("resolveExecutable rewrites a bare command name to the absolute path found on the given PATH") {
-        val binDir = createTempFile(suffix = "").parent!!
+        // Its own directory, not the shared temp dir: this file is left behind read+execute only
+        // (no write), so a second run in the same temp dir dies on AccessDeniedException writing
+        // over the previous run's copy.
+        val binDir = createTempDirectory("fake-npx-bin")
         val exe = binDir.resolve("fake-npx")
         exe.apply {
             writeText("#!/bin/sh\necho hi\n")
