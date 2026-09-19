@@ -64,6 +64,19 @@ streaming transcriber, and the capture-loop changes be written against a known b
 its stdout framing and its segmentation behaviour all shape that code, and guessing them would
 produce something untestable and probably wrong.
 
+`scripts/build-whisper-stream.sh` does the build-and-package half. It exists because the naive
+build is not shippable: `whisper-stream` links Homebrew's SDL2 by absolute path, so the binary
+would run only on the machine that built it. The script bundles SDL2 beside the binary, rewrites
+the load path to `@loader_path`, re-signs ad-hoc (`install_name_tool` invalidates the signature,
+and Apple Silicon kills a modified unsigned binary at launch), and refuses to package anything that
+still references `/opt/homebrew` or `/usr/local`.
+
+The arm64 path is verified end to end: built at ref `b4938`, extracted fresh, `otool -L` clean,
+and the binary launches and opens the microphone. **x64 is not built** — it needs SDL2 from the
+Intel Homebrew prefix (`arch -x86_64 /usr/local/bin/brew install sdl2`) or an Intel machine, and
+publishing a manifest with only one architecture would leave `VoiceInstaller` hard-failing on the
+other. Publishing is opt-in (`--publish`) rather than automatic.
+
 Note that ADR-038 already removed this cost's effect on *capture*: transcription runs off the record
 loop, so a slow model load no longer closes the microphone. What remains is CPU and battery, not
 lost audio — which is why deferring it further is tolerable.
