@@ -142,6 +142,33 @@ class SignificanceEncoderTest : FunSpec({
         prompt shouldContain "THIRD_PARTY"
     }
 
+    test("an ambient turn's prompt tells the model to discard broadcast and recorded media") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+        val ambientTurn = TurnObservation("s1", "overheard chatter", "", 1_000L, ambient = true)
+
+        SignificanceEncoder(provider, cfg).encode(ambientTurn, emptyList())
+
+        // A microphone in a room cannot tell a person from a television. Without this rule the
+        // encoder will happily file a film's dialogue as events in the user's life.
+        val prompt = captured.captured.messages.single().content
+        prompt shouldContain "television"
+        prompt shouldContain "Store nothing from it"
+    }
+
+    test("a non-ambient turn's prompt says nothing about broadcast media") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+
+        SignificanceEncoder(provider, cfg).encode(turn, emptyList())
+
+        captured.captured.messages.single().content shouldNotContain "television"
+    }
+
     test("a non-ambient turn's prompt is unchanged (no overheard framing)") {
         val provider = mockk<LLMProvider>()
         val captured = slot<CompletionRequest>()
