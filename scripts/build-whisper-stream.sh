@@ -14,7 +14,12 @@
 #   scripts/build-whisper-stream.sh                 # build for this machine's architecture
 #   scripts/build-whisper-stream.sh --arch x64      # build for a specific one
 #   scripts/build-whisper-stream.sh --arch both     # both, if both SDL2 slices are installed
+#   scripts/build-whisper-stream.sh --no-manifest   # build and package only (what CI uses)
 #   scripts/build-whisper-stream.sh --publish       # also upload to the GitHub release
+#
+# CI calls this from .github/workflows/voice-tools-release.yml, one architecture per native
+# runner. Prefer that over running it by hand: it builds on clean machines and publishes the whole
+# artifact set together.
 set -euo pipefail
 
 # Must match the manifest's whisperCppRef, or whisper-stream and the shipped whisper-cli come from
@@ -30,10 +35,14 @@ MANIFEST_URL="https://github.com/$RELEASE_REPO/releases/download/$RELEASE_TAG/vo
 
 arch_arg="host"
 publish=false
+write_manifest=true
 while [ $# -gt 0 ]; do
     case "$1" in
         --arch) arch_arg="${2:-}"; shift 2 ;;
         --publish) publish=true; shift ;;
+        # For CI: each runner builds its own architecture, and the publish job writes one manifest
+        # covering all of them. A per-runner manifest would only ever be half a manifest.
+        --no-manifest) write_manifest=false; shift ;;
         # Prints the header comment up to the first non-comment line, so the range never needs
         # updating when the header grows.
         -h|--help) awk 'NR>1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
@@ -206,6 +215,12 @@ for target in "${targets[@]}"; do
     tar -czf "$tarball" -C "$stage_dir" .
     echo "Packaged $tarball"
 done
+
+if [ "$write_manifest" = false ]; then
+    echo
+    echo "Skipping manifest (--no-manifest). Tarballs are in $out_dir."
+    exit 0
+fi
 
 echo
 echo "=== Manifest ==="

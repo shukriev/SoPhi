@@ -64,6 +64,65 @@ jobs:
           path: whisper-cli-macos-${{ matrix.arch }}.tar.gz
           retention-days: 1
 
+  build-whisper-stream:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Unlike whisper-cli, this one cannot be statically linked away: the stream example needs
+      # SDL2, and Homebrew's copy is a dylib referenced by absolute path. scripts/build-whisper-
+      # stream.sh does the bundling, @loader_path rewrite and ad-hoc re-signing, and refuses to
+      # package a binary that still points into the build host. Calling the script rather than
+      # inlining those steps keeps one implementation of that logic.
+      - name: Build and package whisper-stream
+        run: ./scripts/build-whisper-stream.sh --arch ${{ matrix.arch }} --no-manifest
+
+      # Deliberately does not run the binary. whisper-stream opens the microphone and blocks, and a
+      # runner has no capture device, so a launch attempt either hangs or exits silently depending
+      # on the image — it proves nothing and fails at random. These checks are deterministic and
+      # cover exactly what this packaging can break.
+      - name: Verify the packaged artifact (relocated outside the build tree)
+        run: |
+          mkdir -p /tmp/stream-smoke
+          tar xzf .whisper-stream-build/dist/whisper-stream-macos-${{ matrix.arch }}.tar.gz \
+            -C /tmp/stream-smoke
+          cd /tmp/stream-smoke
+          test -f whisper-stream
+          test -f libSDL2-2.0.0.dylib
+
+          # No absolute build-host path may survive, or the binary runs only on this runner.
+          if otool -L whisper-stream | tail -n +2 | grep -qE '^\s+(/opt/homebrew|/usr/local)'; then
+            echo "whisper-stream still references build-host paths:" >&2
+            otool -L whisper-stream >&2
+            exit 1
+          fi
+          otool -L whisper-stream | grep -q '@loader_path/libSDL2-2.0.0.dylib'
+
+          # A cross-built or mis-targeted slice would otherwise surface as a crash on a user's Mac.
+          if [ "${{ matrix.arch }}" = "arm64" ]; then expected=arm64; else expected=x86_64; fi
+          lipo -archs whisper-stream | tr ' ' '\n' | grep -qx "$expected"
+          lipo -archs libSDL2-2.0.0.dylib | tr ' ' '\n' | grep -qx "$expected"
+
+          # install_name_tool invalidates the signature and Apple Silicon then refuses to launch
+          # the binary, so re-signing is not cosmetic. Verify it took.
+          codesign --verify --strict whisper-stream
+          codesign --verify --strict libSDL2-2.0.0.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-stream-macos-${{ matrix.arch }}
+          path: .whisper-stream-build/dist/whisper-stream-macos-${{ matrix.arch }}.tar.gz
+          retention-days: 1
+
   build-piper-runtime:
     strategy:
       fail-fast: true
@@ -102,7 +161,7 @@ jobs:
           retention-days: 1
 
   publish:
-    needs: [build-whisper-cli, build-piper-runtime]
+    needs: [build-whisper-cli, build-whisper-stream, build-piper-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -124,6 +183,8 @@ jobs:
           artifact_files = [
               "whisper-cli-macos-arm64.tar.gz",
               "whisper-cli-macos-x64.tar.gz",
+              "whisper-stream-macos-arm64.tar.gz",
+              "whisper-stream-macos-x64.tar.gz",
               "piper-runtime-macos-arm64.tar.gz",
               "piper-runtime-macos-x64.tar.gz",
           ]
@@ -160,6 +221,8 @@ jobs:
           gh release create "${{ inputs.release_tag }}" \
             whisper-cli-macos-arm64.tar.gz \
             whisper-cli-macos-x64.tar.gz \
+            whisper-stream-macos-arm64.tar.gz \
+            whisper-stream-macos-x64.tar.gz \
             piper-runtime-macos-arm64.tar.gz \
             piper-runtime-macos-x64.tar.gz \
             voice-tools-manifest.json \

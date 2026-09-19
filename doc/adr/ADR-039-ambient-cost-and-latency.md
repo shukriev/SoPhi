@@ -89,10 +89,25 @@ Rosetta far enough to enumerate capture devices and open the microphone at 16 kH
 only on the missing model argument — which is what proves the signature and `@loader_path` rewrite
 hold, not just that the file links.
 
-Publishing is opt-in (`--publish`) rather than automatic, and the script warns that a manifest
-carrying only one architecture leaves `VoiceInstaller` hard-failing on the other. **Nothing has
-been published** — uploading binaries to the public release is the owner's call, and the tarballs
-plus the merged manifest are left in `.whisper-stream-build/dist/`.
+**CI is the intended path, not the local script.** `.github/workflows/voice-tools-release.yml`
+already builds the other voice artifacts on native runners — `macos-14` for arm64, `macos-15-intel`
+for x64 — so a `build-whisper-stream` job was added to it alongside. Native runners mean no
+cross-compilation at all, which removes the hazard that produced the `-mcpu=apple-m2` failure
+above; `GGML_NATIVE=OFF` stays regardless, because a runner's CPU is no more the user's CPU than
+this laptop's is.
+
+That job calls the script rather than inlining the SDL2 handling, so the bundling, `@loader_path`
+rewrite and re-signing have one implementation. `--no-manifest` exists for it: each runner builds
+one architecture, and the existing `publish` job writes a single manifest covering the whole set.
+The local script's manifest-and-publish half remains useful only for one-off local builds.
+
+Consequence worth planning for: the `publish` job runs `gh release create` with a tag supplied at
+dispatch, so it makes a *new* release rather than mutating `voice-tools-v1`. `VoiceInstaller`
+hardcodes `voice-tools-v1` in `MANIFEST_URL` and `RELEASE_BASE_URL`, so publishing under a new tag
+requires bumping both — a companion-side change that must land together with the new release.
+
+**Nothing has been published.** Uploading binaries to the public release is the owner's call; the
+locally built tarballs are in `.whisper-stream-build/dist/`.
 
 Note that ADR-038 already removed this cost's effect on *capture*: transcription runs off the record
 loop, so a slow model load no longer closes the microphone. What remains is CPU and battery, not
