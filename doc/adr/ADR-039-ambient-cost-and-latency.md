@@ -71,11 +71,28 @@ the load path to `@loader_path`, re-signs ad-hoc (`install_name_tool` invalidate
 and Apple Silicon kills a modified unsigned binary at launch), and refuses to package anything that
 still references `/opt/homebrew` or `/usr/local`.
 
-The arm64 path is verified end to end: built at ref `b4938`, extracted fresh, `otool -L` clean,
-and the binary launches and opens the microphone. **x64 is not built** — it needs SDL2 from the
-Intel Homebrew prefix (`arch -x86_64 /usr/local/bin/brew install sdl2`) or an Intel machine, and
-publishing a manifest with only one architecture would leave `VoiceInstaller` hard-failing on the
-other. Publishing is opt-in (`--publish`) rather than automatic.
+Two things surfaced only by running it, both of which would have shipped broken artifacts:
+
+- **`GGML_NATIVE` must be OFF.** Left at its default, ggml targets the build host's CPU. Cross-
+  building x64 from Apple Silicon it hands `-mcpu=apple-m2` to the x86_64 compiler, which rejects
+  it outright — loud, at least. Building arm64 natively it silently bakes in `-mcpu=apple-m2`, so
+  the published binary can fault with an illegal instruction on an M1 or any chip that isn't the
+  one that built it. A binary published for other people's machines must target the baseline.
+- **SDL2 has to be built from source for x86_64.** Homebrew publishes no x86_64 SDL2 bottle for
+  current macOS, and its `sdl2` formula is now an alias for `sdl2-compat`, an SDL3 shim. The script
+  falls back to building SDL2 (pinned at `release-2.32.10`) for any architecture Homebrew cannot
+  supply a matching slice for, so `--arch both` works from a single Apple Silicon machine.
+
+Both artifacts are built and verified: fresh extraction, correct slice, the bundled SDL2 matching
+it, `otool -L` showing no build-host paths, and the binary launching. The x64 one was run under
+Rosetta far enough to enumerate capture devices and open the microphone at 16 kHz mono, failing
+only on the missing model argument — which is what proves the signature and `@loader_path` rewrite
+hold, not just that the file links.
+
+Publishing is opt-in (`--publish`) rather than automatic, and the script warns that a manifest
+carrying only one architecture leaves `VoiceInstaller` hard-failing on the other. **Nothing has
+been published** — uploading binaries to the public release is the owner's call, and the tarballs
+plus the merged manifest are left in `.whisper-stream-build/dist/`.
 
 Note that ADR-038 already removed this cost's effect on *capture*: transcription runs off the record
 loop, so a slow model load no longer closes the microphone. What remains is CPU and battery, not

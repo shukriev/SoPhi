@@ -20,6 +20,10 @@ set -euo pipefail
 # Must match the manifest's whisperCppRef, or whisper-stream and the shipped whisper-cli come from
 # different sources -- different segmentation behaviour, silently.
 WHISPER_REF="b4938"
+# Homebrew no longer publishes an x86_64 SDL2 bottle for current macOS (and its `sdl2` is now an
+# alias for sdl2-compat, an SDL3 shim), so the x64 artifact has to build SDL2 itself. Pinned rather
+# than tracking the SDL2 branch, so two runs produce the same binary.
+SDL2_REF="release-2.32.10"
 RELEASE_TAG="voice-tools-v1"
 RELEASE_REPO="shukriev/SoPhi"
 MANIFEST_URL="https://github.com/$RELEASE_REPO/releases/download/$RELEASE_TAG/voice-tools-manifest.json"
@@ -68,38 +72,60 @@ mkdir -p "$out_dir"
 # CMake's own arch names differ from the manifest's; keep the mapping in one place.
 cmake_arch_for() { [ "$1" = "arm64" ] && echo "arm64" || echo "x86_64"; }
 
-# Homebrew installs per-prefix: Apple Silicon under /opt/homebrew, Intel (or Rosetta) under
-# /usr/local. Picking the prefix by target arch is what makes a cross-arch build possible at all.
-sdl2_prefix_for() { [ "$1" = "arm64" ] && echo "/opt/homebrew/opt/sdl2" || echo "/usr/local/opt/sdl2"; }
+# Homebrew installs per-prefix: Apple Silicon under /opt/homebrew, Intel under /usr/local.
+brew_sdl2_prefix_for() { [ "$1" = "arm64" ] && echo "/opt/homebrew/opt/sdl2" || echo "/usr/local/opt/sdl2"; }
 
-check_sdl2() {
-    local target="$1" prefix dylib
-    prefix="$(sdl2_prefix_for "$target")"
-    dylib="$prefix/lib/libSDL2-2.0.0.dylib"
+# Builds SDL2 for [$1] into the work dir and echoes the install prefix. Progress goes to stderr so
+# the prefix is the only thing on stdout.
+build_sdl2_from_source() {
+    local target="$1" cmake_arch prefix src build
+    cmake_arch="$(cmake_arch_for "$target")"
+    prefix="$work_dir/sdl2-$target"
 
-    if [ ! -f "$dylib" ]; then
-        echo "Error: SDL2 for $target not found at $dylib" >&2
-        if [ "$target" = "$host_arch" ]; then
-            echo "  Install it with:  brew install sdl2" >&2
-        else
-            echo "  Cross-building $target from $host_arch needs the other Homebrew prefix." >&2
-            echo "  On Apple Silicon that means the Intel brew under /usr/local:" >&2
-            echo "    arch -x86_64 /usr/local/bin/brew install sdl2" >&2
-            echo "  If you don't have it, build $target on an Intel Mac (or a runner) instead." >&2
-        fi
-        return 1
+    if [ -f "$prefix/lib/libSDL2-2.0.0.dylib" ]; then
+        echo "SDL2 for $target already built at $prefix" >&2
+        echo "$prefix"; return 0
     fi
 
-    # A dylib present at the right prefix can still be the wrong slice. Check rather than discover
-    # it at link time, or worse, on a user's machine.
-    if ! lipo -archs "$dylib" | tr ' ' '\n' | grep -qx "$(cmake_arch_for "$target")"; then
-        echo "Error: $dylib has no $(cmake_arch_for "$target") slice (found: $(lipo -archs "$dylib"))." >&2
+    src="$work_dir/SDL"
+    if [ ! -d "$src" ]; then
+        echo "Cloning SDL2 $SDL2_REF..." >&2
+        git clone --quiet --branch "$SDL2_REF" --depth 1 https://github.com/libsdl-org/SDL "$src"
+    fi
+
+    echo "Building SDL2 $SDL2_REF for $target (no Homebrew bottle available)..." >&2
+    build="$src/build-$target"
+    rm -rf "$build"
+    cmake -S "$src" -B "$build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_OSX_ARCHITECTURES="$cmake_arch" \
+        -DCMAKE_INSTALL_PREFIX="$prefix" \
+        -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF \
+        >/dev/null
+    cmake --build "$build" --config Release -j"$(sysctl -n hw.ncpu)" >/dev/null
+    cmake --install "$build" >/dev/null
+
+    if [ ! -f "$prefix/lib/libSDL2-2.0.0.dylib" ]; then
+        echo "Error: SDL2 build produced no libSDL2-2.0.0.dylib under $prefix." >&2
         return 1
     fi
+    echo "$prefix"
 }
 
-echo "Checking SDL2 for: ${targets[*]}"
-for target in "${targets[@]}"; do check_sdl2 "$target"; done
+# Returns a prefix whose SDL2 actually has the target's slice, preferring Homebrew's and falling
+# back to a source build. A dylib present at the right prefix can still be the wrong slice, so
+# check rather than discover it at link time — or worse, on a user's machine.
+ensure_sdl2() {
+    local target="$1" brew_prefix dylib
+    brew_prefix="$(brew_sdl2_prefix_for "$target")"
+    dylib="$brew_prefix/lib/libSDL2-2.0.0.dylib"
+
+    if [ -f "$dylib" ] && lipo -archs "$dylib" | tr ' ' '\n' | grep -qx "$(cmake_arch_for "$target")"; then
+        echo "Using Homebrew SDL2 for $target: $brew_prefix" >&2
+        echo "$brew_prefix"; return 0
+    fi
+    build_sdl2_from_source "$target"
+}
 
 if [ ! -d "$src_dir" ]; then
     echo "Cloning whisper.cpp..."
@@ -111,7 +137,7 @@ git -C "$src_dir" checkout --quiet "$WHISPER_REF"
 
 for target in "${targets[@]}"; do
     cmake_arch="$(cmake_arch_for "$target")"
-    sdl2_prefix="$(sdl2_prefix_for "$target")"
+    sdl2_prefix="$(ensure_sdl2 "$target")"
     build_dir="$src_dir/build-$target"
     stage_dir="$work_dir/stage-$target"
 
@@ -120,9 +146,16 @@ for target in "${targets[@]}"; do
     rm -rf "$build_dir" "$stage_dir"
     mkdir -p "$stage_dir"
 
+    # GGML_NATIVE=OFF matters twice over, and defaulting to ON is wrong for anything shipped:
+    #   - cross-building x64 from Apple Silicon, ggml detects the *host* CPU and hands
+    #     "-mcpu=apple-m2" to the x86_64 compiler, which rejects it outright;
+    #   - building arm64 natively, it bakes in -mcpu=apple-m2, so the artifact can fault with an
+    #     illegal instruction on an M1 or any chip that isn't this one.
+    # A binary published for other people's machines must target the baseline, not this laptop.
     cmake -S "$src_dir" -B "$build_dir" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_OSX_ARCHITECTURES="$cmake_arch" \
+        -DGGML_NATIVE=OFF \
         -DWHISPER_SDL2=ON \
         -DCMAKE_PREFIX_PATH="$sdl2_prefix" \
         -DBUILD_SHARED_LIBS=OFF \
