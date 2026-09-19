@@ -105,9 +105,14 @@ private fun renderView(v: dev.sophi.memory.MemoryView): String {
 
 class MemoryList : CliktCommand(name = "list", help = "Browse memories by room") {
     private val room: String? by option("--room", help = "entities|tasks|episodes|knowledge|narrative")
+    private val provenance: String? by option(
+        "--provenance", help = "user_direct|user_artifact|third_party|system_inferred")
+    private val source: String? by option(
+        "--source", help = "Originating session id; 'ambient' for overheard speech")
     private val all: Boolean by option("--all", help = "Include superseded and soft-deleted").flag()
     override fun run() {
-        val views = palace().browse(BrowseFilter(room = room, includeHidden = all))
+        val views = palace().browse(BrowseFilter(
+            room = room, provenance = provenance, includeHidden = all, sourceSessionId = source))
         if (views.isEmpty()) echo("(no memories)") else views.forEach { echo(renderView(it)) }
     }
 }
