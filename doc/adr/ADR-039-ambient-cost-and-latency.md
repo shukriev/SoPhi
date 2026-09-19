@@ -101,10 +101,20 @@ rewrite and re-signing have one implementation. `--no-manifest` exists for it: e
 one architecture, and the existing `publish` job writes a single manifest covering the whole set.
 The local script's manifest-and-publish half remains useful only for one-off local builds.
 
-Consequence worth planning for: the `publish` job runs `gh release create` with a tag supplied at
-dispatch, so it makes a *new* release rather than mutating `voice-tools-v1`. `VoiceInstaller`
-hardcodes `voice-tools-v1` in `MANIFEST_URL` and `RELEASE_BASE_URL`, so publishing under a new tag
-requires bumping both — a companion-side change that must land together with the new release.
+The `publish` job runs `gh release create` with a tag supplied at dispatch, so it makes a *new*
+release rather than mutating `voice-tools-v1`. `VoiceInstaller` is bumped to `voice-tools-v2`
+accordingly, with the tag reduced to a single constant that `RELEASE_BASE_URL`, `MANIFEST_URL` and
+the test's expected URLs all derive from — previously the tag was written out three times.
+
+**Ordering matters here.** That bump is inert but not harmless: every install reads the manifest at
+that URL at install time, so until `voice-tools-v2` is dispatched and published, a fresh install
+on the companion's branch resolves a URL that 404s. The release must be published before the
+companion change ships.
+
+Installing the new binary is a separate step still to come: `VoiceInstaller` downloads
+`whisper-cli-macos-$arch` and `piper-runtime-macos-$arch` by name and does not yet fetch
+`whisper-stream`. Adding it is deliberately deferred until there is a streaming transcriber to use
+it — shipping an extra binary that nothing calls is just bundle weight.
 
 **Nothing has been published.** Uploading binaries to the public release is the owner's call; the
 locally built tarballs are in `.whisper-stream-build/dist/`.
