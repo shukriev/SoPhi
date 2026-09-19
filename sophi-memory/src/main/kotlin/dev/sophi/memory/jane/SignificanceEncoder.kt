@@ -17,7 +17,10 @@ internal data class VerdictMemory(
     val aff: Double = 0.0,
     val commitment: Boolean = false,
     val sensitivity: String = "PERSONAL",
-    val provenance: String = "USER_DIRECT",
+    // Nullable with no default on purpose: "the model didn't say" and "the model said USER_DIRECT"
+    // must stay distinguishable, because MemoryWriter resolves the unstated case differently on an
+    // ambient turn (THIRD_PARTY) than on a chat turn (USER_DIRECT).
+    val provenance: String? = null,
     val causedBy: List<String> = emptyList(),
     val thread: String? = null,
     val supersedes: String? = null

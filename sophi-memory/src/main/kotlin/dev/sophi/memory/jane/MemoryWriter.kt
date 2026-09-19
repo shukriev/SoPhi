@@ -49,7 +49,14 @@ class MemoryWriter(
             val alpha = blend(vm, nov = nov, rep = rep)
             if (alpha < config.significanceThreshold) continue
 
-            val provenance = runCatching { Provenance.valueOf(vm.provenance) }.getOrDefault(Provenance.USER_DIRECT)
+            // Unstated or unparseable provenance resolves per-turn, in code rather than in the
+            // prompt (same reasoning as the isCommitment gate below). Defaulting overheard speech
+            // to USER_DIRECT is the worst available guess: it is the one value that unlocks the
+            // commitment gate and asserts a stranger's words as the user's own.
+            val fallback = if (turn.ambient) Provenance.THIRD_PARTY else Provenance.USER_DIRECT
+            val provenance = vm.provenance?.let {
+                runCatching { Provenance.valueOf(it) }.getOrDefault(fallback)
+            } ?: fallback
             val memory = Memory(
                 id = "mem_" + UUID.randomUUID(),
                 text = text,
@@ -89,6 +96,12 @@ class MemoryWriter(
                 }
             }
         }
+
+        // The profile is the *user's* stable traits. An ambient turn cannot establish who was
+        // speaking — a guest saying "I'm vegetarian" would otherwise be written as a fact about
+        // the user — so ambient turns contribute no profile evidence at all. Enforced here rather
+        // than in the prompt, for the same reason as the isCommitment gate above (ADR-035).
+        if (turn.ambient) return stored
 
         verdict.profile.forEach { pe ->
             val evidenceId = stored.lastOrNull()?.id ?: "turn_${turn.sessionId}_${turn.nowMs}"
