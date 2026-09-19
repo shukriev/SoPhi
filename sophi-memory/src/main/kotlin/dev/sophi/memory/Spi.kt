@@ -15,7 +15,10 @@ data class ConsolidationReport(
 ) { val total: Int get() = merged + strengthened + compressed + pruned + purged + classified + classifiedHabits }
 
 sealed interface ForgetRequest {
-    data class ById(val id: String) : ForgetRequest
+    /** [soft] = true marks the memory deleted instead of removing it, so [MemoryTechnique.restore]
+     *  can undo it until the grace period elapses. Defaults to false: every existing caller keeps
+     *  today's permanent-delete semantics. */
+    data class ById(val id: String, val soft: Boolean = false) : ForgetRequest
     data object All : ForgetRequest
 }
 data class ForgetResult(val removedIds: List<String>, val relinkedEdges: Int, val affectedProfilePaths: List<String>)

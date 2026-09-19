@@ -4,6 +4,7 @@ import dev.sophi.memory.ForgetRequest
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 
 class ForgetEngineTest : FunSpec({
     class Rig {
@@ -134,5 +135,53 @@ class ForgetEngineTest : FunSpec({
         // Refused, so nothing changed -- still soft-deleted and still superseded.
         r.store.memories().getValue("mem_a").softDeletedAt shouldBe 100L
         r.store.memories().getValue("mem_a").supersededBy shouldBe "mem_b"
+    }
+
+    test("soft forget hides the memory from active reads and restore brings it back intact") {
+        val r = Rig()
+        r.add("mem_a"); r.add("mem_b", "the thing misheard from across the room")
+        r.store.upsertEdge(CausalEdge("mem_a", "mem_b", "story"))
+        r.profile.observeEvidence("some.path", "value", "mem_b", 1L)
+
+        val result = r.engine.forget(ForgetRequest.ById("mem_b", soft = true), 10L)
+        result.removedIds shouldBe listOf("mem_b")
+        result.relinkedEdges shouldBe 0
+        result.affectedProfilePaths shouldBe emptyList()
+
+        // Still present in the store, but no longer active -- so browse() and every other
+        // active-only read path skips it.
+        r.store.memories().getValue("mem_b").softDeletedAt shouldBe 10L
+        r.store.memories().getValue("mem_b").active shouldBe false
+        // Untouched, which is exactly what lets restore put it back whole.
+        r.store.edges().single().toId shouldBe "mem_b"
+        r.store.vectorFor("mem_b") shouldNotBe null
+        r.profile.all().containsKey("some.path") shouldBe true
+
+        r.engine.restore("mem_b") shouldBe true
+        r.store.memories().getValue("mem_b").softDeletedAt shouldBe null
+        r.store.memories().getValue("mem_b").active shouldBe true
+    }
+
+    test("hard forget remains the default and is not restorable") {
+        val r = Rig()
+        r.add("mem_a")
+
+        r.engine.forget(ForgetRequest.ById("mem_a"), 10L)
+
+        r.store.memories().containsKey("mem_a") shouldBe false
+        r.engine.restore("mem_a") shouldBe false
+    }
+
+    test("soft forgetting an already soft-deleted memory is a no-op") {
+        val r = Rig()
+        r.add("mem_a")
+
+        r.engine.forget(ForgetRequest.ById("mem_a", soft = true), 10L)
+        val second = r.engine.forget(ForgetRequest.ById("mem_a", soft = true), 99L)
+
+        second.removedIds shouldBe emptyList()
+        // The original deletion timestamp stands, so the 30-day grace period is not restarted
+        // by a second click.
+        r.store.memories().getValue("mem_a").softDeletedAt shouldBe 10L
     }
 })
