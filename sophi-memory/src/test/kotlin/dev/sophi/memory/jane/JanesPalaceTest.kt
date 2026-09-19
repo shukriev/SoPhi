@@ -1,5 +1,6 @@
 package dev.sophi.memory.jane
 
+import dev.sophi.memory.BrowseFilter
 import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.VersionStore
 import io.kotest.core.spec.style.FunSpec
@@ -70,6 +71,38 @@ class JanesPalaceTest : FunSpec({
         )
         val ids = palace.openCommitments(nowMs).map { it.id }.toSet()
         ids shouldBe setOf("mem_ok", "mem_public")
+        palace.close()
+    }
+
+    test("browse filters by sourceSessionId, ANDs with room, and view exposes it as metadata 'source'") {
+        // ArcadeDB locks its database directory to one open instance at a time (see PalaceStore's
+        // class doc), so the seeding store must close before JanesPalace opens the same home.
+        val home = tempdir().toPath()
+        val seed = PalaceStore(home)
+        val base = Memory(
+            "x", "text", Room.EPISODES, 0.5, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
+            Sensitivity.PERSONAL, Provenance.USER_DIRECT, 0L, 0L, "s"
+        )
+        seed.upsertMemory(base.copy(id = "mem_ambient", sourceSessionId = "ambient"))
+        seed.upsertMemory(base.copy(id = "mem_chat", sourceSessionId = "sess_123"))
+        seed.close()
+
+        val palace = JanesPalace(
+            JanesPalaceConfig(home = home, sessionModel = "test-model"),
+            llmProvider = null, embeddingProvider = null
+        )
+
+        palace.browse(BrowseFilter(sourceSessionId = "ambient")).map { it.id } shouldBe listOf("mem_ambient")
+        palace.browse(BrowseFilter()).map { it.id }.toSet() shouldBe setOf("mem_ambient", "mem_chat")
+        // Exact match, not case-insensitive like room/provenance: these are opaque ids.
+        palace.browse(BrowseFilter(sourceSessionId = "AMBIENT")) shouldBe emptyList()
+        // ANDs with the other clauses rather than replacing them.
+        palace.browse(BrowseFilter(room = "knowledge", sourceSessionId = "ambient")) shouldBe emptyList()
+        palace.browse(BrowseFilter(room = "episodes", sourceSessionId = "ambient")).map { it.id } shouldBe
+            listOf("mem_ambient")
+
+        palace.browse(BrowseFilter(sourceSessionId = "ambient")).single().metadata["source"] shouldBe "ambient"
+        palace.browse(BrowseFilter(sourceSessionId = "sess_123")).single().metadata["source"] shouldBe "sess_123"
         palace.close()
     }
 })

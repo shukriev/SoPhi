@@ -104,6 +104,7 @@ class JanesPalace(
             .filter { filter.includeHidden || it.active }
             .filter { filter.room == null || it.room.name.equals(filter.room, ignoreCase = true) }
             .filter { filter.provenance == null || it.provenance.name.equals(filter.provenance, ignoreCase = true) }
+            .filter { filter.sourceSessionId == null || it.sourceSessionId == filter.sourceSessionId }
             .sortedByDescending { it.createdAt }
             .map { view(it, nowMs) }
     }
@@ -167,6 +168,7 @@ class JanesPalace(
             "ageDays" to ((nowMs - m.createdAt) / 86_400_000L).toString(),
             "sensitivity" to m.sensitivity.name,
             "provenance" to m.provenance.name,
+            "source" to m.sourceSessionId,
             "state" to when { m.supersededBy != null -> "superseded"; m.softDeletedAt != null -> "soft-deleted"; else -> "active" }
         )
     )
