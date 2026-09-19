@@ -281,7 +281,14 @@ class SlashHandler(
         val subArg = parts.getOrNull(1)?.trim()
         when (sub) {
             "list" -> {
-                val views = palace.browse(BrowseFilter(room = subArg))
+                // /memory list [room] [--provenance=X] [--source=Y] — the bare-room form predates
+                // the flags and must keep working, so the room is simply the first non-flag token.
+                val tokens = subArg?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+                val views = palace.browse(BrowseFilter(
+                    room = tokens.firstOrNull { !it.startsWith("--") },
+                    provenance = tokens.firstOrNull { it.startsWith("--provenance=") }?.substringAfter("="),
+                    sourceSessionId = tokens.firstOrNull { it.startsWith("--source=") }?.substringAfter("=")
+                ))
                 if (views.isEmpty()) output("(no memories)") else views.forEach { output(renderMemoryView(it)) }
             }
             "show" -> {

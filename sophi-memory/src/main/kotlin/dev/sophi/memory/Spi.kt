@@ -15,12 +15,24 @@ data class ConsolidationReport(
 ) { val total: Int get() = merged + strengthened + compressed + pruned + purged + classified + classifiedHabits }
 
 sealed interface ForgetRequest {
-    data class ById(val id: String) : ForgetRequest
+    /** [soft] = true marks the memory deleted instead of removing it, so [MemoryTechnique.restore]
+     *  can undo it until the grace period elapses. Defaults to false: every existing caller keeps
+     *  today's permanent-delete semantics. */
+    data class ById(val id: String, val soft: Boolean = false) : ForgetRequest
     data object All : ForgetRequest
 }
 data class ForgetResult(val removedIds: List<String>, val relinkedEdges: Int, val affectedProfilePaths: List<String>)
 
-data class BrowseFilter(val room: String? = null, val provenance: String? = null, val includeHidden: Boolean = false)
+data class BrowseFilter(
+    val room: String? = null,
+    val provenance: String? = null,
+    val includeHidden: Boolean = false,
+    /** Originating session id, matched exactly (unlike [room]/[provenance], these are opaque ids,
+     *  not enum names). "ambient" selects memories written by ambient listening — see
+     *  MemoryWriter's `sourceSessionId = turn.sessionId` and the companion's
+     *  `settleExternalTurn("ambient", ...)`. */
+    val sourceSessionId: String? = null
+)
 data class MemoryView(val id: String, val text: String, val metadata: Map<String, String>)
 data class ProfileAttributeView(val path: String, val value: String, val confidence: Double)
 

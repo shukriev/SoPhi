@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive `/goal [--check "<command>"] <task>` command: explicit multi-step planning
   (`PlanRunner`) in a live chat session, with a plan preview, live per-step progress, and
   replanning on failure (ADR-025)
+- Memory browsing can filter by originating session: `BrowseFilter.sourceSessionId`, exposed as
+  `sophi memory list --source=ambient` and `/memory list --source=ambient`, which selects what
+  ambient listening overheard. `MemoryView` metadata gained a `source` key. `sophi memory list`
+  also gained the `--provenance` filter ADR-034 left open (ADR-036)
+- `ForgetRequest.ById(soft = true)`: a reversible delete that sets `softDeletedAt` so `restore()`
+  can undo it within the grace period. The default stays permanent (ADR-036)
 
 ### Changed
 - `PlanRunner`'s progress stream is now one seam: `PlanProgressEvent` gained `PlanReady`,
@@ -21,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `sophi-cli`: a session started before `sophi-companion` never appeared in the companion's Sessions tab, even after the companion started — `HubClient.connect()` was only attempted once, at CLI startup. The CLI now retries the hub connection on a timer for the life of the session (ADR-023)
+- Ambient listening could write overheard speech down as facts about the user. Provenance left unstated by the encoder defaulted to `USER_DIRECT` — the one value that opens the ADR-035 commitment gate — so an omitted field became a user commitment; it now resolves to `THIRD_PARTY` on ambient turns. Profile evidence was written from ambient turns unconditionally, so a guest's remark could become one of the user's stable traits; ambient turns now write none. The ambient encoder prompt also rejects broadcast media (TV, podcasts, lyrics, ads), which a microphone cannot distinguish from people in the room (ADR-037)
 
 ### Deprecated
 

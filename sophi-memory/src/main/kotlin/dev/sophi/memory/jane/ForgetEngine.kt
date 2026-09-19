@@ -19,7 +19,8 @@ class ForgetEngine(
             store.wipe()
             ForgetResult(ids, 0, emptyList())
         }
-        is ForgetRequest.ById -> forgetOne(request.id, nowMs)
+        is ForgetRequest.ById -> if (request.soft) softDeleteOne(request.id, nowMs)
+                                 else forgetOne(request.id, nowMs)
     }
 
     private fun forgetOne(id: String, nowMs: Long): ForgetResult {
@@ -45,6 +46,29 @@ class ForgetEngine(
             put("ts", JsonPrimitive(nowMs)); put("event", JsonPrimitive("forget")); put("count", JsonPrimitive(1))
         }.toString())
         return ForgetResult(listOf(id), relinked.size, affectedPaths)
+    }
+
+    /**
+     * Reversible delete: flips `softDeletedAt` so the memory leaves every active read path
+     * ([Memory.active], and so [JanesPalace.browse]) while staying restorable until
+     * [purgeSoftDeleted] reaps it after [JanesPalaceConfig.softDeleteGraceMs]. Edges, embeddings
+     * and profile evidence are deliberately left untouched — that is what lets [restore] put the
+     * memory back whole rather than as a stump.
+     *
+     * The one thing it does clear is last-recall: that text can quote the memory verbatim, and a
+     * user who just deleted something should not still see it in `explainLastRecall`.
+     */
+    private fun softDeleteOne(id: String, nowMs: Long): ForgetResult {
+        val m = store.memories()[id] ?: return ForgetResult(emptyList(), 0, emptyList())
+        // Already soft-deleted: return empty rather than restarting the grace period.
+        if (m.softDeletedAt != null) return ForgetResult(emptyList(), 0, emptyList())
+
+        store.upsertMemory(m.copy(softDeletedAt = nowMs))
+        store.deleteLastRecall()
+        store.appendAudit(buildJsonObject {
+            put("ts", JsonPrimitive(nowMs)); put("event", JsonPrimitive("soft-forget")); put("count", JsonPrimitive(1))
+        }.toString())
+        return ForgetResult(listOf(id), 0, emptyList())
     }
 
     /** Non-mutating preview of what forget(ById(id)) would remove and affect. */

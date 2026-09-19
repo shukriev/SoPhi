@@ -72,6 +72,10 @@ existing `checkInRuntime` — instead.
    No new notification kind, no new review surface — once tagging is correct, browsing by
    provenance is the review UI.
 
+   > **Superseded by ADR-036.** Provenance turned out to be a proxy that is wrong in both
+   > directions, so it could neither show all overheard memories nor only overheard ones. The
+   > review surface filters on `sourceSessionId == "ambient"` instead.
+
 6. **`VoiceController.onPttPress` now catches a failing `recorder.start()`** instead of leaving
    `turnInFlight` stuck `true` forever. This is a pre-existing latent bug that ambient listening's
    mic contention makes reachable for the first time — the fix is a root-cause fix (unhandled

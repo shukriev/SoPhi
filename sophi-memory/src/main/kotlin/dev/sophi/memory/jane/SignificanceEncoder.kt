@@ -17,7 +17,10 @@ internal data class VerdictMemory(
     val aff: Double = 0.0,
     val commitment: Boolean = false,
     val sensitivity: String = "PERSONAL",
-    val provenance: String = "USER_DIRECT",
+    // Nullable with no default on purpose: "the model didn't say" and "the model said USER_DIRECT"
+    // must stay distinguishable, because MemoryWriter resolves the unstated case differently on an
+    // ambient turn (THIRD_PARTY) than on a chat turn (USER_DIRECT).
+    val provenance: String? = null,
     val causedBy: List<String> = emptyList(),
     val thread: String? = null,
     val supersedes: String? = null
@@ -93,8 +96,14 @@ class SignificanceEncoder(
         if (turn.ambient) {
             appendLine("- provenance: THIRD_PARTY when the content is about someone other than the user")
             appendLine("  (a named third party speaking, or being spoken about); USER_DIRECT only when the")
-            appendLine("  user is clearly the one speaking about themselves. Prefer room ENTITIES for facts")
-            appendLine("  about a named person.")
+            appendLine("  user is clearly the one speaking about themselves. If you cannot tell who is")
+            appendLine("  speaking, say THIRD_PARTY — never guess USER_DIRECT. Prefer room ENTITIES for")
+            appendLine("  facts about a named person.")
+            appendLine("- A microphone cannot tell a person in the room from a television. If the text reads")
+            appendLine("  like recorded or broadcast media rather than people talking to each other —")
+            appendLine("  film or TV dialogue, a news or sports broadcast, a podcast or interview, song")
+            appendLine("  lyrics, an advertisement, a lecture or audiobook — then it is not about the")
+            appendLine("  user's life. Store nothing from it, however dramatic it sounds.")
         }
         appendLine("- NEVER store credentials, passwords, payment card or government ID numbers.")
         appendLine("- Facts about third parties' health/legal matters: generalized form only.")

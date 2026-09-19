@@ -6,8 +6,15 @@ import dev.sophi.core.session.SessionManager
 import dev.sophi.memory.MemoryPlugin
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
+import dev.sophi.memory.jane.Memory
+import dev.sophi.memory.jane.PalaceStore
+import dev.sophi.memory.jane.Provenance
+import dev.sophi.memory.jane.Room
+import dev.sophi.memory.jane.SalienceSignals
+import dev.sophi.memory.jane.Sensitivity
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 
@@ -87,5 +94,41 @@ class SlashMemoryTest : FunSpec({
         val handler = SlashHandler(sessionManager, null, config, memoryPlugin = palacePlugin()) { output.add(it) }
         handler.handle("/memory banana", AgentSession(id = "s1"))
         output shouldBe listOf("Unknown /memory subcommand: banana  Available: list show threads profile why")
+    }
+
+    test("/memory list accepts --source and --provenance filters alongside an optional room") {
+        // Seed through PalaceStore and close it before JanesPalace opens the same home --
+        // ArcadeDB allows one open process per directory.
+        val home = tempdir().toPath()
+        val seed = PalaceStore(home)
+        val base = Memory(
+            "x", "text", Room.EPISODES, 0.5, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
+            Sensitivity.PERSONAL, Provenance.USER_DIRECT, 0L, 0L, "s"
+        )
+        seed.upsertMemory(base.copy(id = "mem_ambient", text = "overheard thing", sourceSessionId = "ambient"))
+        seed.upsertMemory(base.copy(id = "mem_chat", text = "typed thing", sourceSessionId = "sess_1"))
+        seed.close()
+        val plugin = MemoryPlugin(JanesPalace(JanesPalaceConfig(home = home), null, null))
+        val handler = SlashHandler(sessionManager, null, config, memoryPlugin = plugin) { output.add(it) }
+
+        handler.handle("/memory list --source=ambient", AgentSession(id = "s1"))
+        output.single().contains("overheard thing") shouldBe true
+
+        output.clear()
+        handler.handle("/memory list episodes --source=ambient", AgentSession(id = "s1"))
+        output.single().contains("overheard thing") shouldBe true
+
+        output.clear()
+        handler.handle("/memory list --source=sess_1", AgentSession(id = "s1"))
+        output.single().contains("typed thing") shouldBe true
+
+        output.clear()
+        handler.handle("/memory list --provenance=third_party", AgentSession(id = "s1"))
+        output shouldBe listOf("(no memories)")
+
+        // The pre-existing bare-room form must keep working unchanged.
+        output.clear()
+        handler.handle("/memory list episodes", AgentSession(id = "s1"))
+        output shouldHaveSize 2
     }
 })

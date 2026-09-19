@@ -117,6 +117,84 @@ class MemoryWriterTest : FunSpec({
         stored.single().isCommitment shouldBe false
     }
 
+    test("an ambient turn with no stated provenance falls back to THIRD_PARTY, never USER_DIRECT") {
+        val (_, writer) = rig()
+        val ambient = TurnObservation("ambient", "someone is renewing a passport", "", 1_000L, ambient = true)
+        // provenance omitted entirely — the case where the model simply didn't say who was speaking.
+        val stored = writer.write(ambient, EncoderVerdict(listOf(
+            VerdictMemory(text = "Someone is renewing a passport", room = "TASKS", emph = 0.8,
+                commitment = true)
+        ))).single()
+
+        stored.provenance shouldBe Provenance.THIRD_PARTY
+        // And so the ADR-035 commitment gate closes on it too: an overheard promise whose speaker
+        // was never established must not become one of the user's open commitments.
+        stored.isCommitment shouldBe false
+    }
+
+    test("an ambient turn that explicitly says USER_DIRECT is still trusted") {
+        val (_, writer) = rig()
+        val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
+        val stored = writer.write(ambient, EncoderVerdict(listOf(
+            VerdictMemory(text = "User will call Mark back", room = "TASKS", emph = 0.8,
+                commitment = true, provenance = "USER_DIRECT")
+        ))).single()
+
+        // The ambient prompt tells the model to use USER_DIRECT only when the user is clearly the
+        // speaker, so an explicit verdict is a judgment, not a default — don't override it.
+        stored.provenance shouldBe Provenance.USER_DIRECT
+        stored.isCommitment shouldBe true
+    }
+
+    test("a chat turn with no stated provenance still defaults to USER_DIRECT") {
+        val (_, writer) = rig()
+        val stored = writer.write(turn, EncoderVerdict(listOf(
+            VerdictMemory(text = "User prefers window seats", room = "KNOWLEDGE", emph = 0.8)
+        ))).single()
+        stored.provenance shouldBe Provenance.USER_DIRECT
+    }
+
+    test("an unparseable provenance falls back per-turn: THIRD_PARTY ambient, USER_DIRECT chat") {
+        val (_, writer) = rig()
+        val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
+        writer.write(ambient, EncoderVerdict(listOf(
+            VerdictMemory(text = "Overheard fact", room = "KNOWLEDGE", emph = 0.8, provenance = "BANANA")
+        ))).single().provenance shouldBe Provenance.THIRD_PARTY
+
+        writer.write(turn, EncoderVerdict(listOf(
+            VerdictMemory(text = "Typed fact", room = "KNOWLEDGE", emph = 0.8, provenance = "BANANA")
+        ))).single().provenance shouldBe Provenance.USER_DIRECT
+    }
+
+    test("ambient turns never write profile attributes") {
+        val store = PalaceStore(tempdir().toPath())
+        val profile = UserProfile(store)
+        val writer = MemoryWriter(store, profile, embeddings, "fake", JanesPalaceConfig())
+        val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
+
+        // A guest in the room saying "I'm vegetarian" must not become a fact about the user:
+        // the profile is the user's stable traits, and ambient can't establish who spoke.
+        writer.write(ambient, EncoderVerdict(
+            memories = listOf(vm("Someone mentioned being vegetarian", emph = 0.8, aff = 0.9)),
+            profile = listOf(VerdictProfile(path = "diet.preference", value = "vegetarian", explicit = true))
+        ))
+
+        profile.all().containsKey("diet.preference") shouldBe false
+    }
+
+    test("chat turns still write profile attributes") {
+        val store = PalaceStore(tempdir().toPath())
+        val profile = UserProfile(store)
+        val writer = MemoryWriter(store, profile, embeddings, "fake", JanesPalaceConfig())
+
+        writer.write(turn, EncoderVerdict(
+            memories = listOf(vm("User mentioned being vegetarian", emph = 0.8, aff = 0.9)),
+            profile = listOf(VerdictProfile(path = "diet.preference", value = "vegetarian", explicit = true))
+        ))
+
+        profile.all().containsKey("diet.preference") shouldBe true
+    }
+
     test("unknown room or causedBy id degrades gracefully (skip memory / skip link)") {
         val (store, writer) = rig()
         writer.write(turn, EncoderVerdict(listOf(vm("x", room = "GARAGE", emph = 0.9)))) shouldBe emptyList()
