@@ -182,6 +182,11 @@ class RuntimeBuilder {
             if (skillRegistry.topLevel().isNotEmpty()) registry.register(SkillTool(skillRegistry, topK = harnessConfig?.topKSkills))
             registry.register(InstallSkillTool())
             registry.register(WriteSkillTool())
+            // Recall is wired with the skill tools because it is useless without them: the pointer
+            // it injects tells the model to call skill(name=...).
+            plugins.add(SiteSkillRecallPlugin {
+                SkillRegistry.load(skillsDir, Path.of(".sophi", "skills"))
+            })
         }
         scheduleDir?.let { dir ->
             registry.register(ScheduleTaskTool(
