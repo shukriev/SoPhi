@@ -18,7 +18,7 @@ import kotlin.io.path.writeText
 private fun versionsIn(dir: Path, project: Boolean) = SkillVersionStore(VersionStore(dir.resolve(".versions")), project)
 
 private const val VALID_ARGS = """
-    {"id":"site-example-com","title":"example.com","description":"How to use example.com","tags":["site"],"body":"# example.com\n\nStep 1: navigate to /login."}
+    {"id":"site-example-com","title":"example.com","description":"How to use example.com","tags":["site"],"body":"## Map\n\nEntry: https://example.com/login\n\n## Last updated\n2026-09-21"}
 """
 
 class WriteSkillToolTest : FunSpec({
@@ -42,12 +42,12 @@ class WriteSkillToolTest : FunSpec({
             title = "example.com", description = "How to use example.com",
             tags = listOf("site")
         )
-        skill.body shouldContain "Step 1: navigate to /login."
+        skill.body shouldContain "Entry: https://example.com/login"
         result shouldContain "site-example-com"
     }
 
     test("execute() writes to the project dir when project=true") {
-        val args = """{"id":"site-example-com","title":"t","description":"d","tags":[],"body":"b","project":true}"""
+        val args = """{"id":"site-example-com","title":"t","description":"d","tags":[],"body":"## Map\nEntry: https://example.com","project":true}"""
         runBlocking { tool.execute(args) }
 
         projectDir.resolve("site-example-com.md").exists() shouldBe true
@@ -64,7 +64,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("execute() rejects an id outside the site-<slug> pattern") {
-        val args = """{"id":"browsing-sites","title":"t","description":"d","tags":[],"body":"b"}"""
+        val args = """{"id":"browsing-sites","title":"t","description":"d","tags":[],"body":"## Map\nEntry: https://example.com"}"""
 
         val result = runBlocking { tool.execute(args) }
 
@@ -73,7 +73,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("execute() rejects an id with path-traversal characters") {
-        val args = """{"id":"site-../../etc-passwd","title":"t","description":"d","tags":[],"body":"b"}"""
+        val args = """{"id":"site-../../etc-passwd","title":"t","description":"d","tags":[],"body":"## Map\nEntry: https://example.com"}"""
 
         val result = runBlocking { tool.execute(args) }
 
@@ -94,7 +94,7 @@ class WriteSkillToolTest : FunSpec({
         val versions = versionsIn(globalDir, project = false).history("site-example-com", project = false)
 
         versions shouldHaveSize 1
-        versions.first().content shouldContain "Step 1: navigate to /login."
+        versions.first().content shouldContain "Entry: https://example.com/login"
     }
 
     test("execute() records a new version per overwrite, not just the first write") {
@@ -109,7 +109,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("execute() with project=true records into the project store, not the global one") {
-        val args = """{"id":"site-example-com","title":"t","description":"d","tags":[],"body":"b","project":true}"""
+        val args = """{"id":"site-example-com","title":"t","description":"d","tags":[],"body":"## Map\nEntry: https://example.com","project":true}"""
         runBlocking { tool.execute(args) }
 
         versionsIn(projectDir, project = true).history("site-example-com", project = true) shouldHaveSize 1
@@ -117,7 +117,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("a rejected write (bad id pattern) records no version") {
-        val badArgs = """{"id":"not-a-site-id","title":"t","description":"d","tags":[],"body":"b"}"""
+        val badArgs = """{"id":"not-a-site-id","title":"t","description":"d","tags":[],"body":"## Map\nEntry: https://example.com"}"""
         runBlocking { tool.execute(badArgs) }
 
         versionsIn(globalDir, project = false).history("not-a-site-id", project = false) shouldHaveSize 0
@@ -142,7 +142,7 @@ class WriteSkillToolTest : FunSpec({
         history shouldHaveSize 2
         history.last().content shouldContain "Pre-existing content nobody versioned"
         history.last().trial shouldBe false
-        history.first().content shouldContain "Step 1: navigate to /login."
+        history.first().content shouldContain "Entry: https://example.com/login"
         history.first().trial shouldBe true
     }
 
@@ -155,7 +155,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("execute() rejects content that fails static checks and writes nothing") {
-        val badArgs = """{"id":"site-example-com","title":"t","description":"d","body":"token: AKIAABCDEFGHIJKLMNOP"}"""
+        val badArgs = """{"id":"site-example-com","title":"t","description":"d","body":"## Map\nEntry: https://example.com\n\ntoken: AKIAABCDEFGHIJKLMNOP"}"""
 
         val result = runBlocking { tool.execute(badArgs) }
 
@@ -173,16 +173,16 @@ class WriteSkillToolTest : FunSpec({
     test("confirmationPreview shows a diff against the existing file's content") {
         runBlocking { tool.execute(VALID_ARGS) }
         val updatedArgs = """
-            {"id":"site-example-com","title":"example.com","description":"How to use example.com","tags":["site"],"body":"# example.com\n\nStep 1: navigate to /login.\nStep 2: click Sign in."}
+            {"id":"site-example-com","title":"example.com","description":"How to use example.com","tags":["site"],"body":"## Map\n\nEntry: https://example.com/login\n\n## Last updated\n2026-09-22"}
         """
 
         val preview = tool.confirmationPreview(updatedArgs)
 
-        preview shouldContain "+ Step 2: click Sign in."
+        preview shouldContain "+ 2026-09-22"
     }
 
     test("execute() with domain=true writes to <id>/_index.md, creating the directory") {
-        val args = """{"id":"site-maidplus-de","title":"MaidPlus","description":"MaidPlus platform","body":"Orchestrator body.","domain":true}"""
+        val args = """{"id":"site-maidplus-de","title":"MaidPlus","description":"MaidPlus platform","body":"## Map\nEntry: https://example.com\n\nOrchestrator body.","domain":true}"""
 
         val result = runBlocking { tool.execute(args) }
 
@@ -193,7 +193,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("execute() with a member id writes to <domain>/<member>.md, creating the domain directory if absent") {
-        val args = """{"id":"site-maidplus-de/companies","title":"Companies","description":"Companies page","body":"Companies body."}"""
+        val args = """{"id":"site-maidplus-de/companies","title":"Companies","description":"Companies page","body":"## Map\nEntry: https://example.com\n\nCompanies body."}"""
 
         val result = runBlocking { tool.execute(args) }
 
@@ -204,7 +204,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("execute() rejects domain=true combined with a member id") {
-        val args = """{"id":"site-maidplus-de/companies","title":"t","description":"d","body":"b","domain":true}"""
+        val args = """{"id":"site-maidplus-de/companies","title":"t","description":"d","body":"## Map\nEntry: https://example.com","domain":true}"""
 
         val result = runBlocking { tool.execute(args) }
 
@@ -214,7 +214,7 @@ class WriteSkillToolTest : FunSpec({
 
     test("execute() with domain=true rejects an id that already exists as a flat skill") {
         runBlocking { tool.execute(VALID_ARGS) } // creates site-example-com.md
-        val args = """{"id":"site-example-com","title":"t","description":"d","body":"b","domain":true}"""
+        val args = """{"id":"site-example-com","title":"t","description":"d","body":"## Map\nEntry: https://example.com","domain":true}"""
 
         val result = runBlocking { tool.execute(args) }
 
@@ -223,7 +223,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("execute() rejects an id with two slashes") {
-        val args = """{"id":"site-a/b/c","title":"t","description":"d","body":"b"}"""
+        val args = """{"id":"site-a/b/c","title":"t","description":"d","body":"## Map\nEntry: https://example.com"}"""
 
         val result = runBlocking { tool.execute(args) }
 
@@ -231,7 +231,7 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("confirmationPreview() for an existing domain root reflects it as not-new (proves it resolves the same path execute() writes to)") {
-        val args = """{"id":"site-maidplus-de","title":"MaidPlus","description":"d","body":"b","domain":true}"""
+        val args = """{"id":"site-maidplus-de","title":"MaidPlus","description":"d","body":"## Map\nEntry: https://example.com","domain":true}"""
         runBlocking { tool.execute(args) }
 
         val preview = tool.confirmationPreview(args)
@@ -240,8 +240,74 @@ class WriteSkillToolTest : FunSpec({
     }
 
     test("confirmationPreview() falls back to null for an invalid id instead of guessing a path") {
-        val args = """{"id":"not-a-site-id","title":"t","description":"d","body":"b"}"""
+        val args = """{"id":"not-a-site-id","title":"t","description":"d","body":"## Map\nEntry: https://example.com"}"""
 
         tool.confirmationPreview(args) shouldBe null
+    }
+
+    test("a body with no recognised sections is rejected") {
+        val unsectioned = """
+            {"id":"site-example-com","title":"example.com","description":"d",
+             "body":"# example.com\n\nJust prose about the dashboard."}
+        """.trimIndent()
+
+        val result = runBlocking { tool.execute(unsectioned) }
+
+        result shouldContain "recognised sections"
+        globalDir.resolve("site-example-com.md").exists() shouldBe false
+    }
+
+    test("mode defaults to map, so an omitted mode rejects a Procedures section") {
+        // The default is the safety property — omitting the parameter must not grant procedure mode.
+        val body = "## Map\\nEntry: https://example.com\\n\\n## Procedures\\n\\n### Do a thing\\n1. Click it."
+        val args = """
+            {"id":"site-example-com","title":"example.com","description":"d","body":"$body"}
+        """.trimIndent()
+
+        val result = runBlocking { tool.execute(args) }
+
+        result shouldContain "mode=map"
+        globalDir.resolve("site-example-com.md").exists() shouldBe false
+    }
+
+    test("mode=procedure accepts a single procedure entry and writes it") {
+        val body = "## Map\\nEntry: https://example.com\\n\\n## Procedures\\n\\n### Do a thing\\n1. Click it."
+        val args = """
+            {"id":"site-example-com","title":"example.com","description":"d",
+             "mode":"procedure","body":"$body"}
+        """.trimIndent()
+
+        val result = runBlocking { tool.execute(args) }
+
+        result shouldContain "Wrote skill"
+        globalDir.resolve("site-example-com.md").exists() shouldBe true
+    }
+
+    test("a credential inside a well-formed Procedures block is still rejected") {
+        // Structure validation must not become a way past the secret check — a body can be
+        // perfectly shaped and still be the worst thing to write down.
+        val body = "## Map\\nEntry: https://example.com\\n\\n## Procedures\\n\\n### Log in\\n1. Use password: \\\"hunter2hunter2\\\"."
+        val args = """
+            {"id":"site-example-com","title":"example.com","description":"d",
+             "mode":"procedure","body":"$body"}
+        """.trimIndent()
+
+        val result = runBlocking { tool.execute(args) }
+
+        result shouldContain "secret/credential"
+        globalDir.resolve("site-example-com.md").exists() shouldBe false
+    }
+
+    test("an unrecognised mode is an error rather than a silent default") {
+        val body = "## Map\\nEntry: https://example.com"
+        val args = """
+            {"id":"site-example-com","title":"example.com","description":"d",
+             "mode":"banana","body":"$body"}
+        """.trimIndent()
+
+        val result = runBlocking { tool.execute(args) }
+
+        result shouldContain "mode"
+        globalDir.resolve("site-example-com.md").exists() shouldBe false
     }
 })
