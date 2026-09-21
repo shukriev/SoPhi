@@ -46,6 +46,13 @@ list tabs — whichever of those this MCP server exposes as `safeTools`), map ju
 part of the site relevant to this task: the nav structure, the relevant form, the
 workflow's steps. Stay scoped to what this task needs — this is not a full-site crawl.
 
+Record what you found with `write_skill` in the default `mode=map`. A map is what the
+site *is*: entry URLs, navigation, the screens and forms that exist. It is **not** a
+workflow — you have not done anything yet, and writing steps you have only looked at is
+the failure this protocol exists to prevent.
+
+Anything you noticed you cannot yet do goes under `## Known unknowns`, one line each.
+
 ## 4. Act
 
 Perform the actual task using the interaction tools (click, type, select, submit).
@@ -54,23 +61,41 @@ around.
 
 ## 5. Record
 
-After finishing this step (or as soon as you've learned something materially new),
-call `write_skill` to create or update the site's skill:
+Having actually completed the task, call `write_skill` with `mode=procedure` and add a
+single entry under `## Procedures`:
 
 - `id`: `site-<hostname>` (must match `site-[a-z0-9-]+` or the tool will refuse it)
-- `title`: the site's name
-- `description`: one line — what this skill covers
-- `tags`: `["site"]`
-- `body`: entry URL(s), the workflow as numbered steps, selectors/text anchors that
-  worked, gotchas hit, a last-updated note
+- `mode`: `procedure`
+- `body`: the full skill — `## Map`, `## Procedures` with your new `### <task name>`
+  entry, `## Known unknowns` with anything resolved struck out, and `## Last updated`
+
+A procedure entry is: numbered steps, the selectors or text anchors that actually
+worked, and any gotcha you hit. Write only the task you just performed. One write
+records one completed task; the tool rejects a second entry, and a task you merely
+watched belongs under Known unknowns, not here.
 
 **Never write credentials, session tokens, or secrets into a skill body.** Login is
 handled by an already-authenticated browser profile or a separate interactive login
 step — it is never something to record here.
 
-## 6. Self-heal
+## 6. Deepen
+
+When you are working on a site whose skill has a `## Known unknowns` list and you have
+room to, you may resolve entries yourself rather than waiting to be asked: navigate,
+inspect, and carry out the steps needed to find out how something works, then record it
+with `mode=procedure` exactly as in step 5.
+
+Two things bound this. Every interaction still goes through the confirmation layer —
+that gate decides what may happen unattended, and it is not yours to route around.
+And a procedure still means *you performed these steps*: if you worked out how
+something probably works without doing it, that is a Known unknown with better notes,
+not a procedure.
+
+## 7. Self-heal
 
 If a documented step fails at runtime (the site changed), that's a signal to
 re-explore that specific part and update the skill via `write_skill` again — not to
 retry the same failing action repeatedly, and not to leave the stale documentation in
-place for next time.
+place for next time. Correcting a procedure you have just re-performed is a
+`mode=procedure` write; if you could not complete it, downgrade it to a Known unknown
+rather than leaving steps that do not work.
