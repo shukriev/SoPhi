@@ -77,11 +77,21 @@ fun checkSiteSkillStructure(body: String, mode: SiteSkillMode): List<String> = b
  * `###` headings inside the `## Procedures` section only. A `###` under `## Map` is a sub-heading
  * of the map, not a procedure, so the count is scoped to the section rather than the whole body.
  */
-private fun procedureEntryCount(body: String): Int {
-    val start = H2.findAll(body).firstOrNull { it.groupValues[1].trim().lowercase() == PROCEDURES }
-        ?: return 0
+private fun procedureEntryCount(body: String): Int = procedureNames(body).size
+
+/** The `### ` entries under `## Procedures`, in document order. Empty for an unsectioned body. */
+fun procedureNames(body: String): List<String> =
+    H3.findAll(sectionBody(body, PROCEDURES)).map { it.groupValues[1].trim() }.toList()
+
+/** How many `-` bullets sit under `## Known unknowns`. */
+fun knownUnknownCount(body: String): Int =
+    sectionBody(body, KNOWN_UNKNOWNS).lines().count { it.trimStart().startsWith("- ") }
+
+/** The text under [heading], up to the next `##` or end of body; empty when absent. */
+private fun sectionBody(body: String, heading: String): String {
+    val start = H2.findAll(body).firstOrNull { it.groupValues[1].trim().lowercase() == heading }
+        ?: return ""
     val after = body.substring(start.range.last + 1)
     val nextH2 = H2.find(after)
-    val section = if (nextH2 == null) after else after.substring(0, nextH2.range.first)
-    return H3.findAll(section).count()
+    return if (nextH2 == null) after else after.substring(0, nextH2.range.first)
 }
