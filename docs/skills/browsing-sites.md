@@ -24,12 +24,19 @@ attached to, rather than hunting for a way around it.
 
 ## 1. Recall
 
-Derive `site-<hostname>` from the task's target URL: lowercase the host, replace every
-`.` with `-` (e.g. `github.com` -> `site-github-com`, `docs.example.com` ->
-`site-docs-example-com`). Check the list of available skills already in your context
-(this tool's own description lists every skill id) for a match.
+If a site skill already exists for the target, a pointer naming it is **already in your
+context** — it names the skill id, its documented procedures, and how to load it. Load
+it with `skill(name="site-<hostname>")` before doing anything else.
 
-If found, load it with `skill(name="site-<hostname>")` before doing anything else.
+If no pointer appeared, the site may still have a skill that recall could not match from
+the wording of the request — recall keys off the message, so "check my CRM tasks" names
+no host. The available skill ids are listed in the `skill` tool's own description; check
+there for a `site-` id matching the target.
+
+Deriving an id by hand: lowercase the host, drop a leading `www.`, replace every `.`
+with `-` (`github.com` -> `site-github-com`, `www.maidplus.de` -> `site-maidplus-de`,
+`docs.example.com` -> `site-docs-example-com`). Dropping `www.` matters — otherwise one
+site ends up with two skills that never find each other.
 
 ## 2. Decide
 
