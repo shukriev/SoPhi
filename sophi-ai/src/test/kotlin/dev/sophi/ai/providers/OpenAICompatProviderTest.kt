@@ -200,7 +200,9 @@ class OpenAICompatProviderTest : FunSpec({
 
         val events = runBlocking { provider.stream(req).toList() }
 
-        events shouldBe listOf(StreamEvent.Content("hello"), StreamEvent.Content(" world"))
+        events shouldBe listOf(
+            StreamEvent.Content("hello"), StreamEvent.Content(" world"), StreamEvent.Finish("stop")
+        )
     }
 
     test("stream() emits StreamEvent.Reasoning from the 'reasoning' additionalProperty (Ollama convention)") {
@@ -209,7 +211,9 @@ class OpenAICompatProviderTest : FunSpec({
 
         val events = runBlocking { provider.stream(req).toList() }
 
-        events shouldBe listOf(StreamEvent.Reasoning("thinking..."), StreamEvent.Content("answer"))
+        events shouldBe listOf(
+            StreamEvent.Reasoning("thinking..."), StreamEvent.Content("answer"), StreamEvent.Finish("stop")
+        )
     }
 
     test("stream() emits one merged StreamEvent.ToolCallsReady on the finishing chunk") {
@@ -222,7 +226,10 @@ class OpenAICompatProviderTest : FunSpec({
 
         val events = runBlocking { provider.stream(req).toList() }
 
-        events shouldBe listOf(StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "get_weather", "{\"city\":\"Paris\"}"))))
+        events shouldBe listOf(
+            StreamEvent.ToolCallsReady(listOf(ToolCall("call_1", "get_weather", "{\"city\":\"Paris\"}"))),
+            StreamEvent.Finish("stop")
+        )
     }
 
     test("stream() does not emit ToolCallsReady when no tool calls were accumulated") {
@@ -231,7 +238,7 @@ class OpenAICompatProviderTest : FunSpec({
 
         val events = runBlocking { provider.stream(req).toList() }
 
-        events shouldBe listOf(StreamEvent.Content("just an answer"))
+        events shouldBe listOf(StreamEvent.Content("just an answer"), StreamEvent.Finish("stop"))
     }
 
     test("stream() emits StreamEvent.Usage from the final usage-only chunk") {
@@ -242,6 +249,7 @@ class OpenAICompatProviderTest : FunSpec({
 
         events shouldBe listOf(
             StreamEvent.Content("hi"),
+            StreamEvent.Finish("stop"),
             StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
         )
     }

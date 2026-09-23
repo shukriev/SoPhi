@@ -66,7 +66,12 @@ private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
  * normal turn at the call site, so a step cut short by e.g. compaction thrashing looked identical
  * to one that actually finished.
  */
-enum class TurnStopReason { ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing }
+enum class TurnStopReason {
+    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated
+}
+
+/** OpenAI's finish_reason for "ran out of output tokens", shared by every compatible server. */
+private const val FINISH_REASON_LENGTH = "length"
 
 /**
  * Tracks the state a LoopGuardPolicy check needs across rounds of a single turn: how many
@@ -261,6 +266,7 @@ class AgentLoop(
             val contentBuf = StringBuilder()
             var pendingToolCalls: List<ToolCall>? = null
             var roundUsage: TokenUsage? = null
+            var finishReason: String? = null
             provider.stream(request).collect { event ->
                 when (event) {
                     is StreamEvent.Content -> {
@@ -269,6 +275,7 @@ class AgentLoop(
                     }
                     is StreamEvent.Reasoning -> onEvent(TurnEvent.ReasoningToken(event.text))
                     is StreamEvent.ToolCallsReady -> pendingToolCalls = event.calls
+                    is StreamEvent.Finish -> finishReason = event.reason
                     // Cumulative for the whole prompt just sent, so the latest value IS the total.
                     is StreamEvent.Usage -> roundUsage = event.usage
                 }
@@ -276,6 +283,25 @@ class AgentLoop(
 
             val toolCalls = pendingToolCalls
             if (toolCalls == null) {
+                // A round with no tool calls AND no text isn't an answer — it's the model stopping
+                // mid-thought, usually because a long reasoning block ate the whole output budget.
+                // Ending the turn here used to persist an empty assistant entry and flip the UI to
+                // Idle with nothing shown, which reads as "it just stopped working".
+                if (contentBuf.isBlank()) {
+                    val truncated = finishReason.equals(FINISH_REASON_LENGTH, ignoreCase = true)
+                    return finishEarly(
+                        session, userInput, pendingRounds,
+                        if (truncated)
+                            "the model used its whole ${config.maxTokens}-token output budget " +
+                                "(likely on reasoning) without answering or calling a tool — " +
+                                "raise maxTokens for this profile"
+                        else
+                            "the model returned no text and no tool call " +
+                                "(finish reason: ${finishReason ?: "not reported"})",
+                        if (truncated) TurnStopReason.OutputTruncated else TurnStopReason.EmptyResponse,
+                        onEvent
+                    )
+                }
                 session.append(EntryRole.USER, userInput)
                 pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
                 session.append(EntryRole.ASSISTANT, contentBuf.toString())

@@ -317,4 +317,32 @@ class AgentLoopStreamTest : FunSpec({
         session.branch().last().content shouldContain "round"
         coVerify(exactly = 1) { provider.stream(any()) }
     }
+
+    test("streamTurn() stops early and says so when reasoning burns the whole output budget") {
+        val loop = newLoop()
+        val session = AgentSession(id = "s11")
+        every { provider.stream(any()) } returns flowOf(
+            StreamEvent.Reasoning("Let me take a snapshot to see the full page structure"),
+            StreamEvent.Finish("length")
+        )
+
+        loop.streamTurn(session, "create a test client", config.copy(maxTokens = 4096)) {}
+
+        val tip = session.branch().last()
+        tip.content shouldContain "Stopped early"
+        tip.content shouldContain "4096-token output budget"
+        tip.metadata["stopReason"] shouldBe TurnStopReason.OutputTruncated.name
+    }
+
+    test("streamTurn() stops early on an empty round even when no finish reason is reported") {
+        val loop = newLoop()
+        val session = AgentSession(id = "s12")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Reasoning("hmm"))
+
+        loop.streamTurn(session, "go", config) {}
+
+        val tip = session.branch().last()
+        tip.content shouldContain "no text and no tool call"
+        tip.metadata["stopReason"] shouldBe TurnStopReason.EmptyResponse.name
+    }
 })
