@@ -75,9 +75,11 @@ class OpenAICompatProvider(
 
                         delta.toolCalls().orElse(null)?.forEach { merger.accumulate(it) }
 
-                        if (choice.finishReason().isPresent) {
+                        choice.finishReason().ifPresent { reason ->
                             val merged = merger.build()
                             if (merged.isNotEmpty()) trySend(StreamEvent.ToolCallsReady(merged))
+                            runCatching { reason.asString() }.getOrNull()
+                                ?.let { trySend(StreamEvent.Finish(it)) }
                         }
                     }
                     // Present only on the final chunk (per the OpenAI streaming convention), and
