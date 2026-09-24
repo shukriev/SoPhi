@@ -86,7 +86,11 @@ internal fun palace(
     val llm = if (baseUrl != null && chatModel != null)
         buildProvider("openai-compat", apiKey, baseUrl, chatModel, 60L, 2) else null
     return JanesPalace(
-        JanesPalaceConfig(sessionModel = chatModel, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
+        JanesPalaceConfig(
+            sessionModel = chatModel,
+            autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv(),
+            encoderTelemetry = JanesPalaceConfig.encoderTelemetryFromEnv()
+        ),
         llm, emb, embeddingModel ?: "unknown",
         versionStore = VersionStore(memoryVersioningHome())
     )

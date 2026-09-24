@@ -70,7 +70,13 @@ data class JanesPalaceConfig(
     val encoderModel: String? = null,
     val sessionModel: String? = null,
     val encoderMaxTokens: Int = 1024,
-    val autoPurgeEnabled: Boolean = true
+    val autoPurgeEnabled: Boolean = true,
+    /** Logs every encoder-proposed memory and why it was stored, merged or dropped, so the write
+     *  gate's selectivity is measurable at all — [MemoryWriter] is fire-and-forget, so a candidate
+     *  the threshold rejects currently leaves no trace anywhere. Off by default: the log holds
+     *  candidate text that was deliberately NOT stored, which for an ambient turn can be a
+     *  bystander's words. */
+    val encoderTelemetry: Boolean = false
 ) {
     companion object {
         /** Only the literal string "false" disables purging -- unset, empty, or a typo all
@@ -80,5 +86,10 @@ data class JanesPalaceConfig(
          *  doing nothing must not silently change what every current install already does. */
         fun autoPurgeEnabledFromEnv(env: (String) -> String? = System::getenv): Boolean =
             env("SOPHI_MEMORY_AUTO_PURGE_ENABLED")?.lowercase() != "false"
+
+        /** Fail-toward-off, unlike [autoPurgeEnabledFromEnv]: this is a brand-new capability that
+         *  writes un-stored candidate text to disk, so doing nothing must leave it disabled. */
+        fun encoderTelemetryFromEnv(env: (String) -> String? = System::getenv): Boolean =
+            env("SOPHI_MEMORY_ENCODER_TELEMETRY")?.lowercase() == "true"
     }
 }

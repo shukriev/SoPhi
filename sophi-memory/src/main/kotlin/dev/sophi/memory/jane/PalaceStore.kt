@@ -24,6 +24,9 @@ class PalaceStore(
     private val db: ArcadeStore = EmbeddedArcadeStore.open(home)
 ) {
     private val auditLog = JsonlLog(home.resolve("audit.jsonl"))
+    /** Kept out of [auditLog]: that is the privacy trail for SENSITIVE+ accesses and must stay
+     *  independently readable, not interleaved with write-gate telemetry. */
+    private val encoderLog = JsonlLog(home.resolve("encoder.jsonl"))
 
     init {
         db.ensureSchema(
@@ -67,6 +70,9 @@ class PalaceStore(
 
     fun appendAudit(line: String) = auditLog.append(line)
 
+    fun appendEncoderLog(line: String) = encoderLog.append(line)
+    fun encoderLogLines(): List<String> = encoderLog.readAll()
+
     fun writeLastRecall(text: String) {
         Files.createDirectories(home)
         Files.writeString(home.resolve("last-recall.txt"), text)
@@ -93,6 +99,7 @@ class PalaceStore(
         Files.deleteIfExists(home.resolve("last-recall.txt"))
         Files.deleteIfExists(home.resolve("consolidation.marker"))
         Files.deleteIfExists(home.resolve("audit.jsonl"))
+        Files.deleteIfExists(home.resolve("encoder.jsonl"))
     }
 
     private fun Map<String, Any?>.memoryId(): String = get("id") as String

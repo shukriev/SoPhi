@@ -239,7 +239,11 @@ class RuntimeBuilder {
                 // probe does, rather than letting an uncaught exception crash the whole build().
                 runCatching {
                     JanesPalace(
-                        JanesPalaceConfig(home = memoryHome, sessionModel = model, autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv()),
+                        JanesPalaceConfig(
+                            home = memoryHome, sessionModel = model,
+                            autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv(),
+                            encoderTelemetry = JanesPalaceConfig.encoderTelemetryFromEnv()
+                        ),
                         p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                     )
                 }.fold(

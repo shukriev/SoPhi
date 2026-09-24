@@ -5,6 +5,7 @@ import dev.sophi.memory.TurnObservation
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 
 class MemoryWriterTest : FunSpec({
@@ -38,6 +39,30 @@ class MemoryWriterTest : FunSpec({
         // emph=0, aff=0, nov=1, rec=1: α = 0.15 + 0.10 = 0.25 < 0.35
         writer.write(turn, EncoderVerdict(listOf(vm("weather was fine")))) shouldBe emptyList()
         store.memories() shouldBe emptyMap()
+    }
+
+    test("encoder telemetry is off by default — a dropped candidate leaves no trace") {
+        val (store, writer) = rig()
+        writer.write(turn, EncoderVerdict(listOf(vm("weather was fine"))))
+        store.encoderLogLines() shouldBe emptyList()
+    }
+
+    test("encoder telemetry records what the gate dropped, and why") {
+        val store = PalaceStore(tempdir().toPath())
+        val writer = MemoryWriter(
+            store, UserProfile(store), embeddings, "fake",
+            JanesPalaceConfig(encoderTelemetry = true)
+        )
+        writer.write(turn, EncoderVerdict(listOf(
+            vm("weather was fine"),                                   // α = 0.25, dropped
+            vm("User was diagnosed with X", emph = 0.8, aff = 0.9)    // α = 0.72, stored
+        )))
+        val lines = store.encoderLogLines()
+        lines.count { it.contains("\"outcome\":\"proposed_2\"") } shouldBe 1
+        lines.count { it.contains("\"outcome\":\"dropped_below_threshold\"") } shouldBe 1
+        lines.count { it.contains("\"outcome\":\"stored\"") } shouldBe 1
+        // The alpha that caused the drop is recorded, so the gate's margin is measurable.
+        lines.single { it.contains("dropped_below_threshold") } shouldContain "\"alpha\":0.25"
     }
 
     test("near-duplicate merges: existing reinforced, no new memory") {
@@ -144,6 +169,33 @@ class MemoryWriterTest : FunSpec({
         // speaker, so an explicit verdict is a judgment, not a default — don't override it.
         stored.provenance shouldBe Provenance.USER_DIRECT
         stored.isCommitment shouldBe true
+    }
+
+    test("a THIRD_PARTY memory that makes the user its subject is dropped, not stored") {
+        val (store, writer) = rig()
+        val ambient = TurnObservation("ambient", "candidate describes their CV", "", 1_000L, ambient = true)
+        // The real failure, verbatim in shape: the encoder tagged provenance correctly and then
+        // wrote an interview candidate's own project history as a fact about the user.
+        val stored = writer.write(ambient, EncoderVerdict(listOf(
+            VerdictMemory(text = "The user is developing an MVP using the Adverity Marketing API",
+                room = "TASKS", emph = 0.9, aff = 0.8, provenance = "THIRD_PARTY")
+        )))
+        stored shouldBe emptyList()
+        store.memories() shouldBe emptyMap()
+    }
+
+    test("the subject guard spares the possessive and non-THIRD_PARTY memories") {
+        val (_, writer) = rig()
+        val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
+        // "The user's wife" is a fact about the wife — legal at any provenance.
+        writer.write(ambient, EncoderVerdict(listOf(
+            VerdictMemory(text = "The user's wife is named Sofia", room = "ENTITIES", emph = 0.9,
+                provenance = "THIRD_PARTY")
+        ))).size shouldBe 1
+        // And the guard is scoped to THIRD_PARTY: a chat turn may say "The user ..." freely.
+        writer.write(turn, EncoderVerdict(listOf(
+            VerdictMemory(text = "The user prefers window seats", room = "KNOWLEDGE", emph = 0.9)
+        ))).size shouldBe 1
     }
 
     test("a chat turn with no stated provenance still defaults to USER_DIRECT") {
