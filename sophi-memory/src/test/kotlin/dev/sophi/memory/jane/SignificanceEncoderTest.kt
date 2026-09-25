@@ -158,6 +158,23 @@ class SignificanceEncoderTest : FunSpec({
         prompt shouldContain "Store nothing from it"
     }
 
+    test("an ambient turn's prompt forbids making the user the subject of a THIRD_PARTY memory") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+        val ambientTurn = TurnObservation("s1", "overheard chatter", "", 1_000L, ambient = true)
+
+        SignificanceEncoder(provider, cfg).encode(ambientTurn, emptyList())
+
+        // Tagging provenance THIRD_PARTY while still writing "The user ..." was the observed
+        // failure: the metadata was right and the sentence stored someone else's career as the
+        // user's. The subject has to be constrained, not just the provenance field.
+        val prompt = captured.captured.messages.single().content
+        prompt shouldContain "naming who it is about"
+        prompt shouldContain "NEVER begin a THIRD_PARTY memory with"
+    }
+
     test("a non-ambient turn's prompt says nothing about broadcast media") {
         val provider = mockk<LLMProvider>()
         val captured = slot<CompletionRequest>()
