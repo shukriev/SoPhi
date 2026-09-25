@@ -98,6 +98,27 @@ class StdioMcpConnectorTest : FunSpec({
         resolveLoginShellPath(fakeShell.toString()) shouldBe "/real/path/bin:/usr/bin"
     }
 
+    // The failure this fallback exists for: a cold interactive zsh with a plugin manager measured
+    // 20.7s to start, well past any sane interactive budget, which made every stdio MCP server
+    // fail with a "No such file or directory" naming the *server's* command rather than the shell.
+    test("resolveLoginShellPath falls back to a login-only shell when the interactive one times out") {
+        val slowWhenInteractive = createTempFile(suffix = ".sh").apply {
+            writeText(
+                """
+                #!/bin/sh
+                for arg in "$@"; do
+                  if [ "${'$'}arg" = "-i" ]; then sleep 10; exit 0; fi
+                done
+                printf '%s' "/login/only/bin:/usr/bin"
+                """.trimIndent()
+            )
+            setPosixFilePermissions(setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE))
+        }
+
+        resolveLoginShellPath(slowWhenInteractive.toString(), timeoutSeconds = 1) shouldBe
+            "/login/only/bin:/usr/bin"
+    }
+
     test("resolveLoginShellPath returns null within its timeout when the shell never exits") {
         val hangingShell = createTempFile(suffix = ".sh").apply {
             writeText("#!/bin/sh\nsleep 10\n")
@@ -108,7 +129,7 @@ class StdioMcpConnectorTest : FunSpec({
             resolveLoginShellPath(hangingShell.toString(), timeoutSeconds = 1).shouldBeNull()
         }
 
-        (elapsed.inWholeSeconds < 5) shouldBe true
+        (elapsed.inWholeSeconds < 6) shouldBe true
     }
 
     test("connect injects the resolved login-shell PATH into the spawned process's environment") {

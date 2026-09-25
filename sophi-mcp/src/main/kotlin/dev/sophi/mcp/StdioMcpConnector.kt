@@ -29,8 +29,9 @@ import java.util.concurrent.TimeUnit
  * at all. Reads only the last non-blank output line so a shell that prints a startup banner before
  * running the command (oh-my-zsh update checks, MOTD) doesn't corrupt the parsed PATH.
  */
-internal fun resolveLoginShellPath(shell: String, timeoutSeconds: Long = 5): String? = runCatching {
-    val process = ProcessBuilder(shell, "-i", "-l", "-c", "echo -n \$PATH").redirectErrorStream(true).start()
+private fun shellPath(shell: String, flags: List<String>, timeoutSeconds: Long): String? = runCatching {
+    val process = ProcessBuilder(listOf(shell) + flags + listOf("-c", "echo -n \$PATH"))
+        .redirectErrorStream(true).start()
     if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
         process.destroyForcibly()
         return@runCatching null
@@ -39,6 +40,25 @@ internal fun resolveLoginShellPath(shell: String, timeoutSeconds: Long = 5): Str
     process.inputStream.bufferedReader().readText()
         .lines().lastOrNull { it.isNotBlank() }?.trim().takeIf { !it.isNullOrBlank() }
 }.getOrNull()
+
+/**
+ * The user's real `PATH`, as their login shell would set it — a GUI-launched app inherits almost
+ * nothing useful, so without this a bare `npx` cannot be found.
+ *
+ * Tries an interactive login shell first, because that is the only invocation that sources
+ * `~/.zshrc`, where most people's Homebrew and node exports actually live. Falls back to a
+ * login-only shell when that times out: a partial `PATH` from `~/.zprofile` still resolves most
+ * commands, and is far better than returning null and failing every stdio MCP server outright.
+ *
+ * [timeoutSeconds] is deliberately generous. A warm interactive zsh here answers in about 2s, but
+ * the same shell measured 20.7s on a cold first run — plugin managers doing their first-run work —
+ * and the old 5s budget turned that into a hard failure with a misleading "No such file or
+ * directory" for the *server's* command. This runs once per connector, lazily, on a background
+ * dispatcher, so waiting costs nothing that anyone is watching.
+ */
+internal fun resolveLoginShellPath(shell: String, timeoutSeconds: Long = 30): String? =
+    shellPath(shell, listOf("-i", "-l"), timeoutSeconds)
+        ?: shellPath(shell, listOf("-l"), timeoutSeconds)
 
 /**
  * Resolves a bare command name (e.g. "npx") to an absolute path by searching [path] (`:`-joined,
