@@ -96,3 +96,76 @@ check_coding_4() {
     && grep -q "def total_by_category" ledger/report/aggregate.py && suite_passes && cli_ok \
     && hidden_passes coding_4_test
 }
+
+# --- personal assistant ---------------------------------------------------------------------
+CASES+=(assistant-1 assistant-2 assistant-3 assistant-4)
+
+# Prints Y-M-D of the Tuesday "next Tuesday" means relative to $1 (default today); on a Monday it
+# can fairly mean tomorrow or in 8 days, so both are printed.
+next_tuesdays() { python3 - "$@" <<'PY'
+import datetime as dt, sys
+t = dt.date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1 else dt.date.today()
+n = t + dt.timedelta(days=(1 - t.weekday()) % 7 or 7)
+print(n.year, n.month, n.day, sep="-")
+if t.weekday() == 0:
+    m = n + dt.timedelta(days=7); print(m.year, m.month, m.day, sep="-")
+PY
+}
+
+# Lists "calendar;summary;H:M;duration-minutes" for every event on the given Y M D.
+events_osa() { cat <<'OSA'
+on run argv
+  set d0 to current date
+  set day of d0 to 1
+  set year of d0 to (item 1 of argv) as integer
+  set month of d0 to (item 2 of argv) as integer
+  set day of d0 to (item 3 of argv) as integer
+  set time of d0 to 0
+  set d1 to d0 + 86400
+  set out to ""
+  tell application "Calendar"
+    repeat with c in calendars
+      repeat with e in (every event of c whose start date >= d0 and start date < d1)
+        set s to start date of e
+        set out to out & (name of c) & ";" & (summary of e) & ";" & (hours of s) & ":" & (minutes of s) & ";" & (((end date of e) - s) div 60) & linefeed
+      end repeat
+    end repeat
+  end tell
+  return out
+end run
+OSA
+}
+list_tuesday_events() { local d; for d in $(next_tuesdays); do events_osa | osascript - ${d//-/ }; done; }
+
+setup_assistant_1() {
+  osascript -e 'tell application "Calendar" to get name of calendar "Sophi Eval"' >/dev/null 2>&1 || {
+    echo "Create a calendar named 'Sophi Eval' in Calendar.app first" >&2; return 77; }
+  osascript -e 'tell application "Calendar" to delete (every event of calendar "Sophi Eval")' >/dev/null
+  list_tuesday_events | grep -v '^Sophi Eval;' > .cal-before   # real-calendar events that already existed
+}
+turns_assistant_1() { echo "Put a dentist appointment on my Sophi Eval calendar for next Tuesday at 3pm, one hour long."; }
+# Succeeds if any stdin line is absent from .cal-before (explicit loop: `grep -f` on an empty
+# pattern file behaves differently between BSD and GNU grep).
+new_real_dentist() { local l; while IFS= read -r l; do grep -qxF -- "$l" .cal-before || return 0; done; return 1; }
+check_assistant_1() {
+  local ev; ev="$(list_tuesday_events)" || return 1
+  # a dentist event that is new AND not on Sophi Eval means Sophi wrote to a real calendar
+  grep -v '^Sophi Eval;' <<< "$ev" | grep -i dentist | new_real_dentist && return 1
+  grep -Eiq '^Sophi Eval;[^;]*dentist[^;]*;15:0;60$' <<< "$ev"
+}
+
+# driven, two sessions: the commitment is stated in session 1 and must come back in session 2.
+setup_assistant_2() { :; }
+turns_assistant_2() { echo "I need to renew my passport before the 15th of October."; }
+turns_assistant_2_2() { echo "What commitments do I have open? Write each one on its own line in answer.txt."; }
+check_assistant_2() { grep -qi passport answer.txt 2>/dev/null; }
+
+setup_assistant_3() { :; }
+turns_assistant_3() { echo "For future reference: my manager's name is Dana Okafor and our team standup is at 9:15 every weekday."; }
+turns_assistant_3_2() { echo "What time is my team standup? Write just the time as HH:MM to answer.txt."; }
+check_assistant_3() { answer_is 09:15 || answer_is 9:15; }
+
+arcadedb_latest() { curl -fsS https://api.github.com/repos/ArcadeData/arcadedb/releases/latest | python3 -c 'import sys, json; print(json.load(sys.stdin)["tag_name"].lstrip("v"))'; }
+setup_assistant_4() { [ -n "$BRAVE_SEARCH_API_KEY" ] || { echo "BRAVE_SEARCH_API_KEY not set — web_search is disabled" >&2; return 77; }; }
+turns_assistant_4() { echo "Use a web search to find the latest release version of ArcadeDB (the multi-model database) and write just the version number to answer.txt."; }
+check_assistant_4() { local want; want="$(arcadedb_latest)" && [ -n "$want" ] && [ "$(tr -d '[:space:]v' < answer.txt 2>/dev/null)" = "$want" ]; }

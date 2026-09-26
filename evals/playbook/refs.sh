@@ -79,3 +79,20 @@ PY
   printf 'from ledger.report.loading import load_entries\nfrom ledger.report.aggregate import total_by_category\n' > ledger/report/__init__.py
   rm ledger/report.py
 }
+
+add_event_osa() { cat <<'OSA'
+on run argv
+  set d to current date
+  set day of d to 1
+  set year of d to (item 1 of argv) as integer
+  set month of d to (item 2 of argv) as integer
+  set day of d to (item 3 of argv) as integer
+  set time of d to 15 * hours
+  tell application "Calendar" to make new event at end of events of calendar "Sophi Eval" with properties {summary:"Dentist", start date:d, end date:d + 3600}
+end run
+OSA
+}
+ref_assistant_1() { local d; d="$(next_tuesdays | head -1)"; add_event_osa | osascript - ${d//-/ } >/dev/null; }
+ref_assistant_2() { echo "Renew passport before 15 October" > answer.txt; }
+ref_assistant_3() { echo 09:15 > answer.txt; }
+ref_assistant_4() { arcadedb_latest > answer.txt; }
