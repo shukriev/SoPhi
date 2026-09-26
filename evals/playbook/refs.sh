@@ -35,3 +35,47 @@ class MoneyTest(unittest.TestCase):
         self.assertEqual(format_amount(Decimal("-0.05")), "-0.05")
 PY
 }
+
+ref_coding_1() { perl -pi -e 's/\{cents % 100\}/{cents % 100:02d}/' ledger/money.py; }
+ref_coding_2() {
+  cat >> ledger/report.py <<'PY'
+
+
+def average_by_category(entries):
+    sums, counts = {}, {}
+    for category, cents in entries:
+        sums[category] = sums.get(category, 0) + cents
+        counts[category] = counts.get(category, 0) + 1
+    return {c: (2 * sums[c] + counts[c]) // (2 * counts[c]) for c in sums}
+PY
+  cat >> tests/test_report.py <<'PY'
+
+
+class AverageTest(unittest.TestCase):
+    def test_average(self):
+        from ledger.report import average_by_category
+        self.assertEqual(average_by_category([("a", 100), ("a", 201)]), {"a": 151})
+PY
+}
+ref_coding_3() { perl -pi -e 's/frac = frac\[:2\]/frac = (frac + "00")[:2]/' ledger/money.py; }
+ref_coding_4() {
+  mkdir -p ledger/report
+  cat > ledger/report/loading.py <<'PY'
+import csv
+from ledger.money import parse_amount
+
+
+def load_entries(path):
+    with open(path, newline="") as f:
+        return [(row["category"], parse_amount(row["amount"])) for row in csv.DictReader(f)]
+PY
+  cat > ledger/report/aggregate.py <<'PY'
+def total_by_category(entries):
+    totals = {}
+    for category, cents in entries:
+        totals[category] = totals.get(category, 0) + cents
+    return totals
+PY
+  printf 'from ledger.report.loading import load_entries\nfrom ledger.report.aggregate import total_by_category\n' > ledger/report/__init__.py
+  rm ledger/report.py
+}

@@ -66,3 +66,33 @@ check_plan_3() {
 setup_plan_4() { :; }
 turns_plan_4() { echo "/goal Migrate the whole ledger package from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, every other function and the CLI (python3 -m ledger.cli data/entries-2026.csv) must keep working, and update the existing tests to the new types. The full test suite must pass."; }
 check_plan_4() { suite_passes && cli_ok && hidden_passes plan_4_test; }
+
+# --- coding ---------------------------------------------------------------------------------
+CASES+=(coding-1 coding-2 coding-3 coding-4)
+
+setup_coding_1() { perl -pi -e 's/\{cents % 100:02d\}/{cents % 100}/' ledger/money.py; }
+turns_coding_1() { echo "The test suite (python3 -m unittest discover -s tests -t .) is failing. Fix the code so it passes. Do not modify anything under tests/."; }
+check_coding_1() { suite_passes && tests_untouched; }
+
+setup_coding_2() { :; }
+turns_coding_2() { echo "Add a function average_by_category(entries) to ledger/report.py. It takes the same (category, cents) entries as total_by_category and returns a dict of category -> average in integer cents, rounded half up. Add tests for it in tests/test_report.py."; }
+check_coding_2() { grep -q average_by_category tests/test_report.py && suite_passes && hidden_passes coding_2_test; }
+
+# The bug crashes on the "misc,3" row (no fraction); the traceback is handed over as a file
+# because stdin is one-line-per-turn.
+setup_coding_3() {
+  perl -pi -e 's/frac = \(frac \+ "00"\)\[:2\]/frac = frac[:2]/' ledger/money.py
+  PYTHONDONTWRITEBYTECODE=1 python3 -m ledger.cli data/entries-2026.csv >/dev/null 2> crash.log
+  grep -q ValueError crash.log
+}
+turns_coding_3() { echo "Running python3 -m ledger.cli data/entries-2026.csv crashes; the traceback is in crash.log. Find the root cause and fix it in the code, not by changing the data."; }
+check_coding_3() { cli_ok && suite_passes && cmp -s data/entries-2026.csv "$PB/fixtures/ledger/data/entries-2026.csv"; }
+
+# delegate: cross-module refactor; pass also requires invoke_claude_code (run.sh).
+setup_coding_4() { :; }
+turns_coding_4() { echo "Refactor ledger/report.py into a package ledger/report/ with two modules: ledger/report/loading.py (load_entries) and ledger/report/aggregate.py (total_by_category). Existing imports like 'from ledger.report import load_entries, total_by_category' must keep working, and the CLI and the test suite must pass."; }
+check_coding_4() {
+  [ ! -e ledger/report.py ] && grep -q "def load_entries" ledger/report/loading.py 2>/dev/null \
+    && grep -q "def total_by_category" ledger/report/aggregate.py && suite_passes && cli_ok \
+    && hidden_passes coding_4_test
+}
