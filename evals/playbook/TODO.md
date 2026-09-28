@@ -16,13 +16,10 @@ which repeats non-idempotent work.
   Same prompt on bonsai-27b: `max_tokens=8` → `length`, `''`; `max_tokens=400` → `stop`, `YES`.
 - [x] Give the judge room to think: `maxTokens = 1024` (fix/playbook-followups).
 - [x] Regression test: `PlanRunnerTest` — "the LlmJudged judge gets enough tokens for a thinking model to reach its YES".
-- [x] ~~Log the judge's finish reason~~ — dropped: sophi-core has no logging, and the regression
-      test is what guards this.
 - [x] Other `LlmJudged` users: `PlanRunner.judge` is the only evaluation site, so `/goal`, sub-plans and
       scheduled goal tasks are all covered. The same starvation was also found in
       `Consolidator` compress (200 tokens, no `reasoningEffort`), where an empty summary soft-deleted
       a memory thread. Fixed, with a test: "compress keeps the thread when the summary comes back blank".
-- [x] ~~Open the issue~~ — fixed directly in fix/playbook-followups instead.
 
 ## 2. First A/B runs (README → "A/B a prescription")
 

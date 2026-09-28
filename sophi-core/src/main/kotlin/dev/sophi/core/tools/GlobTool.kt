@@ -45,11 +45,8 @@ class GlobTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
     }
 }
 
-// Java's glob makes each double-star-slash consume at least one directory, so a pattern like
-// "any-depth ledger, anything below" misses ledger/money.py; bash globstar and gitignore let it
-// match zero. Each occurrence is expanded to both readings (2^n patterns, n tiny in practice)
-// rather than rewritten to a {..,} group, which would nest inside a pattern's own {a,b} group —
-// something Java's glob rejects. (Line comments: a KDoc here would nest on the glob text.)
+// Java's glob makes each double-star-slash match >= 1 directory; bash globstar and gitignore
+// also allow 0, so every occurrence is tried both ways (2^n patterns, n tiny in practice).
 private fun zeroDirVariants(pattern: String): List<String> {
     val parts = pattern.split("**/")
     var variants = listOf(parts.first())

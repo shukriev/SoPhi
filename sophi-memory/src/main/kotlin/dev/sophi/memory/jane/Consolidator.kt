@@ -208,7 +208,8 @@ class Consolidator(
                     is LLMResponse.Text -> r.content.trim()
                     else -> null
                 }
-            }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@forEach   // a thinking model cut off at length returns ""; never soft-delete a thread for an empty summary
+            // A thinking model cut off at length returns "": never soft-delete a thread for that.
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@forEach
 
             val summary = Memory(
                 id = "mem_" + UUID.randomUUID(), text = summaryText, room = Room.NARRATIVE,
