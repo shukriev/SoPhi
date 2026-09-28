@@ -120,6 +120,21 @@ class ConsolidatorTest : FunSpec({
         (r.store.memories().getValue("mem_2").softDeletedAt != null) shouldBe true
     }
 
+    test("compress keeps the thread when the summary comes back blank (thinking model cut off at length)") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("", TokenUsage(1, 200), stopReason = "length")
+        val r = Rig(provider)
+        r.add("mem_1", "user changed jobs", at = 0L, salience = 0.05)
+        r.add("mem_2", "family moved to plovdiv", at = 1 * DAY, salience = 0.05)
+        r.add("mem_3", "emma enrolled in new school", at = 2 * DAY, salience = 0.05)
+        r.store.upsertEdge(CausalEdge("mem_1", "mem_2", "relocation"))
+        r.store.upsertEdge(CausalEdge("mem_2", "mem_3", "relocation"))
+
+        r.consolidator.run(nowMs = 200 * DAY).compressed shouldBe 0
+        r.store.memories().getValue("mem_2").softDeletedAt shouldBe null
+        r.store.memories().values.none { it.provenance == Provenance.SYSTEM_INFERRED } shouldBe true
+    }
+
     test("compress is skipped without a provider") {
         val r = Rig(provider = null)
         val now = 200 * DAY

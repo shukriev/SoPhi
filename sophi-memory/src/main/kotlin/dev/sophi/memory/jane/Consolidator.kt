@@ -204,11 +204,11 @@ class Consolidator(
                     messages = listOf(Message(MessageRole.USER,
                         "Summarize this causal chain in ONE sentence preserving cause and effect:\n" +
                             members.joinToString(" -> ") { it.text })),
-                    model = model, maxTokens = 200, temperature = 0.0))) {
+                    model = model, maxTokens = 200, temperature = 0.0, reasoningEffort = "none"))) {
                     is LLMResponse.Text -> r.content.trim()
                     else -> null
                 }
-            }.getOrNull() ?: return@forEach
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@forEach   // a thinking model cut off at length returns ""; never soft-delete a thread for an empty summary
 
             val summary = Memory(
                 id = "mem_" + UUID.randomUUID(), text = summaryText, room = Room.NARRATIVE,
