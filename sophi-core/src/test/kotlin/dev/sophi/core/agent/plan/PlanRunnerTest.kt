@@ -65,6 +65,24 @@ class PlanRunnerTest : FunSpec({
         completedOutcome shouldBe outcome
     }
 
+    test("the LlmJudged judge gets enough tokens for a thinking model to reach its YES") {
+        // Seen live on prism-ml/bonsai-27b and qwen3.5: with maxTokens = 8 the reply stops at
+        // finish_reason=length mid-reasoning with empty content, so every finished goal was
+        // judged NO and replanned until Exhausted.
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } answers {
+            if (firstArg<CompletionRequest>().maxTokens < 256) LLMResponse.Text("", TokenUsage(1, 8), stopReason = "length")
+            else LLMResponse.Text("YES", TokenUsage(1, 200), stopReason = "stop")
+        }
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+
+        val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
+
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+    }
+
     test("PlanRunnerConfig.maxStepExecutions defaults high enough for a many-section decomposed goal") {
         // The tree-wide budget is consumed by every sub-plan step too (RunBudget doc comment) —
         // a goal that decomposes into "discover, then one sub-plan per section, then an

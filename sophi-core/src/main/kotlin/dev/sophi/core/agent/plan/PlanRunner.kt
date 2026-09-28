@@ -358,7 +358,9 @@ class PlanRunner(
         val response = provider.complete(
             CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
-                model = judgeModel, maxTokens = 8, temperature = 0.0
+                // Thinking models spend their budget reasoning before the one-word answer: at 8
+                // tokens they stop mid-thought with empty content, which reads as NO forever.
+                model = judgeModel, maxTokens = 1024, temperature = 0.0
             )
         )
         return (response as? LLMResponse.Text)?.content?.trim()?.uppercase()?.startsWith("YES") ?: false
