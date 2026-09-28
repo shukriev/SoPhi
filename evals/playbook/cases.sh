@@ -40,7 +40,7 @@ CASES+=(plan-1 plan-2 plan-3 plan-4)
 
 setup_plan_1() { :; }
 turns_plan_1() { echo "/goal Read the retry limit from docs/ops.md, then create config/settings.ini containing a [network] section with retry_limit set to that value, then append the line 'retry_limit configured' to CHANGELOG.md."; }
-check_plan_1() { grep -q '^\[network\]' config/settings.ini 2>/dev/null && grep -Eq '^retry_limit *= *7$' config/settings.ini && grep -qx 'retry_limit configured' CHANGELOG.md; }
+check_plan_1() { grep -q '^\[network\]' config/settings.ini 2>/dev/null && grep -Eq '^retry_limit *[=:] *7 *$' config/settings.ini && grep -qx 'retry_limit configured' CHANGELOG.md && [ "$(head -1 CHANGELOG.md)" = "# Changelog" ]; }
 
 # driven: the second line is the answer to the clarifying question Sophi should ask first.
 setup_plan_2() { :; }
@@ -58,7 +58,7 @@ setup_plan_3() { :; }
 turns_plan_3() { echo "/goal Copy data/entries.csv into a backup/ folder, then compute the grand total of the amount column and write it (two decimals) to answer.txt."; }
 check_plan_3() {
   local f ok=1
-  for f in backup/*.csv; do cmp -s "$f" data/entries-2026.csv && ok=0; done
+  for f in $(find backup -name '*.csv' 2>/dev/null); do cmp -s "$f" data/entries-2026.csv && ok=0; done
   [ $ok -eq 0 ] && answer_is 964.55
 }
 
@@ -124,14 +124,16 @@ on run argv
   set time of d0 to 0
   set d1 to d0 + 86400
   set out to ""
-  tell application "Calendar"
-    repeat with c in calendars
-      repeat with e in (every event of c whose start date >= d0 and start date < d1)
-        set s to start date of e
-        set out to out & (name of c) & ";" & (summary of e) & ";" & (hours of s) & ":" & (minutes of s) & ";" & (((end date of e) - s) div 60) & linefeed
+  with timeout of 600 seconds -- big Exchange/iCloud calendars exceed the 120 s AppleEvent default
+    tell application "Calendar"
+      repeat with c in calendars
+        repeat with e in (every event of c whose start date >= d0 and start date < d1)
+          set s to start date of e
+          set out to out & (name of c) & ";" & (summary of e) & ";" & (hours of s) & ":" & (minutes of s) & ";" & (((end date of e) - s) div 60) & linefeed
+        end repeat
       end repeat
-    end repeat
-  end tell
+    end tell
+  end timeout
   return out
 end run
 OSA

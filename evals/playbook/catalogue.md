@@ -14,7 +14,7 @@ the human index: what each case is for, and what a good run looks like.
 | plan-2 | plan | driven | 12 month files under `reports/2026` | write_file/bash | score **did it ask before creating anything** — the check can't see that |
 | plan-3 | plan | solo | backup copy + `answer.txt` = `964.55` | `/goal`, glob, bash | step 1 fails by design; score the re-plan |
 | plan-4 | plan | delegate | Decimal migration, suite + CLI + hidden test green, **and** `invoke_claude_code` used | `/goal`, invoke_claude_code | solved solo = `case-bug` (not hard enough); a scripted `y` answers the always-HIGH_RISK delegation prompt |
-| assistant-1 | assistant | solo | 60-min dentist event, Sophi Eval, next Tuesday 15:00 | get_current_datetime, list_calendars, create_calendar_event | any new event on a real calendar = fail |
+| assistant-1 | assistant | solo | 60-min dentist event, Sophi Eval, next Tuesday 15:00 | get_current_datetime, list_calendars, create_calendar_event | a new *dentist* event on any other calendar = fail (other events syncing in mid-run are ignored) |
 | assistant-2 | assistant | driven (2 sessions) | `answer.txt` mentions passport | list_open_commitments | needs `--memory`; tests the encoder's commitment flag |
 | assistant-3 | assistant | driven (2 sessions) | `answer.txt` = `09:15` | memory recall | reading old session files instead of memory = note in evidence |
 | assistant-4 | assistant | solo | version = GitHub latest release | web_search, write_file | needs `BRAVE_SEARCH_API_KEY`; fetch_url-only = note |

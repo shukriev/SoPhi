@@ -12,7 +12,7 @@ for id in "${ids[@]}"; do
   fn="${id//-/_}"
   W="$(mktemp -d)"; mkdir "$W/work"; cp -R "$PB/fixtures/ledger/." "$W/work/"
   ( cd "$W/work" && "setup_$fn" ) >/dev/null; rc=$?
-  if [ $rc -eq 77 ]; then echo "skip $id (prerequisite missing)"; continue; fi
+  if [ $rc -eq 77 ]; then rm -rf "$W"; echo "skip $id (prerequisite missing)"; continue; fi
   if [ $rc -ne 0 ]; then echo "FAIL $id: setup failed ($W)"; fails=$((fails+1)); continue; fi
   if ( cd "$W/work" && "check_$fn" ) >/dev/null 2>&1; then
     echo "FAIL $id: check passes before any work ($W)"; fails=$((fails+1)); continue

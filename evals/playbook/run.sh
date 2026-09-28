@@ -2,7 +2,7 @@
 # One isolated Sophi run of a playbook case: a fresh user.home (seeded from home-seed/), a fresh copy
 # of the ledger fixture as cwd, and the case's turns piped to stdin (one line = one turn, EOF ends
 # the session). Usage: evals/playbook/run.sh <case-id> [run-number]
-# Env: SOPHI_JAR, SOPHI_FLAGS (default = the companion's "Remote Local" profile + --god-mode --no-remote), AB_LABEL.
+# Env: SOPHI_JAR, PLAYBOOK_RUNS (run dirs; default ~/Library/Caches/sophi-playbook), SOPHI_FLAGS (default = the companion's "Remote Local" profile + --god-mode --no-remote), AB_LABEL.
 set -o pipefail
 export PB="$(cd "$(dirname "$0")" && pwd)"
 source "$PB/cases.sh" || exit 2
@@ -14,7 +14,9 @@ RESULTS="${RESULTS:-$PB/runs/results.tsv}"
 DEFAULT_FLAGS="--provider openai-compat --base-url http://192.168.0.103:1234/v1 --model prism-ml/bonsai-27b --context-window-tokens 32768 --max-tokens 16384 --llm-timeout-seconds 300 --memory --embedding-model text-embedding-qwen3-embedding-0.6b --embedding-dimensions 1024 --god-mode --no-remote"
 read -ra FLAGS <<< "${SOPHI_FLAGS:-$DEFAULT_FLAGS}"
 
-RUN="$(mktemp -d "${TMPDIR:-/tmp}/sophi-pb-$id-$n.XXXX")"
+# Outside $TMPDIR (macOS purges it after ~3 days) so scorecards' RUN paths stay inspectable.
+RUNS_ROOT="${PLAYBOOK_RUNS:-$HOME/Library/Caches/sophi-playbook}"; RUNS_ROOT="${RUNS_ROOT%/}"
+mkdir -p "$RUNS_ROOT" && RUN="$(mktemp -d "$RUNS_ROOT/sophi-pb-$id-$n.XXXX")" || exit 1
 mkdir -p "$RUN/home/.sophi" "$RUN/work"
 cp -R "$PB/home-seed/." "$RUN/home/.sophi/"
 cp -R "$PB/fixtures/ledger/." "$RUN/work/"
