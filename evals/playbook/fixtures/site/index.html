@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Order lookup</title>
+<h1>Order lookup</h1>
+<label>Customer <input id="q" placeholder="Full name"></label>
+<button id="go">Search</button>
+<ul id="out"></ul>
+<script>
+  const orders = {
+    "Ada Byron": [["SO-1001", "shipped"]],
+    "Grace Hopper": [["SO-2044", "open"], ["SO-2051", "shipped"]],
+  };
+  document.getElementById("go").onclick = () => {
+    const rows = orders[document.getElementById("q").value.trim()] || [];
+    document.getElementById("out").innerHTML = rows.length
+      ? rows.map(([id, status]) => `<li>${id} — ${status}</li>`).join("")
+      : "<li>No orders found</li>";
+  };
+</script>

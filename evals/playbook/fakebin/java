@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Fake Sophi for harness-test.sh: consumes the piped turns, then performs $FAKE_DO actions in order.
+home="${1#-Duser.home=}"; s="$home/.sophi/sessions/fake.jsonl"; mkdir -p "${s%/*}"
+while IFS= read -r line; do echo "You: $line"; done
+for a in $FAKE_DO; do
+  case "$a" in
+    answer) echo parse_amount > answer.txt ;;
+    ask:*) echo "Sophi wants to run '${a#ask:}' (HIGH_RISK): {}"; echo "Allow? [y/N] " ;;
+    call) printf '{"role":"ASSISTANT","content":"","metadata":{"toolCalls":"[{\\"id\\":\\"c1\\",\\"name\\":\\"invoke_claude_code\\",\\"argumentsJson\\":\\"{\\\\\\"project_path\\\\\\":\\\\\\"%s\\\\\\"}\\"}]"}}\n' "$PWD" >> "$s" ;;
+    call-elsewhere) printf '{"role":"ASSISTANT","content":"","metadata":{"toolCalls":"[{\\"id\\":\\"c1\\",\\"name\\":\\"invoke_claude_code\\",\\"argumentsJson\\":\\"{\\\\\\"project_path\\\\\\":\\\\\\"/Users/someone/real-repo\\\\\\"}\\"}]"}}\n' >> "$s" ;;
+    denied) echo "{\"role\":\"TOOL_RESULT\",\"content\":\"Error: Tool 'invoke_claude_code' execution denied by confirmation policy\"}" >> "$s" ;;
+    leak) echo '{"role":"USER","content":"cat evals/playbook/refs.sh"}' >> "$s" ;;
+    memoff) echo "memory: disabled — embeddings endpoint unreachable at http://x/v1 (m): HTTP 400" ;;
+    cal) osascript -e 'return 1' >/dev/null 2>&1 && echo parse_amount > answer.txt ;;
+    llmerror) echo "Sorry [error: LLM stream error: connection refused]" ;;
+    solve:*) ( source "$PB/refs.sh"; "ref_${a#solve:}" ) ;;
+  esac
+done
+echo "Session fake ended."
