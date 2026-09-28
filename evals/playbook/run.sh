@@ -11,7 +11,7 @@ declare -F "turns_$fn" >/dev/null || { echo "unknown case: $id" >&2; exit 2; }
 JAR="${SOPHI_JAR:-$PB/../../sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar}"
 [ -f "$JAR" ] || { echo "no jar at $JAR — build it: mvn -q -pl sophi-cli -am package -DskipTests" >&2; exit 2; }
 RESULTS="${RESULTS:-$PB/runs/results.tsv}"
-DEFAULT_FLAGS="--provider openai-compat --base-url http://192.168.0.103:1234/v1 --model prism-ml/bonsai-27b --context-window-tokens 32768 --max-tokens 16384 --llm-timeout-seconds 300 --memory --embedding-model text-embedding-qwen3-embedding-0.6b --embedding-dimensions 1024 --god-mode --no-remote"
+DEFAULT_FLAGS="--provider openai-compat --base-url http://192.168.0.103:1234/v1 --model prism-ml/bonsai-27b --context-window-tokens 32768 --max-tokens 16384 --llm-timeout-seconds 300 --memory --embedding-model text-embedding-nomic-embed-text-v1.5 --embedding-dimensions 768 --god-mode --no-remote"
 read -ra FLAGS <<< "${SOPHI_FLAGS:-$DEFAULT_FLAGS}"
 
 # Outside $TMPDIR (macOS purges it after ~3 days) so scorecards' RUN paths stay inspectable.

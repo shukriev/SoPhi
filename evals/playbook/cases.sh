@@ -91,8 +91,11 @@ turns_coding_3() { echo "Running python3 -m ledger.cli data/entries-2026.csv cra
 check_coding_3() { cli_ok && suite_passes && cmp -s data/entries-2026.csv "$PB/fixtures/ledger/data/entries-2026.csv"; }
 
 # delegate: cross-module refactor; pass also requires invoke_claude_code (run.sh).
-setup_coding_4() { :; }
-turns_coding_4() { echo "Refactor ledger/report.py into a package ledger/report/ with two modules: ledger/report/loading.py (load_entries) and ledger/report/aggregate.py (total_by_category). Existing imports like 'from ledger.report import load_entries, total_by_category' must keep working, and the CLI and the test suite must pass. Work only inside $PWD."; echo y; }
+setup_coding_4() {
+  printf 'currency,eur_rate\nUSD,0.92\nGBP,1.17\n' > data/rates.csv
+  printf 'category,amount,currency\nfood,10.00,USD\nrent,100.00,EUR\ntravel,20.00,GBP\nfood,5.00,\nmisc,0.50,GBP\n' > data/entries-multi.csv
+}
+turns_coding_4() { echo "Add multi-currency support to the ledger and restructure it. (1) CSV entries may carry an optional third column 'currency' (empty or missing means EUR); exchange rates are in rates.csv next to the entries file (columns currency,eur_rate). load_entries must return amounts converted to EUR cents, rounding half up. (2) The CLI keeps its current output (converted to EUR) and gains a --by-currency flag, used as 'python3 -m ledger.cli <file> --by-currency', that prints one line per currency, sorted, like 'USD: 10.00', in the original currency. (3) Split ledger/report.py into a package ledger/report/ with loading.py (load_entries) and aggregate.py (total_by_category); existing imports such as 'from ledger.report import load_entries, total_by_category' must keep working. The existing test suite and the current CLI output for data/entries-2026.csv must stay the same. Work only inside $PWD."; echo y; }
 check_coding_4() {
   [ ! -e ledger/report.py ] && grep -q "def load_entries" ledger/report/loading.py 2>/dev/null \
     && grep -q "def total_by_category" ledger/report/aggregate.py && suite_passes && cli_ok \
