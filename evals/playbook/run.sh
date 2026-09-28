@@ -24,11 +24,14 @@ cd "$RUN/work" || exit 1
 "setup_$fn"; rc=$?
 [ $rc -eq 0 ] || { echo "setup failed (rc=$rc) for $id" >&2; exit 1; }
 
-session() { "$1" | java -Duser.home="$RUN/home" -jar "$JAR" "${FLAGS[@]}" 2>&1 | tee -a "$RUN/transcript.txt"; }
+# Only the calendar case may reach Calendar.app; every other run gets the osascript guard.
+case " ${CALENDAR_CASES[*]} " in *" $id "*) SPATH="$PATH" ;; *) SPATH="$PB/guardbin:$PATH" ;; esac
+session() { "$1" | PATH="$SPATH" java -Duser.home="$RUN/home" -jar "$JAR" "${FLAGS[@]}" 2>&1 | tee -a "$RUN/transcript.txt"; }
 session "turns_$fn"
 declare -F "turns_${fn}_2" >/dev/null && session "turns_${fn}_2"
 
 if "check_$fn" >/dev/null 2>&1; then result=pass; else result=fail; fi
+declare -F "teardown_$fn" >/dev/null && "teardown_$fn"
 S="$RUN/home/.sophi/sessions"
 calls="$(cat "$S"/*.jsonl 2>/dev/null | grep -F '\"name\":\"invoke_claude_code\"')"
 denials=$(cat "$S"/*.jsonl 2>/dev/null | grep -cF "Tool 'invoke_claude_code' execution denied")
@@ -45,6 +48,8 @@ void=""
 [ "$prompts" -gt "$allowed" ] && void="a [y/N] prompt consumed a scripted turn — later turns are shifted"
 grep -qs 'evals/playbook' "$S"/*.jsonl && void="the session touched evals/playbook — it may have seen the answers"
 grep -q '\[error: ' "$RUN/transcript.txt" && void="the model backend errored mid-run"
+case " ${FLAGS[*]} " in *" --memory "*) grep -q '^memory: disabled' "$RUN/transcript.txt" && \
+  void="memory was requested but switched itself off (embeddings endpoint) — memory cases would pass by other means" ;; esac
 [ -n "$calls" ] && grep -vqF "$(basename "$RUN")" <<< "$calls" && \
   void="invoke_claude_code was pointed OUTSIDE the run dir — check that project for changes Claude Code made"
 [ -n "$void" ] && { echo "VOID: $void"; result=void; }

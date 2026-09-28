@@ -10,6 +10,8 @@ for a in $FAKE_DO; do
     call-elsewhere) printf '{"role":"ASSISTANT","content":"","metadata":{"toolCalls":"[{\\"id\\":\\"c1\\",\\"name\\":\\"invoke_claude_code\\",\\"argumentsJson\\":\\"{\\\\\\"project_path\\\\\\":\\\\\\"/Users/someone/real-repo\\\\\\"}\\"}]"}}\n' >> "$s" ;;
     denied) echo "{\"role\":\"TOOL_RESULT\",\"content\":\"Error: Tool 'invoke_claude_code' execution denied by confirmation policy\"}" >> "$s" ;;
     leak) echo '{"role":"USER","content":"cat evals/playbook/refs.sh"}' >> "$s" ;;
+    memoff) echo "memory: disabled — embeddings endpoint unreachable at http://x/v1 (m): HTTP 400" ;;
+    cal) osascript -e 'return 1' >/dev/null 2>&1 && echo parse_amount > answer.txt ;;
     llmerror) echo "Sorry [error: LLM stream error: connection refused]" ;;
     solve:*) ( source "$PB/refs.sh"; "ref_${a#solve:}" ) ;;
   esac

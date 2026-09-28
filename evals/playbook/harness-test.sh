@@ -14,6 +14,8 @@ expect "plain pass"                 tool-1 "answer"                             
 expect "stray prompt voids"         tool-1 "answer ask:bash"                           "result=void delegated=no"
 expect "answer leak voids"          tool-1 "answer leak"                               "result=void delegated=no"
 expect "backend error voids"        tool-1 "answer llmerror"                           "result=void delegated=no"
+expect "memory switched off voids"  tool-1 "answer memoff"                            "result=void delegated=no"
+expect "calendar blocked outside assistant-1" tool-1 "cal"                         "result=fail delegated=no"
 expect "delegated + solved passes"  plan-4 "ask:invoke_claude_code call solve:plan_4"  "result=pass delegated=yes"
 expect "solved solo fails"          plan-4 "solve:plan_4"                              "result=fail delegated=no"
 expect "denied delegation fails"    plan-4 "ask:invoke_claude_code call denied solve:plan_4" "result=fail delegated=no"
@@ -41,11 +43,19 @@ neg() {  # neg <label> <case-fn> <shell that produces a wrong-but-plausible resu
 }
 # seen live (plan-1, bonsai-27b): write_file replaced CHANGELOG.md instead of appending to it
 neg "plan-1 rejects an overwritten CHANGELOG" plan_1 "mkdir config && printf '[network]\nretry_limit = 7\n' > config/settings.ini && echo 'retry_limit configured' > CHANGELOG.md"
+# seen live (tool-5, bonsai-27b): the right pattern plus an explanatory note
+tol "tool-5 accepts the pattern with a trailing note" tool_5 "echo 'rel/<yyyy>.<n> (n restarts at 1 each year)' > answer.txt"
+neg "tool-5 rejects the feature-branch pattern" tool_5 "echo 'feat/<ticket>-<slug>' > answer.txt"
+# browser-1 serves its page over http (Playwright MCP blocks file:); the server must not outlive the run
+out="$(FAKE_DO=answer "$PB/run.sh" browser-1 1 2>&1 | sed -n 's/^RUN=\([^ ]*\).*/\1/p')"
+pid="$(cat "$out/.browser-server.pid" 2>/dev/null)"
+if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then echo "ok   browser-1 server stopped after the run"
+else echo "FAIL browser-1 server: pid '$pid' (run $out)"; fails=$((fails+1)); fi
 # run dirs: stable location (not the purged $TMPDIR), no doubled slash
 out="$(PLAYBOOK_RUNS="$PB_RUNS_ROOT/" FAKE_DO=answer "$PB/run.sh" tool-1 1 2>&1 | sed -n 's/^RUN=\([^ ]*\).*/\1/p')"
 case "$out" in "$PB_RUNS_ROOT"/sophi-pb-tool-1-1.*) [[ "$out" != *//* ]] && echo "ok   run dir under PLAYBOOK_RUNS, no //" || { echo "FAIL doubled slash: $out"; fails=$((fails+1)); } ;;
   *) echo "FAIL run dir: $out"; fails=$((fails+1)) ;; esac
 SOPHI_JAR=/nonexistent "$PB/run.sh" tool-1 1 >/dev/null 2>&1; rc=$?
 if [ $rc -eq 2 ]; then echo "ok   missing jar exits 2"; else echo "FAIL missing jar: exit $rc, want 2"; fails=$((fails+1)); fi
-[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 10 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
+[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 13 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
 rm -rf "$RESULTS" "$PB_RUNS_ROOT"; echo "$fails failure(s)"; exit $fails

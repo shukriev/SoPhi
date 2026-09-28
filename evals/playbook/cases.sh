@@ -5,6 +5,7 @@
 
 CASES=()
 DELEGATE_CASES=(plan-4 coding-4)
+CALENDAR_CASES=(assistant-1)   # the only cases whose Sophi may reach Calendar.app (see guardbin/osascript)
 
 suite_passes() { PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . >/dev/null 2>&1; }
 answer_is() { [ "$(tr -d '[:space:]' < answer.txt 2>/dev/null)" = "$1" ]; }
@@ -172,3 +173,55 @@ arcadedb_latest() { curl -fsS https://api.github.com/repos/ArcadeData/arcadedb/r
 setup_assistant_4() { [ -n "$BRAVE_SEARCH_API_KEY" ] || { echo "BRAVE_SEARCH_API_KEY not set — web_search is disabled" >&2; return 77; }; }
 turns_assistant_4() { echo "Use a web search to find the latest release version of ArcadeDB (the multi-model database) and write just the version number to answer.txt."; }
 check_assistant_4() { local want; want="$(arcadedb_latest)" && [ -n "$want" ] && [ "$(tr -d '[:space:]v' < answer.txt 2>/dev/null)" = "$want" ]; }
+
+# --- grown from real sessions (2026-09-28 harvest) ------------------------------------------
+CASES+=(tool-5 assistant-5 browser-1)
+
+# Real pattern: read_file("~/…") fails (no ~ expansion), an absolute path "escapes working directory",
+# and bash's ~ is the REAL home — the skill tool is the only way in. The skill exists only in the run home.
+setup_tool_5() {
+  mkdir -p ../home/.sophi/skills && cat > ../home/.sophi/skills/team-conventions.md <<'MD'
+---
+title: team-conventions
+description: Branch, commit and release naming conventions for the user's team
+version: 1.0.0
+---
+
+# Team conventions
+
+- Feature branches: `feat/<ticket>-<slug>`
+- Release branches: `rel/<yyyy>.<n>` (n restarts at 1 each year)
+- Commit messages follow Conventional Commits.
+MD
+}
+# The prompt must not name the skill: in the real sessions Sophi had to find it itself.
+turns_tool_5() { echo "I wrote down my team's conventions for you earlier. How must our release branches be named? Write just the naming pattern to answer.txt."; }
+check_tool_5() { head -1 answer.txt 2>/dev/null | tr -d '`' | grep -qE '^[[:space:]]*rel/<yyyy>\.<n>([[:space:]]|$)'; }
+
+# Real pattern: manage_scheduled_task is the most-used tool, with real "'mode' must be recurring or
+# goal" errors. The task store lives in the run home.
+setup_assistant_5() { :; }
+turns_assistant_5() { echo "Every weekday at 8am, remind me to review my calendar for the day."; }
+check_assistant_5() {
+  grep -rqE '"0 8 \* \* (1-5|MON-FRI|mon-fri)"' ../home/.sophi/schedule 2>/dev/null && grep -rqi calendar ../home/.sophi/schedule
+}
+
+# Real pattern: browser work through the Playwright MCP server. The run gets its own MCP config
+# (cwd .sophi/mcp.json) with an --isolated, headless profile — never the user's real browser profile.
+BROWSER_BIN="${PLAYBOOK_BROWSER:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+setup_browser_1() {
+  command -v npx >/dev/null && [ -x "$BROWSER_BIN" ] || { echo "needs npx and a Chromium browser (PLAYBOOK_BROWSER)" >&2; return 77; }
+  # Playwright MCP blocks file: URLs, so the page is served over http on a free local port.
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  cp -R "$PB/fixtures/site" site && echo "$port" > ../.browser-port
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory site >/dev/null 2>&1 &
+  echo $! > ../.browser-server.pid
+  mkdir -p .sophi && cat > .sophi/mcp.json <<JSON
+{"servers": [{"name": "browser", "transport": "stdio",
+  "command": ["npx", "-y", "@playwright/mcp@latest", "--executable-path", "$BROWSER_BIN", "--isolated", "--headless"],
+  "safeTools": ["browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_fill_form", "browser_press_key", "browser_wait_for"]}]}
+JSON
+}
+teardown_browser_1() { kill "$(cat ../.browser-server.pid 2>/dev/null)" 2>/dev/null; }
+turns_browser_1() { echo "Open http://127.0.0.1:$(cat ../.browser-port)/index.html in the browser, search for the customer Grace Hopper, and write the ID of her open order to answer.txt."; }
+check_browser_1() { answer_is SO-2044; }

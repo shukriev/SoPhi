@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Put first on Sophi's PATH by run.sh for every case except the calendar case: Sophi's calendar tools
+# (and anything its bash tool tries) shell out to `osascript` by name, and there is no other switch.
+# Without this, a run can write to the user's real calendars (seen live: assistant-2 run 2).
+echo "osascript is disabled in this playbook case (it would reach the user's real calendars)" >&2
+exit 1

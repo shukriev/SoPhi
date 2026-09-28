@@ -1,6 +1,6 @@
 # Claude × Sophi use-case playbook
 
-Measures the local Sophi (`prism-ml/bonsai-27b` on LM Studio) on 16 fixed cases, with Claude as the critic, and keeps
+Measures the local Sophi (`prism-ml/bonsai-27b` on LM Studio) on 19 fixed cases (16 designed, 3 grown from real session failures), with Claude as the critic, and keeps
 only the harness fixes that measurably help. Spec:
 `docs/superpowers/specs/2026-09-26-claude-sophi-usecase-playbook-design.md` (local, gitignored).
 
@@ -8,6 +8,7 @@ only the harness fixes that measurably help. Spec:
 
 - `sophi-cli` jar built: `mvn -q -pl sophi-cli -am package -DskipTests`
 - LM Studio at `192.168.0.103:1234` serving `prism-ml/bonsai-27b` and `text-embedding-qwen3-embedding-0.6b` (override with `SOPHI_FLAGS`)
+- `npx` and a Chromium browser for `browser-1` (Brave by default; set `PLAYBOOK_BROWSER`)
 - a Calendar.app calendar named `Sophi Eval`, used for nothing else: every `assistant-1` setup deletes all its events (the first run asks for automation permission)
 - `BRAVE_SEARCH_API_KEY` exported (else `assistant-4` is skipped)
 - the `claude` CLI logged in (delegate cases)

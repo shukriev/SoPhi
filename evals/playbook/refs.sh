@@ -96,3 +96,12 @@ ref_assistant_1() { local d; d="$(next_tuesdays | head -1)"; add_event_osa | osa
 ref_assistant_2() { echo "Renew passport before 15 October" > answer.txt; }
 ref_assistant_3() { echo 09:15 > answer.txt; }
 ref_assistant_4() { arcadedb_latest > answer.txt; }
+
+ref_tool_5() { echo 'rel/<yyyy>.<n>' > answer.txt; }
+ref_assistant_5() {
+  mkdir -p ../home/.sophi/schedule && cat > ../home/.sophi/schedule/tasks.json <<'JSON'
+[{"name": "Morning calendar review", "prompt": "Remind the user to review today's calendar",
+  "trigger": {"type": "cron", "expression": "0 8 * * 1-5"}, "mode": "recurring"}]
+JSON
+}
+ref_browser_1() { echo SO-2044 > answer.txt; }
