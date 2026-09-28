@@ -2,14 +2,14 @@
 # One isolated Sophi run of a playbook case: a fresh user.home (seeded from home-seed/), a fresh copy
 # of the ledger fixture as cwd, and the case's turns piped to stdin (one line = one turn, EOF ends
 # the session). Usage: evals/playbook/run.sh <case-id> [run-number]
-# Env: SOPHI_JAR, SOPHI_FLAGS (default = the sophi_local alias + --god-mode --no-remote), AB_LABEL.
+# Env: SOPHI_JAR, SOPHI_FLAGS (default = the companion's "Remote Local" profile + --god-mode --no-remote), AB_LABEL.
 set -o pipefail
 export PB="$(cd "$(dirname "$0")" && pwd)"
 source "$PB/cases.sh" || exit 2
 id="$1"; n="${2:-1}"; fn="${id//-/_}"
 declare -F "turns_$fn" >/dev/null || { echo "unknown case: $id" >&2; exit 2; }
 JAR="${SOPHI_JAR:-$PB/../../sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar}"
-DEFAULT_FLAGS="--provider openai-compat --base-url http://localhost:11434/v1 --model qwen3.5:9b --max-tokens 8192 --memory --embedding-model qwen3-embedding:latest --embedding-dimensions 4096 --god-mode --no-remote"
+DEFAULT_FLAGS="--provider openai-compat --base-url http://192.168.0.103:1234/v1 --model prism-ml/bonsai-27b --context-window-tokens 32768 --max-tokens 16384 --llm-timeout-seconds 300 --memory --embedding-model text-embedding-qwen3-embedding-0.6b --embedding-dimensions 1024 --god-mode --no-remote"
 read -ra FLAGS <<< "${SOPHI_FLAGS:-$DEFAULT_FLAGS}"
 
 RUN="$(mktemp -d "${TMPDIR:-/tmp}/sophi-pb-$id-$n.XXXX")"

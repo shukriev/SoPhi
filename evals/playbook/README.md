@@ -1,13 +1,13 @@
 # Claude × Sophi use-case playbook
 
-Measures the local Sophi (`qwen3.5:9b`) on 16 fixed cases, with Claude as the critic, and keeps
+Measures the local Sophi (`prism-ml/bonsai-27b` on LM Studio) on 16 fixed cases, with Claude as the critic, and keeps
 only the harness fixes that measurably help. Spec:
 `docs/superpowers/specs/2026-09-26-claude-sophi-usecase-playbook-design.md` (local, gitignored).
 
 ## One-time setup
 
 - `sophi-cli` jar built: `mvn -q -pl sophi-cli -am package -DskipTests`
-- Ollama running with `qwen3.5:9b` and `qwen3-embedding`
+- LM Studio at `192.168.0.103:1234` serving `prism-ml/bonsai-27b` and `text-embedding-qwen3-embedding-0.6b` (override with `SOPHI_FLAGS`)
 - a Calendar.app calendar named `Sophi Eval` (the first run asks for automation permission)
 - `BRAVE_SEARCH_API_KEY` exported (else `assistant-4` is skipped)
 - the `claude` CLI logged in (delegate cases)
@@ -22,7 +22,7 @@ only the harness fixes that measurably help. Spec:
    > the case in `cases.sh` and `catalogue.md`, then `$RUN/transcript.txt` and
    > `$RUN/home/.sophi/sessions/*.jsonl`. Write `evals/playbook/runs/<date>-<id>-<n>.md`.
 4. **`unclear` → Claude-backed re-run:**
-   `SOPHI_FLAGS="--provider claude --model claude-sonnet-5 --memory --embedding-base-url http://localhost:11434/v1 --embedding-model qwen3-embedding:latest --embedding-dimensions 4096 --god-mode --no-remote" AB_LABEL=claude evals/playbook/run.sh <case>`
+   `SOPHI_FLAGS="--provider claude --model claude-sonnet-5 --memory --embedding-base-url http://192.168.0.103:1234/v1 --embedding-model text-embedding-qwen3-embedding-0.6b --embedding-dimensions 1024 --god-mode --no-remote" AB_LABEL=claude evals/playbook/run.sh <case>`
 
 ## A/B a prescription
 
