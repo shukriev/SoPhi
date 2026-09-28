@@ -14,13 +14,12 @@ which repeats non-idempotent work.
 
 - Evidence: 5 real sessions (qwen3.5:9b), playbook plan-1 and plan-3, and plan-4 running 30+ min.
   Same prompt on bonsai-27b: `max_tokens=8` → `length`, `''`; `max_tokens=400` → `stop`, `YES`.
-- [ ] Separate PR against sophi-core: give the judge room to think (e.g. `maxTokens = 1024`).
-- [ ] Regression test: a fake provider that only answers when `maxTokens` ≥ N.
-- [ ] Log the judge's finish reason when it isn't `stop`, so a starved judge doesn't look like a
-      real "NO".
-- [ ] Check the other `LlmJudged` users: `/goal` without `--check` (`GoalController.kt:57`),
-      sub-plans (`PlanRunner.kt:207`) and scheduled goal-mode tasks (`stop_condition_type=llm_judged`).
-- [ ] Open the issue: `gh auth login` first, or paste this section.
+- [x] Give the judge room to think: `maxTokens = 1024` (fix/playbook-followups).
+- [x] Regression test: `PlanRunnerTest` — "the LlmJudged judge gets enough tokens for a thinking model to reach its YES".
+- [x] Other `LlmJudged` users: `PlanRunner.judge` is the only evaluation site, so `/goal`, sub-plans and
+      scheduled goal tasks are all covered. The same starvation was also found in
+      `Consolidator` compress (200 tokens, no `reasoningEffort`), where an empty summary soft-deleted
+      a memory thread. Fixed, with a test: "compress keeps the thread when the summary comes back blank".
 
 ## 2. First A/B runs (README → "A/B a prescription")
 
@@ -39,14 +38,14 @@ Run each only after item 1 lands; until then /goal replans are noise that swamp 
 
 ## 3. Case fixes
 
-- [ ] **coding-4 is a case-bug.** bonsai-27b solved it alone in both runs, so it doesn't need
-      delegation. Make it genuinely larger (multi-module plus new behaviour), or accept solo success
-      for this model tier.
+- [x] **coding-4 is a case-bug.** bonsai-27b solved it alone in both runs, so it doesn't need
+      delegation. Enlarged: multi-currency support (EUR conversion half-up, `--by-currency`) plus
+      the package split, with a hidden test. Needs a live run.
 - [ ] **plan-4** has no valid run yet (the judge bug made it spiral). Re-run after item 1 before
       judging it.
-- [ ] **`glob "**/ledger/**"` → No files found** (tool-1 ×2, coding-4, where it tripped the loop
-      guard). Confirm whether `GlobTool` uses Java `PathMatcher`, where a leading `**/` needs a
-      parent directory. Then fix the tool or its description.
+- [x] **`glob "**/ledger/**"` → No files found** (tool-1 ×2, coding-4, where it tripped the loop
+      guard). Confirmed: Java `PathMatcher` makes `**/` consume at least one directory. `GlobTool` now
+      also tries each zero-directory reading; tested (`GlobToolTest`).
 
 ## 4. Remaining baseline coverage
 
@@ -61,8 +60,8 @@ Run each only after item 1 lands; until then /goal replans are noise that swamp 
       even after a reload; nomic still works). The companion uses it, so companion memory is
       probably off. Check the companion log for "memory: disabled". Also fix the `qwe3` → `qwen3`
       typo in the companion profile if it's there.
-- [ ] Playbook runs used nomic embeddings as a stand-in (fine: each run has an empty store). Switch
-      `run.sh`'s default back to qwen3 once it works, or keep nomic for the playbook.
+- [x] `run.sh` defaults to nomic embeddings: each run has an empty store, so the playbook doesn't
+      depend on the companion's embedding model.
 
 ## 6. Later
 

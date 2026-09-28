@@ -62,12 +62,31 @@ ref_coding_4() {
   mkdir -p ledger/report
   cat > ledger/report/loading.py <<'PY'
 import csv
+from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
 from ledger.money import parse_amount
 
 
-def load_entries(path):
+def load_rows(path):
+    """(category, cents, currency) in the entry's own currency."""
     with open(path, newline="") as f:
-        return [(row["category"], parse_amount(row["amount"])) for row in csv.DictReader(f)]
+        return [(r["category"], parse_amount(r["amount"]), (r.get("currency") or "EUR").strip() or "EUR")
+                for r in csv.DictReader(f)]
+
+
+def load_rates(path):
+    rates_file = Path(path).parent / "rates.csv"
+    rates = {"EUR": Decimal(1)}
+    if rates_file.exists():
+        with open(rates_file, newline="") as f:
+            rates.update({r["currency"]: Decimal(r["eur_rate"]) for r in csv.DictReader(f)})
+    return rates
+
+
+def load_entries(path):
+    rates = load_rates(path)
+    return [(cat, int((Decimal(cents) * rates[cur]).quantize(Decimal(1), ROUND_HALF_UP)))
+            for cat, cents, cur in load_rows(path)]
 PY
   cat > ledger/report/aggregate.py <<'PY'
 def total_by_category(entries):
@@ -78,6 +97,30 @@ def total_by_category(entries):
 PY
   printf 'from ledger.report.loading import load_entries\nfrom ledger.report.aggregate import total_by_category\n' > ledger/report/__init__.py
   rm ledger/report.py
+  cat > ledger/cli.py <<'PY'
+import sys
+from ledger.money import format_amount
+from ledger.report import load_entries, total_by_category
+from ledger.report.loading import load_rows
+
+
+def main(argv):
+    if "--by-currency" in argv:
+        per = {}
+        for _, cents, cur in load_rows(argv[1]):
+            per[cur] = per.get(cur, 0) + cents
+        for cur, cents in sorted(per.items()):
+            print(f"{cur}: {format_amount(cents)}")
+        return
+    entries = load_entries(argv[1])
+    for category, cents in sorted(total_by_category(entries).items()):
+        print(f"{category}: {format_amount(cents)}")
+    print(f"TOTAL: {format_amount(sum(c for _, c in entries))}")
+
+
+if __name__ == "__main__":
+    main(sys.argv)
+PY
 }
 
 add_event_osa() { cat <<'OSA'

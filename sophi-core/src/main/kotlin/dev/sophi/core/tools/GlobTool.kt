@@ -28,7 +28,7 @@ class GlobTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val searchRoot = root.resolve(args.path ?: ".").normalize()
         require(searchRoot.startsWith(root)) { "Path escapes working directory: ${args.path}" }
 
-        val matcher = root.fileSystem.getPathMatcher("glob:${args.pattern}")
+        val matchers = zeroDirVariants(args.pattern).map { root.fileSystem.getPathMatcher("glob:$it") }
 
         val matches = walkRegularFiles(searchRoot)
             .filter { file ->
@@ -37,10 +37,19 @@ class GlobTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
             }
             // Matched relative to searchRoot (not root) so a bare pattern like "*.txt" behaves as
             // documented once "path" scopes into a subdirectory, instead of silently never matching.
-            .filter { file -> matcher.matches(file.relativeTo(searchRoot)) }
+            .filter { file -> file.relativeTo(searchRoot).let { rel -> matchers.any { it.matches(rel) } } }
             .map { it.relativeTo(root).toString() }
             .sorted()
 
         return if (matches.isEmpty()) "No files found" else matches.take(DEFAULT_MAX_RESULTS).joinToString("\n")
     }
+}
+
+// Java's glob makes each double-star-slash match >= 1 directory; bash globstar and gitignore
+// also allow 0, so every occurrence is tried both ways (2^n patterns, n tiny in practice).
+private fun zeroDirVariants(pattern: String): List<String> {
+    val parts = pattern.split("**/")
+    var variants = listOf(parts.first())
+    for (part in parts.drop(1)) variants = variants.flatMap { listOf("$it**/$part", "$it$part") }
+    return variants.distinct()
 }

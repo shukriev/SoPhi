@@ -34,6 +34,25 @@ class GlobToolTest : FunSpec({
         result shouldBe "src/main/App.kt"
     }
 
+    // Java's PathMatcher makes "**/" consume at least one directory; models (and bash globstar,
+    // gitignore) expect it to also match zero. Seen live: "**/ledger/**" → "No files found" for
+    // ledger/money.py, which sent a model into retries and tripped the loop guard.
+    test("execute() lets a leading **/ match zero directories") {
+        root.resolve("ledger").createDirectories()
+        root.resolve("ledger/money.py").writeText("x")
+        root.resolve("a.kt").writeText("x")
+        runBlocking { tool.execute("""{"pattern":"**/ledger/**"}""") } shouldBe "ledger/money.py"
+        runBlocking { tool.execute("""{"pattern":"**/*.kt"}""") } shouldBe "a.kt"
+    }
+
+    test("execute() lets an inner /**/ match zero directories, alongside an existing {a,b} group") {
+        root.resolve("src/deep").createDirectories()
+        root.resolve("src/x.kt").writeText("x")
+        root.resolve("src/deep/y.kt").writeText("x")
+        root.resolve("src/z.md").writeText("x")
+        runBlocking { tool.execute("""{"pattern":"src/**/*.{kt,md}"}""") } shouldBe "src/deep/y.kt\nsrc/x.kt\nsrc/z.md"
+    }
+
     test("execute() returns results sorted alphabetically") {
         root.resolve("b.kt").writeText("x")
         root.resolve("a.kt").writeText("x")
