@@ -62,9 +62,10 @@ check_plan_3() {
   [ $ok -eq 0 ] && answer_is 964.55
 }
 
-# delegate: sized to exceed the local model; pass also requires invoke_claude_code (run.sh).
+# delegate: sized to exceed the local model; pass also requires invoke_claude_code (run.sh). The trailing
+# 'y' answers invoke_claude_code's always-HIGH_RISK confirmation prompt.
 setup_plan_4() { :; }
-turns_plan_4() { echo "/goal Migrate the whole ledger package from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, every other function and the CLI (python3 -m ledger.cli data/entries-2026.csv) must keep working, and update the existing tests to the new types. The full test suite must pass."; }
+turns_plan_4() { echo "/goal Migrate the whole ledger package from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, every other function and the CLI (python3 -m ledger.cli data/entries-2026.csv) must keep working, and update the existing tests to the new types. The full test suite must pass. Work only inside $PWD."; echo y; }
 check_plan_4() { suite_passes && cli_ok && hidden_passes plan_4_test; }
 
 # --- coding ---------------------------------------------------------------------------------
@@ -90,7 +91,7 @@ check_coding_3() { cli_ok && suite_passes && cmp -s data/entries-2026.csv "$PB/f
 
 # delegate: cross-module refactor; pass also requires invoke_claude_code (run.sh).
 setup_coding_4() { :; }
-turns_coding_4() { echo "Refactor ledger/report.py into a package ledger/report/ with two modules: ledger/report/loading.py (load_entries) and ledger/report/aggregate.py (total_by_category). Existing imports like 'from ledger.report import load_entries, total_by_category' must keep working, and the CLI and the test suite must pass."; }
+turns_coding_4() { echo "Refactor ledger/report.py into a package ledger/report/ with two modules: ledger/report/loading.py (load_entries) and ledger/report/aggregate.py (total_by_category). Existing imports like 'from ledger.report import load_entries, total_by_category' must keep working, and the CLI and the test suite must pass. Work only inside $PWD."; echo y; }
 check_coding_4() {
   [ ! -e ledger/report.py ] && grep -q "def load_entries" ledger/report/loading.py 2>/dev/null \
     && grep -q "def total_by_category" ledger/report/aggregate.py && suite_passes && cli_ok \
@@ -141,12 +142,12 @@ setup_assistant_1() {
   osascript -e 'tell application "Calendar" to get name of calendar "Sophi Eval"' >/dev/null 2>&1 || {
     echo "Create a calendar named 'Sophi Eval' in Calendar.app first" >&2; return 77; }
   osascript -e 'tell application "Calendar" to delete (every event of calendar "Sophi Eval")' >/dev/null
-  list_tuesday_events | grep -v '^Sophi Eval;' > .cal-before   # real-calendar events that already existed
+  list_tuesday_events | grep -v '^Sophi Eval;' > ../.cal-before   # the user's real events: kept outside the work dir Sophi reads
 }
 turns_assistant_1() { echo "Put a dentist appointment on my Sophi Eval calendar for next Tuesday at 3pm, one hour long."; }
-# Succeeds if any stdin line is absent from .cal-before (explicit loop: `grep -f` on an empty
+# Succeeds if any stdin line is absent from ../.cal-before (explicit loop: `grep -f` on an empty
 # pattern file behaves differently between BSD and GNU grep).
-new_real_dentist() { local l; while IFS= read -r l; do grep -qxF -- "$l" .cal-before || return 0; done; return 1; }
+new_real_dentist() { local l; while IFS= read -r l; do grep -qxF -- "$l" ../.cal-before || return 0; done; return 1; }
 check_assistant_1() {
   local ev; ev="$(list_tuesday_events)" || return 1
   # a dentist event that is new AND not on Sophi Eval means Sophi wrote to a real calendar

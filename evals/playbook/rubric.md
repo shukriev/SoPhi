@@ -9,8 +9,10 @@ Claude fills one scorecard per run at `runs/YYYY-MM-DD-<case>-<n>.md`.
 2. **Exactly one fault tag and one prescription** per non-passing run.
 3. **Delegate cases:** passing the check without calling `invoke_claude_code` → `outcome: fail`,
    `fault: case-bug` (the case isn't hard enough; recalibrate it, don't fix Sophi).
-4. **`run.sh` warnings void the run:** a `[y/N]` warning or an `evals/playbook` warning →
-   `fault: case-bug`, re-run.
+4. **`result=void` runs are not scored.** `run.sh` voids a run when a `[y/N]` prompt swallowed a
+   scripted turn, the session touched `evals/playbook`, the model backend errored, or
+   `invoke_claude_code` was pointed outside the run dir (check that project for changes!). Fix the
+   cause and re-run; void rows are excluded from A/B counts.
 5. **`unclear`** is the only tag that triggers a Claude-backed re-run (command in `README.md`).
    Claude passes → retag `model-capacity`. Claude fails → retag with the harness fault it shows.
 

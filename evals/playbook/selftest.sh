@@ -10,14 +10,14 @@ if [ $# -gt 0 ]; then ids=("$@"); else ids=("${CASES[@]}"); fi
 fails=0
 for id in "${ids[@]}"; do
   fn="${id//-/_}"
-  W="$(mktemp -d)"; cp -R "$PB/fixtures/ledger/." "$W/"
-  ( cd "$W" && "setup_$fn" ) >/dev/null; rc=$?
+  W="$(mktemp -d)"; mkdir "$W/work"; cp -R "$PB/fixtures/ledger/." "$W/work/"
+  ( cd "$W/work" && "setup_$fn" ) >/dev/null; rc=$?
   if [ $rc -eq 77 ]; then echo "skip $id (prerequisite missing)"; continue; fi
   if [ $rc -ne 0 ]; then echo "FAIL $id: setup failed ($W)"; fails=$((fails+1)); continue; fi
-  if ( cd "$W" && "check_$fn" ) >/dev/null 2>&1; then
+  if ( cd "$W/work" && "check_$fn" ) >/dev/null 2>&1; then
     echo "FAIL $id: check passes before any work ($W)"; fails=$((fails+1)); continue
   fi
-  if ! ( cd "$W" && "ref_$fn" && "check_$fn" ) >/dev/null 2>&1; then
+  if ! ( cd "$W/work" && "ref_$fn" && "check_$fn" ) >/dev/null 2>&1; then
     echo "FAIL $id: check fails on the reference solution ($W)"; fails=$((fails+1)); continue
   fi
   rm -rf "$W"; echo "ok   $id"

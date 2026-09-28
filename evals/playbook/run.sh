@@ -9,6 +9,8 @@ source "$PB/cases.sh" || exit 2
 id="$1"; n="${2:-1}"; fn="${id//-/_}"
 declare -F "turns_$fn" >/dev/null || { echo "unknown case: $id" >&2; exit 2; }
 JAR="${SOPHI_JAR:-$PB/../../sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar}"
+[ -f "$JAR" ] || { echo "no jar at $JAR — build it: mvn -q -pl sophi-cli -am package -DskipTests" >&2; exit 2; }
+RESULTS="${RESULTS:-$PB/runs/results.tsv}"
 DEFAULT_FLAGS="--provider openai-compat --base-url http://192.168.0.103:1234/v1 --model prism-ml/bonsai-27b --context-window-tokens 32768 --max-tokens 16384 --llm-timeout-seconds 300 --memory --embedding-model text-embedding-qwen3-embedding-0.6b --embedding-dimensions 1024 --god-mode --no-remote"
 read -ra FLAGS <<< "${SOPHI_FLAGS:-$DEFAULT_FLAGS}"
 
@@ -25,11 +27,25 @@ session "turns_$fn"
 declare -F "turns_${fn}_2" >/dev/null && session "turns_${fn}_2"
 
 if "check_$fn" >/dev/null 2>&1; then result=pass; else result=fail; fi
-delegated=no
-grep -qF '\"name\":\"invoke_claude_code\"' "$RUN"/home/.sophi/sessions/*.jsonl 2>/dev/null && delegated=yes
-case " ${DELEGATE_CASES[*]} " in *" $id "*) [ "$delegated" = yes ] || result=fail ;; esac
-grep -q '\[y/N\]' "$RUN/transcript.txt" && echo "WARNING: a [y/N] prompt consumed a scripted turn — later turns are shifted"
-grep -qs 'evals/playbook' "$RUN"/home/.sophi/sessions/*.jsonl && echo "WARNING: the session touched evals/playbook — the run may have seen answers; score it as case-bug"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%F)" "$id" "$n" "${AB_LABEL:-baseline}" "$result" "$delegated" "$RUN" >> "$PB/runs/results.tsv"
+S="$RUN/home/.sophi/sessions"
+calls="$(cat "$S"/*.jsonl 2>/dev/null | grep -F '\"name\":\"invoke_claude_code\"')"
+denials=$(cat "$S"/*.jsonl 2>/dev/null | grep -cF "Tool 'invoke_claude_code' execution denied")
+delegated=no; [ "$(grep -c . <<< "$calls")" -gt "$denials" ] && delegated=yes
+is_delegate=no; case " ${DELEGATE_CASES[*]} " in *" $id "*) is_delegate=yes ;; esac
+[ $is_delegate = yes ] && [ $delegated = no ] && result=fail
+
+# A void run is not evidence about Sophi: it's excluded from pass counts (README A/B) and re-run.
+# Delegate cases script one 'y' for the invoke_claude_code prompt (it is always HIGH_RISK); any
+# other [y/N] prompt swallowed a scripted turn.
+prompts=$(grep -c '\[y/N\]' "$RUN/transcript.txt")
+allowed=0; [ $is_delegate = yes ] && allowed=$(grep -cE "wants to run 'invoke_claude_code'|- invoke_claude_code \(" "$RUN/transcript.txt")
+void=""
+[ "$prompts" -gt "$allowed" ] && void="a [y/N] prompt consumed a scripted turn — later turns are shifted"
+grep -qs 'evals/playbook' "$S"/*.jsonl && void="the session touched evals/playbook — it may have seen the answers"
+grep -q '\[error: ' "$RUN/transcript.txt" && void="the model backend errored mid-run"
+[ -n "$calls" ] && grep -vqF "$(basename "$RUN")" <<< "$calls" && \
+  void="invoke_claude_code was pointed OUTSIDE the run dir — check that project for changes Claude Code made"
+[ -n "$void" ] && { echo "VOID: $void"; result=void; }
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%F)" "$id" "$n" "${AB_LABEL:-baseline}" "$result" "$delegated" "$RUN" >> "$RESULTS"
 echo "case=$id run=$n result=$result delegated=$delegated"
 echo "RUN=$RUN  (transcript.txt, home/.sophi/sessions/*.jsonl, home/.sophi/learning/)"
