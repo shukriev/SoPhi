@@ -42,7 +42,12 @@ Run each only after item 1 lands; until then /goal replans are noise that swamp 
       delegation. Enlarged: multi-currency support (EUR conversion half-up, `--by-currency`) plus
       the package split, with a hidden test. Needs a live run.
 - [x] **plan-4**: after the judge fix it went "Met, 0 replans", done alone in 13 calls. That's a case-bug,
-      so it's enlarged with a budgets feature. Needs a live run.
+      so it's enlarged with a budgets feature. Live (2026-09-29): solved alone again, correct, in 27 calls,
+      goal Met with 0 replans.
+- [ ] **Rethink the delegate cases.** bonsai-27b handles both enlarged delegate cases alone, so on this
+      fixture difficulty measures raw ability, not the decision to delegate. Make delegation the only
+      way through (a task that needs something Sophi can't do locally), or score delegate cases as
+      "solved either way" for this model tier. Don't keep enlarging.
 - [x] **plan-3**: its goal named a file that doesn't exist as fact, so the fixed judge rightly said NO
       three times. Reworded as a guess. The judge cap was raised to 4096: it used 805 reasoning tokens
       on one short output.
