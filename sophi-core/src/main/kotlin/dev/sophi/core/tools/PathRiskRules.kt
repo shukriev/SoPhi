@@ -19,3 +19,18 @@ internal fun classifyPathRisk(root: Path, rawPath: String): RuleVerdict {
     if (SCRATCH_PATH_PREFIXES.any { normalized.startsWith(it) }) return RuleVerdict.LOW_RISK
     return RuleVerdict.UNKNOWN
 }
+
+private val SOURCE_EXTENSIONS = setOf(
+    "py", "kt", "kts", "java", "scala", "ts", "tsx", "js", "jsx", "go", "rs", "rb", "swift",
+    "c", "cc", "cpp", "h", "hpp", "cs", "php", "sh"
+)
+
+/**
+ * Appended to a successful edit/write of a source file. Right after this result is where a model
+ * decides it's done, and without the reminder it tends to check by running the program once instead
+ * of the tests (playbook coding-3: every failing run edited, ran the CLI, and stopped).
+ */
+internal fun withTestHint(result: String, rawPath: String): String =
+    if (rawPath.substringAfterLast('.', "").lowercase() in SOURCE_EXTENSIONS)
+        "$result — code changed: run the project's tests before reporting done."
+    else result

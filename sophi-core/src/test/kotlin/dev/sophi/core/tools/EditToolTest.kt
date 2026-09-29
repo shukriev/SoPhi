@@ -19,6 +19,16 @@ class EditToolTest : FunSpec({
         tool = EditTool(root)
     }
 
+    // Playbook coding-3: in every failing run the model edited code, ran only the CLI, and declared
+    // done without running the tests. The edit result is the one place it looks right then.
+    test("execute() tells the model to run the tests after changing a source file") {
+        root.resolve("money.py").writeText("x = 1")
+        val result = runBlocking {
+            tool.execute("""{"path":"money.py","old_string":"1","new_string":"2"}""")
+        }
+        result shouldBe "Replaced 1 occurrence in money.py — code changed: run the project's tests before reporting done."
+    }
+
     test("execute() replaces a unique occurrence") {
         root.resolve("a.txt").writeText("hello world")
         val result = runBlocking {
