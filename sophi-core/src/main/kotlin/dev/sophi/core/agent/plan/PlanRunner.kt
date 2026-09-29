@@ -358,9 +358,10 @@ class PlanRunner(
         val response = provider.complete(
             CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
-                // Thinking models spend their budget reasoning before the one-word answer: at 8
-                // tokens they stop mid-thought with empty content, which reads as NO forever.
-                model = judgeModel, maxTokens = 1024, temperature = 0.0
+                // Thinking models spend their budget reasoning before the one-word answer: cut off,
+                // they return empty content, which reads as NO forever. 8 tokens always starved;
+                // live, bonsai-27b used 805 on one short output, so leave generous headroom.
+                model = judgeModel, maxTokens = 4096, temperature = 0.0
             )
         )
         return (response as? LLMResponse.Text)?.content?.trim()?.uppercase()?.startsWith("YES") ?: false
