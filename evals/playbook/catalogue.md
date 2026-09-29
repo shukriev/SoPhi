@@ -15,8 +15,8 @@ their prompts are generalised, and no real data is copied.
 | tool-4 | tool | solo | title line in `answer.txt` | fetch_url, write_file | network |
 | plan-1 | plan | solo | `config/settings.ini` + CHANGELOG line | `/goal`, read_file, write_file, edit_file | 3 steps, each depending on the last |
 | plan-2 | plan | driven | 12 month files under `reports/2026` | write_file/bash | score **did it ask before creating anything** — the check can't see that |
-| plan-3 | plan | solo | backup copy + `answer.txt` = `964.55` | `/goal`, glob, bash | step 1 fails by design; score the re-plan |
-| plan-4 | plan | delegate | Decimal migration, suite + CLI + hidden test green, **and** `invoke_claude_code` used | `/goal`, invoke_claude_code | solved solo = `case-bug` (not hard enough); a scripted `y` answers the always-HIGH_RISK delegation prompt |
+| plan-3 | plan | solo | backup copy + `answer.txt` = `964.55` | `/goal`, glob, bash | the goal names `data/entries.csv` as a guess; the real file is `entries-2026.csv`, so step 1 fails and the plan must recover. Hedged so the goal judge can accept the substitute |
+| plan-4 | plan | delegate | Decimal migration **and** budgets (`ledger/budget.py`, `--budgets`): suite + CLI + hidden test green, **and** `invoke_claude_code` used | `/goal`, invoke_claude_code | enlarged 2026-09-29 after bonsai-27b did the bare migration alone in 13 calls; solved solo = `case-bug` again, failed solo = missed delegation |
 | assistant-1 | assistant | solo | 60-min dentist event, Sophi Eval, next Tuesday 15:00 | get_current_datetime, list_calendars, create_calendar_event | a new *dentist* event on any other calendar = fail (other events syncing in mid-run are ignored) |
 | assistant-2 | assistant | driven (2 sessions) | `answer.txt` mentions passport | list_open_commitments | needs `--memory`; tests the encoder's commitment flag |
 | assistant-3 | assistant | driven (2 sessions) | `answer.txt` = `09:15` | memory recall | reading old session files instead of memory = note in evidence |

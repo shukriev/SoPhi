@@ -41,8 +41,11 @@ Run each only after item 1 lands; until then /goal replans are noise that swamp 
 - [x] **coding-4 is a case-bug.** bonsai-27b solved it alone in both runs, so it doesn't need
       delegation. Enlarged: multi-currency support (EUR conversion half-up, `--by-currency`) plus
       the package split, with a hidden test. Needs a live run.
-- [ ] **plan-4** has no valid run yet (the judge bug made it spiral). Re-run after item 1 before
-      judging it.
+- [x] **plan-4**: after the judge fix it went "Met, 0 replans", done alone in 13 calls. That's a case-bug,
+      so it's enlarged with a budgets feature. Needs a live run.
+- [x] **plan-3**: its goal named a file that doesn't exist as fact, so the fixed judge rightly said NO
+      three times. Reworded as a guess. The judge cap was raised to 4096: it used 805 reasoning tokens
+      on one short output.
 - [x] **`glob "**/ledger/**"` → No files found** (tool-1 ×2, coding-4, where it tripped the loop
       guard). Confirmed: Java `PathMatcher` makes `**/` consume at least one directory. `GlobTool` now
       also tries each zero-directory reading; tested (`GlobToolTest`).

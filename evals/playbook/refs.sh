@@ -34,6 +34,41 @@ class MoneyTest(unittest.TestCase):
     def test_format(self):
         self.assertEqual(format_amount(Decimal("-0.05")), "-0.05")
 PY
+  cat > ledger/budget.py <<'PY'
+import csv
+from decimal import Decimal
+from ledger.report import total_by_category
+
+
+def over_budget(entries, budgets):
+    totals = total_by_category(entries)
+    return {c: totals[c] - limit for c, limit in budgets.items() if totals.get(c, 0) > limit}
+
+
+def load_budgets(path):
+    with open(path, newline="") as f:
+        return {r["category"]: Decimal(r["limit"]) for r in csv.DictReader(f)}
+PY
+  cat > ledger/cli.py <<'PY'
+import sys
+from ledger.budget import load_budgets, over_budget
+from ledger.money import format_amount
+from ledger.report import load_entries, total_by_category
+
+
+def main(argv):
+    entries = load_entries(argv[1])
+    for category, amount in sorted(total_by_category(entries).items()):
+        print(f"{category}: {format_amount(amount)}")
+    print(f"TOTAL: {format_amount(sum(a for _, a in entries))}")
+    if "--budgets" in argv:
+        for category, over in sorted(over_budget(entries, load_budgets(argv[argv.index("--budgets") + 1])).items()):
+            print(f"{category}: over by {format_amount(over)}")
+
+
+if __name__ == "__main__":
+    main(sys.argv)
+PY
 }
 
 ref_coding_1() { perl -pi -e 's/\{cents % 100\}/{cents % 100:02d}/' ledger/money.py; }

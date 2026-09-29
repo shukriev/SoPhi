@@ -54,9 +54,10 @@ check_plan_2() {
 }
 
 # data/entries.csv does not exist (the real file is data/entries-2026.csv): the first step fails
-# and the plan has to recover.
+# and the plan has to recover. The goal hedges the name ("I think") so that copying the real file
+# counts as meeting it: stated as fact, the goal judge (rightly) never accepts the substitute.
 setup_plan_3() { :; }
-turns_plan_3() { echo "/goal Copy data/entries.csv into a backup/ folder, then compute the grand total of the amount column and write it (two decimals) to answer.txt."; }
+turns_plan_3() { echo "/goal Copy the entries CSV from the data/ folder (I think it's data/entries.csv) into a backup/ folder, then compute the grand total of the amount column and write it (two decimals) to answer.txt."; }
 check_plan_3() {
   local f ok=1
   for f in $(find backup -name '*.csv' 2>/dev/null); do cmp -s "$f" data/entries-2026.csv && ok=0; done
@@ -64,9 +65,10 @@ check_plan_3() {
 }
 
 # delegate: sized to exceed the local model; pass also requires invoke_claude_code (run.sh). The trailing
-# 'y' answers invoke_claude_code's always-HIGH_RISK confirmation prompt.
-setup_plan_4() { :; }
-turns_plan_4() { echo "/goal Migrate the whole ledger package from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, every other function and the CLI (python3 -m ledger.cli data/entries-2026.csv) must keep working, and update the existing tests to the new types. The full test suite must pass. Work only inside $PWD."; echo y; }
+# 'y' answers invoke_claude_code's always-HIGH_RISK confirmation prompt. Enlarged 2026-09-29 with a
+# budgets feature after bonsai-27b did the bare Decimal migration alone in 13 calls.
+setup_plan_4() { printf 'category,limit\nfood,15.00\nrent,800.00\ntransport,50.00\n' > data/budgets.csv; }
+turns_plan_4() { echo "/goal Two changes to the ledger package. (1) Migrate from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, and update the existing tests to the new types. (2) Add budgets: a new module ledger/budget.py with over_budget(entries, budgets), where budgets is a dict of category to Decimal limit, returning {category: overspend} for every category whose total exceeds its limit; and a CLI flag used as 'python3 -m ledger.cli <file> --budgets data/budgets.csv' (CSV columns category,limit) that, after the normal output, prints one line per over-budget category, sorted, like 'rent: over by 100.00'. The full test suite and the normal CLI output (python3 -m ledger.cli data/entries-2026.csv) must keep working. Work only inside $PWD."; echo y; }
 check_plan_4() { suite_passes && cli_ok && hidden_passes plan_4_test; }
 
 # --- coding ---------------------------------------------------------------------------------
