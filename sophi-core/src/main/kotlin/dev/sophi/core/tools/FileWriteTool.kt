@@ -46,6 +46,6 @@ class FileWriteTool(private val root: Path = Paths.get("").toAbsolutePath()) : T
         resolved.parent?.createDirectories()
         resolved.writeText(args.content)
 
-        return "Wrote ${contentBytes.size} bytes to ${args.path}"
+        return withTestHint("Wrote ${contentBytes.size} bytes to ${args.path}", args.path)
     }
 }

@@ -20,6 +20,13 @@ class FileWriteToolTest : FunSpec({
         tool = FileWriteTool(root)
     }
 
+    test("execute() tells the model to run the tests after writing a source file, not a note") {
+        val code = runBlocking { tool.execute("""{"path":"src/App.kt","content":"fun main() {}"}""") }
+        code shouldBe "Wrote 13 bytes to src/App.kt — code changed: run the project's tests before reporting done."
+        val note = runBlocking { tool.execute("""{"path":"notes.md","content":"hi"}""") }
+        note shouldBe "Wrote 2 bytes to notes.md"
+    }
+
     test("execute() writes a new file with the given content") {
         val result = runBlocking { tool.execute("""{"path":"hello.txt","content":"hello world"}""") }
         root.resolve("hello.txt").readText() shouldBe "hello world"

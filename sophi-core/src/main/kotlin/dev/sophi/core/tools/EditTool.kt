@@ -61,7 +61,8 @@ class EditTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         }
         resolved.writeText(updated)
 
-        return if (args.replace_all) "Replaced $occurrences occurrence(s) in ${args.path}"
+        val summary = if (args.replace_all) "Replaced $occurrences occurrence(s) in ${args.path}"
         else "Replaced 1 occurrence in ${args.path}"
+        return withTestHint(summary, args.path)
     }
 }
