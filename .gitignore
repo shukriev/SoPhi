@@ -23,6 +23,7 @@ doc/articles/
 .whisper-stream-build/
 TODO_TASK.md
 TODO_TASKS.md
+evals/playbook/TODO.md
 TESTING_SCHEDULE.md
 TICKET_PIPELINE_SETUP.md
 work-folder/
