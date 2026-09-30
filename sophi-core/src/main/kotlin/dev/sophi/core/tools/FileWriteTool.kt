@@ -20,8 +20,10 @@ class FileWriteTool(private val root: Path = Paths.get("").toAbsolutePath()) : T
     override val description = "Write UTF-8 text content to a file within the working directory, creating it (and parent directories) if needed"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
+        // Unparseable: execute() decodes the same type and throws before doing anything, so don't prompt —
+        // let it fail with the parse error the model can act on. (riskLevel still fails closed; ADR-027.)
         val args = runCatching { json.decodeFromString<FileWriteArgs>(argumentsJson) }.getOrNull()
-            ?: return RuleVerdict.HIGH_RISK
+            ?: return RuleVerdict.LOW_RISK
         return classifyPathRisk(root, args.path)
     }
     override val parametersJson = """

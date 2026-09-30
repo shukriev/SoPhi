@@ -45,8 +45,10 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
         return if (grantingPower) RiskLevel.DESTRUCTIVE else RiskLevel.SAFE
     }
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
+        // Unparseable: execute() decodes the same type and throws before doing anything, so don't prompt —
+        // let it fail with the parse error the model can act on. (riskLevel still fails closed; ADR-027.)
         val args = runCatching { json.decodeFromString(ManageTaskArgs.serializer(), argumentsJson) }.getOrNull()
-            ?: return RuleVerdict.HIGH_RISK
+            ?: return RuleVerdict.LOW_RISK
         val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
         return if (grantingPower) RuleVerdict.HIGH_RISK else RuleVerdict.LOW_RISK
     }

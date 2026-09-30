@@ -1,6 +1,7 @@
 package dev.sophi.core.tools
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
@@ -97,7 +98,11 @@ class BashToolTest : FunSpec({
         tool.ruleVerdict("""{"command":"npm install"}""") shouldBe RuleVerdict.UNKNOWN
     }
 
-    test("ruleVerdict is HIGH_RISK when arguments cannot be parsed") {
-        tool.ruleVerdict("not json") shouldBe RuleVerdict.HIGH_RISK
+    // An unparseable call can't run: execute() decodes the same type and throws first. Prompting
+    // for it only swallowed a scripted turn and hid the real parse error from the model. riskLevel
+    // still fails closed (the ADR-027 grants probe depends on that); ruleVerdict no longer does.
+    test("ruleVerdict lets an unparseable call through to fail with its parse error") {
+        tool.ruleVerdict("not json") shouldBe RuleVerdict.LOW_RISK
+        shouldThrowAny { runBlocking { tool.execute("not json") } }
     }
 })

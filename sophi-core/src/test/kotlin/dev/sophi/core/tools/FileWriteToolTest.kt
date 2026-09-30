@@ -1,6 +1,7 @@
 package dev.sophi.core.tools
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
@@ -25,6 +26,16 @@ class FileWriteToolTest : FunSpec({
         code shouldBe "Wrote 13 bytes to src/App.kt — code changed: run the project's tests before reporting done."
         val note = runBlocking { tool.execute("""{"path":"notes.md","content":"hi"}""") }
         note shouldBe "Wrote 2 bytes to notes.md"
+    }
+
+    // Seen live (playbook coding-3): edit_file called with `content` instead of `new_string`
+    // prompted [y/N] under --god-mode instead of telling the model what was wrong.
+    test("ruleVerdict lets an unparseable call through to fail with its parse error") {
+        root.resolve("money.py").writeText("x = 1")
+        val call = """{"file":"money.py","content":"x"}"""
+        tool.ruleVerdict(call) shouldBe RuleVerdict.LOW_RISK
+        shouldThrowAny { runBlocking { tool.execute(call) } }
+        root.resolve("money.py").readText() shouldBe "x = 1"
     }
 
     test("execute() writes a new file with the given content") {

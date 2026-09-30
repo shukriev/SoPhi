@@ -43,8 +43,10 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         return if (looksReadOnly) RiskLevel.CAUTION else RiskLevel.DESTRUCTIVE
     }
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
+        // Unparseable: execute() decodes the same type and throws before doing anything, so don't prompt —
+        // let it fail with the parse error the model can act on. (riskLevel still fails closed; ADR-027.)
         val command = runCatching { json.decodeFromString<BashArgs>(argumentsJson).command }
-            .getOrNull() ?: return RuleVerdict.HIGH_RISK
+            .getOrNull() ?: return RuleVerdict.LOW_RISK
         val trimmed = command.trim()
         if (HIGH_RISK_BASH_SUBSTRINGS.any { trimmed.contains(it) }) return RuleVerdict.HIGH_RISK
         SINGLE_FILE_RM.matchEntire(trimmed)?.let { match ->
