@@ -273,7 +273,7 @@ class AgentLoopStreamTest : FunSpec({
         coVerify(exactly = 3) { provider.stream(any()) }
     }
 
-    test("streamTurn() stops early when a glob/grep search broadens beyond an earlier scoped path") {
+    test("streamTurn() stops early when searches keep broadening beyond an earlier scoped path") {
         val tool = object : Tool {
             override val name = "glob"
             override val description = ""
@@ -296,7 +296,7 @@ class AgentLoopStreamTest : FunSpec({
 
         session.branch().last().content shouldContain "Stopped early"
         session.branch().last().content shouldContain "broadened"
-        coVerify(exactly = 2) { provider.stream(any()) }
+        coVerify(exactly = 3) { provider.stream(any()) }
     }
 
     test("streamTurn() stops early when approaching the tool-round budget under the default guard") {

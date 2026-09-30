@@ -37,7 +37,7 @@ calls="$(cat "$S"/*.jsonl 2>/dev/null | grep -F '\"name\":\"invoke_claude_code\"
 denials=$(cat "$S"/*.jsonl 2>/dev/null | grep -cF "Tool 'invoke_claude_code' execution denied")
 delegated=no; [ "$(grep -c . <<< "$calls")" -gt "$denials" ] && delegated=yes
 is_delegate=no; case " ${DELEGATE_CASES[*]} " in *" $id "*) is_delegate=yes ;; esac
-[ $is_delegate = yes ] && [ $delegated = no ] && result=fail
+case " ${DELEGATION_REQUIRED[*]} " in *" $id "*) [ $delegated = no ] && result=fail ;; esac
 
 # A void run is not evidence about Sophi: it's excluded from pass counts (README A/B) and re-run.
 # Delegate cases script one 'y' for the invoke_claude_code prompt (it is always HIGH_RISK); any

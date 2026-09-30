@@ -18,6 +18,13 @@ class BashToolTest : FunSpec({
         tool = BashTool(root)
     }
 
+    // No input is ever fed to a command, so a command that reads stdin (cat, input(), a git
+    // commit without -m) used to block on an open pipe until the timeout.
+    test("execute() gives the command a closed stdin instead of an open pipe") {
+        val result = runBlocking { tool.execute("""{"command":"cat; echo stdin-closed","timeoutSeconds":5}""") }
+        result shouldContain "stdin-closed"
+    }
+
     test("execute() returns stdout for a simple command") {
         val result = runBlocking { tool.execute("""{"command":"echo hello"}""") }
         result shouldContain "hello"

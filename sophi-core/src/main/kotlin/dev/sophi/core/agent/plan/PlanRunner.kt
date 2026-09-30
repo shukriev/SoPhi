@@ -60,7 +60,10 @@ class PlanRunner(
     private val critic: StepCritic,
     private val config: PlanRunnerConfig,
     private val judgeModel: String = config.model,
-    private val shellRunner: (String) -> Int = { cmd -> ProcessBuilder("sh", "-c", cmd).start().waitFor() },
+    // stdin closed at once: this waits without a timeout, so a check that reads stdin hung the goal forever.
+    private val shellRunner: (String) -> Int = { cmd ->
+        ProcessBuilder("sh", "-c", cmd).start().also { it.outputStream.close() }.waitFor()
+    },
     private val onPlanComplete: suspend (PlanOutcome) -> Unit = {},
     private val planLog: PlanLog? = null,
     private val onEvent: suspend (TurnEvent) -> Unit = {},

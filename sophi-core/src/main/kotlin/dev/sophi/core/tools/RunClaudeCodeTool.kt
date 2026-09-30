@@ -62,6 +62,9 @@ class RunClaudeCodeTool(
             .directory(File(args.projectPath))
             .redirectErrorStream(true)
             .start()
+        // Nothing is ever written to its stdin: leave the pipe open and `claude -p` waits for it,
+        // then prints "no stdin data received in 3s" into the result. Closing it signals EOF now.
+        process.outputStream.close()
 
         // Must read concurrently with waitFor(), not after — sequential read-after-wait
         // deadlocks once output exceeds the OS pipe buffer (same reason BashTool reads this

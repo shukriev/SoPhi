@@ -22,6 +22,17 @@ class RunClaudeCodeToolTest : FunSpec({
 
     fun projectDir(): Path = createTempDirectory("run-claude-code-test")
 
+    // Seen live (playbook delegate-1): stdin was a pipe nobody wrote to or closed, so `claude -p`
+    // waited for it, then printed "Warning: no stdin data received in 3s" into every result.
+    test("execute() gives claude an already-closed stdin instead of an open pipe") {
+        val dir = projectDir()
+        val tool = RunClaudeCodeTool(fakeClaude(dir, "cat > /dev/null\necho stdin-closed"))
+        val result = runBlocking {
+            tool.execute("""{"project_path":"$dir","task":"t","timeout_seconds":5}""")
+        }
+        result.trim() shouldBe "stdin-closed"
+    }
+
     test("name is invoke_claude_code") {
         RunClaudeCodeTool().name shouldBe "invoke_claude_code"
     }

@@ -37,6 +37,7 @@ private data class ToolCallOutcome(val call: ToolCall, val message: Message, val
 private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
 private const val LOOP_GUARD_FAILURE_THRESHOLD = 3
+private const val LOOP_GUARD_BROADENING_THRESHOLD = 2
 /** Enough recent rounds for the model to stay coherent about what it was just doing. */
 private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
 /**
@@ -82,10 +83,19 @@ private const val FINISH_REASON_LENGTH = "length"
 private class LoopGuardState(private val maxToolRounds: Int) {
     private var consecutiveFailedRounds = 0
     private var narrowestSearchPath: String? = null
+    private var searchesBeyondScope = 0
     private var roundBudgetWarned = false
 
-    private fun extractPathArg(argumentsJson: String): String? = runCatching {
-        (entryJson.parseToJsonElement(argumentsJson).jsonObject["path"])?.jsonPrimitive?.content
+    // The directory a search is confined to: its `path` joined with a glob pattern's literal leading
+    // directories (a pattern starting "ledger/" then wildcards is scoped to ledger; one starting with
+    // a wildcard, to nothing). Null = the whole working directory. Reading `path` alone mistook a
+    // re-scoped pattern for a broadened search. (Line comments: glob text would nest a block comment.)
+    private fun searchScope(name: String, argumentsJson: String): String? = runCatching {
+        val args = entryJson.parseToJsonElement(argumentsJson).jsonObject
+        val path = args["path"]?.jsonPrimitive?.content.orEmpty().trim('/')
+        val pattern = if (name == "glob") args["pattern"]?.jsonPrimitive?.content.orEmpty() else ""
+        val literalDirs = pattern.split('/').dropLast(1).takeWhile { seg -> seg.none { it in "*?[{" } }
+        (listOf(path) + literalDirs).filter { it.isNotEmpty() && it != "." }.joinToString("/").ifEmpty { null }
     }.getOrNull()
 
     /** Call once per round, after that round's tool calls have all completed. */
@@ -99,12 +109,16 @@ private class LoopGuardState(private val maxToolRounds: Int) {
         }
 
         for (outcome in outcomes) {
-            if (outcome.call.name !in SEARCH_TOOL_NAMES) continue
-            val path = extractPathArg(outcome.call.argumentsJson)
+            // A failed call (e.g. arguments that didn't parse) searched nothing, so it scopes nothing.
+            if (outcome.call.name !in SEARCH_TOOL_NAMES || outcome.failed) continue
+            val path = searchScope(outcome.call.name, outcome.call.argumentsJson)
             val previous = narrowestSearchPath
-            if (previous != null && path == null) {
-                narrowestSearchPath = null
-                return "search scope broadened from \"$previous\" to the whole working directory"
+            // One widening after a scoped search came up empty is recovery (a wrong path, say); the
+            // flailing this guards against is searching everything again and again, so the scope is
+            // kept and only the second search beyond it stops the turn.
+            if (previous != null && path == null && ++searchesBeyondScope >= LOOP_GUARD_BROADENING_THRESHOLD) {
+                searchesBeyondScope = 0
+                return "search scope broadened from \"$previous\" to the whole working directory, again"
             }
             if (narrowestSearchPath == null) narrowestSearchPath = path
         }

@@ -524,7 +524,7 @@ class AgentLoopTest : FunSpec({
         result.branch().last().content shouldBe "recovered"
     }
 
-    test("turn() stops early when a glob/grep search broadens beyond an earlier scoped path") {
+    test("turn() stops early when searches keep broadening beyond an earlier scoped path") {
         val session = AgentSession(id = "s1")
         val toolRegistry = ToolRegistry()
         toolRegistry.register(object : dev.sophi.core.tools.Tool {
@@ -551,7 +551,65 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "broadened"
-        coVerify(exactly = 2) { provider.stream(any()) }
+        coVerify(exactly = 3) { provider.stream(any()) }
+    }
+
+    // Seen live (playbook coding-3, bonsai-27b): glob {"path":"ledger/**/*.py"} failed to parse, the
+    // corrected glob {"pattern":"ledger/**/*.py"} succeeded, and the guard stopped the turn as
+    // "broadened from ledger/**/*.py". A failed call scoped nothing, and the pattern is itself scoped.
+    fun globThatNeedsPattern() = object : dev.sophi.core.tools.Tool {
+        override val name = "glob"
+        override val description = "Finds files"
+        override val parametersJson = "{}"
+        override suspend fun execute(argumentsJson: String): String {
+            require("\"pattern\"" in argumentsJson) { "Field 'pattern' is required" }
+            return "ledger/money.py"
+        }
+    }
+
+    fun twoGlobsThenDone(first: String, second: String) = listOf(
+        LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c1", "glob", first)), usage = TokenUsage(1, 0)).toStreamFlow(),
+        LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c2", "glob", second)), usage = TokenUsage(1, 0)).toStreamFlow(),
+        LLMResponse.Text("found it", TokenUsage(1, 1)).toStreamFlow()
+    )
+
+    // Seen live (playbook tool-3, 3 of 6 runs stopped): given a wrong path, Sophi searched
+    // docs/operations, found nothing, widened once to the whole tree and found the file. One widening
+    // after an empty scoped search is recovery, not flailing; only a repeat is.
+    test("turn() lets a single widening after a scoped search through") {
+        val toolRegistry = ToolRegistry().apply { register(globThatNeedsPattern()) }
+        every { provider.stream(any()) } returnsMany twoGlobsThenDone(
+            """{"path":"docs/operations","pattern":"*.md"}""", """{"pattern":"**/*ops*"}"""
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = newLoop(toolRegistry).turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldBe "found it"
+    }
+
+    test("turn() does not treat a failed search call as a scope that a later search broadens") {
+        val toolRegistry = ToolRegistry().apply { register(globThatNeedsPattern()) }
+        every { provider.stream(any()) } returnsMany twoGlobsThenDone(
+            """{"path":"ledger/**/*.py"}""", """{"pattern":"**/*.py"}"""
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = newLoop(toolRegistry).turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldBe "found it"
+    }
+
+    test("turn() reads a glob pattern's leading directories as its scope") {
+        val toolRegistry = ToolRegistry().apply { register(globThatNeedsPattern()) }
+        every { provider.stream(any()) } returnsMany twoGlobsThenDone(
+            """{"path":"ledger","pattern":"*.py"}""", """{"pattern":"ledger/**/*.py"}"""
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = newLoop(toolRegistry).turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldBe "found it"
     }
 
     test("turn() stops early when approaching the tool-round budget under the default guard") {
