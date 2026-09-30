@@ -37,6 +37,7 @@ private data class ToolCallOutcome(val call: ToolCall, val message: Message, val
 private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
 private const val LOOP_GUARD_FAILURE_THRESHOLD = 3
+private const val LOOP_GUARD_BROADENING_THRESHOLD = 2
 /** Enough recent rounds for the model to stay coherent about what it was just doing. */
 private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
 /**
@@ -82,6 +83,7 @@ private const val FINISH_REASON_LENGTH = "length"
 private class LoopGuardState(private val maxToolRounds: Int) {
     private var consecutiveFailedRounds = 0
     private var narrowestSearchPath: String? = null
+    private var searchesBeyondScope = 0
     private var roundBudgetWarned = false
 
     // The directory a search is confined to: its `path` joined with a glob pattern's literal leading
@@ -111,9 +113,12 @@ private class LoopGuardState(private val maxToolRounds: Int) {
             if (outcome.call.name !in SEARCH_TOOL_NAMES || outcome.failed) continue
             val path = searchScope(outcome.call.name, outcome.call.argumentsJson)
             val previous = narrowestSearchPath
-            if (previous != null && path == null) {
-                narrowestSearchPath = null
-                return "search scope broadened from \"$previous\" to the whole working directory"
+            // One widening after a scoped search came up empty is recovery (a wrong path, say); the
+            // flailing this guards against is searching everything again and again, so the scope is
+            // kept and only the second search beyond it stops the turn.
+            if (previous != null && path == null && ++searchesBeyondScope >= LOOP_GUARD_BROADENING_THRESHOLD) {
+                searchesBeyondScope = 0
+                return "search scope broadened from \"$previous\" to the whole working directory, again"
             }
             if (narrowestSearchPath == null) narrowestSearchPath = path
         }
