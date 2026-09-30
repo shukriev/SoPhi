@@ -4,7 +4,12 @@
 # setup_ returning 77 means "prerequisite missing on this machine" — skip, not fail.
 
 CASES=()
-DELEGATE_CASES=(plan-4 coding-4)
+# Cases whose turns script a 'y' for invoke_claude_code's always-HIGH_RISK prompt (the prompt is allowed).
+DELEGATE_CASES=(plan-4 coding-4 delegate-1)
+# Cases that only pass if Sophi actually delegated. plan-4/coding-4 are outcome cases: a correct solo
+# solve passes (bonsai-27b does them alone), and failing without trying to delegate is scored as
+# missed-delegation in the rubric. delegate-1 asks for delegation explicitly: it tests the mechanics.
+DELEGATION_REQUIRED=(delegate-1)
 CALENDAR_CASES=(assistant-1)   # the only cases whose Sophi may reach Calendar.app (see guardbin/osascript)
 
 suite_passes() { PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . >/dev/null 2>&1; }
@@ -230,3 +235,14 @@ JSON
 teardown_browser_1() { kill "$(cat ../.browser-server.pid 2>/dev/null)" 2>/dev/null; }
 turns_browser_1() { echo "Open http://127.0.0.1:$(cat ../.browser-port)/index.html in the browser, search for the customer Grace Hopper, and write the ID of her open order to answer.txt."; }
 check_browser_1() { answer_is SO-2044; }
+
+# --- delegation mechanics (2026-09-30) --------------------------------------------------------
+# Until now no run had ever delegated, so invoke_claude_code was untested end to end. This case asks
+# for it explicitly: tool call -> scripted 'y' -> `claude -p` in the run dir -> result back to Sophi.
+CASES+=(delegate-1)
+
+setup_delegate_1() { command -v claude >/dev/null || { echo "needs the claude CLI" >&2; return 77; }; }
+turns_delegate_1() { echo "Ask Claude Code to add a --version flag to the ledger CLI: 'python3 -m ledger.cli --version' must print exactly 'ledger 1.0' and exit 0, and normal usage must keep working. Then run it yourself to confirm. Work only inside $PWD."; echo y; }
+check_delegate_1() {
+  [ "$(PYTHONDONTWRITEBYTECODE=1 python3 -m ledger.cli --version 2>/dev/null)" = "ledger 1.0" ] && cli_ok && suite_passes
+}

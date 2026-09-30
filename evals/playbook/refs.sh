@@ -183,3 +183,5 @@ ref_assistant_5() {
 JSON
 }
 ref_browser_1() { echo SO-2044 > answer.txt; }
+
+ref_delegate_1() { perl -0pi -e 's/def main\(argv\):\n/def main(argv):\n    if "--version" in argv:\n        print("ledger 1.0")\n        return\n/' ledger/cli.py; }
