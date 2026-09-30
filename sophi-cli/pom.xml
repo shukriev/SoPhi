@@ -122,15 +122,6 @@
                                         <exclude>META-INF/*.RSA</exclude>
                                     </excludes>
                                 </filter>
-                                <!-- sophi-store ships its own arcadedb-log.properties (logs under the home
-                                     dir, not ./log in whatever project Sophi runs in); ArcadeDB loads the
-                                     first one it finds, so drop the engine's copy rather than rely on order. -->
-                                <filter>
-                                    <artifact>com.arcadedb:arcadedb-engine</artifact>
-                                    <excludes>
-                                        <exclude>arcadedb-log.properties</exclude>
-                                    </excludes>
-                                </filter>
                             </filters>
                         </configuration>
                     </execution>
