@@ -84,6 +84,21 @@ class PlanRunnerTest : FunSpec({
         outcome.finalStatus shouldBe PlanFinalStatus.Met
     }
 
+    // The default shellRunner waits without a timeout, so a stop-condition command that reads stdin
+    // hung the goal forever on the open pipe. Run on its own thread so a regression fails, not hangs.
+    test("a shell stop-condition command gets a closed stdin instead of hanging on it") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+
+        val outcome = java.util.concurrent.CompletableFuture.supplyAsync {
+            runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.ShellCheck("cat")) }
+        }.get(10, java.util.concurrent.TimeUnit.SECONDS)
+
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+    }
+
     test("PlanRunnerConfig.maxStepExecutions defaults high enough for a many-section decomposed goal") {
         // The tree-wide budget is consumed by every sub-plan step too (RunBudget doc comment) —
         // a goal that decomposes into "discover, then one sub-plan per section, then an

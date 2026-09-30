@@ -69,6 +69,8 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
             .directory(root.toFile())
             .redirectErrorStream(true)
             .start()
+        // No input is ever fed to a command; an open pipe left one that reads stdin blocking until the timeout.
+        process.outputStream.close()
 
         val outputDeferred = async {
             val buffer = StringBuilder()
