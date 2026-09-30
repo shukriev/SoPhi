@@ -6,7 +6,9 @@ import com.arcadedb.database.Document
 import com.arcadedb.index.TypeIndex
 import com.arcadedb.index.vector.LSMVectorIndex
 import com.arcadedb.schema.Type
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 
 /**
  * ArcadeDB doesn't route the documented `vector.neighbors(...)` SQL function to a live
@@ -17,6 +19,7 @@ class EmbeddedArcadeStore(private val db: Database) : ArcadeStore {
 
     companion object {
         fun open(home: Path): EmbeddedArcadeStore {
+            useSophiArcadeLogConfig()
             val factory = DatabaseFactory(home.resolve("arcadedb").toString())
             val db = if (factory.exists()) factory.open() else factory.create()
             return EmbeddedArcadeStore(db)
@@ -135,4 +138,21 @@ class EmbeddedArcadeStore(private val db: Database) : ArcadeStore {
         val rs = db.query("sql", "SELECT FROM $type")
         return rs.use { r -> generateSequence { if (r.hasNext()) r.next() else null }.map { it.toMap() }.toList() }
     }
+}
+
+internal const val LOG_CONFIG_PROPERTY = "java.util.logging.config.file"
+
+/**
+ * Points ArcadeDB's logging at Sophi's config (log file under the home dir, console at WARNING)
+ * instead of the engine's own, which logs to ./log in whatever directory the host was started in.
+ * ArcadeDB reads [LOG_CONFIG_PROPERTY] before looking on the classpath, so this holds whatever the
+ * jar order — the packaged companion lists arcadedb-engine ahead of sophi-store. Must run before
+ * ArcadeDB first logs; a host that already chose a logging config keeps it.
+ */
+internal fun useSophiArcadeLogConfig() {
+    if (System.getProperty(LOG_CONFIG_PROPERTY) != null) return
+    val file = Files.createTempFile("sophi-arcadedb-log", ".properties").also { it.toFile().deleteOnExit() }
+    EmbeddedArcadeStore::class.java.getResourceAsStream("/sophi-arcadedb-log.properties")!!
+        .use { Files.copy(it, file, StandardCopyOption.REPLACE_EXISTING) }
+    System.setProperty(LOG_CONFIG_PROPERTY, file.toString())
 }
