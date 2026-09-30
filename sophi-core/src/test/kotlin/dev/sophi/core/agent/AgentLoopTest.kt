@@ -554,6 +554,49 @@ class AgentLoopTest : FunSpec({
         coVerify(exactly = 2) { provider.stream(any()) }
     }
 
+    // Seen live (playbook coding-3, bonsai-27b): glob {"path":"ledger/**/*.py"} failed to parse, the
+    // corrected glob {"pattern":"ledger/**/*.py"} succeeded, and the guard stopped the turn as
+    // "broadened from ledger/**/*.py". A failed call scoped nothing, and the pattern is itself scoped.
+    fun globThatNeedsPattern() = object : dev.sophi.core.tools.Tool {
+        override val name = "glob"
+        override val description = "Finds files"
+        override val parametersJson = "{}"
+        override suspend fun execute(argumentsJson: String): String {
+            require("\"pattern\"" in argumentsJson) { "Field 'pattern' is required" }
+            return "ledger/money.py"
+        }
+    }
+
+    fun twoGlobsThenDone(first: String, second: String) = listOf(
+        LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c1", "glob", first)), usage = TokenUsage(1, 0)).toStreamFlow(),
+        LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c2", "glob", second)), usage = TokenUsage(1, 0)).toStreamFlow(),
+        LLMResponse.Text("found it", TokenUsage(1, 1)).toStreamFlow()
+    )
+
+    test("turn() does not treat a failed search call as a scope that a later search broadens") {
+        val toolRegistry = ToolRegistry().apply { register(globThatNeedsPattern()) }
+        every { provider.stream(any()) } returnsMany twoGlobsThenDone(
+            """{"path":"ledger/**/*.py"}""", """{"pattern":"**/*.py"}"""
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = newLoop(toolRegistry).turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldBe "found it"
+    }
+
+    test("turn() reads a glob pattern's leading directories as its scope") {
+        val toolRegistry = ToolRegistry().apply { register(globThatNeedsPattern()) }
+        every { provider.stream(any()) } returnsMany twoGlobsThenDone(
+            """{"path":"ledger","pattern":"*.py"}""", """{"pattern":"ledger/**/*.py"}"""
+        )
+        every { sessionManager.save(any()) } just Runs
+
+        val result = newLoop(toolRegistry).turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldBe "found it"
+    }
+
     test("turn() stops early when approaching the tool-round budget under the default guard") {
         val session = AgentSession(id = "s1")
         val toolRegistry = ToolRegistry()

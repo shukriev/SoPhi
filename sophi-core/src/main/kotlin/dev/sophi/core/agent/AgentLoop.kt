@@ -84,8 +84,16 @@ private class LoopGuardState(private val maxToolRounds: Int) {
     private var narrowestSearchPath: String? = null
     private var roundBudgetWarned = false
 
-    private fun extractPathArg(argumentsJson: String): String? = runCatching {
-        (entryJson.parseToJsonElement(argumentsJson).jsonObject["path"])?.jsonPrimitive?.content
+    // The directory a search is confined to: its `path` joined with a glob pattern's literal leading
+    // directories (a pattern starting "ledger/" then wildcards is scoped to ledger; one starting with
+    // a wildcard, to nothing). Null = the whole working directory. Reading `path` alone mistook a
+    // re-scoped pattern for a broadened search. (Line comments: glob text would nest a block comment.)
+    private fun searchScope(name: String, argumentsJson: String): String? = runCatching {
+        val args = entryJson.parseToJsonElement(argumentsJson).jsonObject
+        val path = args["path"]?.jsonPrimitive?.content.orEmpty().trim('/')
+        val pattern = if (name == "glob") args["pattern"]?.jsonPrimitive?.content.orEmpty() else ""
+        val literalDirs = pattern.split('/').dropLast(1).takeWhile { seg -> seg.none { it in "*?[{" } }
+        (listOf(path) + literalDirs).filter { it.isNotEmpty() && it != "." }.joinToString("/").ifEmpty { null }
     }.getOrNull()
 
     /** Call once per round, after that round's tool calls have all completed. */
@@ -99,8 +107,9 @@ private class LoopGuardState(private val maxToolRounds: Int) {
         }
 
         for (outcome in outcomes) {
-            if (outcome.call.name !in SEARCH_TOOL_NAMES) continue
-            val path = extractPathArg(outcome.call.argumentsJson)
+            // A failed call (e.g. arguments that didn't parse) searched nothing, so it scopes nothing.
+            if (outcome.call.name !in SEARCH_TOOL_NAMES || outcome.failed) continue
+            val path = searchScope(outcome.call.name, outcome.call.argumentsJson)
             val previous = narrowestSearchPath
             if (previous != null && path == null) {
                 narrowestSearchPath = null
