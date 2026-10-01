@@ -21,7 +21,8 @@ only the harness fixes that measurably help. Spec:
    own state (sessions, memory, lessons, skills) never touches the real `~/.sophi`. Its `bash` tool
    and a delegated Claude Code still run as you, with your real `$HOME`; the prompts scope work to
    the run dir and `run.sh` voids a run whose delegation points elsewhere. The result
-   (`pass`/`fail`/`void`) is appended to `runs/results.tsv`. Everything in `runs/` (results and
+   (`pass`/`fail`/`void`) is appended to `runs/results.tsv`. Each run is capped at 20 min
+   (`PLAYBOOK_RUN_TIMEOUT`, seconds); a run past it is killed and scored `fail`. Everything in `runs/` (results and
    scorecards) is gitignored and stays on this machine.
 3. **Score:** ask Claude Code:
    > Score playbook run: case `<id>`, run `<n>`, RUN=`<path>`. Read `evals/playbook/rubric.md`,

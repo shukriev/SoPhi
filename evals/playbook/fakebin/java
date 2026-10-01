@@ -5,6 +5,7 @@ while IFS= read -r line; do echo "You: $line"; done
 for a in $FAKE_DO; do
   case "$a" in
     answer) echo parse_amount > answer.txt ;;
+    sleep:*) sleep "${a#sleep:}" ;;
     ask:*) echo "Sophi wants to run '${a#ask:}' (HIGH_RISK): {}"; echo "Allow? [y/N] " ;;
     call) printf '{"role":"ASSISTANT","content":"","metadata":{"toolCalls":"[{\\"id\\":\\"c1\\",\\"name\\":\\"invoke_claude_code\\",\\"argumentsJson\\":\\"{\\\\\\"project_path\\\\\\":\\\\\\"%s\\\\\\"}\\"}]"}}\n' "$PWD" >> "$s" ;;
     call-elsewhere) printf '{"role":"ASSISTANT","content":"","metadata":{"toolCalls":"[{\\"id\\":\\"c1\\",\\"name\\":\\"invoke_claude_code\\",\\"argumentsJson\\":\\"{\\\\\\"project_path\\\\\\":\\\\\\"/Users/someone/real-repo\\\\\\"}\\"}]"}}\n' >> "$s" ;;
