@@ -29,6 +29,7 @@ Claude fills one scorecard per run at `runs/YYYY-MM-DD-<case>-<n>.md`.
 | `harness-bug` | an issue describing the code defect; not fixed inside the run |
 | `model-capacity` | none; mark the run as a Phase B candidate |
 | `missed-delegation` | a lesson or prompt change about when to hand work to Claude Code (outcome cases only) |
+| `too-slow` | the run hit the 20-min cap (`TIMEOUT` in the run output); usually means missed delegation or flailing — say which |
 | `case-bug` | fix the case in `cases.sh`; discard the run |
 | `unclear` | Claude-backed re-run, then retag |
 
