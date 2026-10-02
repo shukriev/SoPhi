@@ -14,9 +14,10 @@ data class JanesPalaceConfig(
         Room.KNOWLEDGE to 90 * DAY,
         Room.NARRATIVE to 365 * DAY
     ),
-    // Salience weights (spec §7): rep, emph, nov, aff, rec — aff deliberately heaviest.
-    val wRep: Double = 0.20, val wEmph: Double = 0.25, val wNov: Double = 0.15,
-    val wAff: Double = 0.30, val wRec: Double = 0.10,
+    // Salience weights (spec §7 + durability, 2026-10-02): rep, emph, nov, aff, rec, dur. Sum 1.
+    // dur is heaviest: without it a neutral durable fact (job, colleague, convention) maxed at 0.25.
+    val wRep: Double = 0.15, val wEmph: Double = 0.15, val wNov: Double = 0.10,
+    val wAff: Double = 0.20, val wRec: Double = 0.10, val wDur: Double = 0.30,
     val significanceThreshold: Double = 0.35,
     // Retrieval betas (spec §6): semantic, decayed priority, profile resonance.
     val beta1: Double = 0.45, val beta2: Double = 0.35, val beta3: Double = 0.20,

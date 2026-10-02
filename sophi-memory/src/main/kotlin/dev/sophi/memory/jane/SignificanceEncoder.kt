@@ -15,6 +15,9 @@ internal data class VerdictMemory(
     val room: String,
     val emph: Double = 0.0,
     val aff: Double = 0.0,
+    // Nullable on purpose: "the model didn't say" falls back by room (MemoryWriter.durOf); it must
+    // not read as "the model said 0", which would drop every durable fact the model forgot to rate.
+    val dur: Double? = null,
     val commitment: Boolean = false,
     val sensitivity: String = "PERSONAL",
     // Nullable with no default on purpose: "the model didn't say" and "the model said USER_DIRECT"

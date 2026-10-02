@@ -32,7 +32,8 @@ class DecayTest : FunSpec({
 
     test("config carries spec defaults") {
         cfg.significanceThreshold shouldBe 0.35
-        cfg.wAff shouldBe 0.30
+        cfg.wAff shouldBe 0.20   // rebalanced for the durability signal (2026-10-02)
+        cfg.wDur shouldBe 0.30
         cfg.beta1 shouldBe 0.45
         cfg.mergeThreshold shouldBe 0.92
         cfg.halfLifeMs.getValue(Room.NARRATIVE) shouldBe 365L * 24 * 3600 * 1000
