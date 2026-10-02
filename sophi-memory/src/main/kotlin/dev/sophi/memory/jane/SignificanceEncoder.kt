@@ -80,7 +80,7 @@ class SignificanceEncoder(
             appendLine("exchange deserves remembering. Respond with ONLY a JSON object:")
         }
         appendLine("""{"memories":[{"text":"normalized third-person fact, naming who it is about","room":"ENTITIES|TASKS|EPISODES|KNOWLEDGE|NARRATIVE",""")
-        appendLine(""" "emph":0.0,"aff":0.0,"commitment":false,"sensitivity":"PUBLIC|PERSONAL|SENSITIVE|RESTRICTED",""")
+        appendLine(""" "emph":0.0,"aff":0.0,"dur":0.0,"commitment":false,"sensitivity":"PUBLIC|PERSONAL|SENSITIVE|RESTRICTED",""")
         appendLine(""" "provenance":"USER_DIRECT|USER_ARTIFACT|THIRD_PARTY|SYSTEM_INFERRED",""")
         appendLine(""" "causedBy":["<existing memory id>"],"thread":"short thread label or null","supersedes":"<id or null>"}],""")
         appendLine(""" "profile":[{"path":"dotted.trait.path","value":"...","explicit":false}]}""")
@@ -88,6 +88,9 @@ class SignificanceEncoder(
         appendLine("Rules:")
         appendLine("- Emit [] for trivial exchanges (small talk, generic Q&A). Most turns store NOTHING.")
         appendLine("- emph: did the user stress it or say to remember it (0..1)? aff: emotional weight (0..1).")
+        appendLine("- dur: will this still be true and useful a month from now (0..1)? High for facts about the")
+        appendLine("  user's identity, people, work, places and long-running projects; low for details of the")
+        appendLine("  current task (paths, settings, file names, one-off values).")
         appendLine("- commitment: true when the user states they will do something for someone else or")
         appendLine("  themselves — a promise or obligation (\"I'll call him back\", \"I need to renew my")
         appendLine("  passport\") — not a bare fact or something already done.")

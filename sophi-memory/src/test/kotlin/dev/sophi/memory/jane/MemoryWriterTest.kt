@@ -335,4 +335,18 @@ class MemoryWriterTest : FunSpec({
     test("default weights sum to 1") {
         with(JanesPalaceConfig()) { (wRep + wEmph + wNov + wAff + wRec + wDur) shouldBe (1.0 plusOrMinus 1e-9) }
     }
+
+    test("telemetry records room, dur and whether dur was a fallback") {
+        val store = PalaceStore(tempdir().toPath())
+        val writer = MemoryWriter(store, UserProfile(store), embeddings, "fake", JanesPalaceConfig(encoderTelemetry = true))
+        writer.write(turn, EncoderVerdict(listOf(
+            vm("The user is an engineering manager", "KNOWLEDGE", dur = 0.8),
+            vm("Priya owns billing", "ENTITIES")
+        )))
+        val stored = store.encoderLogLines().filter { it.contains("\"outcome\":\"stored\"") }
+        stored.single { it.contains("engineering manager") }.let {
+            it shouldContain "\"room\":\"KNOWLEDGE\""; it shouldContain "\"dur\":0.8"; it shouldContain "\"durFallback\":false"
+        }
+        stored.single { it.contains("Priya") } shouldContain "\"durFallback\":true"
+    }
 })

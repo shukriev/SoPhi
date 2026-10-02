@@ -41,7 +41,10 @@ class MemoryWriter(
      * "the encoder proposes little" and "the gate rejects nearly everything" look identical from
      * the outside. Never throws: telemetry must not break a write.
      */
-    private fun logCandidate(turn: TurnObservation, outcome: String, alpha: Double?, text: String?) {
+    private fun logCandidate(
+        turn: TurnObservation, outcome: String, alpha: Double?, text: String?,
+        room: Room? = null, dur: Pair<Double, Boolean>? = null
+    ) {
         if (!config.encoderTelemetry) return
         runCatching {
             store.appendEncoderLog(buildJsonObject {
@@ -50,6 +53,8 @@ class MemoryWriter(
                 put("ambient", JsonPrimitive(turn.ambient))
                 put("outcome", JsonPrimitive(outcome))
                 alpha?.let { put("alpha", JsonPrimitive(it)) }
+                room?.let { put("room", JsonPrimitive(it.name)) }
+                dur?.let { put("dur", JsonPrimitive(it.first)); put("durFallback", JsonPrimitive(it.second)) }
                 text?.let { put("text", JsonPrimitive(it.take(160))) }
             }.toString())
         }
@@ -80,7 +85,7 @@ class MemoryWriter(
                     salience = min(1.0, maxOf(existing.salience, blend(vm, room, nov = 0.0, rep = 1.0)) + 0.05),
                     reinforcedAt = turn.nowMs
                 ))
-                logCandidate(turn, "merged", maxSim, text)
+                logCandidate(turn, "merged", maxSim, text, room, durOf(vm, room))
                 continue
             }
 
@@ -104,7 +109,7 @@ class MemoryWriter(
             // to provenance, because the encoder can label overheard speech USER_DIRECT.
             val chatCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !turn.ambient
             if (alpha < config.significanceThreshold && !chatCommitment) {
-                logCandidate(turn, "dropped_below_threshold", alpha, text)
+                logCandidate(turn, "dropped_below_threshold", alpha, text, room, durOf(vm, room))
                 continue
             }
 
@@ -115,7 +120,7 @@ class MemoryWriter(
             // the prompt for the same reason as the isCommitment gate below. Dropping beats
             // storing: a memory known to name the wrong person is worse than no memory at all.
             if (provenance == Provenance.THIRD_PARTY && USER_AS_SUBJECT.containsMatchIn(text)) {
-                logCandidate(turn, "dropped_subject_mismatch", alpha, text)
+                logCandidate(turn, "dropped_subject_mismatch", alpha, text, room, durOf(vm, room))
                 continue
             }
             val memory = Memory(
@@ -136,7 +141,7 @@ class MemoryWriter(
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)
             stored += memory
-            logCandidate(turn, "stored", alpha, text)
+            logCandidate(turn, "stored", alpha, text, room, durOf(vm, room))
 
             // Causal links: only to ids that exist (spec §7 — the encoder may only cite the shortlist).
             vm.causedBy.filter { it in all || stored.any { s -> s.id == it } }.forEach { causeId ->
