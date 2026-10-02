@@ -31,7 +31,6 @@ class JanesPalace(
 ) : MemoryTechnique {
     private val store = PalaceStore(config.home)
     private val profile = UserProfile(store)
-    private val router = embeddingProvider?.let { RoomRouter(it) }
     private val walker = embeddingProvider?.let { PalaceWalker(store, profile, it, config) }
     private val encoder = llmProvider?.let { SignificanceEncoder(it, config, onWarning) }
     private val writer = embeddingProvider?.let {
@@ -47,8 +46,7 @@ class JanesPalace(
     override suspend fun recall(query: RecallQuery): MemoryBlock? {
         val w = walker ?: return null
         val vector = embeddingProvider!!.embed(listOf(query.userInput)).first()
-        val rooms = router!!.route(vector, config.routeTopK)
-        return w.walk(query, vector, rooms)
+        return w.walk(query, vector)
     }
 
     override suspend fun observe(turn: TurnObservation) {

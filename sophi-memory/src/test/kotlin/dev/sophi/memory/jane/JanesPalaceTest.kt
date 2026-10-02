@@ -1,15 +1,39 @@
 package dev.sophi.memory.jane
 
 import dev.sophi.memory.BrowseFilter
+import dev.sophi.memory.FakeEmbeddingProvider
+import dev.sophi.memory.RecallQuery
+import dev.sophi.memory.TurnObservation
 import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.VersionStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
 
 class JanesPalaceTest : FunSpec({
+    // Regression (playbook assistant-6): top-3 descriptor routing skipped ENTITIES for "write down what
+    // you know about...", so stored facts there were never recalled. Recall must reach every room.
+    test("recall finds a matching memory in every room") {
+        val home = tempdir().toPath()
+        val embeddings = FakeEmbeddingProvider()
+        val texts = mapOf(
+            Room.ENTITIES to "Tomas Berg owns the payments API", Room.TASKS to "renew the parking permit",
+            Room.EPISODES to "the offsite moved to Lisbon", Room.KNOWLEDGE to "feature flags start with ff_",
+            Room.NARRATIVE to "the outage led to the on-call rotation")
+        PalaceStore(home).let { store ->
+            MemoryWriter(store, UserProfile(store), embeddings, "fake", JanesPalaceConfig()).write(
+                TurnObservation("s1", "u", "a", 1_000L),
+                EncoderVerdict(texts.map { (room, text) -> VerdictMemory(text = text, room = room.name, dur = 1.0) }))
+            store.close()
+        }
+        val palace = JanesPalace(JanesPalaceConfig(home = home, sessionModel = "m"), null, embeddings, "fake")
+        texts.values.forEach { text -> palace.recall(RecallQuery("s2", text, 2_000L))!!.rendered shouldContain text }
+        palace.close()
+    }
+
     test("consolidate() records a MEMORY_CONSOLIDATION Version when JanesPalace is given a VersionStore") {
         val vs = VersionStore(tempdir().toPath())
         val palace = JanesPalace(

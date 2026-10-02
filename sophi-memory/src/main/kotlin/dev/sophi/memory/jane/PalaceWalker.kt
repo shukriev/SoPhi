@@ -9,7 +9,7 @@ import kotlinx.serialization.json.buildJsonObject
 private data class Hit(val memory: Memory, val score: Double, val direct: Boolean, val semantic: Double)
 
 /**
- * Recall (spec §6): blended scoring over active rooms, neighborhood + narrative expansion,
+ * Recall (spec §6): blended scoring over every room (the per-memory relevance floor does the filtering), neighborhood + narrative expansion,
  * sensitivity guard, VERIFY markers, structured rendering. No LLM call on this path.
  */
 class PalaceWalker(
@@ -21,9 +21,9 @@ class PalaceWalker(
     // Profile-attribute embeddings for the resonance term, invalidated when the profile changes.
     private var profileVectors: Pair<Set<String>, List<FloatArray>>? = null
 
-    suspend fun walk(query: RecallQuery, queryVector: FloatArray, rooms: List<Room>): MemoryBlock? {
+    suspend fun walk(query: RecallQuery, queryVector: FloatArray): MemoryBlock? {
         val all = store.memories()
-        val candidates = all.values.filter { it.active && it.room in rooms }
+        val candidates = all.values.filter { it.active }
         val prof = profile.view(0.7)
         if (candidates.isEmpty() && prof.isEmpty()) return null
 
