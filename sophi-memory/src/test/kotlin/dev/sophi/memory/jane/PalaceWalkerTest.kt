@@ -29,8 +29,8 @@ class PalaceWalkerTest : FunSpec({
             store.putEmbedding(id, "fake", v)
             return m
         }
-        suspend fun walk(input: String, nowMs: Long = DAY, rooms: List<Room> = Room.entries.toList()) =
-            walker.walk(RecallQuery("s1", input, nowMs), fake.embed(listOf(input)).single(), rooms)
+        suspend fun walk(input: String, nowMs: Long = DAY) =
+            walker.walk(RecallQuery("s1", input, nowMs), fake.embed(listOf(input)).single())
     }
 
     test("relevant memory is rendered with room, salience, and age; recall is logged") {

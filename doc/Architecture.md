@@ -177,7 +177,7 @@ User input
     │
     ├─ PluginRegistry.collectContext(sessionId, input)      ← BEFORE the turn, ≤2s budget
     │       MemoryPlugin.contribute → JanesPalace.recall:
-    │       embed query → route the top 3 rooms (descriptor cosine; configurable routeTopK) →
+    │       embed query → search every room (relevance floor 0.25) →
     │       score β₁·semantic + β₂·decayed-priority + β₃·profile-resonance →
     │       expand neighbors + causal threads → privacy guard →
     │       <memory_context> block appended to THIS turn's system prompt

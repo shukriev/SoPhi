@@ -26,10 +26,8 @@ class ScenarioBenchmarkTest : FunSpec({
     test("90-day life: recall, decay, correction, verification, forget — in one story") {
         val home = Files.createTempDirectory("palace-bench")
         val llm = mockk<LLMProvider>()
-        // routeTopK = 5 for the same reason as SpiSubstitutabilityTest: descriptor routing is
-        // meaningless under hash-fake embeddings; the benchmark tests memory behavior, not routing.
         val palace = JanesPalace(
-            JanesPalaceConfig(home = home, sessionModel = "m", routeTopK = 5), llm, FakeEmbeddingProvider(), "fake")
+            JanesPalaceConfig(home = home, sessionModel = "m"), llm, FakeEmbeddingProvider(), "fake")
 
         // Day 0, session 1: an entity, a task, and a sensitive disclosure.
         coEvery { llm.complete(any()) } returns verdict("""{"memories":[

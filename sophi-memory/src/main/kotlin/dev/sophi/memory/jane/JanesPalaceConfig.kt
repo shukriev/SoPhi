@@ -21,7 +21,6 @@ data class JanesPalaceConfig(
     val significanceThreshold: Double = 0.35,
     // Retrieval betas (spec §6): semantic, decayed priority, profile resonance.
     val beta1: Double = 0.45, val beta2: Double = 0.35, val beta3: Double = 0.20,
-    val routeTopK: Int = 3,
     val directK: Int = 8,
     val injectionCap: Int = 15,
     val neighborsPerHit: Int = 2,

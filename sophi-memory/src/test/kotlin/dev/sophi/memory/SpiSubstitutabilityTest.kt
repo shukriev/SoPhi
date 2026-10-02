@@ -49,10 +49,8 @@ class SpiSubstitutabilityTest : FunSpec({
             """{"memories":[{"text":"User's daughter Emma starts school Monday","room":"ENTITIES",
                "emph":0.7,"aff":0.6}],"profile":[{"path":"family.daughter.name","value":"Emma"}]}""",
             TokenUsage(1, 1))
-        // routeTopK = 5: with hash-fake embeddings, descriptor routing is arbitrary — search all
-        // rooms so the test exercises recall, not routing luck (routing has its own test).
         val palace: MemoryTechnique = JanesPalace(
-            JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model", routeTopK = 5),
+            JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model"),
             llm, FakeEmbeddingProvider(), "fake")
 
         palace.observe(TurnObservation("s1", "Emma starts school Monday", "Noted!", 1_000L))
