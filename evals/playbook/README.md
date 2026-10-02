@@ -1,6 +1,6 @@
 # Claude × Sophi use-case playbook
 
-Measures the local Sophi (`prism-ml/bonsai-27b` on LM Studio) on 20 fixed cases (17 designed, 3 grown from real session failures), with Claude as the critic, and keeps
+Measures the local Sophi (`prism-ml/bonsai-27b` on LM Studio) on 21 fixed cases (18 designed, 3 grown from real session failures), with Claude as the critic, and keeps
 only the harness fixes that measurably help. Spec:
 `docs/superpowers/specs/2026-09-26-claude-sophi-usecase-playbook-design.md` (local, gitignored).
 

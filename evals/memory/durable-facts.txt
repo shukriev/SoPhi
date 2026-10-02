@@ -1,0 +1,10 @@
+I work as an engineering manager and lead a team of ten backend developers.
+My colleague Priya Raman owns the billing service.
+We're migrating our FTP accounts to SFTP this quarter.
+I prefer PostgreSQL over MySQL for new projects.
+Our team's release branches are named rel/<year>.<n>.
+I have to send the migration report to Marco by Friday.
+My daughter starts school in Plovdiv next month.
+I really can't stand meetings before 9am, they ruin my whole day.
+Please remember this: my office badge number is 4471.
+Our office moved to the Sofia Tech Park building in September.
