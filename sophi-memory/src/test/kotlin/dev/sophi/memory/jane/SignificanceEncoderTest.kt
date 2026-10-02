@@ -63,6 +63,30 @@ class SignificanceEncoderTest : FunSpec({
         prompt shouldContain "promise or obligation"
     }
 
+    test("prompt asks for dur and says what makes a fact durable") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+        SignificanceEncoder(provider, cfg).encode(turn, emptyList())
+        val prompt = captured.captured.messages.single().content
+        prompt shouldContain "\"dur\":0.0"
+        prompt shouldContain "a month from now"
+        prompt shouldContain "details of the"
+        // Live replay 2026-10-02: the model rated "release branches are named rel/<year>.<n>" dur 0.3.
+        prompt shouldContain "conventions"
+    }
+
+    test("dur parses when present and stays null when absent") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text(
+            """{"memories":[{"text":"a","room":"KNOWLEDGE","dur":0.9},{"text":"b","room":"TASKS"}],"profile":[]}""",
+            TokenUsage(1, 1))
+        val verdict = SignificanceEncoder(provider, cfg).encode(turn, emptyList())!!
+        verdict.memories[0].dur shouldBe 0.9
+        verdict.memories[1].dur shouldBe null
+    }
+
     test("retries once with a stricter instruction when the first response is prose") {
         val provider = mockk<LLMProvider>()
         coEvery { provider.complete(any()) } returnsMany listOf(

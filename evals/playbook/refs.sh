@@ -185,3 +185,4 @@ JSON
 ref_browser_1() { echo SO-2044 > answer.txt; }
 
 ref_delegate_1() { perl -0pi -e 's/def main\(argv\):\n/def main(argv):\n    if "--version" in argv:\n        print("ledger 1.0")\n        return\n/' ledger/cli.py; }
+ref_assistant_6() { printf 'data platform lead\nTomas Berg owns the payments API\nfeature flags use the ff_ prefix\noffice: Riverside building\n' > answer.txt; }

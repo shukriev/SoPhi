@@ -246,3 +246,18 @@ turns_delegate_1() { echo "Ask Claude Code to add a --version flag to the ledger
 check_delegate_1() {
   [ "$(PYTHONDONTWRITEBYTECODE=1 python3 -m ledger.cli --version 2>/dev/null)" = "ledger 1.0" ] && cli_ok && suite_passes
 }
+
+# Neutral durable facts (no emphasis, no emotion): before the durability signal the gate dropped exactly
+# this class (spike 2026-10-01). Session 1 states them; session 2 must recall all four.
+CASES+=(assistant-6)
+setup_assistant_6() { :; }
+turns_assistant_6() {
+  echo "I'm the data platform lead here."
+  echo "My colleague Tomas Berg owns the payments API."
+  echo "Our team prefixes feature flags with ff_."
+  echo "Our office is in the Riverside building."
+}
+turns_assistant_6_2() { echo "Write down what you know about my role, Tomas, how we name feature flags, and where our office is, one per line, in answer.txt."; }
+check_assistant_6() {
+  grep -qi "platform lead" answer.txt 2>/dev/null && grep -qi "payments" answer.txt && grep -q "ff_" answer.txt && grep -qi "riverside" answer.txt
+}

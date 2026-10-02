@@ -14,6 +14,17 @@ import kotlin.math.min
  */
 private val USER_AS_SUBJECT = Regex("^\\s*the user\\s", RegexOption.IGNORE_CASE)
 
+/** Room default for an absent dur: a missing judgment degrades to "probably durable" for facts of the
+ *  user's world, not to the old "neutral means dropped". */
+private val DUR_FALLBACK = mapOf(
+    Room.KNOWLEDGE to 0.8, Room.ENTITIES to 0.8, Room.NARRATIVE to 0.5, Room.EPISODES to 0.4, Room.TASKS to 0.3
+)
+
+/** (dur, fromFallback). On an ambient turn a missing dur is 0, not the room default: the fallback would
+ *  otherwise store overheard facts the model never judged durable (a guest's dentist, a TV plot point). */
+internal fun durOf(vm: VerdictMemory, room: Room, ambient: Boolean): Pair<Double, Boolean> =
+    vm.dur?.let { it.coerceIn(0.0, 1.0) to false } ?: ((if (ambient) 0.0 else DUR_FALLBACK.getValue(room)) to true)
+
 /**
  * Encoding pipeline (spec §7): verdict → redaction → embedding → system-side signals
  * (novelty/repetition/recency) → α blend → θ gate → dedupe-merge → supersede → edges → profile.
@@ -31,7 +42,10 @@ class MemoryWriter(
      * "the encoder proposes little" and "the gate rejects nearly everything" look identical from
      * the outside. Never throws: telemetry must not break a write.
      */
-    private fun logCandidate(turn: TurnObservation, outcome: String, alpha: Double?, text: String?) {
+    private fun logCandidate(
+        turn: TurnObservation, outcome: String, alpha: Double?, text: String?,
+        room: Room? = null, dur: Pair<Double, Boolean>? = null
+    ) {
         if (!config.encoderTelemetry) return
         runCatching {
             store.appendEncoderLog(buildJsonObject {
@@ -40,6 +54,8 @@ class MemoryWriter(
                 put("ambient", JsonPrimitive(turn.ambient))
                 put("outcome", JsonPrimitive(outcome))
                 alpha?.let { put("alpha", JsonPrimitive(it)) }
+                room?.let { put("room", JsonPrimitive(it.name)) }
+                dur?.let { put("dur", JsonPrimitive(it.first)); put("durFallback", JsonPrimitive(it.second)) }
                 text?.let { put("text", JsonPrimitive(it.take(160))) }
             }.toString())
         }
@@ -67,10 +83,10 @@ class MemoryWriter(
                 val existingId = similarities.entries.maxByOrNull { it.value }!!.key
                 val existing = all.getValue(existingId)
                 store.upsertMemory(existing.copy(
-                    salience = min(1.0, maxOf(existing.salience, blend(vm, nov = 0.0, rep = 1.0)) + 0.05),
+                    salience = min(1.0, maxOf(existing.salience, blend(vm, room, turn.ambient, nov = 0.0, rep = 1.0)) + 0.05),
                     reinforcedAt = turn.nowMs
                 ))
-                logCandidate(turn, "merged", maxSim, text)
+                logCandidate(turn, "merged", maxSim, text, room, durOf(vm, room, turn.ambient))
                 continue
             }
 
@@ -78,11 +94,7 @@ class MemoryWriter(
             val recent = roomMemories.sortedByDescending { it.createdAt }.take(config.recentWindow)
             val repCount = recent.count { (similarities[it.id] ?: 0.0) >= config.repetitionThreshold }
             val rep = min(1.0, repCount / 3.0)
-            val alpha = blend(vm, nov = nov, rep = rep)
-            if (alpha < config.significanceThreshold) {
-                logCandidate(turn, "dropped_below_threshold", alpha, text)
-                continue
-            }
+            val alpha = blend(vm, room, turn.ambient, nov = nov, rep = rep)
 
             // Unstated or unparseable provenance resolves per-turn, in code rather than in the
             // prompt (same reasoning as the isCommitment gate below). Defaulting overheard speech
@@ -93,6 +105,15 @@ class MemoryWriter(
                 runCatching { Provenance.valueOf(it) }.getOrDefault(fallback)
             } ?: fallback
 
+            // A commitment the user made in chat is stored whatever its alpha: ADR-035's tracking depends
+            // on it, and a short-lived deadline scores low on dur. !turn.ambient is checked here, not left
+            // to provenance, because the encoder can label overheard speech USER_DIRECT.
+            val chatCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !turn.ambient
+            if (alpha < config.significanceThreshold && !chatCommitment) {
+                logCandidate(turn, "dropped_below_threshold", alpha, text, room, durOf(vm, room, turn.ambient))
+                continue
+            }
+
             // Provenance says whose fact this is; the sentence has to agree. The encoder reliably
             // tags overheard speech THIRD_PARTY and then still writes "The user ..." as the
             // subject -- metadata right, prose wrong -- so a bystander's career gets stored as the
@@ -100,7 +121,7 @@ class MemoryWriter(
             // the prompt for the same reason as the isCommitment gate below. Dropping beats
             // storing: a memory known to name the wrong person is worse than no memory at all.
             if (provenance == Provenance.THIRD_PARTY && USER_AS_SUBJECT.containsMatchIn(text)) {
-                logCandidate(turn, "dropped_subject_mismatch", alpha, text)
+                logCandidate(turn, "dropped_subject_mismatch", alpha, text, room, durOf(vm, room, turn.ambient))
                 continue
             }
             val memory = Memory(
@@ -108,7 +129,7 @@ class MemoryWriter(
                 text = text,
                 room = room,
                 salience = alpha,
-                signals = SalienceSignals(rep, vm.emph.coerceIn(0.0, 1.0), nov, vm.aff.coerceIn(0.0, 1.0), 1.0),
+                signals = SalienceSignals(rep, vm.emph.coerceIn(0.0, 1.0), nov, vm.aff.coerceIn(0.0, 1.0), 1.0, dur = durOf(vm, room, turn.ambient).first),
                 sensitivity = runCatching { Sensitivity.valueOf(vm.sensitivity) }.getOrDefault(Sensitivity.PERSONAL),
                 provenance = provenance,
                 createdAt = turn.nowMs,
@@ -121,7 +142,7 @@ class MemoryWriter(
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)
             stored += memory
-            logCandidate(turn, "stored", alpha, text)
+            logCandidate(turn, "stored", alpha, text, room, durOf(vm, room, turn.ambient))
 
             // Causal links: only to ids that exist (spec §7 — the encoder may only cite the shortlist).
             vm.causedBy.filter { it in all || stored.any { s -> s.id == it } }.forEach { causeId ->
@@ -160,7 +181,7 @@ class MemoryWriter(
         return stored
     }
 
-    private fun blend(vm: VerdictMemory, nov: Double, rep: Double): Double =
+    private fun blend(vm: VerdictMemory, room: Room, ambient: Boolean, nov: Double, rep: Double): Double =
         config.wRep * rep + config.wEmph * vm.emph.coerceIn(0.0, 1.0) + config.wNov * nov +
-            config.wAff * vm.aff.coerceIn(0.0, 1.0) + config.wRec * 1.0
+            config.wAff * vm.aff.coerceIn(0.0, 1.0) + config.wRec * 1.0 + config.wDur * durOf(vm, room, ambient).first
 }

@@ -4,6 +4,7 @@ import dev.sophi.memory.FakeEmbeddingProvider
 import dev.sophi.memory.TurnObservation
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -16,8 +17,10 @@ class MemoryWriterTest : FunSpec({
         return Pair(store, writer)
     }
     val turn = TurnObservation("s1", "u", "a", 1_000L)
-    fun vm(text: String, room: String = "EPISODES", emph: Double = 0.0, aff: Double = 0.0) =
-        VerdictMemory(text = text, room = room, emph = emph, aff = aff)
+    fun vm(text: String, room: String = "EPISODES", emph: Double = 0.0, aff: Double = 0.0,
+           dur: Double? = null, commitment: Boolean = false, provenance: String? = null) =
+        VerdictMemory(text = text, room = room, emph = emph, aff = aff, dur = dur,
+            commitment = commitment, provenance = provenance)
 
     test("TurnObservation.ambient defaults to false") {
         TurnObservation("s1", "u", "a", 1_000L).ambient shouldBe false
@@ -26,24 +29,25 @@ class MemoryWriterTest : FunSpec({
 
     test("high-signal memory is stored with blended salience; embedding is retrievable") {
         val (store, writer) = rig()
-        // rep=0, nov=1 (empty room), rec=1: α = 0.25*0.8 + 0.15*1 + 0.30*0.9 + 0.10*1 = 0.72
+        // rep=0, nov=1 (empty room), rec=1, dur=fallback EPISODES 0.4:
+        // α = 0.15*0.8 + 0.10*1 + 0.20*0.9 + 0.10*1 + 0.30*0.4 = 0.62
         val stored = writer.write(turn, EncoderVerdict(listOf(vm("User was diagnosed with X", emph = 0.8, aff = 0.9))))
         val m = stored.single()
-        (m.salience in 0.70..0.74) shouldBe true
+        (m.salience in 0.60..0.64) shouldBe true
         store.memories().containsKey(m.id) shouldBe true
         store.vectorFor(m.id) shouldBe store.embeddings().getValue(m.id)
     }
 
     test("below-threshold memory is not stored (θ=0.35)") {
         val (store, writer) = rig()
-        // emph=0, aff=0, nov=1, rec=1: α = 0.15 + 0.10 = 0.25 < 0.35
-        writer.write(turn, EncoderVerdict(listOf(vm("weather was fine")))) shouldBe emptyList()
+        // A transient detail: dur=0.1, nov=1, rec=1: α = 0.10 + 0.10 + 0.03 = 0.23 < 0.35
+        writer.write(turn, EncoderVerdict(listOf(vm("weather was fine", dur = 0.1)))) shouldBe emptyList()
         store.memories() shouldBe emptyMap()
     }
 
     test("encoder telemetry is off by default — a dropped candidate leaves no trace") {
         val (store, writer) = rig()
-        writer.write(turn, EncoderVerdict(listOf(vm("weather was fine"))))
+        writer.write(turn, EncoderVerdict(listOf(vm("weather was fine", dur = 0.1))))
         store.encoderLogLines() shouldBe emptyList()
     }
 
@@ -54,7 +58,7 @@ class MemoryWriterTest : FunSpec({
             JanesPalaceConfig(encoderTelemetry = true)
         )
         writer.write(turn, EncoderVerdict(listOf(
-            vm("weather was fine"),                                   // α = 0.25, dropped
+            vm("weather was fine", dur = 0.1),                        // α = 0.23, dropped
             vm("User was diagnosed with X", emph = 0.8, aff = 0.9)    // α = 0.72, stored
         )))
         val lines = store.encoderLogLines()
@@ -62,7 +66,7 @@ class MemoryWriterTest : FunSpec({
         lines.count { it.contains("\"outcome\":\"dropped_below_threshold\"") } shouldBe 1
         lines.count { it.contains("\"outcome\":\"stored\"") } shouldBe 1
         // The alpha that caused the drop is recorded, so the gate's margin is measurable.
-        lines.single { it.contains("dropped_below_threshold") } shouldContain "\"alpha\":0.25"
+        lines.single { it.contains("dropped_below_threshold") } shouldContain "\"alpha\":0.23"
     }
 
     test("near-duplicate merges: existing reinforced, no new memory") {
@@ -147,7 +151,9 @@ class MemoryWriterTest : FunSpec({
         val ambient = TurnObservation("ambient", "someone is renewing a passport", "", 1_000L, ambient = true)
         // provenance omitted entirely — the case where the model simply didn't say who was speaking.
         val stored = writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "Someone is renewing a passport", room = "TASKS", emph = 0.8,
+            // dur given so the candidate clears the gate: this test is about provenance, and an
+            // ambient candidate with no dur gets no room fallback.
+            VerdictMemory(text = "Someone is renewing a passport", room = "TASKS", emph = 0.8, dur = 0.5,
                 commitment = true)
         ))).single()
 
@@ -161,7 +167,7 @@ class MemoryWriterTest : FunSpec({
         val (_, writer) = rig()
         val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
         val stored = writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "User will call Mark back", room = "TASKS", emph = 0.8,
+            VerdictMemory(text = "User will call Mark back", room = "TASKS", emph = 0.8, dur = 0.5,
                 commitment = true, provenance = "USER_DIRECT")
         ))).single()
 
@@ -189,7 +195,7 @@ class MemoryWriterTest : FunSpec({
         val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
         // "The user's wife" is a fact about the wife — legal at any provenance.
         writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "The user's wife is named Sofia", room = "ENTITIES", emph = 0.9,
+            VerdictMemory(text = "The user's wife is named Sofia", room = "ENTITIES", emph = 0.9, dur = 0.5,
                 provenance = "THIRD_PARTY")
         ))).size shouldBe 1
         // And the guard is scoped to THIRD_PARTY: a chat turn may say "The user ..." freely.
@@ -210,7 +216,7 @@ class MemoryWriterTest : FunSpec({
         val (_, writer) = rig()
         val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
         writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "Overheard fact", room = "KNOWLEDGE", emph = 0.8, provenance = "BANANA")
+            VerdictMemory(text = "Overheard fact", room = "KNOWLEDGE", emph = 0.8, dur = 0.5, provenance = "BANANA")
         ))).single().provenance shouldBe Provenance.THIRD_PARTY
 
         writer.write(turn, EncoderVerdict(listOf(
@@ -254,5 +260,110 @@ class MemoryWriterTest : FunSpec({
             vm("real fact", emph = 0.9).copy(causedBy = listOf("mem_ghost"))))).single()
         store.edges() shouldBe emptyList()
         store.memories().containsKey(m.id) shouldBe true
+    }
+
+    // Spike 2026-10-01: neutral durable facts (job, colleague, convention, office) maxed at 0.25.
+    test("a neutral durable fact is stored in an empty store") {
+        val (_, writer) = rig()
+        // dur=0.8, nov=1: α = 0.10 + 0.10 + 0.24 = 0.44
+        writer.write(turn, EncoderVerdict(listOf(
+            vm("The user is an engineering manager", "KNOWLEDGE", dur = 0.8)))).size shouldBe 1
+    }
+
+    test("a neutral durable fact is still stored in a crowded room") {
+        val (_, writer) = rig()
+        listOf("user works on the billing platform", "user leads the platform team",
+               "user prefers postgres", "user's team uses trunk-based development").forEachIndexed { i, t ->
+            writer.write(turn.copy(nowMs = 1_000L + i), EncoderVerdict(listOf(vm(t, "KNOWLEDGE", emph = 0.9, dur = 0.9))))
+        }
+        writer.write(turn.copy(nowMs = 9_000L), EncoderVerdict(listOf(
+            vm("user's team names release branches rel/<year>.<n>", "KNOWLEDGE", dur = 0.9)))).size shouldBe 1
+    }
+
+    test("task trivia is dropped") {
+        val (_, writer) = rig()
+        // dur=0.1, nov=1: α = 0.23
+        writer.write(turn, EncoderVerdict(listOf(
+            vm("The retry limit in docs/ops.md is 7", "KNOWLEDGE", dur = 0.1)))) shouldBe emptyList()
+    }
+
+    test("a missing dur falls back by room: ENTITIES kept, TASKS detail dropped") {
+        val (_, writer) = rig()
+        // ENTITIES fallback 0.8, nov=1: α = 0.10 + 0.10 + 0.24 = 0.44 → stored
+        writer.write(turn, EncoderVerdict(listOf(vm("Priya owns the billing service", "ENTITIES")))).size shouldBe 1
+        // TASKS fallback 0.3, nov=1: α = 0.10 + 0.10 + 0.09 = 0.29 → dropped
+        writer.write(turn.copy(nowMs = 2_000L), EncoderVerdict(listOf(
+            vm("ran the build once", "TASKS")))) shouldBe emptyList()
+    }
+
+    test("dur is clamped to 0..1") {
+        val (_, writer) = rig()
+        val m = writer.write(turn, EncoderVerdict(listOf(vm("odd verdict", "KNOWLEDGE", dur = 1.7)))).single()
+        m.signals.dur shouldBe 1.0
+        writer.write(turn.copy(nowMs = 2_000L), EncoderVerdict(listOf(
+            vm("negative verdict", "TASKS", dur = -0.3)))) shouldBe emptyList()
+    }
+
+    test("a chat USER_DIRECT commitment is stored even below the gate") {
+        val (_, writer) = rig()
+        // dur=0.0, nov=1: α = 0.20 < 0.35, but it's a commitment the user made in chat.
+        val m = writer.write(turn, EncoderVerdict(listOf(
+            vm("User will send the report to Marco by Friday", "TASKS", dur = 0.0,
+                commitment = true, provenance = "USER_DIRECT")))).single()
+        m.isCommitment shouldBe true
+    }
+
+    test("an ambient commitment labelled USER_DIRECT is not bypassed") {
+        val (_, writer) = rig()
+        writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
+            vm("User will send the report to Marco by Friday", "TASKS", dur = 0.0,
+                commitment = true, provenance = "USER_DIRECT")))) shouldBe emptyList()
+    }
+
+    test("ambient trivia is still dropped") {
+        val (_, writer) = rig()
+        writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
+            vm("Someone mentioned the TV volume", "EPISODES", dur = 0.05, provenance = "THIRD_PARTY")))) shouldBe emptyList()
+    }
+
+    test("merge uses the fallback dur when the encoder omits it") {
+        val (store, writer) = rig()
+        val first = writer.write(turn, EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES")))).single()
+        writer.write(turn.copy(nowMs = 2_000L), EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES"))))
+        store.memories().values.count { it.active } shouldBe 1
+        (store.memories().getValue(first.id).salience >= first.salience) shouldBe true
+    }
+
+    test("default weights sum to 1") {
+        with(JanesPalaceConfig()) { (wRep + wEmph + wNov + wAff + wRec + wDur) shouldBe (1.0 plusOrMinus 1e-9) }
+    }
+
+    test("telemetry records room, dur and whether dur was a fallback") {
+        val store = PalaceStore(tempdir().toPath())
+        val writer = MemoryWriter(store, UserProfile(store), embeddings, "fake", JanesPalaceConfig(encoderTelemetry = true))
+        writer.write(turn, EncoderVerdict(listOf(
+            vm("The user is an engineering manager", "KNOWLEDGE", dur = 0.8),
+            vm("Priya owns billing", "ENTITIES")
+        )))
+        val stored = store.encoderLogLines().filter { it.contains("\"outcome\":\"stored\"") }
+        stored.single { it.contains("engineering manager") }.let {
+            it shouldContain "\"room\":\"KNOWLEDGE\""; it shouldContain "\"dur\":0.8"; it shouldContain "\"durFallback\":false"
+        }
+        stored.single { it.contains("Priya") } shouldContain "\"durFallback\":true"
+    }
+
+    // Review finding: the room fallback (ENTITIES 0.8) let an overheard fact the model never rated
+    // as durable score ~0.44 and be stored — always-on listening would keep guests' facts. On an
+    // ambient turn a missing dur counts as 0; an explicitly-rated durable overheard fact still passes.
+    test("an ambient candidate with no dur gets no room fallback") {
+        val (_, writer) = rig()
+        writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
+            vm("Dr. Lee is the guest's dentist", "ENTITIES", provenance = "THIRD_PARTY")))) shouldBe emptyList()
+    }
+
+    test("an ambient candidate the model rated durable is still stored") {
+        val (_, writer) = rig()
+        writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
+            vm("Dr. Lee is the family dentist", "ENTITIES", dur = 0.9, provenance = "THIRD_PARTY")))).size shouldBe 1
     }
 })
