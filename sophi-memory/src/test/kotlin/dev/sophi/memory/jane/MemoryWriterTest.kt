@@ -344,6 +344,13 @@ class MemoryWriterTest : FunSpec({
         store.memories().getValue(first.id).signals.dur shouldBe 0.9
     }
 
+    test("a merge without a dur judgment keeps the stored dur") {
+        val (store, writer) = rig()
+        val first = writer.write(turn, EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES", dur = 0.9)))).single()
+        writer.write(turn.copy(nowMs = 2_000L, ambient = true), EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES"))))
+        store.memories().getValue(first.id).signals.dur shouldBe 0.9
+    }
+
     test("default weights sum to 1") {
         with(JanesPalaceConfig()) { (wRep + wEmph + wNov + wAff + wRec + wDur) shouldBe (1.0 plusOrMinus 1e-9) }
     }

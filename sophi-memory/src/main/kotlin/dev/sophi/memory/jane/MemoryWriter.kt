@@ -87,7 +87,8 @@ class MemoryWriter(
                 val existing = all.getValue(existingId)
                 store.upsertMemory(existing.copy(
                     salience = min(1.0, maxOf(existing.salience, blend(vm, room, turn.ambient, nov = 0.0, rep = 1.0)) + 0.05),
-                    signals = existing.signals.copy(dur = durOf(vm, room, turn.ambient).first),
+                    // Only a real judgment replaces the stored dur; a room or ambient fallback is not one.
+                    signals = existing.signals.copy(dur = vm.dur?.coerceIn(0.0, 1.0) ?: existing.signals.dur),
                     reinforcedAt = turn.nowMs
                 ))
                 logCandidate(turn, "merged", maxSim, text, room, durOf(vm, room, turn.ambient))
