@@ -20,9 +20,10 @@ private val DUR_FALLBACK = mapOf(
     Room.KNOWLEDGE to 0.8, Room.ENTITIES to 0.8, Room.NARRATIVE to 0.5, Room.EPISODES to 0.4, Room.TASKS to 0.3
 )
 
-/** (dur, fromFallback). */
-internal fun durOf(vm: VerdictMemory, room: Room): Pair<Double, Boolean> =
-    vm.dur?.let { it.coerceIn(0.0, 1.0) to false } ?: (DUR_FALLBACK.getValue(room) to true)
+/** (dur, fromFallback). On an ambient turn a missing dur is 0, not the room default: the fallback would
+ *  otherwise store overheard facts the model never judged durable (a guest's dentist, a TV plot point). */
+internal fun durOf(vm: VerdictMemory, room: Room, ambient: Boolean): Pair<Double, Boolean> =
+    vm.dur?.let { it.coerceIn(0.0, 1.0) to false } ?: ((if (ambient) 0.0 else DUR_FALLBACK.getValue(room)) to true)
 
 /**
  * Encoding pipeline (spec §7): verdict → redaction → embedding → system-side signals
@@ -82,10 +83,10 @@ class MemoryWriter(
                 val existingId = similarities.entries.maxByOrNull { it.value }!!.key
                 val existing = all.getValue(existingId)
                 store.upsertMemory(existing.copy(
-                    salience = min(1.0, maxOf(existing.salience, blend(vm, room, nov = 0.0, rep = 1.0)) + 0.05),
+                    salience = min(1.0, maxOf(existing.salience, blend(vm, room, turn.ambient, nov = 0.0, rep = 1.0)) + 0.05),
                     reinforcedAt = turn.nowMs
                 ))
-                logCandidate(turn, "merged", maxSim, text, room, durOf(vm, room))
+                logCandidate(turn, "merged", maxSim, text, room, durOf(vm, room, turn.ambient))
                 continue
             }
 
@@ -93,7 +94,7 @@ class MemoryWriter(
             val recent = roomMemories.sortedByDescending { it.createdAt }.take(config.recentWindow)
             val repCount = recent.count { (similarities[it.id] ?: 0.0) >= config.repetitionThreshold }
             val rep = min(1.0, repCount / 3.0)
-            val alpha = blend(vm, room, nov = nov, rep = rep)
+            val alpha = blend(vm, room, turn.ambient, nov = nov, rep = rep)
 
             // Unstated or unparseable provenance resolves per-turn, in code rather than in the
             // prompt (same reasoning as the isCommitment gate below). Defaulting overheard speech
@@ -109,7 +110,7 @@ class MemoryWriter(
             // to provenance, because the encoder can label overheard speech USER_DIRECT.
             val chatCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !turn.ambient
             if (alpha < config.significanceThreshold && !chatCommitment) {
-                logCandidate(turn, "dropped_below_threshold", alpha, text, room, durOf(vm, room))
+                logCandidate(turn, "dropped_below_threshold", alpha, text, room, durOf(vm, room, turn.ambient))
                 continue
             }
 
@@ -120,7 +121,7 @@ class MemoryWriter(
             // the prompt for the same reason as the isCommitment gate below. Dropping beats
             // storing: a memory known to name the wrong person is worse than no memory at all.
             if (provenance == Provenance.THIRD_PARTY && USER_AS_SUBJECT.containsMatchIn(text)) {
-                logCandidate(turn, "dropped_subject_mismatch", alpha, text, room, durOf(vm, room))
+                logCandidate(turn, "dropped_subject_mismatch", alpha, text, room, durOf(vm, room, turn.ambient))
                 continue
             }
             val memory = Memory(
@@ -128,7 +129,7 @@ class MemoryWriter(
                 text = text,
                 room = room,
                 salience = alpha,
-                signals = SalienceSignals(rep, vm.emph.coerceIn(0.0, 1.0), nov, vm.aff.coerceIn(0.0, 1.0), 1.0, dur = durOf(vm, room).first),
+                signals = SalienceSignals(rep, vm.emph.coerceIn(0.0, 1.0), nov, vm.aff.coerceIn(0.0, 1.0), 1.0, dur = durOf(vm, room, turn.ambient).first),
                 sensitivity = runCatching { Sensitivity.valueOf(vm.sensitivity) }.getOrDefault(Sensitivity.PERSONAL),
                 provenance = provenance,
                 createdAt = turn.nowMs,
@@ -141,7 +142,7 @@ class MemoryWriter(
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)
             stored += memory
-            logCandidate(turn, "stored", alpha, text, room, durOf(vm, room))
+            logCandidate(turn, "stored", alpha, text, room, durOf(vm, room, turn.ambient))
 
             // Causal links: only to ids that exist (spec §7 — the encoder may only cite the shortlist).
             vm.causedBy.filter { it in all || stored.any { s -> s.id == it } }.forEach { causeId ->
@@ -180,7 +181,7 @@ class MemoryWriter(
         return stored
     }
 
-    private fun blend(vm: VerdictMemory, room: Room, nov: Double, rep: Double): Double =
+    private fun blend(vm: VerdictMemory, room: Room, ambient: Boolean, nov: Double, rep: Double): Double =
         config.wRep * rep + config.wEmph * vm.emph.coerceIn(0.0, 1.0) + config.wNov * nov +
-            config.wAff * vm.aff.coerceIn(0.0, 1.0) + config.wRec * 1.0 + config.wDur * durOf(vm, room).first
+            config.wAff * vm.aff.coerceIn(0.0, 1.0) + config.wRec * 1.0 + config.wDur * durOf(vm, room, ambient).first
 }

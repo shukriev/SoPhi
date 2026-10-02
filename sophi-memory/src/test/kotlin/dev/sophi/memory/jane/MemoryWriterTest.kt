@@ -151,7 +151,9 @@ class MemoryWriterTest : FunSpec({
         val ambient = TurnObservation("ambient", "someone is renewing a passport", "", 1_000L, ambient = true)
         // provenance omitted entirely — the case where the model simply didn't say who was speaking.
         val stored = writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "Someone is renewing a passport", room = "TASKS", emph = 0.8,
+            // dur given so the candidate clears the gate: this test is about provenance, and an
+            // ambient candidate with no dur gets no room fallback.
+            VerdictMemory(text = "Someone is renewing a passport", room = "TASKS", emph = 0.8, dur = 0.5,
                 commitment = true)
         ))).single()
 
@@ -165,7 +167,7 @@ class MemoryWriterTest : FunSpec({
         val (_, writer) = rig()
         val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
         val stored = writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "User will call Mark back", room = "TASKS", emph = 0.8,
+            VerdictMemory(text = "User will call Mark back", room = "TASKS", emph = 0.8, dur = 0.5,
                 commitment = true, provenance = "USER_DIRECT")
         ))).single()
 
@@ -193,7 +195,7 @@ class MemoryWriterTest : FunSpec({
         val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
         // "The user's wife" is a fact about the wife — legal at any provenance.
         writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "The user's wife is named Sofia", room = "ENTITIES", emph = 0.9,
+            VerdictMemory(text = "The user's wife is named Sofia", room = "ENTITIES", emph = 0.9, dur = 0.5,
                 provenance = "THIRD_PARTY")
         ))).size shouldBe 1
         // And the guard is scoped to THIRD_PARTY: a chat turn may say "The user ..." freely.
@@ -214,7 +216,7 @@ class MemoryWriterTest : FunSpec({
         val (_, writer) = rig()
         val ambient = TurnObservation("ambient", "u", "", 1_000L, ambient = true)
         writer.write(ambient, EncoderVerdict(listOf(
-            VerdictMemory(text = "Overheard fact", room = "KNOWLEDGE", emph = 0.8, provenance = "BANANA")
+            VerdictMemory(text = "Overheard fact", room = "KNOWLEDGE", emph = 0.8, dur = 0.5, provenance = "BANANA")
         ))).single().provenance shouldBe Provenance.THIRD_PARTY
 
         writer.write(turn, EncoderVerdict(listOf(
@@ -348,5 +350,20 @@ class MemoryWriterTest : FunSpec({
             it shouldContain "\"room\":\"KNOWLEDGE\""; it shouldContain "\"dur\":0.8"; it shouldContain "\"durFallback\":false"
         }
         stored.single { it.contains("Priya") } shouldContain "\"durFallback\":true"
+    }
+
+    // Review finding: the room fallback (ENTITIES 0.8) let an overheard fact the model never rated
+    // as durable score ~0.44 and be stored — always-on listening would keep guests' facts. On an
+    // ambient turn a missing dur counts as 0; an explicitly-rated durable overheard fact still passes.
+    test("an ambient candidate with no dur gets no room fallback") {
+        val (_, writer) = rig()
+        writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
+            vm("Dr. Lee is the guest's dentist", "ENTITIES", provenance = "THIRD_PARTY")))) shouldBe emptyList()
+    }
+
+    test("an ambient candidate the model rated durable is still stored") {
+        val (_, writer) = rig()
+        writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
+            vm("Dr. Lee is the family dentist", "ENTITIES", dur = 0.9, provenance = "THIRD_PARTY")))).size shouldBe 1
     }
 })
