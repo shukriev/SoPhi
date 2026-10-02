@@ -73,6 +73,8 @@ class SignificanceEncoderTest : FunSpec({
         prompt shouldContain "\"dur\":0.0"
         prompt shouldContain "a month from now"
         prompt shouldContain "details of the"
+        // Live replay 2026-10-02: the model rated "release branches are named rel/<year>.<n>" dur 0.3.
+        prompt shouldContain "conventions"
     }
 
     test("dur parses when present and stays null when absent") {
