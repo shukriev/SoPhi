@@ -10,7 +10,11 @@ read -ra FLAGS <<< "${SOPHI_FLAGS:-$DEFAULT_FLAGS}"
 D="$(mktemp -d)"; mkdir -p "$D/home/.sophi" "$D/cwd"
 (cd "$D/cwd" && SOPHI_MEMORY_ENCODER_TELEMETRY=true java -Duser.home="$D/home" -jar "$JAR" "${FLAGS[@]}" \
   < "$HERE/durable-facts.txt" > "$D/transcript.txt" 2>&1)
-python3 - "$D/home/.sophi/memory/encoder.jsonl" "$(grep -c . "$HERE/durable-facts.txt")" <<'PY'
+LOG="$D/home/.sophi/memory/encoder.jsonl"
+if [[ ! -s "$LOG" ]]; then
+  echo "no encoder telemetry at $LOG: memory was off or the session failed; see $D/transcript.txt" >&2; exit 1
+fi
+python3 - "$LOG" "$(grep -c . "$HERE/durable-facts.txt")" <<'PY'
 import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1])]
 cands = [r for r in rows if not r["outcome"].startswith("proposed")]
