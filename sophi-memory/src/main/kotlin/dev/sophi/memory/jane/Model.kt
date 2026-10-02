@@ -7,7 +7,12 @@ import kotlinx.serialization.Serializable
 @Serializable enum class Provenance { USER_DIRECT, USER_ARTIFACT, THIRD_PARTY, SYSTEM_INFERRED }
 
 @Serializable
-data class SalienceSignals(val rep: Double, val emph: Double, val nov: Double, val aff: Double, val rec: Double)
+data class SalienceSignals(
+    val rep: Double, val emph: Double, val nov: Double, val aff: Double, val rec: Double,
+    // Encoder's "still true and useful in a month?" judgment. Last with a default so older positional
+    // call sites and records written before it existed (read as 0.0) need no change.
+    val dur: Double = 0.0
+)
 
 @Serializable
 data class Memory(

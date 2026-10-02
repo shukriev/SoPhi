@@ -145,4 +145,24 @@ class PalaceStoreTest : FunSpec({
         s.attributes() shouldBe emptyMap()
         s.readLastRecall() shouldBe null
     }
+
+    test("the dur signal round-trips through the store") {
+        val s = store()
+        s.upsertMemory(mem("mem_1").copy(signals = SalienceSignals(0.0, 0.0, 1.0, 0.0, 1.0, dur = 0.8)))
+        s.memories().getValue("mem_1").signals.dur shouldBe 0.8
+    }
+
+    // Every memory written before the durability signal existed has no sigDur. It must load as 0.0,
+    // with its stored salience untouched (spec: no migration, no re-scoring).
+    test("a record without sigDur loads with dur 0.0 and its salience unchanged") {
+        val home = tempdir().toPath()
+        val db = dev.sophi.store.arcade.EmbeddedArcadeStore.open(home)
+        val s = PalaceStore(home, db)
+        s.upsertMemory(mem("mem_old").copy(salience = 0.42))
+        db.upsertVertex("Memory", "mem_old", mapOf("sigDur" to null))
+
+        val loaded = s.memories().getValue("mem_old")
+        loaded.signals.dur shouldBe 0.0
+        loaded.salience shouldBe 0.42
+    }
 })

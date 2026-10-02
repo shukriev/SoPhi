@@ -107,7 +107,7 @@ class PalaceStore(
     private fun Memory.toProperties(): Map<String, Any?> = mapOf(
         "text" to text, "room" to room.name, "salience" to salience,
         "sigRep" to signals.rep, "sigEmph" to signals.emph, "sigNov" to signals.nov,
-        "sigAff" to signals.aff, "sigRec" to signals.rec,
+        "sigAff" to signals.aff, "sigRec" to signals.rec, "sigDur" to signals.dur,
         "sensitivity" to sensitivity.name, "provenance" to provenance.name,
         "createdAt" to createdAt, "reinforcedAt" to reinforcedAt, "sourceSessionId" to sourceSessionId,
         "supersededBy" to supersededBy, "softDeletedAt" to softDeletedAt,
@@ -122,7 +122,8 @@ class PalaceStore(
         signals = SalienceSignals(
             (get("sigRep") as Number).toDouble(), (get("sigEmph") as Number).toDouble(),
             (get("sigNov") as Number).toDouble(), (get("sigAff") as Number).toDouble(),
-            (get("sigRec") as Number).toDouble()
+            (get("sigRec") as Number).toDouble(),
+            dur = (get("sigDur") as Number?)?.toDouble() ?: 0.0
         ),
         sensitivity = Sensitivity.valueOf(get("sensitivity") as String),
         provenance = Provenance.valueOf(get("provenance") as String),
