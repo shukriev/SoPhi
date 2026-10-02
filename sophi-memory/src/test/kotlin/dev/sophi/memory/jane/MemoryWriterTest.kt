@@ -327,11 +327,21 @@ class MemoryWriterTest : FunSpec({
     }
 
     test("merge uses the fallback dur when the encoder omits it") {
-        val (store, writer) = rig()
-        val first = writer.write(turn, EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES")))).single()
+        val store = PalaceStore(tempdir().toPath())
+        val writer = MemoryWriter(store, UserProfile(store), embeddings, "fake", JanesPalaceConfig(encoderTelemetry = true))
+        writer.write(turn, EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES"))))
         writer.write(turn.copy(nowMs = 2_000L), EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES"))))
         store.memories().values.count { it.active } shouldBe 1
-        (store.memories().getValue(first.id).salience >= first.salience) shouldBe true
+        store.encoderLogLines().single { it.contains("\"outcome\":\"merged\"") }.let {
+            it shouldContain "\"dur\":0.8"; it shouldContain "\"durFallback\":true"
+        }
+    }
+
+    test("merge keeps the latest dur judgment on the stored memory") {
+        val (store, writer) = rig()
+        val first = writer.write(turn, EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES", dur = 0.6)))).single()
+        writer.write(turn.copy(nowMs = 2_000L), EncoderVerdict(listOf(vm("Priya owns billing", "ENTITIES", dur = 0.9))))
+        store.memories().getValue(first.id).signals.dur shouldBe 0.9
     }
 
     test("default weights sum to 1") {

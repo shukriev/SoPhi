@@ -16,14 +16,17 @@ private val USER_AS_SUBJECT = Regex("^\\s*the user\\s", RegexOption.IGNORE_CASE)
 
 /** Room default for an absent dur: a missing judgment degrades to "probably durable" for facts of the
  *  user's world, not to the old "neutral means dropped". */
-private val DUR_FALLBACK = mapOf(
-    Room.KNOWLEDGE to 0.8, Room.ENTITIES to 0.8, Room.NARRATIVE to 0.5, Room.EPISODES to 0.4, Room.TASKS to 0.3
-)
+private fun durFallback(room: Room): Double = when (room) {
+    Room.KNOWLEDGE, Room.ENTITIES -> 0.8
+    Room.NARRATIVE -> 0.5
+    Room.EPISODES -> 0.4
+    Room.TASKS -> 0.3
+}
 
 /** (dur, fromFallback). On an ambient turn a missing dur is 0, not the room default: the fallback would
  *  otherwise store overheard facts the model never judged durable (a guest's dentist, a TV plot point). */
 internal fun durOf(vm: VerdictMemory, room: Room, ambient: Boolean): Pair<Double, Boolean> =
-    vm.dur?.let { it.coerceIn(0.0, 1.0) to false } ?: ((if (ambient) 0.0 else DUR_FALLBACK.getValue(room)) to true)
+    vm.dur?.let { it.coerceIn(0.0, 1.0) to false } ?: ((if (ambient) 0.0 else durFallback(room)) to true)
 
 /**
  * Encoding pipeline (spec §7): verdict → redaction → embedding → system-side signals
@@ -84,6 +87,7 @@ class MemoryWriter(
                 val existing = all.getValue(existingId)
                 store.upsertMemory(existing.copy(
                     salience = min(1.0, maxOf(existing.salience, blend(vm, room, turn.ambient, nov = 0.0, rep = 1.0)) + 0.05),
+                    signals = existing.signals.copy(dur = durOf(vm, room, turn.ambient).first),
                     reinforcedAt = turn.nowMs
                 ))
                 logCandidate(turn, "merged", maxSim, text, room, durOf(vm, room, turn.ambient))
