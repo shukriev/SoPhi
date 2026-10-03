@@ -30,6 +30,12 @@ data class JanesPalaceConfig(
     val relevanceFloor: Double = 0.25,
     val sensitiveFloor: Double = 0.35,
     val restrictedFloor: Double = 0.55,
+    // Per-query relative floor: a memory must also beat the query's median score over the store by this
+    // margin. Fixed floors can't separate relevant from unrelated (nomic: unrelated median ~0.42).
+    // Below baselineMinMemories the median says little, so only the fixed floors apply.
+    val relevanceMargin: Double = 0.05,
+    val sensitiveMargin: Double = 0.12,
+    val baselineMinMemories: Int = 8,
     val mergeThreshold: Double = 0.92,
     val repetitionThreshold: Double = 0.80,
     val recentWindow: Int = 20,

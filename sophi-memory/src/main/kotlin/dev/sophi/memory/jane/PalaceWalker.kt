@@ -34,13 +34,19 @@ class PalaceWalker(
         }
 
         // 1. Direct hits: blended score, relevance floor, sensitivity floors (spec §6 steps 3+5).
-        val direct = candidates.mapNotNull { m ->
-            val sem = store.vectorFor(m.id)?.let { cosine(queryVector, it) } ?: return@mapNotNull null
-            val floor = when (m.sensitivity) {
-                Sensitivity.RESTRICTED -> config.restrictedFloor
-                Sensitivity.SENSITIVE -> config.sensitiveFloor
-                else -> config.relevanceFloor
+        val sems = candidates.mapNotNull { m -> store.vectorFor(m.id)?.let { m to cosine(queryVector, it) } }
+        val sorted = sems.map { it.second }.sorted()
+        val baseline = sorted.takeIf { it.size >= config.baselineMinMemories }
+            ?.let { (it[(it.size - 1) / 2] + it[it.size / 2]) / 2 }
+        val direct = sems.mapNotNull { (m, sem) ->
+            // The relative floor never rises above the best match for ordinary memories, so a store where
+            // everything matches equally still recalls; SENSITIVE+ must clear it regardless (fails closed).
+            val (fixed, relative) = when (m.sensitivity) {
+                Sensitivity.RESTRICTED -> config.restrictedFloor to baseline?.plus(config.sensitiveMargin)
+                Sensitivity.SENSITIVE -> config.sensitiveFloor to baseline?.plus(config.sensitiveMargin)
+                else -> config.relevanceFloor to baseline?.plus(config.relevanceMargin)?.coerceAtMost(sorted.last())
             }
+            val floor = maxOf(fixed, relative ?: fixed)
             if (sem < floor) return@mapNotNull null
             val score = (config.beta1 * sem + config.beta2 * priority(m, query.nowMs, config.halfLifeMs) +
                 config.beta3 * resonance(m.id)) * worthMultiplier(m, config)

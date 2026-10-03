@@ -4,9 +4,16 @@ import dev.sophi.memory.FakeEmbeddingProvider
 import dev.sophi.memory.RecallQuery
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.float
 
 private const val DAY = 24 * 3_600_000L
 
@@ -31,6 +38,31 @@ class PalaceWalkerTest : FunSpec({
         }
         suspend fun walk(input: String, nowMs: Long = DAY) =
             walker.walk(RecallQuery("s1", input, nowMs), fake.embed(listOf(input)).single())
+    }
+
+    // Real nomic geometry (invented text, embeddings saved from LM Studio): unrelated pairs score a median
+    // ~0.42, so the fixed 0.25/0.35 floors filtered nothing and every query recalled almost the whole store.
+    test("on nomic embeddings, recall keeps answers and drops unrelated memories") {
+        val fx = Json.parseToJsonElement(javaClass.getResource("/nomic-recall-fixture.json")!!.readText()).jsonObject
+        fun vecs(key: String) = fx.getValue(key).jsonArray.map { v -> v.jsonArray.map { it.jsonPrimitive.float }.toFloatArray() }
+        val queries = fx.getValue("queries").jsonArray.map { it.jsonPrimitive.content }
+        val texts = fx.getValue("memories").jsonArray.map { it.jsonPrimitive.content }
+        val (q, m) = vecs("q") to vecs("m")
+        val store = PalaceStore(tempdir().toPath())
+        texts.forEachIndexed { i, text ->
+            // Index 7 is a health fact: SENSITIVE.
+            val sens = if (i == 7) Sensitivity.SENSITIVE else Sensitivity.PERSONAL
+            store.upsertMemory(Memory("m$i", text, Room.KNOWLEDGE, 0.8, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
+                sens, Provenance.USER_DIRECT, 0L, 0L, "s"))
+            store.putEmbedding("m$i", "nomic", m[i])
+        }
+        val walker = PalaceWalker(store, UserProfile(store), fake, JanesPalaceConfig(neighborsPerHit = 0))
+        val recalled = queries.indices.map { i ->
+            walker.walk(RecallQuery("s1", queries[i], DAY), q[i])?.memoryIds.orEmpty().toSet()
+        }
+        queries.indices.count { i -> "m$i" in recalled[i] } shouldBeGreaterThanOrEqual 10
+        queries.indices.sumOf { i -> recalled[i].count { it != "m$i" } } shouldBeLessThanOrEqual 20
+        queries.indices.filter { i -> "m7" in recalled[i] } shouldBe listOf(7)
     }
 
     test("relevant memory is rendered with room, salience, and age; recall is logged") {
