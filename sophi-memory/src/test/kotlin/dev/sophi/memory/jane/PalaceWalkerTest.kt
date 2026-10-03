@@ -60,9 +60,29 @@ class PalaceWalkerTest : FunSpec({
         val recalled = queries.indices.map { i ->
             walker.walk(RecallQuery("s1", queries[i], DAY), q[i])?.memoryIds.orEmpty().toSet()
         }
+        // A guard, not a calibration: these pass by small margins (q10's answer clears its floor by ~0.001, 18
+        // unrelated vs 20, m7 by 0.015), so retuning the margins may flip them. Neighbor expansion is off: this
+        // counts direct hits only; each one still pulls in its nearest same-room memories in production.
         queries.indices.count { i -> "m$i" in recalled[i] } shouldBeGreaterThanOrEqual 10
         queries.indices.sumOf { i -> recalled[i].count { it != "m$i" } } shouldBeLessThanOrEqual 20
         queries.indices.filter { i -> "m7" in recalled[i] } shouldBe listOf(7)
+    }
+
+    // Review finding: the relative floor was capped at the best match over ALL memories. When that best match
+    // was SENSITIVE and failed its own stricter floor, ordinary memories were capped at a score none reached.
+    test("a sensitive best match that fails its floor does not empty ordinary recall") {
+        val store = PalaceStore(tempdir().toPath())
+        fun add(id: String, sem: Double, sens: Sensitivity) {
+            store.upsertMemory(Memory(id, "memory $id", Room.KNOWLEDGE, 0.8, SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0),
+                sens, Provenance.USER_DIRECT, 0L, 0L, "s"))
+            store.putEmbedding(id, "unit", floatArrayOf(sem.toFloat(), kotlin.math.sqrt(1 - sem * sem).toFloat(), 0f))
+        }
+        repeat(8) { add("o$it", 0.50, Sensitivity.PERSONAL) }   // ordinary: all at the median
+        add("health", 0.55, Sensitivity.SENSITIVE)              // best match, below median + 0.12
+        val walker = PalaceWalker(store, UserProfile(store), fake, JanesPalaceConfig(neighborsPerHit = 0))
+        val ids = walker.walk(RecallQuery("s1", "q", DAY), floatArrayOf(1f, 0f, 0f))!!.memoryIds
+        ("o0" in ids) shouldBe true
+        ("health" in ids) shouldBe false
     }
 
     test("relevant memory is rendered with room, salience, and age; recall is logged") {
