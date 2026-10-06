@@ -9,13 +9,16 @@ import kotlinx.serialization.json.Json
 @Serializable
 private data class SkillArgs(val name: String? = null)
 
-/** [topK] caps how many skills are listed in [description] — a HarnessConfig knob (Task 14+);
- *  `null` (the default) lists every skill, today's exact behavior. */
-class SkillTool(private val registry: SkillRegistry, private val topK: Int? = null) : Tool {
+/** [load] runs on every use, so a skill written mid-session (e.g. an auto-learned one) shows up at
+ *  once. [topK] caps how many skills are listed in [description] — a HarnessConfig knob;
+ *  `null` (the default) lists every skill. */
+class SkillTool(private val load: () -> SkillRegistry, private val topK: Int? = null) : Tool {
+    constructor(registry: SkillRegistry, topK: Int? = null) : this({ registry }, topK)
+
     override val name = "skill"
-    override val description: String =
+    override val description: String get() =
         "Load a skill's instructions into context. Available skills:\n" +
-            registry.topLevel().let { all -> topK?.let { all.take(it) } ?: all }
+            load().topLevel().let { all -> topK?.let { all.take(it) } ?: all }
                 .joinToString("\n") { (id, skill) -> "- $id: ${skill.metadata.description}" }
     override val parametersJson = """
         {"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}
@@ -28,6 +31,7 @@ class SkillTool(private val registry: SkillRegistry, private val topK: Int? = nu
     override suspend fun execute(argumentsJson: String): String {
         val args = runCatching { json.decodeFromString(SkillArgs.serializer(), argumentsJson) }.getOrNull()
         val skillName = args?.name ?: return "Error: missing 'name' argument"
+        val registry = load()
         val skill = registry.get(skillName) ?: return "Error: skill not found: $skillName"
         val children = registry.childrenOf(skillName)
         if (children.isEmpty()) return skill.body

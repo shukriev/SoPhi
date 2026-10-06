@@ -4,7 +4,7 @@ import dev.sophi.ai.api.LLMProvider
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
-import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import kotlin.io.path.writeText
 
@@ -26,7 +26,7 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
         names shouldContain "write_skill"
     }
 
-    test("skillTools() with an empty skills dir does not register skill, but still registers install_skill/write_skill") {
+    test("skillTools() with an empty skills dir registers skill anyway, so skills learned later show up") {
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
@@ -34,8 +34,19 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
         }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools().build()
 
         val names = runtime.toolNames()
-        names shouldNotContain "skill"
+        names shouldContain "skill"
         names shouldContain "install_skill"
         names shouldContain "write_skill"
+    }
+
+    test("the skill loader hides auto-* skills while includeAutoSkills is false, and follows it live") {
+        val dir = tempdir().toPath()
+        dir.resolve("auto-x.md").writeText("---\ntitle: X\ndescription: auto one\n---\nbody")
+        dir.resolve("mine.md").writeText("---\ntitle: Mine\ndescription: hand one\n---\nbody")
+        var include = false
+        val load = skillRegistryLoader(dir, tempdir().toPath()) { include }
+        load().all().map { it.first } shouldBe listOf("mine")
+        include = true
+        load().all().map { it.first } shouldBe listOf("auto-x", "mine")
     }
 })

@@ -10,6 +10,8 @@ import kotlin.io.path.nameWithoutExtension
 class SkillRegistry(private val skills: Map<String, Skill>) {
     fun get(id: String): Skill? = skills[id]
 
+    fun filter(keep: (String) -> Boolean): SkillRegistry = SkillRegistry(skills.filterKeys(keep))
+
     fun all(): List<Pair<String, Skill>> =
         skills.entries.map { it.key to it.value }.sortedBy { it.first }
 

@@ -68,6 +68,7 @@ class RuntimeBuilder {
     private var goalDecompositionPlansDir: Path? = null
     private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
     private var skillToolsEnabled: Boolean = false
+    private var includeAutoSkills: () -> Boolean = { true }
     private var configVersionRef: Pair<String, VersionStore>? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
@@ -119,11 +120,14 @@ class RuntimeBuilder {
     }
 
     /**
-     * Registers `skill` (only when [skillsDir] plus this project's `.sophi/skills` together yield
-     * at least one skill — an empty skill set advertising itself as a tool is just noise), and
-     * unconditionally `install_skill`/`write_skill`.
+     * Registers `skill`, `install_skill` and `write_skill`. `skill` always registers and reloads
+     * [skillsDir] plus this project's `.sophi/skills` on every use, so skills learned mid-session
+     * (auto-learned ones) are usable at once. [includeAutoSkills] false hides `auto-*` skills.
      */
-    fun skillTools(): RuntimeBuilder = apply { skillToolsEnabled = true }
+    fun skillTools(includeAutoSkills: () -> Boolean = { true }): RuntimeBuilder = apply {
+        skillToolsEnabled = true
+        this.includeAutoSkills = includeAutoSkills
+    }
 
     /**
      * Loads the [HarnessConfig] recorded as [id] in [versionStore] and applies whichever of its
@@ -178,15 +182,13 @@ class RuntimeBuilder {
         }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
-            val skillRegistry = SkillRegistry.load(skillsDir, Path.of(".sophi", "skills"))
-            if (skillRegistry.topLevel().isNotEmpty()) registry.register(SkillTool(skillRegistry, topK = harnessConfig?.topKSkills))
+            val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
+            registry.register(SkillTool(loadSkills, topK = harnessConfig?.topKSkills))
             registry.register(InstallSkillTool())
             registry.register(WriteSkillTool())
             // Recall is wired with the skill tools because it is useless without them: the pointer
             // it injects tells the model to call skill(name=...).
-            plugins.add(SiteSkillRecallPlugin {
-                SkillRegistry.load(skillsDir, Path.of(".sophi", "skills"))
-            })
+            plugins.add(SiteSkillRecallPlugin(loadSkills))
         }
         scheduleDir?.let { dir ->
             registry.register(ScheduleTaskTool(
@@ -330,3 +332,8 @@ private data class MemoryConfig(
     val onWarning: (String) -> Unit,
     val embeddingProvider: EmbeddingProvider? = null
 )
+
+/** Loads skills on every call; drops `auto-*` ones while [includeAutoSkills] says so. */
+internal fun skillRegistryLoader(globalDir: Path, projectDir: Path, includeAutoSkills: () -> Boolean): () -> SkillRegistry = {
+    SkillRegistry.load(globalDir, projectDir).let { r -> if (includeAutoSkills()) r else r.filter { !isAutoSkillId(it) } }
+}
