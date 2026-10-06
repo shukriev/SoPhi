@@ -336,8 +336,8 @@ private data class MemoryConfig(
 /**
  * Called on every use of the skill tool; re-parses only when a skill file was added, removed or
  * changed (or [includeAutoSkills] flipped), and drops `auto-*` skills while it says so.
- * ponytail: a skill learned in another chat still changes the tool list mid-turn — one prompt-cache
- * miss on a local server, once per learned skill.
+ * A skill learned in another chat still changes the tool list mid-turn: one prompt-cache miss on
+ * a local server, once per learned skill.
  */
 internal fun skillRegistryLoader(globalDir: Path, projectDir: Path, includeAutoSkills: () -> Boolean): () -> SkillRegistry {
     val lock = Any()

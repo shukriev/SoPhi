@@ -5,7 +5,7 @@ data class Scored(val id: String, val score: Double)
 /**
  * Generic document/graph/vector primitives over ArcadeDB. Domain-agnostic on purpose —
  * no Jane's-Palace types here — so a future second memory technique can build on this
- * same layer (spec: docs/superpowers/specs/2026-08-18-arcadedb-memory-storage-design.md).
+ * same layer.
  */
 interface ArcadeStore : AutoCloseable {
     fun upsertVertex(type: String, id: String, properties: Map<String, Any?>)

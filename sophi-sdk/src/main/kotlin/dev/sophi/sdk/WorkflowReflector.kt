@@ -29,7 +29,7 @@ data class Reflection(
 class WorkflowReflector(
     private val provider: LLMProvider,
     private val model: String,
-    private val timeoutMs: Long = 180_000,
+    private val timeoutMs: Long = 600_000,
     /** Reasoning models spend this on thinking before the JSON — pass the profile's budget. */
     private val maxTokens: Int = 4096,
 ) {

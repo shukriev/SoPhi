@@ -35,9 +35,9 @@ internal fun stripModelWrapping(text: String): String =
 class SkillSecurityReview(
     private val provider: LLMProvider,
     private val model: String,
-    private val timeoutMs: Long = 120_000,
+    private val timeoutMs: Long = 600_000,
     /** Reasoning models spend this on thinking before the verdict — pass the profile's budget. */
-    private val maxTokens: Int = 1024,
+    private val maxTokens: Int = 4096,
 ) {
     suspend fun review(skillContent: String, userRequest: String): ReviewVerdict {
         val nonce = UUID.randomUUID().toString().replace("-", "").take(8)

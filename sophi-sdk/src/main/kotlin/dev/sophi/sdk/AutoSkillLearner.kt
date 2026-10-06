@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.learning.JsonlLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -16,28 +17,27 @@ sealed class LearnResult {
 
 /**
  * Turns a finished turn into an auto-skill, fully automatically:
- * reflect → code gate → security review → write (docs/superpowers/specs/2026-10-06-auto-learned-skills-design.md).
+ * reflect → code gate → security review → write.
  * Every outcome except "not reusable" is one line in [log]. It never throws.
  */
+/** [maxTokens] should be the chat profile's: reasoning models think inside that budget first. */
 class AutoSkillLearner(
-    private val reflector: WorkflowReflector,
-    private val review: SkillSecurityReview,
-    private val store: AutoSkillStore = AutoSkillStore(),
-    private val log: JsonlLog? = null,
+    provider: LLMProvider,
+    model: String,
+    skillsDir: Path,
+    private val log: JsonlLog?,
+    maxTokens: Int = 4096,
+    timeoutMs: Long = 600_000,
 ) {
-    /** [maxTokens] should be the chat profile's: reasoning models think inside that budget first. */
-    constructor(
-        provider: LLMProvider, model: String, skillsDir: Path, log: JsonlLog?,
-        maxTokens: Int = 4096, timeoutMs: Long = 600_000,
-    ) : this(
-        WorkflowReflector(provider, model, timeoutMs, maxTokens),
-        SkillSecurityReview(provider, model, timeoutMs, maxTokens),
-        AutoSkillStore(skillsDir), log,
-    )
+    private val reflector = WorkflowReflector(provider, model, timeoutMs, maxTokens)
+    private val review = SkillSecurityReview(provider, model, timeoutMs, maxTokens)
+    private val store = AutoSkillStore(skillsDir)
 
     /** [canSave] is asked right before writing: the user may switch learning off while this runs. */
     suspend fun learn(turn: FinishedTurn, fromWeb: Boolean, canSave: () -> Boolean = { true }): LearnResult {
-        val result = try { run(turn, fromWeb, canSave) } catch (e: Exception) {
+        val result = try { run(turn, fromWeb, canSave) } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             LearnResult.Dropped("error", listOf(e.message ?: e::class.simpleName.orEmpty()))
         }
         if (result != LearnResult.NotReusable) record(result)

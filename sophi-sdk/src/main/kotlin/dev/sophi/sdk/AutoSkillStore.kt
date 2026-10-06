@@ -29,8 +29,8 @@ private const val MAX_DESCRIPTION = 200
  */
 internal object SkillVersionsLock
 
-/** Auto-learned skills live only under `auto-*`, so they can never overwrite a hand-written,
- *  installed or `site-*` skill (docs/superpowers/specs/2026-10-06-auto-learned-skills-design.md). */
+/** Auto-learned skills live only under `auto-*`, so they can never overwrite a `site-*` skill;
+ *  [AutoSkillStore] also refuses `auto-*` files it didn't write. */
 fun isAutoSkillId(id: String): Boolean = AUTO_ID.matches(id)
 
 /** "Archive Trello emails!" → `auto-archive-trello-emails`; null when nothing usable is left. */

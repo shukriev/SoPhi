@@ -59,7 +59,7 @@ class AutoSkillStoreTest : FunSpec({
         val dir = createTempDirectory("auto")
         val store = AutoSkillStore(dir)
         store.write(draft(body = "1. old"))
-        Thread.sleep(5) // ponytail: versions sort by ms timestamp
+        Thread.sleep(5) // versions sort by ms timestamp
         store.write(draft(body = "1. new")) shouldBe AutoSkillWrite.Written("auto-archive-emails", updated = true)
         store.rollback("auto-archive-emails") shouldBe true
         dir.resolve("auto-archive-emails.md").readText() shouldContain "1. old"
