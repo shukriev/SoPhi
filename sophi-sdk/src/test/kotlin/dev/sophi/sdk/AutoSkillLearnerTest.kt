@@ -73,4 +73,10 @@ class AutoSkillLearnerTest : FunSpec({
         runBlocking { AutoSkillLearner(p, "m", createTempDirectory("learn"), null, maxTokens = 16_384, timeoutMs = 60_000).learn(turn, false) }
         p.requests.map { it.maxTokens } shouldBe listOf(16_384, 16_384)
     }
+
+    test("switched off while reflecting → nothing is saved") {
+        val (l, dir, _) = learner(reusable, safe)
+        runBlocking { l.learn(turn, false, canSave = { false }) }.shouldBeInstanceOf<LearnResult.Dropped>().stage shouldBe "off"
+        dir.resolve("auto-archive-sender.md").exists() shouldBe false
+    }
 })

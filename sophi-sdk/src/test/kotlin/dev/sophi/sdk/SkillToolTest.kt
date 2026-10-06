@@ -111,4 +111,16 @@ class SkillToolTest : FunSpec({
         tool.description shouldContain "auto-new: fresh"
         runBlocking { tool.execute("""{"name":"auto-new"}""") } shouldBe "step 1"
     }
+
+    test("with a topK cap, auto-learned skills never push other skills off the list") {
+        val registry = SkillRegistry(mapOf(
+            "auto-a" to skill("A", "learned a", "x"),
+            "auto-b" to skill("B", "learned b", "x"),
+            "zzz-mine" to skill("Mine", "hand written", "x"),
+        ))
+        val d = SkillTool(registry, topK = 2).description
+        d shouldContain "zzz-mine"
+        d shouldContain "auto-a"
+        d shouldNotContain "auto-b"
+    }
 })

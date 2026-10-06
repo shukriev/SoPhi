@@ -35,15 +35,16 @@ class AutoSkillLearner(
         AutoSkillStore(skillsDir), log,
     )
 
-    suspend fun learn(turn: FinishedTurn, fromWeb: Boolean): LearnResult {
-        val result = try { run(turn, fromWeb) } catch (e: Exception) {
+    /** [canSave] is asked right before writing: the user may switch learning off while this runs. */
+    suspend fun learn(turn: FinishedTurn, fromWeb: Boolean, canSave: () -> Boolean = { true }): LearnResult {
+        val result = try { run(turn, fromWeb, canSave) } catch (e: Exception) {
             LearnResult.Dropped("error", listOf(e.message ?: e::class.simpleName.orEmpty()))
         }
         if (result != LearnResult.NotReusable) record(result)
         return result
     }
 
-    private suspend fun run(turn: FinishedTurn, fromWeb: Boolean): LearnResult {
+    private suspend fun run(turn: FinishedTurn, fromWeb: Boolean, canSave: () -> Boolean): LearnResult {
         val existing = store.list().map { (id, s) -> id to "${s.metadata.title}: ${s.metadata.description}" }
         val r = reflector.reflect(turn, existing) ?: return LearnResult.Dropped("reflect", listOf("no usable reflection"))
         if (!r.reusable) return LearnResult.NotReusable
@@ -54,6 +55,7 @@ class AutoSkillLearner(
         store.check(draft).takeIf { it.isNotEmpty() }?.let { return LearnResult.Dropped("gate", it) }
         val verdict = review.review(store.render(draft), turn.request)
         if (!verdict.safe) return LearnResult.Dropped("review", verdict.reasons)
+        if (!canSave()) return LearnResult.Dropped("off", listOf("auto-learning was switched off"))
         return when (val w = store.write(draft)) {
             is AutoSkillWrite.Written -> LearnResult.Learned(w.id, draft.title, w.updated)
             is AutoSkillWrite.Rejected -> LearnResult.Dropped("gate", w.reasons)

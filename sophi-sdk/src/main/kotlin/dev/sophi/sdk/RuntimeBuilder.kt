@@ -333,7 +333,33 @@ private data class MemoryConfig(
     val embeddingProvider: EmbeddingProvider? = null
 )
 
-/** Loads skills on every call; drops `auto-*` ones while [includeAutoSkills] says so. */
-internal fun skillRegistryLoader(globalDir: Path, projectDir: Path, includeAutoSkills: () -> Boolean): () -> SkillRegistry = {
-    SkillRegistry.load(globalDir, projectDir).let { r -> if (includeAutoSkills()) r else r.filter { !isAutoSkillId(it) } }
+/**
+ * Called on every use of the skill tool; re-parses only when a skill file was added, removed or
+ * changed (or [includeAutoSkills] flipped), and drops `auto-*` skills while it says so.
+ * ponytail: a skill learned in another chat still changes the tool list mid-turn — one prompt-cache
+ * miss on a local server, once per learned skill.
+ */
+internal fun skillRegistryLoader(globalDir: Path, projectDir: Path, includeAutoSkills: () -> Boolean): () -> SkillRegistry {
+    val lock = Any()
+    var key: Any? = null
+    var cached: SkillRegistry? = null
+    return {
+        val include = includeAutoSkills()
+        val now = Triple(skillFiles(globalDir), skillFiles(projectDir), include)
+        synchronized(lock) {
+            cached?.takeIf { key == now } ?: SkillRegistry.load(globalDir, projectDir)
+                .let { r -> if (include) r else r.filter { !isAutoSkillId(it) } }
+                .also { cached = it; key = now }
+        }
+    }
 }
+
+/** Path, size and modification time of every skill file, two levels deep (flat skills and domain
+ *  members). A listing that fails mid-change gets a fresh key, so the next load re-parses. */
+private fun skillFiles(dir: Path): Any = runCatching {
+    if (!java.nio.file.Files.isDirectory(dir)) emptyList()
+    else java.nio.file.Files.walk(dir, 2).use { paths ->
+        paths.filter { it.toString().endsWith(".md") && java.nio.file.Files.isRegularFile(it) }.toList()
+    }.map { Triple(it.toString(), java.nio.file.Files.size(it), java.nio.file.Files.getLastModifiedTime(it).toInstant()) }
+        .sortedBy { it.first }
+}.getOrElse { Any() }

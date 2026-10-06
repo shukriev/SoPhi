@@ -18,7 +18,8 @@ class SkillTool(private val load: () -> SkillRegistry, private val topK: Int? = 
     override val name = "skill"
     override val description: String get() =
         "Load a skill's instructions into context. Available skills:\n" +
-            load().topLevel().let { all -> topK?.let { all.take(it) } ?: all }
+            // Auto-learned skills go last, so with a cap they can never crowd out other skills.
+            load().topLevel().sortedBy { isAutoSkillId(it.first) }.let { all -> topK?.let { all.take(it) } ?: all }
                 .joinToString("\n") { (id, skill) -> "- $id: ${skill.metadata.description}" }
     override val parametersJson = """
         {"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}

@@ -49,4 +49,18 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
         include = true
         load().all().map { it.first } shouldBe listOf("auto-x", "mine")
     }
+
+    test("the skill loader only re-parses when a skill file is added, removed or changed") {
+        val dir = tempdir().toPath()
+        dir.resolve("mine.md").writeText("---\ntitle: Mine\ndescription: one\n---\nbody")
+        val load = skillRegistryLoader(dir, tempdir().toPath()) { true }
+        val first = load()
+        (load() === first) shouldBe true
+        dir.resolve("auto-x.md").writeText("---\ntitle: X\ndescription: two\n---\nbody")
+        val second = load()
+        (second === first) shouldBe false
+        second.all().map { it.first } shouldBe listOf("auto-x", "mine")
+        dir.resolve("mine.md").writeText("---\ntitle: Mine\ndescription: changed text\n---\nbody")
+        load().get("mine")!!.metadata.description shouldBe "changed text"
+    }
 })
