@@ -25,8 +25,15 @@ class AutoSkillLearner(
     private val store: AutoSkillStore = AutoSkillStore(),
     private val log: JsonlLog? = null,
 ) {
-    constructor(provider: LLMProvider, model: String, skillsDir: Path, log: JsonlLog?) :
-        this(WorkflowReflector(provider, model), SkillSecurityReview(provider, model), AutoSkillStore(skillsDir), log)
+    /** [maxTokens] should be the chat profile's: reasoning models think inside that budget first. */
+    constructor(
+        provider: LLMProvider, model: String, skillsDir: Path, log: JsonlLog?,
+        maxTokens: Int = 4096, timeoutMs: Long = 600_000,
+    ) : this(
+        WorkflowReflector(provider, model, timeoutMs, maxTokens),
+        SkillSecurityReview(provider, model, timeoutMs, maxTokens),
+        AutoSkillStore(skillsDir), log,
+    )
 
     suspend fun learn(turn: FinishedTurn, fromWeb: Boolean): LearnResult {
         val result = try { run(turn, fromWeb) } catch (e: Exception) {

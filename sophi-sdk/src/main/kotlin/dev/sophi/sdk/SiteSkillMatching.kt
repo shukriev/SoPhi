@@ -30,7 +30,9 @@ fun deriveSiteId(host: String): String =
  * documented, and nothing surfaces that.
  */
 fun matchSiteSkill(userInput: String, availableIds: List<String>): String? {
-    val ids = availableIds.toSet()
+    // Only site skills: other ids (auto-learned ones) are everyday words and would steal or fake matches.
+    val siteIds = availableIds.filter { it.startsWith("site-") }
+    val ids = siteIds.toSet()
 
     // An explicit hostname is unambiguous, so it wins outright.
     HOST_CANDIDATE.findAll(userInput).forEach { match ->
@@ -40,7 +42,7 @@ fun matchSiteSkill(userInput: String, availableIds: List<String>): String? {
 
     // Otherwise fall back to the skill's own slug words appearing in the message.
     val words = userInput.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }.toSet()
-    val hits = availableIds.filter { id ->
+    val hits = siteIds.filter { id ->
         id.removePrefix("site-").split('-')
             .any { token -> token.length >= MIN_TOKEN_LENGTH && token in words }
     }

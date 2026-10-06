@@ -67,4 +67,10 @@ class AutoSkillLearnerTest : FunSpec({
         val (l, _, _) = learner(null)
         runBlocking { l.learn(turn, false) }.shouldBeInstanceOf<LearnResult.Dropped>().stage shouldBe "reflect"
     }
+
+    test("the profile's token budget reaches both the reflection and the review") {
+        val p = ScriptedProvider(reusable, safe)
+        runBlocking { AutoSkillLearner(p, "m", createTempDirectory("learn"), null, maxTokens = 16_384, timeoutMs = 60_000).learn(turn, false) }
+        p.requests.map { it.maxTokens } shouldBe listOf(16_384, 16_384)
+    }
 })

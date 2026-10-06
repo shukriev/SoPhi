@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import com.charleskorn.kaml.Yaml
 import dev.sophi.skills.Skill
+import dev.sophi.skills.SkillLoader
 import dev.sophi.skills.SkillMetadata
 import dev.sophi.skills.SkillRegistry
 import dev.sophi.skills.SkillVersion
@@ -18,6 +19,15 @@ const val AUTO_LEARNED_TAG = "auto-learned"
 const val FROM_WEB_TAG = "from-web"
 private const val AUTO_PREFIX = "auto-"
 private val AUTO_ID = Regex("^auto-[a-z0-9-]{1,60}$")
+private val PARAM_NAME = Regex("^[a-z0-9_]{1,40}$")
+private const val MAX_TITLE = 80
+private const val MAX_DESCRIPTION = 200
+
+/**
+ * ArcadeDB refuses a second open of the same database in one JVM, and every skill-version write
+ * opens `.versions` briefly. Everything in this process that records skill versions holds this.
+ */
+internal object SkillVersionsLock
 
 /** Auto-learned skills live only under `auto-*`, so they can never overwrite a hand-written,
  *  installed or `site-*` skill (docs/superpowers/specs/2026-10-06-auto-learned-skills-design.md). */
@@ -68,34 +78,51 @@ class AutoSkillStore(private val dir: Path = Path.of(System.getProperty("user.ho
     fun check(draft: SkillDraft): List<String> = buildList {
         if (!isAutoSkillId(draft.id)) add("id must match ${AUTO_ID.pattern} (got: ${draft.id})")
         if (draft.title.isBlank() || draft.body.isBlank()) add("title and body are required")
+        // The description goes into the skill tool's definition in every later chat — keep it short.
+        if (draft.title.length > MAX_TITLE) add("title is longer than $MAX_TITLE characters")
+        if (draft.description.length > MAX_DESCRIPTION) add("description is longer than $MAX_DESCRIPTION characters")
+        draft.params.filterNot { PARAM_NAME.matches(it.name) }.forEach { add("parameter name '${it.name}' must match ${PARAM_NAME.pattern}") }
         addAll(checkInstalledSkillContent(render(draft)))
     }
 
-    fun write(draft: SkillDraft): AutoSkillWrite {
+    fun write(draft: SkillDraft): AutoSkillWrite = synchronized(SkillVersionsLock) { writeLocked(draft) }
+
+    private fun writeLocked(draft: SkillDraft): AutoSkillWrite {
         val problems = check(draft)
         if (problems.isNotEmpty()) return AutoSkillWrite.Rejected(problems)
         dir.createDirectories()
         val path = dir.resolve("${draft.id}.md")
         val updated = path.exists()
+        if (updated && !isLearned(path)) {
+            return AutoSkillWrite.Rejected(listOf("${draft.id} exists and isn't an auto-learned skill"))
+        }
         val store = versions()
         // A file with no history (hand-edited, or older than versioning) gets its content kept first.
         if (updated && store.history(draft.id, false).isEmpty()) {
             store.record(SkillVersion(skillId = draft.id, project = false, content = path.readText()))
         }
         val content = render(draft)
-        path.writeText(content)
+        // Recorded before the file is written: a failed record leaves no unversioned skill live.
         store.record(SkillVersion(skillId = draft.id, project = false, content = content, trial = true))
+        path.writeText(content)
         return AutoSkillWrite.Written(draft.id, updated)
     }
 
-    fun list(): List<Pair<String, Skill>> = SkillRegistry.load(dir, dir).all().filter { isAutoSkillId(it.first) }
+    /** Only files this feature wrote: an `auto-*` name alone could be a hand-written or installed skill. */
+    fun list(): List<Pair<String, Skill>> = SkillRegistry.load(dir, dir).all()
+        .filter { (id, skill) -> isAutoSkillId(id) && AUTO_LEARNED_TAG in skill.metadata.tags }
+
+    private fun isLearned(path: Path): Boolean =
+        runCatching { AUTO_LEARNED_TAG in SkillLoader().loadFile(path).metadata.tags }.getOrDefault(false)
 
     /** Restores the newest earlier version that differs from the file. Rolling back twice
      *  toggles between the last two versions. False when there's nothing to go back to. */
-    fun rollback(id: String): Boolean {
+    fun rollback(id: String): Boolean = synchronized(SkillVersionsLock) { rollbackLocked(id) }
+
+    private fun rollbackLocked(id: String): Boolean {
         if (!isAutoSkillId(id)) return false
         val path = dir.resolve("$id.md")
-        if (!path.exists()) return false
+        if (!path.exists() || !isLearned(path)) return false
         val current = path.readText()
         val store = versions()
         val previous = store.history(id, false).firstOrNull { it.content != current } ?: return false

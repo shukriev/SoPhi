@@ -19,7 +19,8 @@ private const val CODE_FENCE = "```"
 
 /** Removes what reasoning models wrap answers in: think blocks and markdown code fences. */
 internal fun stripModelWrapping(text: String): String =
-    text.replace(Regex("(?s)<think>.*?</think>"), "")
+    // Some chat templates drop the opening tag, so everything up to the last </think> is reasoning.
+    text.substringAfterLast("</think>")
         .trim()
         .removePrefix("${CODE_FENCE}json").removePrefix(CODE_FENCE)
         .removeSuffix(CODE_FENCE)
@@ -35,6 +36,8 @@ class SkillSecurityReview(
     private val provider: LLMProvider,
     private val model: String,
     private val timeoutMs: Long = 120_000,
+    /** Reasoning models spend this on thinking before the verdict — pass the profile's budget. */
+    private val maxTokens: Int = 1024,
 ) {
     suspend fun review(skillContent: String, userRequest: String): ReviewVerdict {
         val nonce = UUID.randomUUID().toString().replace("-", "").take(8)
@@ -45,7 +48,7 @@ class SkillSecurityReview(
                 provider.complete(CompletionRequest(
                     messages = listOf(Message(MessageRole.USER,
                         "<<<$asked\n${userRequest.take(2_000)}\n$asked>>>\n\n<<<$fence\n$skillContent\n$fence>>>")),
-                    model = model, maxTokens = 1024, temperature = 0.0, systemPrompt = prompt(fence, asked),
+                    model = model, maxTokens = maxTokens, temperature = 0.0, systemPrompt = prompt(fence, asked),
                 ))
             }
         } catch (e: Exception) {

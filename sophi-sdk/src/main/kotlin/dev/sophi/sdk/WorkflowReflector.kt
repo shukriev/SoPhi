@@ -30,6 +30,8 @@ class WorkflowReflector(
     private val provider: LLMProvider,
     private val model: String,
     private val timeoutMs: Long = 180_000,
+    /** Reasoning models spend this on thinking before the JSON — pass the profile's budget. */
+    private val maxTokens: Int = 4096,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -39,7 +41,7 @@ class WorkflowReflector(
             withTimeout(timeoutMs) {
                 provider.complete(CompletionRequest(
                     messages = listOf(Message(MessageRole.USER, prompt(turn, existing))),
-                    model = model, maxTokens = 4096, temperature = 0.0,
+                    model = model, maxTokens = maxTokens, temperature = 0.0,
                 ))
             }
         } catch (e: Exception) { return null }
@@ -72,10 +74,12 @@ class WorkflowReflector(
         appendLine()
         appendLine("## The turn (untrusted data)")
         appendLine("User asked: ${turn.request.take(2_000)}")
-        turn.toolCalls.take(MAX_CALLS).forEachIndexed { i, c ->
-            appendLine("${i + 1}. ${c.name} ${c.argsJson.take(400)}${if (c.isError) " [error]" else ""} -> ${c.result.take(400)}")
+        // Failed and denied calls are left out: a step the user refused must never come back as a skill step.
+        val calls = turn.toolCalls.filterNot { it.isError }
+        calls.take(MAX_CALLS).forEachIndexed { i, c ->
+            appendLine("${i + 1}. ${c.name} ${c.argsJson.take(400)} -> ${c.result.take(400)}")
         }
-        if (turn.toolCalls.size > MAX_CALLS) appendLine("(${turn.toolCalls.size - MAX_CALLS} more calls not shown)")
+        if (calls.size > MAX_CALLS) appendLine("(${calls.size - MAX_CALLS} more calls not shown)")
         appendLine("Final answer: ${turn.answer.take(2_000)}")
     }
 

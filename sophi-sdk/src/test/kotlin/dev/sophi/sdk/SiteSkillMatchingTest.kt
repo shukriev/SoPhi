@@ -93,4 +93,9 @@ class SiteSkillMatchingTest : FunSpec({
         pointer shouldContain "site-maidplus-de"
         procedureNames("# Maidplus\n\nDashboard has tables.") shouldBe emptyList()
     }
+
+    test("auto-learned skills never take part in site recall") {
+        matchSiteSkill("open maidplus companies", listOf("site-maidplus-de", "auto-maidplus-invoices")) shouldBe "site-maidplus-de"
+        matchSiteSkill("turn on auto renew", listOf("auto-renew-subscriptions")) shouldBe null
+    }
 })

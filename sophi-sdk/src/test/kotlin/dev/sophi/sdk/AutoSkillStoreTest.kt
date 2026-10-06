@@ -80,4 +80,33 @@ class AutoSkillStoreTest : FunSpec({
         dir.resolve("mine.md").writeText("---\ntitle: mine\n---\nbody")
         AutoSkillStore(dir).apply { write(draft()) }.list().map { it.first } shouldContainExactly listOf("auto-archive-emails")
     }
+
+    test("concurrent writes in one process all land with a recorded version") {
+        val dir = createTempDirectory("auto")
+        val store = AutoSkillStore(dir)
+        val results = (1..6).map { n ->
+            java.util.concurrent.CompletableFuture.supplyAsync { runCatching { store.write(draft(id = "auto-s$n")) } }
+        }.map { it.get() }
+        results.forEach { it.getOrThrow().shouldBeInstanceOf<AutoSkillWrite.Written>() }
+        val versions = dev.sophi.skills.SkillVersionStore(dev.sophi.versioning.VersionStore(dir.resolve(".versions")), false)
+        (1..6).forEach { n -> versions.history("auto-s$n", false).size shouldBe 1 }
+    }
+
+    test("a hand-written or installed auto-*.md (no auto-learned tag) is never overwritten, listed or rolled back") {
+        val dir = createTempDirectory("auto")
+        dir.resolve("auto-archive-emails.md").writeText("---\ntitle: mine\n---\nhand written")
+        val store = AutoSkillStore(dir)
+        store.write(draft()).shouldBeInstanceOf<AutoSkillWrite.Rejected>()
+        dir.resolve("auto-archive-emails.md").readText() shouldContain "hand written"
+        store.list() shouldBe emptyList()
+        store.rollback("auto-archive-emails") shouldBe false
+    }
+
+    test("title, description and parameter names are bounded") {
+        val store = AutoSkillStore(createTempDirectory("auto"))
+        store.check(draft(title = "x".repeat(81))).isEmpty() shouldBe false
+        store.check(draft().copy(description = "x".repeat(201))).isEmpty() shouldBe false
+        store.check(draft().copy(params = listOf(SkillParam("Bad Name!")))).isEmpty() shouldBe false
+        store.check(draft()) shouldBe emptyList()
+    }
 })

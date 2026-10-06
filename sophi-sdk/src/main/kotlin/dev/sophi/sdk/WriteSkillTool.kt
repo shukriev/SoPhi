@@ -77,7 +77,9 @@ class WriteSkillTool(
 
     override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
 
-    override suspend fun execute(argumentsJson: String): String {
+    override suspend fun execute(argumentsJson: String): String = synchronized(SkillVersionsLock) { write(argumentsJson) }
+
+    private fun write(argumentsJson: String): String {
         val args = runCatching { json.decodeFromString(WriteSkillArgs.serializer(), argumentsJson) }
             .getOrNull() ?: return "Error: invalid arguments"
 

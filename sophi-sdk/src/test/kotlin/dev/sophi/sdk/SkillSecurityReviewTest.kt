@@ -55,4 +55,14 @@ class SkillSecurityReviewTest : FunSpec({
         a.messages.single().content shouldContain "archive trello mail" // the user's request, as context
         a.systemPrompt!! shouldContain "USER-REQUEST"
     }
+
+    test("a template that drops the opening think tag still works") {
+        verdict("the skill looks fine, maybe {\"safe\": false}? no.\n</think>\n{\"safe\": true, \"reasons\": []}").safe shouldBe true
+    }
+
+    test("the token budget and timeout come from the caller, so reasoning models have room to think") {
+        val p = ScriptedProvider("""{"safe": true, "reasons": []}""")
+        runBlocking { SkillSecurityReview(p, "m", timeoutMs = 1_000, maxTokens = 16_384).review("x", "x") }
+        p.requests.single().maxTokens shouldBe 16_384
+    }
 })
