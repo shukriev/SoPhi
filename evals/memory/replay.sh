@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Replays durable-facts.txt through one real Sophi session (isolated home, encoder telemetry on) and
 # reports what memory kept. Target: no candidate dropped. Usage: evals/memory/replay.sh
-# Env: SOPHI_JAR, SOPHI_FLAGS (same defaults as evals/playbook/run.sh).
+# Env: SOPHI_JAR, LMSTUDIO_URL, SOPHI_FLAGS (same defaults as evals/playbook/run.sh).
 set -o pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 JAR="${SOPHI_JAR:-$HERE/../../sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar}"
-DEFAULT_FLAGS="$(grep '^DEFAULT_FLAGS=' "$HERE/../playbook/run.sh" | cut -d'"' -f2)"
+eval "$(grep -E '^(LMSTUDIO_URL|DEFAULT_FLAGS)=' "$HERE/../playbook/run.sh")"  # same defaults as the playbook
 read -ra FLAGS <<< "${SOPHI_FLAGS:-$DEFAULT_FLAGS}"
 D="$(mktemp -d)"; mkdir -p "$D/home/.sophi" "$D/cwd"
 (cd "$D/cwd" && SOPHI_MEMORY_ENCODER_TELEMETRY=true java -Duser.home="$D/home" -jar "$JAR" "${FLAGS[@]}" \
