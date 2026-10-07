@@ -7,6 +7,8 @@ import dev.sophi.skills.SkillRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import kotlin.io.path.writeText
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
@@ -99,5 +101,26 @@ class SkillToolTest : FunSpec({
         result shouldContain "Available in this domain:"
         result shouldContain "site-maidplus-de/companies: Companies page"
         result shouldContain "site-maidplus-de/dashboard: Dashboard page"
+    }
+
+    test("a skill written after the tool was built is listed and loadable") {
+        val dir = kotlin.io.path.createTempDirectory("live")
+        val tool = SkillTool({ SkillRegistry.load(dir, dir) })
+        tool.description shouldNotContain "auto-new"
+        dir.resolve("auto-new.md").writeText("---\ntitle: New\ndescription: fresh\n---\nstep 1")
+        tool.description shouldContain "auto-new: fresh"
+        runBlocking { tool.execute("""{"name":"auto-new"}""") } shouldBe "step 1"
+    }
+
+    test("with a topK cap, auto-learned skills never push other skills off the list") {
+        val registry = SkillRegistry(mapOf(
+            "auto-a" to skill("A", "learned a", "x"),
+            "auto-b" to skill("B", "learned b", "x"),
+            "zzz-mine" to skill("Mine", "hand written", "x"),
+        ))
+        val d = SkillTool(registry, topK = 2).description
+        d shouldContain "zzz-mine"
+        d shouldContain "auto-a"
+        d shouldNotContain "auto-b"
     }
 })

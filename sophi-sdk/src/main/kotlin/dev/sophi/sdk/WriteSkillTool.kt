@@ -34,13 +34,12 @@ private data class WriteSkillArgs(
 )
 
 /**
- * The only way for the model to write a skill outside the CWD sandbox FileWriteTool enforces —
- * see the design spec's "Core finding" section. Namespaced to `site-*` so it can never clobber
+ * The only way for the model to write a skill outside the CWD sandbox FileWriteTool enforces.
+ * Namespaced to `site-*` so it can never clobber
  * a hand-authored or meta-skill file: there's no separate `id` field in SkillMetadata, so the
  * filename IS the id, and an unrestricted write would be an arbitrary global-skill overwrite.
  *
- * `id` may contain at most one `/`, addressing a domain member (`site-<domain>/<member>`) — see
- * docs/superpowers/specs/2026-08-31-skill-domain-grouping-design.md. Each segment stays
+ * `id` may contain at most one `/`, addressing a domain member (`site-<domain>/<member>`). Each segment stays
  * restricted to [a-z0-9-], so `..` and absolute paths remain structurally unreachable.
  * [resolveWritePath] is the single place both execute() and confirmationPreview() compute a
  * target path from an id, so the two can never diverge.
@@ -77,7 +76,9 @@ class WriteSkillTool(
 
     override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
 
-    override suspend fun execute(argumentsJson: String): String {
+    override suspend fun execute(argumentsJson: String): String = synchronized(SkillVersionsLock) { write(argumentsJson) }
+
+    private fun write(argumentsJson: String): String {
         val args = runCatching { json.decodeFromString(WriteSkillArgs.serializer(), argumentsJson) }
             .getOrNull() ?: return "Error: invalid arguments"
 
@@ -166,7 +167,7 @@ class WriteSkillTool(
     }
 }
 
-// ponytail: line-set diff, not aligned/ordered — good enough for a confirmation preview.
+// Line-set diff, not aligned/ordered — good enough for a confirmation preview.
 private fun lineDiff(old: String, new: String): String {
     val oldLines = old.lines().toSet()
     val newLines = new.lines().toSet()

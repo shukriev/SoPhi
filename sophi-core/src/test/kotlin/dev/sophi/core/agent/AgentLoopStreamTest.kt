@@ -19,7 +19,9 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOf
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -344,5 +346,74 @@ class AgentLoopStreamTest : FunSpec({
         val tip = session.branch().last()
         tip.content shouldContain "no text and no tool call"
         tip.metadata["stopReason"] shouldBe TurnStopReason.EmptyResponse.name
+    }
+
+    test("a turn the user stops keeps what it did, closes the unanswered tool call, and stops the tool") {
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var toolCancelled = false
+        val slow = object : Tool {
+            override val name = "slow"
+            override val description = "waits"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String {
+                started.complete(Unit)
+                try { kotlinx.coroutines.awaitCancellation() } finally { toolCancelled = true }
+            }
+        }
+        val loop = newLoop(ToolRegistry().apply { register(slow) })
+        val session = AgentSession(id = "s1")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "slow", "{}"))))
+
+        kotlinx.coroutines.runBlocking {
+            val job = launch { loop.streamTurn(session, "do it", config) {} }
+            started.await()
+            job.cancelAndJoin()
+        }
+
+        toolCancelled shouldBe true
+        val branch = session.branch()
+        branch.map { it.role } shouldBe listOf(EntryRole.USER, EntryRole.ASSISTANT, EntryRole.TOOL_RESULT, EntryRole.ASSISTANT)
+        branch[2].content shouldContain "Stopped by the user"
+        branch[3].content shouldBe "[Stopped by the user]"
+        coVerify { sessionManager.save(session) }
+    }
+
+    test("a reply that only announces an action gets one nudge to act, and then the tool runs") {
+        val ran = AtomicInteger(0)
+        val tool = object : Tool {
+            override val name = "browser_open"
+            override val description = "opens"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "opened".also { ran.incrementAndGet() }
+        }
+        val loop = newLoop(ToolRegistry().apply { register(tool) })
+        val session = AgentSession(id = "s1")
+        val requests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(capture(requests)) } returnsMany listOf(
+            flowOf(StreamEvent.Content("I'll open Gmail and search for Trello emails now.")),
+            flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "browser_open", "{}")))),
+            flowOf(StreamEvent.Content("Opened it.")),
+        )
+        loop.streamTurn(session, "delete them", config) {}
+        ran.get() shouldBe 1
+        requests[1].messages.last().content shouldContain "didn't call a tool"
+        session.branch().last().content shouldContain "Opened it."
+    }
+
+    test("no nudge for a question or a real answer, and at most one per turn") {
+        val tool = object : Tool {
+            override val name = "t"; override val description = "d"; override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "ok"
+        }
+        listOf("Which folder should I move them to?", "Archived 12 Trello emails.", "Archived 12 emails. Let me know if you want more.").forEach { reply ->
+            val requests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+            every { provider.stream(capture(requests)) } returns flowOf(StreamEvent.Content(reply))
+            newLoop(ToolRegistry().apply { register(tool) }).streamTurn(AgentSession(id = "q"), "go", config) {}
+            requests shouldHaveSize 1
+        }
+        val requests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(capture(requests)) } returns flowOf(StreamEvent.Content("Let me do that now."))
+        newLoop(ToolRegistry().apply { register(tool) }).streamTurn(AgentSession(id = "once"), "go", config) {}
+        requests shouldHaveSize 2
     }
 })

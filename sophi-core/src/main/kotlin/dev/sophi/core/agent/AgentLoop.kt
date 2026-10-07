@@ -17,10 +17,14 @@ import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -31,6 +35,12 @@ private data class ToolCallRecord(val id: String, val name: String, val argument
 private data class PendingEntry(
     val role: EntryRole, val content: String, val metadata: Map<String, String>
 )
+
+/** One turn's rounds so far, and whether they were already written to the session. */
+private class TurnProgress {
+    val pendingRounds = mutableListOf<PendingEntry>()
+    var persisted = false
+}
 
 private data class ToolCallOutcome(val call: ToolCall, val message: Message, val failed: Boolean)
 
@@ -68,7 +78,7 @@ private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
  * to one that actually finished.
  */
 enum class TurnStopReason {
-    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated
+    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped
 }
 
 /** OpenAI's finish_reason for "ran out of output tokens", shared by every compatible server. */
@@ -165,15 +175,16 @@ class AgentLoop(
     private suspend fun finishEarly(
         session: AgentSession,
         userInput: String,
-        pendingRounds: List<PendingEntry>,
+        turn: TurnProgress,
         reason: String,
         stopReason: TurnStopReason,
         onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
         val stopMessage = "[Stopped early: $reason]"
         onEvent(TurnEvent.Token(stopMessage))
+        turn.persisted = true
         session.append(EntryRole.USER, userInput)
-        pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
+        turn.pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
         session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to stopReason.name))
         sessionManager.save(session)
         return session
@@ -254,6 +265,43 @@ class AgentLoop(
         config: AgentConfig,
         onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
+        val turn = TurnProgress()
+        return try {
+            runTurn(session, userInput, config, onEvent, turn)
+        } catch (e: CancellationException) {
+            if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
+            throw e
+        }
+    }
+
+    /**
+     * The user stopped the turn. Keeps what it already did — a browser step or a sent message
+     * happened — so the next turn knows. A tool call still running gets a result saying so, since
+     * a tool call without one is rejected by the model's API on the next request.
+     */
+    private suspend fun saveStopped(session: AgentSession, userInput: String, turn: TurnProgress) {
+        turn.persisted = true
+        session.append(EntryRole.USER, userInput)
+        turn.pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
+        val last = turn.pendingRounds.lastOrNull()
+        if (last?.role == EntryRole.ASSISTANT) {
+            val calls = last.metadata["toolCalls"]?.let { runCatching { entryJson.decodeFromString<List<ToolCallRecord>>(it) }.getOrNull() }.orEmpty()
+            calls.forEach { c ->
+                session.append(EntryRole.TOOL_RESULT, "Stopped by the user before this finished.",
+                    mapOf("replay" to "false", "toolCallId" to c.id, "toolName" to c.name))
+            }
+        }
+        session.append(EntryRole.ASSISTANT, STOPPED_BY_USER, mapOf("stopReason" to TurnStopReason.UserStopped.name))
+        sessionManager.save(session)
+    }
+
+    private suspend fun runTurn(
+        session: AgentSession,
+        userInput: String,
+        config: AgentConfig,
+        onEvent: suspend (TurnEvent) -> Unit,
+        turn: TurnProgress,
+    ): AgentSession {
         val messages = PromptBuilder.build(session.branch()).toMutableList()
         messages.add(Message(MessageRole.USER, userInput))
         // Everything from here on is this turn's own accumulated rounds — the only region
@@ -264,8 +312,9 @@ class AgentLoop(
         val compactionTriggerTokens = (contextWindowTokens * compactionThreshold).toInt()
         var compactionsWithoutRelief = 0
         var toolRound = 0
-        val pendingRounds = mutableListOf<PendingEntry>()
+        val pendingRounds = turn.pendingRounds
         val loopGuardState = LoopGuardState(config.maxToolRounds)
+        var nudged = false
 
         while (true) {
             val request = CompletionRequest(
@@ -304,7 +353,7 @@ class AgentLoop(
                 if (contentBuf.isBlank()) {
                     val truncated = finishReason.equals(FINISH_REASON_LENGTH, ignoreCase = true)
                     return finishEarly(
-                        session, userInput, pendingRounds,
+                        session, userInput, turn,
                         if (truncated)
                             "the model used its whole ${config.maxTokens}-token output budget " +
                                 "(likely on reasoning) without answering or calling a tool — " +
@@ -316,6 +365,15 @@ class AgentLoop(
                         onEvent
                     )
                 }
+                // "I'll open Gmail now." with no tool call ends the turn having done nothing. One
+                // nudge per turn; a second announcement is taken as the answer.
+                if (!nudged && request.tools.isNotEmpty() && announcesWithoutActing(contentBuf.toString())) {
+                    nudged = true
+                    messages.add(Message(MessageRole.ASSISTANT, contentBuf.toString()))
+                    messages.add(Message(MessageRole.USER, ACT_NUDGE))
+                    continue
+                }
+                turn.persisted = true
                 session.append(EntryRole.USER, userInput)
                 pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
                 session.append(EntryRole.ASSISTANT, contentBuf.toString())
@@ -330,7 +388,7 @@ class AgentLoop(
 
             if (toolRound >= config.maxToolRounds) {
                 return finishEarly(
-                    session, userInput, pendingRounds,
+                    session, userInput, turn,
                     "reached the tool-round sanity ceiling (${config.maxToolRounds})",
                     TurnStopReason.ToolRoundCeiling, onEvent
                 )
@@ -385,7 +443,11 @@ class AgentLoop(
                             registry.getOrNull(call.name)
                                 ?.let { tool ->
                                     runCatching { tool.execute(call.argumentsJson) }
-                                        .getOrElse { e -> failed = true; "Error: ${e.message}" }
+                                        .getOrElse { e ->
+                                            // A stopped turn must stop its tools, not report them as failed.
+                                            if (e is CancellationException) throw e
+                                            failed = true; "Error: ${e.message}"
+                                        }
                                 }
                                 ?: run { failed = true; "Error: Tool '${call.name}' not found" }
                         }
@@ -419,7 +481,7 @@ class AgentLoop(
 
             val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
             if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
-                return finishEarly(session, userInput, pendingRounds, guardReason, TurnStopReason.LoopGuard, onEvent)
+                return finishEarly(session, userInput, turn, guardReason, TurnStopReason.LoopGuard, onEvent)
             }
 
             // roundUsage reflects the request that *asked for* these tool calls — sent before any
@@ -437,7 +499,7 @@ class AgentLoop(
             } else {
                 if (!compactInPlace(messages, turnStartIndex, config)) {
                     return finishEarly(
-                        session, userInput, pendingRounds,
+                        session, userInput, turn,
                         "context budget exhausted — a single round's output exceeds the compaction floor",
                         TurnStopReason.ContextExhausted, onEvent
                     )
@@ -445,7 +507,7 @@ class AgentLoop(
                 compactionsWithoutRelief++
                 if (compactionsWithoutRelief >= MAX_COMPACTIONS_WITHOUT_RELIEF) {
                     return finishEarly(
-                        session, userInput, pendingRounds,
+                        session, userInput, turn,
                         "compaction is thrashing — repeated summarisation isn't reducing context enough",
                         TurnStopReason.CompactionThrashing, onEvent
                     )
@@ -453,4 +515,23 @@ class AgentLoop(
             }
         }
     }
+}
+
+const val STOPPED_BY_USER = "[Stopped by the user]"
+
+internal const val ACT_NUDGE = "You said what you'd do next but didn't call a tool. If you meant to act, " +
+    "call the tool now. If you're done or need something from me, say so."
+
+private val ANNOUNCEMENT = Regex("""\b(I'll|I will|I'm going to|I am going to|Let me(?! know)|Now I'll)\b""", RegexOption.IGNORE_CASE)
+
+/**
+ * A short reply whose last sentence promises an action, with no question in it. A heuristic: it
+ * misses other phrasings and can catch a real answer that ends "I'll …", which costs one extra
+ * round; the nudge tells the model it may simply be done.
+ */
+internal fun announcesWithoutActing(reply: String): Boolean {
+    val text = reply.trim()
+    if (text.isEmpty() || text.length > 400 || '?' in text) return false
+    val last = text.split(Regex("(?<=[.!])\\s+")).last()
+    return ANNOUNCEMENT.containsMatchIn(last)
 }

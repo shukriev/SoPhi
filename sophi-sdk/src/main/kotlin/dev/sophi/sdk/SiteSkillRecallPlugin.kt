@@ -11,13 +11,8 @@ import dev.sophi.skills.SkillRegistry
  * durable-knowledge type in this system is already recalled this way; site skills were the
  * exception.
  *
- * [registrySupplier] is called per turn rather than captured once: [RuntimeBuilder.skillTools]
- * snapshots its registry at build time, and inheriting that would make a skill Sophi wrote minutes
- * ago invisible until restart.
- *
- * ponytail: re-reading the skills directory each turn, not caching with invalidation. It is a
- * handful of small Markdown files well inside collectContext's 2s budget; add a cache when a
- * directory large enough to matter actually exists.
+ * [registrySupplier] is called per turn rather than captured once, so a skill Sophi wrote minutes
+ * ago is found without a restart.
  */
 class SiteSkillRecallPlugin(
     private val registrySupplier: () -> SkillRegistry
