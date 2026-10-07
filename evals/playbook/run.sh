@@ -2,7 +2,7 @@
 # One isolated Sophi run of a playbook case: a fresh user.home (seeded from home-seed/), a fresh copy
 # of the ledger fixture as cwd, and the case's turns piped to stdin (one line = one turn, EOF ends
 # the session). Usage: evals/playbook/run.sh <case-id> [run-number]
-# Env: SOPHI_JAR, PLAYBOOK_RUN_TIMEOUT (seconds per run, default 1200), PLAYBOOK_RUNS (run dirs; default ~/Library/Caches/sophi-playbook), SOPHI_FLAGS (default = the companion's "Remote Local" profile + --god-mode --no-remote), AB_LABEL.
+# Env: SOPHI_JAR, PLAYBOOK_RUN_TIMEOUT (seconds per run, default 1200), PLAYBOOK_RUNS (run dirs; default ~/Library/Caches/sophi-playbook), LMSTUDIO_URL (default http://192.168.0.108:1234/v1), SOPHI_FLAGS (default = the companion's "Remote Local" profile + --god-mode --no-remote), AB_LABEL.
 set -o pipefail
 export PB="$(cd "$(dirname "$0")" && pwd)"
 source "$PB/cases.sh" || exit 2
@@ -11,7 +11,8 @@ declare -F "turns_$fn" >/dev/null || { echo "unknown case: $id" >&2; exit 2; }
 JAR="${SOPHI_JAR:-$PB/../../sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar}"
 [ -f "$JAR" ] || { echo "no jar at $JAR — build it: mvn -q -pl sophi-cli -am package -DskipTests" >&2; exit 2; }
 RESULTS="${RESULTS:-$PB/runs/results.tsv}"
-DEFAULT_FLAGS="--provider openai-compat --base-url http://192.168.0.103:1234/v1 --model prism-ml/bonsai-27b --context-window-tokens 32768 --max-tokens 16384 --llm-timeout-seconds 300 --memory --embedding-model text-embedding-nomic-embed-text-v1.5 --embedding-dimensions 768 --god-mode --no-remote"
+LMSTUDIO_URL="${LMSTUDIO_URL:-http://192.168.0.108:1234/v1}"
+DEFAULT_FLAGS="--provider openai-compat --base-url $LMSTUDIO_URL --model prism-ml/bonsai-27b --context-window-tokens 32768 --max-tokens 16384 --llm-timeout-seconds 300 --memory --embedding-model text-embedding-nomic-embed-text-v1.5 --embedding-dimensions 768 --god-mode --no-remote"
 read -ra FLAGS <<< "${SOPHI_FLAGS:-$DEFAULT_FLAGS}"
 
 # Outside $TMPDIR (macOS purges it after ~3 days) so scorecards' RUN paths stay inspectable.
