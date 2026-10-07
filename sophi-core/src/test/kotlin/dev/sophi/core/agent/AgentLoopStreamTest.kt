@@ -19,7 +19,9 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOf
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -344,5 +346,35 @@ class AgentLoopStreamTest : FunSpec({
         val tip = session.branch().last()
         tip.content shouldContain "no text and no tool call"
         tip.metadata["stopReason"] shouldBe TurnStopReason.EmptyResponse.name
+    }
+
+    test("a turn the user stops keeps what it did, closes the unanswered tool call, and stops the tool") {
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var toolCancelled = false
+        val slow = object : Tool {
+            override val name = "slow"
+            override val description = "waits"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String {
+                started.complete(Unit)
+                try { kotlinx.coroutines.awaitCancellation() } finally { toolCancelled = true }
+            }
+        }
+        val loop = newLoop(ToolRegistry().apply { register(slow) })
+        val session = AgentSession(id = "s1")
+        every { provider.stream(any()) } returns flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "slow", "{}"))))
+
+        kotlinx.coroutines.runBlocking {
+            val job = launch { loop.streamTurn(session, "do it", config) {} }
+            started.await()
+            job.cancelAndJoin()
+        }
+
+        toolCancelled shouldBe true
+        val branch = session.branch()
+        branch.map { it.role } shouldBe listOf(EntryRole.USER, EntryRole.ASSISTANT, EntryRole.TOOL_RESULT, EntryRole.ASSISTANT)
+        branch[2].content shouldContain "Stopped by the user"
+        branch[3].content shouldBe "[Stopped by the user]"
+        coVerify { sessionManager.save(session) }
     }
 })
