@@ -7,7 +7,7 @@ only the harness fixes that measurably help. Spec:
 ## One-time setup
 
 - `sophi-cli` jar built: `mvn -q -pl sophi-cli -am package -DskipTests`
-- LM Studio at `192.168.0.103:1234` serving `prism-ml/bonsai-27b` and `text-embedding-nomic-embed-text-v1.5` (any working embedding model will do: every run starts with an empty memory store) (override with `SOPHI_FLAGS`)
+- LM Studio at `192.168.0.108:1234` serving `prism-ml/bonsai-27b` and `text-embedding-nomic-embed-text-v1.5` (any working embedding model will do: every run starts with an empty memory store) (override with `SOPHI_FLAGS`)
 - `npx` and a Chromium browser for `browser-1` (Brave by default; set `PLAYBOOK_BROWSER`)
 - a Calendar.app calendar named `Sophi Eval`, used for nothing else: every `assistant-1` setup deletes all its events (the first run asks for automation permission)
 - `BRAVE_SEARCH_API_KEY` exported (else `assistant-4` is skipped)
@@ -29,7 +29,7 @@ only the harness fixes that measurably help. Spec:
    > the case in `cases.sh` and `catalogue.md`, then `$RUN/transcript.txt` and
    > `$RUN/home/.sophi/sessions/*.jsonl`. Write `evals/playbook/runs/<date>-<id>-<n>.md`.
 4. **`unclear` → Claude-backed re-run:**
-   `SOPHI_FLAGS="--provider claude --model claude-sonnet-5 --memory --embedding-base-url http://192.168.0.103:1234/v1 --embedding-model text-embedding-nomic-embed-text-v1.5 --embedding-dimensions 768 --god-mode --no-remote" AB_LABEL=claude evals/playbook/run.sh <case>`
+   `SOPHI_FLAGS="--provider claude --model claude-sonnet-5 --memory --embedding-base-url http://192.168.0.108:1234/v1 --embedding-model text-embedding-nomic-embed-text-v1.5 --embedding-dimensions 768 --god-mode --no-remote" AB_LABEL=claude evals/playbook/run.sh <case>`
 
 ## A/B a prescription
 
