@@ -1,5 +1,6 @@
 package dev.sophi.ai.providers
 
+import com.openai.core.Timeout
 import dev.sophi.ai.api.LLMProvider
 import io.micrometer.observation.ObservationRegistry
 import org.springframework.ai.anthropic.AnthropicChatModel
@@ -26,10 +27,14 @@ fun buildClaudeProvider(apiKey: String, model: String = "claude-3-5-sonnet-20241
  * (e.g. http://localhost:11434/v1), vLLM (e.g. http://localhost:8000/v1), or any other
  * server implementing the OpenAI chat-completions API. Passing [apiKey] = null puts
  * the underlying client in no-auth mode (OpenAiSetup strips the Authorization header),
- * which is what most local servers expect. [requestTimeout] defaults to 60s but should be
- * raised for local reasoning models: they can spend well over a minute on hidden
- * chain-of-thought before emitting any content, and a client-side timeout aborts the
- * request out from under a model that's still generating rather than one that's stuck.
+ * which is what most local servers expect.
+ *
+ * [requestTimeout] bounds **silence**, not the whole reply: it is the longest the client waits
+ * for the next bytes (connecting, sending, or between streamed chunks). Local reasoning models
+ * can take far longer than any fixed limit to finish a reply, and a whole-call limit used to
+ * kill such replies mid-stream while tokens were still arriving ("LLM stream error: Stream
+ * failed"). The whole call still has a generous ceiling, [MAX_REPLY_DURATION]. Raise
+ * [requestTimeout] for models that think silently for a long time before their first token.
  * The OpenAI Java SDK retries [maxRetries] times, each subject to the full [requestTimeout] —
  * effective worst-case latency before a caller sees an error is `requestTimeout * (maxRetries + 1)`.
  * Lower it (e.g. to 0) for a slow model that's consistently near the timeout, so a caller
@@ -61,7 +66,7 @@ fun buildOpenAiCompatProvider(
         ObservationRegistry.NOOP,
         null,
         null
-    )
+    ).withOptions { it.timeout(streamingTimeout(requestTimeout)) }
     val options = OpenAiChatOptions.builder()
         .baseUrl(baseUrl)
         .apiKey(effectiveApiKey)
@@ -73,6 +78,15 @@ fun buildOpenAiCompatProvider(
         .build()
     return OpenAICompatProvider(chatModel, client, name = name)
 }
+
+/** Ceiling on one whole call, however actively it streams — only so a server that trickles
+ *  bytes forever can't hold a turn open indefinitely. */
+internal val MAX_REPLY_DURATION: Duration = Duration.ofHours(2)
+
+/** [idle] for connect, send and each read (silence between streamed chunks); the whole call
+ *  may run up to [MAX_REPLY_DURATION]. */
+internal fun streamingTimeout(idle: Duration): Timeout =
+    Timeout.builder().connect(idle).read(idle).write(idle).request(MAX_REPLY_DURATION).build()
 
 class ProviderConfigException(message: String) : IllegalArgumentException(message)
 
