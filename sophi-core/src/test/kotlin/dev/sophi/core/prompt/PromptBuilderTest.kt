@@ -84,4 +84,21 @@ class PromptBuilderTest : FunSpec({
         val messages = PromptBuilder.build(session.branch())
         messages.map { it.content } shouldBe listOf("hi", "answer")
     }
+
+    test("a stopped turn is replayed as a neutral note, not a marker the model could copy as an answer") {
+        val msgs = PromptBuilder.build(listOf(
+            entry(EntryRole.ASSISTANT, "[Stopped early: 3 consecutive tool-call rounds failed in a row]", mapOf("stopReason" to "LoopGuard")),
+            entry(EntryRole.ASSISTANT, "[Stopped by the user]", mapOf("stopReason" to "UserStopped")),
+            entry(EntryRole.ASSISTANT, "\n\n[Stopped early: 3 consecutive tool-call rounds failed in a row]"), // one the model wrote itself
+            entry(EntryRole.ASSISTANT, "Done — archived 12 emails."),
+        ))
+        msgs.take(3).forEach {
+            it.role shouldBe MessageRole.ASSISTANT
+            it.content.contains("[Stopped") shouldBe false
+            it.content.startsWith("(") shouldBe true
+        }
+        msgs[0].content.contains("3 consecutive tool-call rounds failed") shouldBe true
+        msgs[1].content.contains("the user stopped it") shouldBe true
+        msgs[3].content shouldBe "Done — archived 12 emails."
+    }
 })

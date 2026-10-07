@@ -314,6 +314,7 @@ class AgentLoop(
         var toolRound = 0
         val pendingRounds = turn.pendingRounds
         val loopGuardState = LoopGuardState(config.maxToolRounds)
+        var nudged = false
 
         while (true) {
             val request = CompletionRequest(
@@ -363,6 +364,14 @@ class AgentLoop(
                         if (truncated) TurnStopReason.OutputTruncated else TurnStopReason.EmptyResponse,
                         onEvent
                     )
+                }
+                // "I'll open Gmail now." with no tool call ends the turn having done nothing. One
+                // nudge per turn; a second announcement is taken as the answer.
+                if (!nudged && request.tools.isNotEmpty() && announcesWithoutActing(contentBuf.toString())) {
+                    nudged = true
+                    messages.add(Message(MessageRole.ASSISTANT, contentBuf.toString()))
+                    messages.add(Message(MessageRole.USER, ACT_NUDGE))
+                    continue
                 }
                 turn.persisted = true
                 session.append(EntryRole.USER, userInput)
@@ -509,3 +518,20 @@ class AgentLoop(
 }
 
 const val STOPPED_BY_USER = "[Stopped by the user]"
+
+internal const val ACT_NUDGE = "You said what you'd do next but didn't call a tool. If you meant to act, " +
+    "call the tool now. If you're done or need something from me, say so."
+
+private val ANNOUNCEMENT = Regex("""\b(I'll|I will|I'm going to|I am going to|Let me(?! know)|Now I'll)\b""", RegexOption.IGNORE_CASE)
+
+/**
+ * A short reply whose last sentence promises an action, with no question in it. A heuristic: it
+ * misses other phrasings and can catch a real answer that ends "I'll …", which costs one extra
+ * round; the nudge tells the model it may simply be done.
+ */
+internal fun announcesWithoutActing(reply: String): Boolean {
+    val text = reply.trim()
+    if (text.isEmpty() || text.length > 400 || '?' in text) return false
+    val last = text.split(Regex("(?<=[.!])\\s+")).last()
+    return ANNOUNCEMENT.containsMatchIn(last)
+}
