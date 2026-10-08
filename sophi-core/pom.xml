@@ -32,6 +32,12 @@
             <artifactId>kotlinx-serialization-json</artifactId>
             <version>${serialization.version}</version>
         </dependency>
+        <!-- fetch_url: HTML pages to readable text. MIT, no transitive dependencies. -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.19.1</version>
+        </dependency>
         <dependency>
             <groupId>com.charleskorn.kaml</groupId>
             <artifactId>kaml-jvm</artifactId>

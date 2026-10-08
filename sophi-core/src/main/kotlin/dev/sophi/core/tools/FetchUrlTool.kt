@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import org.jsoup.Jsoup
 import java.net.CookieManager
 import java.net.InetAddress
 import java.net.URI
@@ -18,7 +19,7 @@ private const val MAX_REDIRECTS = 5
 private val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
 
 @Serializable
-private data class FetchUrlArgs(val url: String)
+private data class FetchUrlArgs(val url: String, val raw: Boolean = false)
 
 class FetchUrlTool(
     // Redirects are followed by hand in execute(), so every hop gets the private-address check. Never switch this
@@ -30,10 +31,11 @@ class FetchUrlTool(
 ) : Tool {
 
     override val name = "fetch_url"
-    override val description = "Fetch the text content of a public http(s) URL. Follows redirects; the first line is the HTTP status and the final URL"
+    override val description = "Fetch a public http(s) URL. Follows redirects; the first line is the HTTP status and the final URL. " +
+        "HTML pages come back as readable text with links as [url]; pass raw=true for the original HTML"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
     override val parametersJson = """
-        {"type":"object","properties":{"url":{"type":"string","description":"The http(s) URL to fetch"}},"required":["url"]}
+        {"type":"object","properties":{"url":{"type":"string","description":"The http(s) URL to fetch"},"raw":{"type":"boolean","description":"Return the original HTML instead of readable text (default false)"}},"required":["url"]}
     """.trimIndent()
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -59,7 +61,10 @@ class FetchUrlTool(
             val location = response.headers().firstValue("Location").orElse(null)
             if (response.statusCode() !in REDIRECT_STATUSES || location == null) {
                 val from = if (uri != start) " (redirected from $start)" else ""
-                return@withContext "HTTP ${response.statusCode()} $uri$from\n\n${capped(response.body())}"
+                val contentType = response.headers().firstValue("Content-Type").orElse("")
+                val body = if (!args.raw && isHtml(contentType, response.body())) htmlToText(response.body(), uri.toString())
+                           else response.body()
+                return@withContext "HTTP ${response.statusCode()} $uri$from\n\n${capped(body)}"
             }
             val next = uri.resolve(location)
             if (next.scheme != "http" && next.scheme != "https") {
@@ -85,6 +90,31 @@ class FetchUrlTool(
             return "Error: refusing to fetch a private/internal address: $host"
         }
         return null
+    }
+
+    private fun isHtml(contentType: String, body: String): Boolean =
+        "html" in contentType.lowercase() ||
+            (contentType.isEmpty() && body.trimStart().take(15).lowercase().let { it.startsWith("<!doctype html") || it.startsWith("<html") })
+
+    /**
+     * Raw HTML is mostly markup: an arXiv listing is ~80k chars of it. Keep the title, the text with its
+     * line structure, and each link's absolute target, so the model can read and follow the page cheaply.
+     */
+    private fun htmlToText(html: String, baseUri: String): String {
+        val doc = Jsoup.parse(html, baseUri)
+        doc.select("script, style, noscript, svg, template, iframe").remove()
+        doc.select("a[href]").forEach { a ->
+            val href = a.absUrl("href")
+            if (href.startsWith("http") && a.text().isNotBlank()) a.appendText(" [$href]")
+        }
+        doc.select("br, p, div, li, tr, h1, h2, h3, h4, h5, h6, ul, ol, table, section, article, header, footer, nav, dt, dd, pre, blockquote")
+            .forEach { it.prependText("\n") }
+        val text = doc.body().wholeText().lines()
+            .map { it.replace(Regex("\\s+"), " ").trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
+        val title = doc.title().trim()
+        return (if (title.isNotEmpty()) "Title: $title\n\n" else "") + text
     }
 
     private fun capped(body: String): String =
