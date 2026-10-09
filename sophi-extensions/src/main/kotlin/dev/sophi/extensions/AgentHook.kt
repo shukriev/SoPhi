@@ -18,7 +18,9 @@ data class HookContext(
     val success: Boolean? = null,
     val durationMillis: Long? = null,
     val assistantReply: String? = null,
-    val ambient: Boolean = false
+    val ambient: Boolean = false,
+    /** Ambient text heard during a detected meeting: memory must not track commitments from it. */
+    val inMeeting: Boolean = false
 )
 
 interface AgentHook {

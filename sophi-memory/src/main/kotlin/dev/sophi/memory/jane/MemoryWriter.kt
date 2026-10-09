@@ -144,7 +144,7 @@ class MemoryWriter(
                 sourceSessionId = turn.sessionId,
                 // Commitment tracking is chat-only in v1 (ADR-035): enforced here in code, not left
                 // to the prompt, since provenance can be THIRD_PARTY even outside an ambient turn.
-                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT
+                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !turn.inMeeting
             )
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)

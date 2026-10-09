@@ -390,4 +390,19 @@ class MemoryWriterTest : FunSpec({
         writer.write(TurnObservation("ambient", "u", "", 1_000L, ambient = true), EncoderVerdict(meeting = 0.8))
         store.encoderLogLines().single { it.contains("proposed_0") } shouldContain "\"meeting\":0.8"
     }
+
+    // Meeting mode: action items become commitments only through the digest's Confirm.
+    test("an ambient commitment during a meeting is stored but never tracked") {
+        val (_, writer) = rig()
+        val inMeeting = TurnObservation("ambient", "u", "", 1_000L, ambient = true, inMeeting = true)
+        val stored = writer.write(inMeeting, EncoderVerdict(listOf(
+            vm("User will send Ivan the FTP account list", "TASKS", emph = 0.8, dur = 0.5,
+                commitment = true, provenance = "USER_DIRECT")
+        ))).single()
+        stored.isCommitment shouldBe false
+    }
+
+    test("inMeeting defaults to false") {
+        TurnObservation("ambient", "u", "", 1_000L, ambient = true).inMeeting shouldBe false
+    }
 })

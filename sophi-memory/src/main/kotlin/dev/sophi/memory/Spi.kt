@@ -6,7 +6,9 @@ data class TurnObservation(
     val userInput: String,
     val assistantReply: String,
     val nowMs: Long,
-    val ambient: Boolean = false
+    val ambient: Boolean = false,
+    /** Heard during a detected meeting: commitments come only from the user's Confirm. */
+    val inMeeting: Boolean = false
 )
 data class MemoryBlock(val rendered: String, val memoryIds: List<String>)
 data class ConsolidationReport(

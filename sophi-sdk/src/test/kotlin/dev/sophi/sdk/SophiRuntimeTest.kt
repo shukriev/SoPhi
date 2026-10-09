@@ -747,4 +747,20 @@ class SophiRuntimeTest : FunSpec({
 
         rt.removeSkill("ghost") shouldBe false
     }
+
+    test("settleExternalTurn threads inMeeting=true onto the dispatched HookContext") {
+        val seen = mutableListOf<HookContext>()
+        val spy = object : SophiPlugin {
+            override val name = "external-settle-meeting-spy"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.AFTER_TURN
+                override suspend fun invoke(context: HookContext) { seen.add(context) }
+            })
+        }
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+
+        rt.settleExternalTurn("s1", "overheard text", "", ambient = true, inMeeting = true)
+
+        seen.single().inMeeting shouldBe true
+    }
 })
