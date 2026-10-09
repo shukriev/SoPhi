@@ -524,6 +524,53 @@ class AgentLoopTest : FunSpec({
         result.branch().last().content shouldBe "recovered"
     }
 
+    fun repeatingToolLoop(argsPerRound: List<String>, then: String = "done"): Pair<AgentLoop, MutableList<dev.sophi.ai.api.CompletionRequest>> {
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : dev.sophi.core.tools.Tool {
+            override val name = "nav"
+            override val description = "Navigates"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String = "page title only"
+        })
+        val requests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(capture(requests)) } returnsMany argsPerRound.mapIndexed { i, a ->
+            LLMResponse.ToolUse(calls = listOf(dev.sophi.ai.api.ToolCall("c$i", "nav", a)), usage = TokenUsage(1, 0)).toStreamFlow()
+        } + LLMResponse.Text(then, TokenUsage(1, 1)).toStreamFlow()
+        every { sessionManager.save(any()) } just Runs
+        return newLoop(toolRegistry) to requests
+    }
+
+    test("turn() notes on the 3rd identical tool call that repeating it won't change the result") {
+        val (loopWithTool, requests) = repeatingToolLoop(List(3) { """{"url":"https://x/a"}""" })
+
+        loopWithTool.turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        val results = requests.last().messages.filter { it.toolName == "nav" }.map { it.content }
+        results.take(2).forEach { it shouldBe "page title only" }
+        results[2] shouldContain "page title only"
+        results[2] shouldContain "3 times"
+        results[2] shouldContain "won't change"
+    }
+
+    test("turn() does not count calls with different arguments as repeats") {
+        val (loopWithTool, requests) = repeatingToolLoop(listOf("""{"url":"a"}""", """{"url":"b"}""", """{"url":"a"}"""))
+
+        loopWithTool.turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        requests.last().messages.filter { it.toolName == "nav" }.forEach { it.content shouldBe "page title only" }
+    }
+
+    test("turn() stops early on the 6th identical tool call under the default (never-continue) guard") {
+        val (loopWithTool, _) = repeatingToolLoop(List(10) { """{"url":"https://x/a"}""" })
+
+        val result = loopWithTool.turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+
+        result.branch().last().content shouldContain "Stopped early"
+        result.branch().last().content shouldContain "same call"
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
+        coVerify(exactly = 6) { provider.stream(any()) }
+    }
+
     test("turn() stops early when searches keep broadening beyond an earlier scoped path") {
         val session = AgentSession(id = "s1")
         val toolRegistry = ToolRegistry()
@@ -702,7 +749,8 @@ class AgentLoopTest : FunSpec({
         val events = mutableListOf<TurnEvent>()
         loopWithTool.turn(session, "test", config) { events.add(it) }
 
-        events shouldBe listOf(
+        // durationMillis is wall-clock (0 or 1 ms here), so it's zeroed before comparing — it made this test flaky.
+        events.map { if (it is TurnEvent.ToolCallFinished) it.copy(durationMillis = 0) else it } shouldBe listOf(
             TurnEvent.ToolCallStarted("broken", "{}"),
             TurnEvent.ToolCallFinished("broken", "Error: disk full", isError = true),
             TurnEvent.Token("recovered")

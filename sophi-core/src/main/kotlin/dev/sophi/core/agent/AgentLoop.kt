@@ -48,6 +48,10 @@ private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = tr
 
 private const val LOOP_GUARD_FAILURE_THRESHOLD = 3
 private const val LOOP_GUARD_BROADENING_THRESHOLD = 2
+/** From this many identical calls (same tool, same arguments) in one turn, the result carries a note. */
+private const val REPEAT_NOTE_THRESHOLD = 3
+/** ...and at this many the loop guard steps in. Seen live: a browser_navigate to one URL 29 times in a turn. */
+private const val LOOP_GUARD_REPEAT_THRESHOLD = 6
 /** Enough recent rounds for the model to stay coherent about what it was just doing. */
 private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
 /**
@@ -95,6 +99,20 @@ private class LoopGuardState(private val maxToolRounds: Int) {
     private var narrowestSearchPath: String? = null
     private var searchesBeyondScope = 0
     private var roundBudgetWarned = false
+    private val repeatCounts = mutableMapOf<String, Int>()
+    private var repeatedTooOften: Pair<String, Int>? = null
+
+    /** Counts this call among identical ones (same tool, same arguments) this turn; returns the count. */
+    fun countRepeat(name: String, argumentsJson: String): Int {
+        val key = name + "\u0000" + argumentsJson.trim()
+        val n = (repeatCounts[key] ?: 0) + 1
+        repeatCounts[key] = n
+        if (n >= LOOP_GUARD_REPEAT_THRESHOLD) {
+            repeatedTooOften = name to n
+            repeatCounts[key] = 0 // a policy that says "continue" isn't asked again until 6 more
+        }
+        return n
+    }
 
     // The directory a search is confined to: its `path` joined with a glob pattern's literal leading
     // directories (a pattern starting "ledger/" then wildcards is scoped to ledger; one starting with
@@ -110,6 +128,10 @@ private class LoopGuardState(private val maxToolRounds: Int) {
 
     /** Call once per round, after that round's tool calls have all completed. */
     fun afterRound(outcomes: List<ToolCallOutcome>, roundAfterIncrement: Int): String? {
+        repeatedTooOften?.let { (name, n) ->
+            repeatedTooOften = null
+            return "the same call ($name, identical arguments) was made $n times this turn"
+        }
         val roundFullyFailed = outcomes.isNotEmpty() && outcomes.all { it.failed }
         consecutiveFailedRounds = if (roundFullyFailed) consecutiveFailedRounds + 1 else 0
         if (consecutiveFailedRounds >= LOOP_GUARD_FAILURE_THRESHOLD) {
@@ -469,7 +491,15 @@ class AgentLoop(
                     }
                 }.awaitAll()
             }
-            val toolResults = toolOutcomes.map { it.message }
+            // Successful calls never trip the failure guard, so a model can repeat one forever without
+            // learning anything new. Tell it on the 3rd identical call; the guard steps in at the 6th.
+            val toolResults = toolOutcomes.map { o ->
+                val n = loopGuardState.countRepeat(o.call.name, o.call.argumentsJson)
+                if (n < REPEAT_NOTE_THRESHOLD) o.message
+                else o.message.copy(content = o.message.content + "\n\n[Note: you have now made this exact call " +
+                    "($n times, same arguments) in this task. Repeating it won't change the result — read what " +
+                    "it returned, or try a different call.]")
+            }
             messages.addAll(toolResults)
             toolResults.forEach { m ->
                 pendingRounds.add(PendingEntry(
