@@ -47,7 +47,7 @@ class MemoryWriter(
      */
     private fun logCandidate(
         turn: TurnObservation, outcome: String, alpha: Double?, text: String?,
-        room: Room? = null, dur: Pair<Double, Boolean>? = null
+        room: Room? = null, dur: Pair<Double, Boolean>? = null, meeting: Double? = null
     ) {
         if (!config.encoderTelemetry) return
         runCatching {
@@ -56,6 +56,7 @@ class MemoryWriter(
                 put("sessionId", JsonPrimitive(turn.sessionId))
                 put("ambient", JsonPrimitive(turn.ambient))
                 put("outcome", JsonPrimitive(outcome))
+                meeting?.let { put("meeting", JsonPrimitive(it)) }
                 alpha?.let { put("alpha", JsonPrimitive(it)) }
                 room?.let { put("room", JsonPrimitive(it.name)) }
                 dur?.let { put("dur", JsonPrimitive(it.first)); put("durFallback", JsonPrimitive(it.second)) }
@@ -68,7 +69,8 @@ class MemoryWriter(
         val stored = mutableListOf<Memory>()
         val all = store.memories()
 
-        logCandidate(turn, "proposed_${verdict.memories.size}", null, null)
+        logCandidate(turn, "proposed_${verdict.memories.size}", null, null,
+            meeting = if (turn.ambient) verdict.meeting ?: 0.0 else null)
         for (vm in verdict.memories) {
             val room = runCatching { Room.valueOf(vm.room) }.getOrNull()
                 ?: run { logCandidate(turn, "dropped_bad_room", null, null); continue }

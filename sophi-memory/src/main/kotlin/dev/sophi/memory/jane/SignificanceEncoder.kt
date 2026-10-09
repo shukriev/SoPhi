@@ -35,7 +35,9 @@ internal data class VerdictProfile(val path: String, val value: String, val expl
 @Serializable
 internal data class EncoderVerdict(
     val memories: List<VerdictMemory> = emptyList(),
-    val profile: List<VerdictProfile> = emptyList()
+    val profile: List<VerdictProfile> = emptyList(),
+    /** Ambient only: how much the text sounds like a meeting (0..1); null = not said (counts as 0). */
+    val meeting: Double? = null
 )
 
 /**
@@ -101,6 +103,10 @@ class SignificanceEncoder(
         appendLine("  EPISODES events/decisions reported; KNOWLEDGE durable facts of the user's world;")
         appendLine("  NARRATIVE only for explicit cause-effect story beats.")
         if (turn.ambient) {
+            appendLine("- meeting: also give a top-level \"meeting\" (0..1): how much this sounds like a meeting —")
+            appendLine("  several people working through an agenda, decisions, or who does what. 0 for TV, radio,")
+            appendLine("  small talk or one person talking. Always answer with the object here, e.g.")
+            appendLine("  {\"meeting\":0.0,\"memories\":[]}, even when nothing deserves remembering.")
             appendLine("- provenance: THIRD_PARTY when the content is about someone other than the user")
             appendLine("  (a named third party speaking, or being spoken about); USER_DIRECT only when the")
             appendLine("  user is clearly the one speaking about themselves. If you cannot tell who is")

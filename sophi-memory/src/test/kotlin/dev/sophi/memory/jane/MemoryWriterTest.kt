@@ -383,4 +383,11 @@ class MemoryWriterTest : FunSpec({
         writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
             vm("Dr. Lee is the family dentist", "ENTITIES", dur = 0.9, provenance = "THIRD_PARTY")))).size shouldBe 1
     }
+
+    test("telemetry records the meeting score on an ambient turn's proposed line") {
+        val store = PalaceStore(tempdir().toPath())
+        val writer = MemoryWriter(store, UserProfile(store), embeddings, "fake", JanesPalaceConfig(encoderTelemetry = true))
+        writer.write(TurnObservation("ambient", "u", "", 1_000L, ambient = true), EncoderVerdict(meeting = 0.8))
+        store.encoderLogLines().single { it.contains("proposed_0") } shouldContain "\"meeting\":0.8"
+    }
 })

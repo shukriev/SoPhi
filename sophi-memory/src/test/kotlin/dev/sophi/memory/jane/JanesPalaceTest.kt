@@ -129,4 +129,33 @@ class JanesPalaceTest : FunSpec({
         palace.browse(BrowseFilter(sourceSessionId = "sess_123")).single().metadata["source"] shouldBe "sess_123"
         palace.close()
     }
+
+    test("meetingScoreSince returns the highest ambient score since a time and ignores chat turns") {
+        val llm = io.mockk.mockk<dev.sophi.ai.api.LLMProvider>()
+        val scores = ArrayDeque(listOf("0.2", "0.9", "0.7"))
+        io.mockk.coEvery { llm.complete(any()) } answers {
+            dev.sophi.ai.api.LLMResponse.Text("""{"meeting":${scores.removeFirst()},"memories":[]}""", dev.sophi.ai.api.TokenUsage(1, 1))
+        }
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), llm, FakeEmbeddingProvider(), "fake")
+        runBlocking {
+            palace.observe(TurnObservation("ambient", "a", "", 1_000L, ambient = true))
+            palace.observe(TurnObservation("ambient", "b", "", 2_000L, ambient = true))
+            palace.observe(TurnObservation("s1", "chat", "ok", 3_000L))   // chat: never counted
+        }
+        palace.meetingScoreSince(1_500L) shouldBe 0.9
+        palace.meetingScoreSince(0L) shouldBe 0.9
+        palace.meetingScoreSince(5_000L) shouldBe 0.0
+        palace.close()
+    }
+
+    test("meetingScoreSince keeps at most 200 scores") {
+        val llm = io.mockk.mockk<dev.sophi.ai.api.LLMProvider>()
+        io.mockk.coEvery { llm.complete(any()) } returns
+            dev.sophi.ai.api.LLMResponse.Text("""{"meeting":0.5,"memories":[]}""", dev.sophi.ai.api.TokenUsage(1, 1))
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), llm, FakeEmbeddingProvider(), "fake")
+        runBlocking { repeat(250) { palace.observe(TurnObservation("ambient", "x$it", "", it.toLong(), ambient = true)) } }
+        palace.meetingScoreSince(0L) shouldBe 0.5
+        palace.meetingScoreCount() shouldBe 200
+        palace.close()
+    }
 })

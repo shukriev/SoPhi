@@ -55,8 +55,21 @@ class JanesPalace(
         val recent = store.memories().values.filter { it.active }
             .sortedByDescending { it.createdAt }.take(config.recentWindow)
         val verdict = e.encode(turn, recent) ?: return
+        if (turn.ambient) {
+            meetingScores.addLast(turn.nowMs to (verdict.meeting ?: 0.0).coerceIn(0.0, 1.0))
+            while (meetingScores.size > 200) meetingScores.pollFirst()
+        }
         w.write(turn, verdict)
     }
+
+    // Ambient meeting scores, newest last; bounded so a day of listening can't grow it.
+    private val meetingScores = java.util.concurrent.ConcurrentLinkedDeque<Pair<Long, Double>>()
+
+    /** The highest ambient meeting score recorded at or after [sinceMs]; 0.0 when none. */
+    fun meetingScoreSince(sinceMs: Long): Double =
+        meetingScores.filter { it.first >= sinceMs }.maxOfOrNull { it.second } ?: 0.0
+
+    internal fun meetingScoreCount(): Int = meetingScores.size
 
     override suspend fun consolidate(nowMs: Long): ConsolidationReport = consolidator.run(nowMs)
 

@@ -230,4 +230,17 @@ class SignificanceEncoderTest : FunSpec({
         SignificanceEncoder(provider, cfg, onWarning = { warnings.add(it) }).encode(turn, emptyList())
         warnings.single() shouldContain "didn't match the expected schema"
     }
+
+    test("ambient prompts ask for a top-level meeting score; chat prompts don't") {
+        val enc = SignificanceEncoder(mockk(), cfg)
+        val ambient = TurnObservation("ambient", "so who takes the migration ticket", "", 1_000L, ambient = true)
+        enc.buildPrompt(ambient, emptyList()) shouldContain "\"meeting\""
+        enc.buildPrompt(turn, emptyList()) shouldNotContain "\"meeting\""
+    }
+
+    test("parses the meeting score; a bare [] on ambient text scores 0") {
+        val enc = SignificanceEncoder(mockk(), cfg)
+        enc.parse("""{"meeting":0.8,"memories":[]}""")!!.meeting shouldBe 0.8
+        (enc.parse("[]")!!.meeting ?: 0.0) shouldBe 0.0
+    }
 })
