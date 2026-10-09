@@ -65,6 +65,40 @@ class MemoryWriter(
         }
     }
 
+    /**
+     * A commitment the user confirmed (meeting digest): stored whatever its significance, since the
+     * user said so. A near-duplicate still inside the open-commitment window is marked instead of
+     * duplicated; an older one is left alone (openCommitments filters by createdAt, so reusing it
+     * would hide the commitment).
+     */
+    internal suspend fun rememberCommitment(text: String, sessionId: String, nowMs: Long): Memory {
+        val vector = embeddings.embed(listOf(text)).first()
+        val near = store.memories().values
+            .filter { it.active && it.createdAt >= nowMs - config.commitmentExpiryMs }
+            .map { it to (store.vectorFor(it.id)?.let { v -> cosine(vector, v) } ?: 0.0) }
+            .filter { it.second >= config.mergeThreshold }
+            .maxByOrNull { it.second }?.first
+        if (near != null) {
+            return near.copy(isCommitment = true, reinforcedAt = nowMs).also { store.upsertMemory(it) }
+        }
+        val memory = Memory(
+            id = "mem_" + UUID.randomUUID(),
+            text = text,
+            room = Room.TASKS,
+            salience = 0.7,
+            signals = SalienceSignals(0.0, 1.0, 1.0, 0.0, 1.0, dur = 0.3),
+            sensitivity = Sensitivity.PERSONAL,
+            provenance = Provenance.USER_DIRECT,
+            createdAt = nowMs,
+            reinforcedAt = nowMs,
+            sourceSessionId = sessionId,
+            isCommitment = true
+        )
+        store.upsertMemory(memory)
+        store.putEmbedding(memory.id, embeddingModelName, vector)
+        return memory
+    }
+
     internal suspend fun write(turn: TurnObservation, verdict: EncoderVerdict): List<Memory> {
         val stored = mutableListOf<Memory>()
         val all = store.memories()

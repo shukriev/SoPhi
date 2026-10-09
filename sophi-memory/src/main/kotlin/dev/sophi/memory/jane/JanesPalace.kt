@@ -71,6 +71,10 @@ class JanesPalace(
 
     internal fun meetingScoreCount(): Int = meetingScores.size
 
+    /** A commitment the user confirmed; null when memory has no embedding provider. */
+    suspend fun rememberCommitment(text: String, sessionId: String, nowMs: Long): Memory? =
+        writer?.rememberCommitment(text, sessionId, nowMs)
+
     override suspend fun consolidate(nowMs: Long): ConsolidationReport = consolidator.run(nowMs)
 
     /**

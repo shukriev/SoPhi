@@ -158,4 +158,34 @@ class JanesPalaceTest : FunSpec({
         palace.meetingScoreCount() shouldBe 200
         palace.close()
     }
+
+    test("rememberCommitment stores a tracked commitment that openCommitments returns") {
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), null, FakeEmbeddingProvider(), "fake")
+        val m = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 1_000L) }!!
+        m.isCommitment shouldBe true
+        m.room shouldBe Room.TASKS
+        m.provenance shouldBe Provenance.USER_DIRECT
+        palace.openCommitments(2_000L).map { it.id } shouldBe listOf(m.id)
+        palace.close()
+    }
+
+    test("rememberCommitment twice for the same item keeps one memory") {
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), null, FakeEmbeddingProvider(), "fake")
+        val a = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 1_000L) }!!
+        val b = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 2_000L) }!!
+        b.id shouldBe a.id
+        palace.openCommitments(3_000L) shouldHaveSize 1
+        palace.close()
+    }
+
+    test("an old similar memory is not reused: it would fall outside the open-commitment window") {
+        val cfg = JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m")
+        val palace = JanesPalace(cfg, null, FakeEmbeddingProvider(), "fake")
+        val old = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 0L) }!!
+        val now = cfg.commitmentExpiryMs + 10_000L
+        val fresh = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-2", now) }!!
+        (fresh.id == old.id) shouldBe false
+        palace.openCommitments(now).map { it.id } shouldBe listOf(fresh.id)
+        palace.close()
+    }
 })
