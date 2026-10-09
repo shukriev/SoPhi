@@ -88,7 +88,9 @@ class SignificanceEncoder(
         appendLine(""" "profile":[{"path":"dotted.trait.path","value":"...","explicit":false}]}""")
         appendLine()
         appendLine("Rules:")
-        appendLine("- Emit [] for trivial exchanges (small talk, generic Q&A). Most turns store NOTHING.")
+        // Ambient answers carry "meeting", so a bare [] there would drop it.
+        if (turn.ambient) appendLine("- Use \"memories\":[] for trivial talk (small talk, TV, generic chatter). Most turns store NOTHING.")
+        else appendLine("- Emit [] for trivial exchanges (small talk, generic Q&A). Most turns store NOTHING.")
         appendLine("- emph: did the user stress it or say to remember it (0..1)? aff: emotional weight (0..1).")
         appendLine("- dur: will this still be true and useful a month from now (0..1)? High for facts about the")
         appendLine("  user's identity, people, work, places, long-running projects, and conventions or ways their")

@@ -425,4 +425,22 @@ class MemoryWriterTest : FunSpec({
         val (_, writer) = rig()
         writer.rememberCommitment("Call the bank about account 123456789", "meeting-1", 1_000L).text shouldContain "[REDACTED]"
     }
+
+    // inMeeting only means something for overheard text; a chat commitment stays tracked.
+    test("inMeeting on a chat turn does not suppress a chat commitment") {
+        val (_, writer) = rig()
+        val chat = TurnObservation("s1", "u", "a", 1_000L, inMeeting = true)
+        writer.write(chat, EncoderVerdict(listOf(
+            vm("User will renew the passport", "TASKS", emph = 0.8, dur = 0.5, commitment = true, provenance = "USER_DIRECT")
+        ))).single().isCommitment shouldBe true
+    }
+
+    // Re-confirming an open commitment restarts its window, or it would drop out early.
+    test("a reused commitment's open window restarts at the new confirmation") {
+        val (_, writer) = rig()
+        val first = writer.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 1_000L)
+        val again = writer.rememberCommitment("Send Ivan the FTP account list", "meeting-2", 5_000L)
+        again.id shouldBe first.id
+        again.createdAt shouldBe 5_000L
+    }
 })

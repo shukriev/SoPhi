@@ -243,4 +243,12 @@ class SignificanceEncoderTest : FunSpec({
         enc.parse("""{"meeting":0.8,"memories":[]}""")!!.meeting shouldBe 0.8
         (enc.parse("[]")!!.meeting ?: 0.0) shouldBe 0.0
     }
+
+    // Ambient answers must keep "meeting", so the ambient prompt can't also say "Emit []".
+    test("the ambient prompt asks for an empty memories list, not a bare [] ; chat keeps Emit []") {
+        val enc = SignificanceEncoder(mockk(), cfg)
+        val ambient = TurnObservation("ambient", "so who takes the migration ticket", "", 1_000L, ambient = true)
+        enc.buildPrompt(ambient, emptyList()) shouldNotContain "Emit []"
+        enc.buildPrompt(turn, emptyList()) shouldContain "Emit []"
+    }
 })

@@ -83,7 +83,8 @@ class MemoryWriter(
             .filter { it.second >= config.mergeThreshold }
             .maxByOrNull { it.second }?.first
         if (near != null) {
-            return near.copy(isCommitment = true, reinforcedAt = nowMs).also { store.upsertMemory(it) }
+            // Re-confirmed: its open window restarts now (openCommitments filters by createdAt).
+            return near.copy(isCommitment = true, createdAt = nowMs, reinforcedAt = nowMs).also { store.upsertMemory(it) }
         }
         val memory = Memory(
             id = "mem_" + UUID.randomUUID(),
@@ -182,7 +183,7 @@ class MemoryWriter(
                 sourceSessionId = turn.sessionId,
                 // Commitment tracking is chat-only in v1 (ADR-035): enforced here in code, not left
                 // to the prompt, since provenance can be THIRD_PARTY even outside an ambient turn.
-                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !turn.inMeeting
+                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting)
             )
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)
