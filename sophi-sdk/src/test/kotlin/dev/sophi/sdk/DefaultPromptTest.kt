@@ -15,4 +15,18 @@ class DefaultPromptTest : FunSpec({
             this shouldContain "read it first and keep its content"
         }
     }
+
+    // GAIA (sophi-arena): median 1 tool call per question on qwen3-32b; 6 runs "gave up" without trying,
+    // one claimed a file it never wrote. Their effect is measured in sophi-arena, not here.
+    test("the base prompt says to check with tools before concluding something is unavailable") {
+        DefaultPrompt.BASE shouldContain "before concluding"
+    }
+
+    test("the base prompt says to try a different route after a failed tool call") {
+        DefaultPrompt.BASE shouldContain "different route"
+    }
+
+    test("the base prompt allows claiming an action only when a tool result shows it") {
+        DefaultPrompt.BASE shouldContain "only if a tool result"
+    }
 })
