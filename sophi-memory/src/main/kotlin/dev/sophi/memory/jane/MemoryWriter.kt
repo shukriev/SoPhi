@@ -47,7 +47,7 @@ class MemoryWriter(
      */
     private fun logCandidate(
         turn: TurnObservation, outcome: String, alpha: Double?, text: String?,
-        room: Room? = null, dur: Pair<Double, Boolean>? = null
+        room: Room? = null, dur: Pair<Double, Boolean>? = null, meeting: Double? = null
     ) {
         if (!config.encoderTelemetry) return
         runCatching {
@@ -56,6 +56,7 @@ class MemoryWriter(
                 put("sessionId", JsonPrimitive(turn.sessionId))
                 put("ambient", JsonPrimitive(turn.ambient))
                 put("outcome", JsonPrimitive(outcome))
+                meeting?.let { put("meeting", JsonPrimitive(it)) }
                 alpha?.let { put("alpha", JsonPrimitive(it)) }
                 room?.let { put("room", JsonPrimitive(it.name)) }
                 dur?.let { put("dur", JsonPrimitive(it.first)); put("durFallback", JsonPrimitive(it.second)) }
@@ -64,11 +65,51 @@ class MemoryWriter(
         }
     }
 
+    /**
+     * A commitment the user confirmed (meeting digest): stored whatever its significance, since the
+     * user said so. Only an existing open commitment is reused for a near-duplicate: another
+     * person's fact or a SENSITIVE memory (hidden by openCommitments) must not absorb it, and an
+     * expired one would hide it (openCommitments filters by createdAt).
+     */
+    internal suspend fun rememberCommitment(rawText: String, sessionId: String, nowMs: Long): Memory {
+        val text = redact(rawText)
+        val vector = embeddings.embed(listOf(text)).first()
+        val near = store.memories().values
+            .filter {
+                it.active && it.isCommitment && it.provenance == Provenance.USER_DIRECT &&
+                    it.sensitivity <= Sensitivity.PERSONAL && it.createdAt >= nowMs - config.commitmentExpiryMs
+            }
+            .map { it to (store.vectorFor(it.id)?.let { v -> cosine(vector, v) } ?: 0.0) }
+            .filter { it.second >= config.mergeThreshold }
+            .maxByOrNull { it.second }?.first
+        if (near != null) {
+            // Re-confirmed: its open window restarts now (openCommitments filters by createdAt).
+            return near.copy(isCommitment = true, createdAt = nowMs, reinforcedAt = nowMs).also { store.upsertMemory(it) }
+        }
+        val memory = Memory(
+            id = "mem_" + UUID.randomUUID(),
+            text = text,
+            room = Room.TASKS,
+            salience = 0.7,
+            signals = SalienceSignals(0.0, 1.0, 1.0, 0.0, 1.0, dur = 0.3),
+            sensitivity = Sensitivity.PERSONAL,
+            provenance = Provenance.USER_DIRECT,
+            createdAt = nowMs,
+            reinforcedAt = nowMs,
+            sourceSessionId = sessionId,
+            isCommitment = true
+        )
+        store.upsertMemory(memory)
+        store.putEmbedding(memory.id, embeddingModelName, vector)
+        return memory
+    }
+
     internal suspend fun write(turn: TurnObservation, verdict: EncoderVerdict): List<Memory> {
         val stored = mutableListOf<Memory>()
         val all = store.memories()
 
-        logCandidate(turn, "proposed_${verdict.memories.size}", null, null)
+        logCandidate(turn, "proposed_${verdict.memories.size}", null, null,
+            meeting = if (turn.ambient) verdict.meeting ?: 0.0 else null)
         for (vm in verdict.memories) {
             val room = runCatching { Room.valueOf(vm.room) }.getOrNull()
                 ?: run { logCandidate(turn, "dropped_bad_room", null, null); continue }
@@ -142,7 +183,7 @@ class MemoryWriter(
                 sourceSessionId = turn.sessionId,
                 // Commitment tracking is chat-only in v1 (ADR-035): enforced here in code, not left
                 // to the prompt, since provenance can be THIRD_PARTY even outside an ambient turn.
-                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT
+                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting)
             )
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)

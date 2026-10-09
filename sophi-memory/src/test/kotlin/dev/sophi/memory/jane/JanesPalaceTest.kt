@@ -129,4 +129,63 @@ class JanesPalaceTest : FunSpec({
         palace.browse(BrowseFilter(sourceSessionId = "sess_123")).single().metadata["source"] shouldBe "sess_123"
         palace.close()
     }
+
+    test("meetingScoreSince returns the highest ambient score since a time and ignores chat turns") {
+        val llm = io.mockk.mockk<dev.sophi.ai.api.LLMProvider>()
+        val scores = ArrayDeque(listOf("0.2", "0.9", "0.7"))
+        io.mockk.coEvery { llm.complete(any()) } answers {
+            dev.sophi.ai.api.LLMResponse.Text("""{"meeting":${scores.removeFirst()},"memories":[]}""", dev.sophi.ai.api.TokenUsage(1, 1))
+        }
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), llm, FakeEmbeddingProvider(), "fake")
+        runBlocking {
+            palace.observe(TurnObservation("ambient", "a", "", 1_000L, ambient = true))
+            palace.observe(TurnObservation("ambient", "b", "", 2_000L, ambient = true))
+            palace.observe(TurnObservation("s1", "chat", "ok", 3_000L))   // chat: never counted
+        }
+        palace.meetingScoreSince(1_500L) shouldBe 0.9
+        palace.meetingScoreSince(0L) shouldBe 0.9
+        palace.meetingScoreSince(5_000L) shouldBe 0.0
+        palace.close()
+    }
+
+    test("meetingScoreSince keeps at most 200 scores") {
+        val llm = io.mockk.mockk<dev.sophi.ai.api.LLMProvider>()
+        io.mockk.coEvery { llm.complete(any()) } returns
+            dev.sophi.ai.api.LLMResponse.Text("""{"meeting":0.5,"memories":[]}""", dev.sophi.ai.api.TokenUsage(1, 1))
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), llm, FakeEmbeddingProvider(), "fake")
+        runBlocking { repeat(250) { palace.observe(TurnObservation("ambient", "x$it", "", it.toLong(), ambient = true)) } }
+        palace.meetingScoreSince(0L) shouldBe 0.5
+        palace.meetingScoreCount() shouldBe 200
+        palace.close()
+    }
+
+    test("rememberCommitment stores a tracked commitment that openCommitments returns") {
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), null, FakeEmbeddingProvider(), "fake")
+        val m = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 1_000L) }!!
+        m.isCommitment shouldBe true
+        m.room shouldBe Room.TASKS
+        m.provenance shouldBe Provenance.USER_DIRECT
+        palace.openCommitments(2_000L).map { it.id } shouldBe listOf(m.id)
+        palace.close()
+    }
+
+    test("rememberCommitment twice for the same item keeps one memory") {
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m"), null, FakeEmbeddingProvider(), "fake")
+        val a = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 1_000L) }!!
+        val b = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 2_000L) }!!
+        b.id shouldBe a.id
+        palace.openCommitments(3_000L) shouldHaveSize 1
+        palace.close()
+    }
+
+    test("an old similar memory is not reused: it would fall outside the open-commitment window") {
+        val cfg = JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "m")
+        val palace = JanesPalace(cfg, null, FakeEmbeddingProvider(), "fake")
+        val old = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 0L) }!!
+        val now = cfg.commitmentExpiryMs + 10_000L
+        val fresh = runBlocking { palace.rememberCommitment("Send Ivan the FTP account list", "meeting-2", now) }!!
+        (fresh.id == old.id) shouldBe false
+        palace.openCommitments(now).map { it.id } shouldBe listOf(fresh.id)
+        palace.close()
+    }
 })

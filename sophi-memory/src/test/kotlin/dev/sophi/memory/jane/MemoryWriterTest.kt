@@ -383,4 +383,64 @@ class MemoryWriterTest : FunSpec({
         writer.write(turn.copy(ambient = true), EncoderVerdict(listOf(
             vm("Dr. Lee is the family dentist", "ENTITIES", dur = 0.9, provenance = "THIRD_PARTY")))).size shouldBe 1
     }
+
+    test("telemetry records the meeting score on an ambient turn's proposed line") {
+        val store = PalaceStore(tempdir().toPath())
+        val writer = MemoryWriter(store, UserProfile(store), embeddings, "fake", JanesPalaceConfig(encoderTelemetry = true))
+        writer.write(TurnObservation("ambient", "u", "", 1_000L, ambient = true), EncoderVerdict(meeting = 0.8))
+        store.encoderLogLines().single { it.contains("proposed_0") } shouldContain "\"meeting\":0.8"
+    }
+
+    // Meeting mode: action items become commitments only through the digest's Confirm.
+    test("an ambient commitment during a meeting is stored but never tracked") {
+        val (_, writer) = rig()
+        val inMeeting = TurnObservation("ambient", "u", "", 1_000L, ambient = true, inMeeting = true)
+        val stored = writer.write(inMeeting, EncoderVerdict(listOf(
+            vm("User will send Ivan the FTP account list", "TASKS", emph = 0.8, dur = 0.5,
+                commitment = true, provenance = "USER_DIRECT")
+        ))).single()
+        stored.isCommitment shouldBe false
+    }
+
+    test("inMeeting defaults to false") {
+        TurnObservation("ambient", "u", "", 1_000L, ambient = true).inMeeting shouldBe false
+    }
+
+    // Review: Confirm merged into any near-duplicate, so someone else's fact or a SENSITIVE memory
+    // (hidden by openCommitments) could absorb the user's confirmed commitment.
+    test("rememberCommitment never reuses another person's fact or a sensitive memory") {
+        val (store, writer) = rig()
+        val bob = writer.write(turn, EncoderVerdict(listOf(
+            vm("Bob will send the deck", "TASKS", emph = 0.8, dur = 0.5, provenance = "THIRD_PARTY")))).single()
+        val lab = writer.write(turn, EncoderVerdict(listOf(VerdictMemory(text = "Send the lab results Friday",
+            room = "TASKS", emph = 0.8, dur = 0.5, sensitivity = "SENSITIVE", provenance = "USER_DIRECT")))).single()
+        val a = writer.rememberCommitment("Bob will send the deck", "meeting-1", 2_000L)
+        val b = writer.rememberCommitment("Send the lab results Friday", "meeting-1", 2_000L)
+        (a.id == bob.id) shouldBe false
+        (b.id == lab.id) shouldBe false
+        store.memories().getValue(bob.id).isCommitment shouldBe false
+    }
+
+    test("rememberCommitment redacts like every other memory write") {
+        val (_, writer) = rig()
+        writer.rememberCommitment("Call the bank about account 123456789", "meeting-1", 1_000L).text shouldContain "[REDACTED]"
+    }
+
+    // inMeeting only means something for overheard text; a chat commitment stays tracked.
+    test("inMeeting on a chat turn does not suppress a chat commitment") {
+        val (_, writer) = rig()
+        val chat = TurnObservation("s1", "u", "a", 1_000L, inMeeting = true)
+        writer.write(chat, EncoderVerdict(listOf(
+            vm("User will renew the passport", "TASKS", emph = 0.8, dur = 0.5, commitment = true, provenance = "USER_DIRECT")
+        ))).single().isCommitment shouldBe true
+    }
+
+    // Re-confirming an open commitment restarts its window, or it would drop out early.
+    test("a reused commitment's open window restarts at the new confirmation") {
+        val (_, writer) = rig()
+        val first = writer.rememberCommitment("Send Ivan the FTP account list", "meeting-1", 1_000L)
+        val again = writer.rememberCommitment("Send Ivan the FTP account list", "meeting-2", 5_000L)
+        again.id shouldBe first.id
+        again.createdAt shouldBe 5_000L
+    }
 })
