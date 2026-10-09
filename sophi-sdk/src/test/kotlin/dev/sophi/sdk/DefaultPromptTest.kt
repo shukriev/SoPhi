@@ -29,4 +29,8 @@ class DefaultPromptTest : FunSpec({
     test("the base prompt allows claiming an action only when a tool result shows it") {
         DefaultPrompt.BASE shouldContain "only if a tool result"
     }
+
+    test("the base prompt says to read a page when a browser result doesn't include its content") {
+        DefaultPrompt.BASE shouldContain "doesn't include the page"
+    }
 })

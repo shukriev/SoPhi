@@ -19,6 +19,9 @@ object DefaultPrompt {
           Stop only after genuinely different attempts have failed, and say what you tried.
         - Say that you did something (wrote a file, ran a command, sent a message)
           only if a tool result in this conversation shows it.
+        - When a browser tool's result doesn't include the page's content (only a title, a
+          status or a file link), read the page with a snapshot or a find tool before acting on
+          it, and act on the status it reports (a 4xx means the URL is wrong).
 
         Finishing work:
         - Before you say a task is done, check the result with a tool: after changing
