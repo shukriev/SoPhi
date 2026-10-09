@@ -405,4 +405,24 @@ class MemoryWriterTest : FunSpec({
     test("inMeeting defaults to false") {
         TurnObservation("ambient", "u", "", 1_000L, ambient = true).inMeeting shouldBe false
     }
+
+    // Review: Confirm merged into any near-duplicate, so someone else's fact or a SENSITIVE memory
+    // (hidden by openCommitments) could absorb the user's confirmed commitment.
+    test("rememberCommitment never reuses another person's fact or a sensitive memory") {
+        val (store, writer) = rig()
+        val bob = writer.write(turn, EncoderVerdict(listOf(
+            vm("Bob will send the deck", "TASKS", emph = 0.8, dur = 0.5, provenance = "THIRD_PARTY")))).single()
+        val lab = writer.write(turn, EncoderVerdict(listOf(VerdictMemory(text = "Send the lab results Friday",
+            room = "TASKS", emph = 0.8, dur = 0.5, sensitivity = "SENSITIVE", provenance = "USER_DIRECT")))).single()
+        val a = writer.rememberCommitment("Bob will send the deck", "meeting-1", 2_000L)
+        val b = writer.rememberCommitment("Send the lab results Friday", "meeting-1", 2_000L)
+        (a.id == bob.id) shouldBe false
+        (b.id == lab.id) shouldBe false
+        store.memories().getValue(bob.id).isCommitment shouldBe false
+    }
+
+    test("rememberCommitment redacts like every other memory write") {
+        val (_, writer) = rig()
+        writer.rememberCommitment("Call the bank about account 123456789", "meeting-1", 1_000L).text shouldContain "[REDACTED]"
+    }
 })

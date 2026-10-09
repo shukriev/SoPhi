@@ -67,14 +67,18 @@ class MemoryWriter(
 
     /**
      * A commitment the user confirmed (meeting digest): stored whatever its significance, since the
-     * user said so. A near-duplicate still inside the open-commitment window is marked instead of
-     * duplicated; an older one is left alone (openCommitments filters by createdAt, so reusing it
-     * would hide the commitment).
+     * user said so. Only an existing open commitment is reused for a near-duplicate: another
+     * person's fact or a SENSITIVE memory (hidden by openCommitments) must not absorb it, and an
+     * expired one would hide it (openCommitments filters by createdAt).
      */
-    internal suspend fun rememberCommitment(text: String, sessionId: String, nowMs: Long): Memory {
+    internal suspend fun rememberCommitment(rawText: String, sessionId: String, nowMs: Long): Memory {
+        val text = redact(rawText)
         val vector = embeddings.embed(listOf(text)).first()
         val near = store.memories().values
-            .filter { it.active && it.createdAt >= nowMs - config.commitmentExpiryMs }
+            .filter {
+                it.active && it.isCommitment && it.provenance == Provenance.USER_DIRECT &&
+                    it.sensitivity <= Sensitivity.PERSONAL && it.createdAt >= nowMs - config.commitmentExpiryMs
+            }
             .map { it to (store.vectorFor(it.id)?.let { v -> cosine(vector, v) } ?: 0.0) }
             .filter { it.second >= config.mergeThreshold }
             .maxByOrNull { it.second }?.first
