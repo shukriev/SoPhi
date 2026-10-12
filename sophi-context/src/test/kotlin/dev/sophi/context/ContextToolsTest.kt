@@ -56,6 +56,30 @@ class ContextToolsTest : FunSpec({
         runBlocking { tool(e, id, "read_context").execute("""{"path":"README.md"}""") } shouldStartWith "not an indexed file"
     }
 
+    test("read_context refuses a file replaced by a symlink to outside the root") {
+        val (e, id, r) = indexedRepo()
+        val outside = tempdir().toPath().write("secret.txt", "TOPSECRET")
+        Files.delete(r.resolve("README.md")); Files.createSymbolicLink(r.resolve("README.md"), outside)
+        runBlocking { tool(e, id, "read_context").execute("""{"path":"README.md"}""") } shouldStartWith "not an indexed file"
+    }
+
+    test("read_context refuses a directory replaced by a symlink to outside the root") {
+        val (e, id, r) = indexedRepo()
+        r.write("sub/x.kt", "class X")
+        e.requestScan(id)
+        eventually { e.fileIndexed(id, "sub/x.kt") }
+        val outside = tempdir().toPath(); outside.write("x.kt", "TOPSECRET")
+        r.resolve("sub").toFile().deleteRecursively(); Files.createSymbolicLink(r.resolve("sub"), outside)
+        runBlocking { tool(e, id, "read_context").execute("""{"path":"sub/x.kt"}""") } shouldStartWith "not an indexed file"
+    }
+
+    test("read_context reports the line count for an out-of-range request") {
+        val (e, id, _) = indexedRepo()
+        val read = tool(e, id, "read_context")
+        runBlocking { read.execute("""{"path":"src/main/Compactor.kt","startLine":99}""") } shouldBe "src/main/Compactor.kt has 4 lines"
+        runBlocking { read.execute("""{"path":"src/main/Compactor.kt","startLine":3,"endLine":2}""") } shouldBe "src/main/Compactor.kt has 4 lines"
+    }
+
     test("project_map shows name, languages, layout and key files with summaries") {
         val (e, id, _) = indexedRepo()
         val map = runBlocking { tool(e, id, "project_map").execute("{}") }
@@ -78,5 +102,17 @@ class ContextToolsTest : FunSpec({
         val plugin = ContextPlugin(e) { listOf(id) }
         runBlocking { plugin.hooks().single { it.point == HookPoint.AFTER_TOOL }.invoke(HookContext("s", toolName = "write_file", success = true)) }
         eventually { e.search("zeppelin", listOf(id))?.isNotEmpty() == true }
+    }
+
+    test("a failed write_file or a successful read_file requests no rescan") {
+        val (e, id, r) = indexedRepo()
+        r.write("src/main/New.kt", "class Zeppelin")
+        val hook = ContextPlugin(e) { listOf(id) }.hooks().single { it.point == HookPoint.AFTER_TOOL }
+        runBlocking {
+            hook.invoke(HookContext("s", toolName = "write_file", success = false))
+            hook.invoke(HookContext("s", toolName = "read_file", success = true))
+        }
+        Thread.sleep(1_500)   // many drain cycles; scanInterval is 60s so nothing else rescans
+        e.search("zeppelin", listOf(id))?.isEmpty() shouldBe true
     }
 })

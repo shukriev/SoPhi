@@ -8,6 +8,8 @@ import dev.sophi.core.tools.Tool
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.Path
 
 /** Spec invariant 3: no exception escapes a context tool. */
@@ -28,7 +30,7 @@ fun contextTools(engine: ContextEngine, scope: () -> List<String>): List<Tool> =
 private fun inScope(engine: ContextEngine, scope: () -> List<String>): List<ProjectInfo>? {
     if (!engine.ready) return null
     val ids = scope().toSet()
-    return engine.projects().filter { it.id in ids }
+    return engine.projectsOrNull()?.filter { it.id in ids }
 }
 
 private class SearchContextTool(private val engine: ContextEngine, private val scope: () -> List<String>) : Tool {
@@ -68,12 +70,20 @@ private class ReadContextTool(private val engine: ContextEngine, private val sco
         val root = Path.of(project.root)
         if (rel.startsWith("/") || rel.startsWith("\\") || Path.of(rel).isAbsolute) return "not an indexed file in this project: ${args.path}"
         val file = root.resolve(rel).normalize()
-        if (!file.startsWith(root) || !engine.fileIndexed(project.id, rel) || !Files.isRegularFile(file) || runCatching { Files.size(file) }.getOrDefault(Long.MAX_VALUE) > 1_000_000)
-            return "not an indexed file in this project: ${args.path}"
-        val lines = try { Files.readAllLines(file) } catch (e: java.io.IOException) { return "cannot read ${args.path}: ${e.javaClass.simpleName}" }
+        val refused = "not an indexed file in this project: ${args.path}"
+        if (!file.startsWith(root)) return refused
+        if (engine.fileIndexedOrNull(project.id, rel) ?: return ContextEngine.NOT_READY) { /* indexed */ } else return refused
+        // Containment must survive symlinks swapped in after indexing (the rescan is async): no link at the
+        // leaf, and the real path (which resolves symlinked parent dirs) must stay under the real root.
+        val attrs = try { Files.readAttributes(file, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS) } catch (e: java.io.IOException) { return refused }
+        if (attrs.isSymbolicLink || !attrs.isRegularFile || attrs.size() > 1_000_000) return refused
+        val real = try { file.toRealPath() to root.toRealPath() } catch (e: java.io.IOException) { return refused }
+        if (!real.first.startsWith(real.second)) return refused
+        val lines = try { String(Files.readAllBytes(file), Charsets.UTF_8).removeSuffix("\n").lines() } catch (e: java.io.IOException) { return "cannot read ${args.path}: ${e.javaClass.simpleName}" }
+        if (args.startLine == null && args.endLine == null) return lines.joinToString("\n")
         val from = (args.startLine ?: 1).coerceAtLeast(1)
         val to = (args.endLine ?: lines.size).coerceAtMost(lines.size)
-        if (args.startLine == null && args.endLine == null) return lines.joinToString("\n")
+        if (from > lines.size || from > to) return "${args.path} has ${lines.size} lines"
         return (from..to).joinToString("\n") { "$it: ${lines[it - 1]}" }
     }
 
@@ -96,6 +106,6 @@ private class ProjectMapTool(private val engine: ContextEngine, private val scop
         val projects = inScope(engine, scope) ?: return ContextEngine.NOT_READY
         val project = projects.firstOrNull() ?: return "No indexed project here — run `sophi context add <dir>`."
         val args = runCatching { json.decodeFromString<MapArgs>(argumentsJson) }.getOrNull() ?: MapArgs()
-        return ProjectMap.render(project, engine.fileSummaries(project.id), args.path)
+        return ProjectMap.render(project, engine.fileSummariesOrNull(project.id) ?: return ContextEngine.NOT_READY, args.path)
     }
 }

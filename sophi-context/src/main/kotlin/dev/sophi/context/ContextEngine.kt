@@ -88,7 +88,10 @@ class ContextEngine(
         } ?: RegisterResult.Refused(NOT_READY)
     }
 
-    fun projects(): List<ProjectInfo> = withStoreOrNull { projects(it) } ?: emptyList()
+    fun projects(): List<ProjectInfo> = projectsOrNull() ?: emptyList()
+
+    /** null = not ready or the store call failed (unlike an empty list, which means nothing is registered). */
+    fun projectsOrNull(): List<ProjectInfo>? = withStoreOrNull { projects(it) }
 
     fun projectContaining(path: Path): ProjectInfo? {
         val p = runCatching { path.toRealPath() }.getOrNull() ?: return null
@@ -111,12 +114,16 @@ class ContextEngine(
         Retriever(s).search(query, projectIds, limit)
     }
 
-    fun fileIndexed(projectId: String, relPath: String): Boolean =
-        withStoreOrNull { it.query("SELECT id FROM ${ContextSchema.FILE} WHERE id = ?", ContextSchema.fileId(projectId, relPath)).isNotEmpty() } ?: false
+    fun fileIndexed(projectId: String, relPath: String): Boolean = fileIndexedOrNull(projectId, relPath) ?: false
 
-    fun fileSummaries(projectId: String): List<Triple<String, String, String?>> =
+    fun fileIndexedOrNull(projectId: String, relPath: String): Boolean? =
+        withStoreOrNull { it.query("SELECT id FROM ${ContextSchema.FILE} WHERE id = ?", ContextSchema.fileId(projectId, relPath)).isNotEmpty() }
+
+    fun fileSummaries(projectId: String): List<Triple<String, String, String?>> = fileSummariesOrNull(projectId) ?: emptyList()
+
+    fun fileSummariesOrNull(projectId: String): List<Triple<String, String, String?>>? =
         withStoreOrNull { s -> s.query("SELECT path, role, summary FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId)
-            .map { Triple(it["path"] as String, it["role"] as String, it["summary"] as String?) } } ?: emptyList()
+            .map { Triple(it["path"] as String, it["role"] as String, it["summary"] as String?) } }
 
     override fun close() {
         closed = true
