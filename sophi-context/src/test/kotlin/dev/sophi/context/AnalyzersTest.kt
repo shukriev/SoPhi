@@ -62,4 +62,18 @@ class AnalyzersTest : FunSpec({
         (a.chunks.size > 1) shouldBe true
         a.chunks.all { it.label == "Big" } shouldBe true
     }
+
+    test("summary skips licence headers and prefers the doc above the first declaration") {
+        val src = "/**\n * Copyright 2026 Acme\n */\npackage a\n\nval s = \"\"\"x\"\"\"\n/** Real summary. */\nclass X {\n    /** member */\n    fun f() = 1\n}\n"
+        Analyzers.analyze("X.kt", Role.SOURCE, "kotlin", src).summary shouldBe "Real summary."
+    }
+
+    test("empty, trailing newline, giant line, annotated one-liners, gradle edge cases") {
+        Analyzers.analyze("A.kt", Role.SOURCE, "kotlin", "class A\n").chunks.map { it.endLine } shouldContainExactly listOf(1)
+        Analyzers.analyze("A.kt", Role.SOURCE, "kotlin", "").chunks shouldBe emptyList()
+        Analyzers.analyze("m.txt", Role.DOC, "text", "x".repeat(20_000)).chunks.size shouldBe 3
+        Analyzers.analyze("G.kt", Role.SOURCE, "kotlin", "@Serializable private data class GrepArgs(val a: Int)").chunks.map { it.label } shouldContainExactly listOf("GrepArgs")
+        Analyzers.analyze("E.java", Role.SOURCE, "java", "@Entity public class E {}").chunks.map { it.label } shouldContainExactly listOf("E")
+        Analyzers.analyze("settings.gradle.kts", Role.CONFIG, "kotlin", "includeBuild(\"../x\")\ninclude(\n\":a\",\n\":b\"\n)").modules shouldContainExactly listOf("a", "b")
+    }
 })
