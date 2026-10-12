@@ -2,13 +2,15 @@
 
 | Date | Commit | Set | n | hit@1 | hit@5 | hit@10 | MRR | grep MRR | p50/p95 ms |
 |---|---|---|---|---|---|---|---|---|---|
-| 2026-10-12 | 987c385+ | queries.tsv | 31 | 0.74 | 0.94 | 0.97 | 0.82 | 0.12 (6.8x) | 12.9 / 23.8 |
-| 2026-10-12 | 987c385+ | commits.tsv | 258 | 0.53 | 0.76 | 0.82 | 0.63 | 0.26 (2.4x) | 13.5 / 22.0 |
+| 2026-10-12 | ab4177c | queries.tsv | 31 | 0.71 | 0.94 | 0.97 | 0.80 | 0.12 (6.7x) | 13.1 / 22.6 |
+| 2026-10-12 | ab4177c | commits.tsv | 258 | 0.53 | 0.76 | 0.83 | 0.64 | 0.26 (2.4x) | 13.6 / 21.8 |
 
 Exit criteria (spec §10 M1): queries.tsv hit@10 >= 0.90 and MRR >= 0.80 — met; commits.tsv engine MRR >= 2x grep — met (2.4x).
 
-Weights: k1 0.9, b 0.4, nameBoost 1.5, perDirectory 3, candidates 300, rolePrior SOURCE 1.0 / INSTRUCTION 1.0 / DOC 0.9 / CONFIG 0.9 / TEST 0.6 / GENERATED 0.2.
-(k1/b were tuned on queries.tsv itself, so its numbers are slightly optimistic; commits.tsv is the held-out check.)
+Weights: k1 1.2, b 0.5, nameBoost 1.5, perDirectory 3, candidates 300, rolePrior SOURCE 1.0 / INSTRUCTION 1.0 / DOC 0.9 / CONFIG 0.9 / TEST 0.6 / GENERATED 0.2.
+(queries.tsv guided the weights, so its numbers are slightly optimistic. commits.tsv was observed while tuning but not optimised against; it is only a sanity check, not a clean held-out set.)
+
+k1/b decision: the earlier pick, k1 0.9 / b 0.4, scored queries.tsv hit@10 0.97 / MRR 0.82 and commits.tsv hit@10 0.82 / MRR 0.63. k1 1.2 / b 0.5 scores queries.tsv hit@10 0.9677 / MRR 0.80242 (unrounded; the rule was MRR >= 0.80 and hit@10 >= 0.90) and commits.tsv hit@10 0.83 / MRR 0.64. Relative to the old defaults (1.2 / 0.75), the earlier pick moved commits.tsv hit@10 0.84 -> 0.82 with MRR flat at 0.63; 1.2 / 0.5 gives back part of it (0.83) at MRR 0.64. It clears the exit criteria by a thin MRR margin (0.0024) on queries.tsv, so the 31-query set cannot tell the two choices apart; commits.tsv (258 queries) favours 1.2 / 0.5, hence the switch.
 
 Variants tried (nameBoost : perDirectory : priors : k1 : b — queries hit@10 / MRR ; commits hit@10 / MRR):
 | Variant | queries | commits |
@@ -28,7 +30,8 @@ Variants tried (nameBoost : perDirectory : priors : k1 : b — queries hit@10 / 
 | 2.0 : 3 : default : 1.2 : 0.75 | 0.97 / 0.78 | 0.82 / 0.62 |
 | 1.5 : 3 : default : 1.5 : 0.75 | 0.97 / 0.77 | 0.84 / 0.64 |
 | 1.5 : 3 : default : 1.2 : 0.5 | 0.97 / 0.80 | 0.83 / 0.64 |
-| **1.5 : 3 : default : 0.9 : 0.4 (chosen)** | **0.97 / 0.82** | **0.82 / 0.63** |
+| 1.5 : 3 : default : 0.9 : 0.4 (previous pick) | 0.97 / 0.82 | 0.82 / 0.63 |
+| **1.5 : 3 : default : 1.2 : 0.5 (chosen)** | **0.97 / 0.80** | **0.83 / 0.64** |
 
 The no-priors baseline lands at 0.94 / 0.79 rather than the bake-off's 0.90 / 0.80: the repos have changed since the bake-off (files added, symlinks and secret files now skipped), so exact reproduction is not expected.
 
