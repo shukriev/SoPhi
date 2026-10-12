@@ -1,0 +1,67 @@
+# ADR-041: Context engine on a shared, lock-elected ArcadeDB store
+
+**Date:** 2026-10-12
+**Status:** Accepted — M0 (shared store) implemented; M1–M2 planned
+
+## Context
+
+Sophi finds code and notes only by grepping blind: no project discovery, no instruction files,
+no index. On 31 labelled questions over the SoPhi and companion repos, a grep-style search put a
+relevant file in the top 10 for 52% of them (MRR 0.22). A context engine has to serve both
+`sophi-cli` and `sophi-companion`, share state when both run on one machine, and work when either
+runs alone — and the user wants one store, not a second database next to ArcadeDB.
+
+ArcadeDB allows one open instance per database, which is why `RuntimeBuilder` disables memory in a
+second process and `sophi-versioning` opens and closes per operation. ADR-026 dropped a shared-server
+design because remote vector search seemed impossible; that turned out to be a parser quirk (ADR-026
+addendum).
+
+## Decision
+
+1. **One store, shared by election.** The first process to lock `~/.sophi/db/host.lock` runs an
+   ArcadeDB server on 127.0.0.1 and uses the database in-process; others read `host.json` and use
+   `RemoteArcadeStore`. The lock is the source of truth: a client whose call fails first reuses an
+   already re-elected store, then tries the lock (becoming host if it is free), and rethrows only
+   when the lock is held and `host.json` names its own live host. A partially failed takeover rolls
+   back. A client built for a different store schema refuses to attach.
+2. **Server credentials.** The server password is generated once per server root into a `secret`
+   file (created 0600 before writing, tightened if found loose, regenerated if blank); it is not
+   stored in `host.json`.
+3. **SQL primitives in `sophi-store`** (`fullText`, `ensureFullTextIndex`, `ensureVectorIndex`,
+   `insertVertex`, `nearestVectors`, `query`, `command`) over a shared `SqlArcadeStore`, so embedded
+   and remote stores behave the same — one contract test suite runs against both.
+   `nearestVectors` scores are cosine distance (lower is closer), identical embedded and remote.
+4. **Lucene is back on the classpath** (FULL_TEXT needs it) and the server/network jars are added:
+   the companion bundle grew from 251M to 302M.
+5. **Ranking is ours, not the database's.** ArcadeDB's `$score` counts matched terms; the engine
+   computes BM25 over its own identifier-splitting, stemming tokenizer. In a bake-off with identical
+   preprocessing, ArcadeDB candidates + Kotlin BM25, SQLite FTS5 and Lucene all scored hit@10 0.90 /
+   MRR 0.80.
+6. The engine itself (`sophi-context`: indexing, orientation, a gated per-turn hint, pull tools, a
+   token budget) follows in M1–M2; design in the 2026-10-12 context-engine spec.
+
+## Reasons
+
+1. **Measured, not assumed.** The database choice was settled by a spike on the real 26.5.1 jar and
+   a bake-off on our own repos: retrieval quality was identical across engines, so the deciding
+   factors were "one store" and concurrency — and ArcadeDB host + remote passed a 20-second
+   two-process test with zero errors and ~39 ms write-to-read freshness.
+2. **SQLite was the strongest alternative** (WAL multi-process with no election, real BM25, 4×
+   faster at 44k chunks) and was rejected only because it would split storage from Jane's Palace.
+3. **Engine-level RPC was rejected** in favour of sharing the database: no new protocol to version,
+   and memory/versioning can move onto the same server later, removing "memory disabled in the
+   second process".
+4. **Doubt resolves to rebuild.** The context database is a cache of files on disk; corruption or a
+   schema change means recreate and reindex. (Memory, when it joins, is never auto-deleted.)
+
+## Consequences
+
+- Every consumer of `sophi-store` carries Lucene and the ArcadeDB server jars.
+- `RemoteArcadeStore.putVector` is unsupported — vector writes happen on the host (inserts carry
+  their vector; `putVector`'s index-put workaround needs the embedded API).
+- Property names are interpolated unquoted into SQL, so reserved words (e.g. `by`) cannot be
+  property names.
+- Jane's Palace and versioning still open their own embedded databases until they migrate.
+- Jane's Palace's recall explain line labels the store's distance as "semantic" (pre-existing,
+  cosmetic; ranking uses its own cosine) — follow-up.
+- Failover after a SIGKILL'd host measured 238–284 ms in `ArcadeHostTwoProcessTest` (3 runs).
