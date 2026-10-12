@@ -26,7 +26,14 @@ class TokenizerTest : FunSpec({
         Tokenizer.tokens("hub port") shouldBe listOf("hub", "port")
     }
     test("is safe to call from several threads") {
-        val results = (1..8).map { Thread { repeat(200) { check(Tokenizer.tokens("compacting sessions") == listOf("compact", "session")) } } }
-        results.forEach { it.start() }; results.forEach { it.join() }
+        val failures = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        val threads = (1..8).map {
+            Thread {
+                try { repeat(200) { check(Tokenizer.tokens("compacting sessions") == listOf("compact", "session")) } }
+                catch (t: Throwable) { failures.add(t) }
+            }
+        }
+        threads.forEach { it.start() }; threads.forEach { it.join() }
+        failures.toList() shouldBe emptyList()
     }
 })
