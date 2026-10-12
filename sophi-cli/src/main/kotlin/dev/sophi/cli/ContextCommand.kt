@@ -2,6 +2,9 @@ package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.options.multiple
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.required
 import dev.sophi.context.ContextEngine
 import dev.sophi.context.RegisterResult
 import dev.sophi.store.arcade.ArcadeHost
@@ -84,4 +87,13 @@ class ContextRemoveCommand : CliktCommand(name = "remove", help = "Stop indexing
 
 class ContextResetCommand : CliktCommand(name = "reset", help = "Delete the context index (it is rebuilt from your files)") {
     override fun run() = ContextReset(ContextEngine.defaultRoot()) { m -> echo(m) }.run()
+}
+
+class ContextEvalCommand : CliktCommand(name = "eval", help = "Measure retrieval quality on a labelled query set") {
+    private val projectSpecs by option("--project", help = "NAME=PATH, repeatable").multiple(required = true)
+    private val queries by option("--queries").required()
+    override fun run() {
+        val projects = projectSpecs.associate { it.substringBefore('=') to Path.of(it.substringAfter('=')) }
+        echo(dev.sophi.context.ContextEval(projects).run(dev.sophi.context.ContextEval.load(Path.of(queries))).toString())
+    }
 }

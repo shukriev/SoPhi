@@ -1,0 +1,32 @@
+# query	expected path substrings (matched against <project>/<path>); projects: SoPhi, sophi-companion
+where is compaction triggered in the middle of a turn when the context fills up	core/agent/AgentLoop.kt
+summarise older conversation when the history gets too long	core/context/ContextCompactor.kt,core/agent/AgentLoop.kt
+how do I change the port the hub listens on	sophi-companion/README.md,companion/Settings.kt,companion/CompanionRuntime.kt
+how risky tool calls are classified and confirmed	ADR-016,core/tools/RiskClassifier.kt,core/tools/ConfirmationPolicy.kt,ADR-017
+why did we decide not to use a vector database for lessons	ADR-010
+vector index not updated after an UPDATE statement workaround	store/arcade/EmbeddedArcadeStore.kt,ADR-026
+grep tool skipping build and node_modules folders	core/tools/GrepTool.kt
+subagent needs the parent session id from coroutine context	core/agent/SubagentTool.kt,core/session/SessionIdContext.kt,ADR-028,ADR-007
+14 day trial and licence key activation	companion/licensing/
+checking github for a newer app version	companion/update/
+what happens when the app crashes, crash reports	companion/crash/
+streaming whisper capture for ambient listening	ADR-040,companion/voice/
+deleting a memory relinks the causal chain	jane/ForgetEngine.kt,ADR-013
+calling an OpenAI compatible embeddings endpoint	OpenAICompatEmbeddingProvider.kt,ai/api/EmbeddingProvider.kt
+replanning when a plan step fails	ADR-018,plan/PlanRunner.kt,ADR-024
+recurring scheduled goal tasks	ADR-014,ScheduleEngine.kt
+stop the agent repeating the same tool call over and over	core/agent/LoopGuardPolicy.kt,core/agent/AgentLoop.kt
+reading events from the macOS Calendar app	calendar/provider/MacCalendarProvider.kt,ADR-015
+replaying actions the user taught on a website	companion/sites/,ADR-021
+keep the orb window visible above full screen apps	ui/MacWindowBehavior.kt,ui/OrbWindow.kt
+detect LM Studio or Ollama running locally on first launch	companion/onboarding/,ui/FirstRunSettingsScreen.kt
+shell command outside the workspace still asks for approval at full autonomy	companion/autonomy/
+tracking promises the user made in conversation	ADR-035,companion/openloops/
+gate that decides whether a new skill may be written	ADR-030
+base system prompt telling the model it is Sophi	sdk/DefaultPrompt.kt
+sessions saved as a tree of jsonl entries	ADR-005,core/session/FileSessionManager.kt
+a stopped turn is replayed as a note instead of the marker	core/prompt/PromptBuilder.kt
+antlr runtime version conflict breaks arcadedb sql	sophi-companion/build.gradle.kts,SoPhi/pom.xml
+cap a single tool result to a fraction of the context window	core/agent/AgentLoop.kt
+add or edit an MCP server in the settings UI	ui/AddEditMcpServerDialog.kt,ui/McpFormValidation.kt
+proactively rescue the user when they are stuck	ADR-033
