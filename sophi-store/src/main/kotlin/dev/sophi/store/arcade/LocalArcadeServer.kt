@@ -49,7 +49,10 @@ class LocalArcadeServer private constructor(
         }
 
         internal fun readSecret(root: Path): String? =
-            root.resolve("secret").takeIf { Files.exists(it) }?.let { Files.readString(it).trim() }
+            root.resolve("secret").takeIf { Files.exists(it) }
+                ?.also { restrictToOwner(it) }
+                ?.let { Files.readString(it).trim() }
+                ?.takeIf { it.isNotBlank() }
 
         /** A missing secret means ArcadeDB's stored user hash belongs to an old password — drop it. */
         private fun newSecret(root: Path): String {
@@ -57,8 +60,10 @@ class LocalArcadeServer private constructor(
             val bytes = ByteArray(24).also { SecureRandom().nextBytes(it) }
             val secret = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
             val file = root.resolve("secret")
+            // Created 0600 from the start: no window where the password is readable by others.
+            Files.deleteIfExists(file)
+            Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
             Files.writeString(file, secret)
-            restrictToOwner(file)
             return secret
         }
 

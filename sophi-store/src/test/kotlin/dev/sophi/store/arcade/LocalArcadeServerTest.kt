@@ -51,4 +51,26 @@ class LocalArcadeServerTest : FunSpec({
             LocalArcadeServer.start(tempdir().toPath()).use { b -> a.port shouldNotBe b.port }
         }
     }
+
+    test("a loose pre-existing secret is tightened and reused") {
+        val root = tempdir().toPath()
+        val file = root.resolve("secret")
+        Files.writeString(file, "old-secret")
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"))
+        LocalArcadeServer.start(root).use { srv ->
+            srv.password shouldBe "old-secret"
+            PosixFilePermissions.toString(Files.getPosixFilePermissions(file)) shouldBe "rw-------"
+        }
+    }
+
+    test("an empty secret file is replaced by a new secret that authenticates") {
+        val root = tempdir().toPath()
+        Files.writeString(root.resolve("secret"), "")
+        LocalArcadeServer.start(root).use { srv ->
+            srv.password.isNotBlank() shouldBe true
+            srv.database("t")
+            canLogin(srv.port, srv.password) shouldBe true
+            PosixFilePermissions.toString(Files.getPosixFilePermissions(root.resolve("secret"))) shouldBe "rw-------"
+        }
+    }
 })
