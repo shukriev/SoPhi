@@ -56,6 +56,7 @@ addendum).
 
 ## Consequences
 
+- `ArcadeHost.withStore` may run its block twice after a failover, so callers must pass idempotent blocks.
 - Every consumer of `sophi-store` carries Lucene and the ArcadeDB server jars.
 - `RemoteArcadeStore.putVector` is unsupported — vector writes happen on the host (inserts carry
   their vector; `putVector`'s index-put workaround needs the embedded API).

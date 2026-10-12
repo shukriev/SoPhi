@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `sophi-store`: one ArcadeDB store shared by every Sophi process on the machine — the first to lock `~/.sophi/db/host.lock` hosts a loopback server, others attach remotely and take over if the host exits; full-text and vector-index primitives that work the same embedded and remote (ADR-041)
+- `sophi-store`: the `ArcadeHost` library for one ArcadeDB store shared across processes — the first to lock `~/.sophi/db/host.lock` hosts a loopback server, others attach remotely and take over if the host exits (CLI/companion wiring comes in M1); full-text and vector-index primitives that work the same embedded and remote (ADR-041)
 - `sophi-hub`: local WebSocket hub letting `sophi-companion` monitor and remote-control running `sophi-cli` sessions — live status, streamed tokens, and confirmation prompts, plus sending messages into a session or answering its confirmation prompts from the companion (ADR-023)
 - Interactive `/goal [--check "<command>"] <task>` command: explicit multi-step planning
   (`PlanRunner`) in a live chat session, with a plan preview, live per-step progress, and
