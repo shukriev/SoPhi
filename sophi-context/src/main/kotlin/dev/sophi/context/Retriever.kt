@@ -10,8 +10,8 @@ data class SearchHit(
 
 /** Ranking knobs (spec §6.5); defaults chosen by the M1 eval (evals/context/RESULTS.md), not user settings. */
 data class Weights(
-    val k1: Double = 0.9,
-    val b: Double = 0.4,
+    val k1: Double = 1.2,
+    val b: Double = 0.5,
     val rolePrior: Map<String, Double> = mapOf("SOURCE" to 1.0, "INSTRUCTION" to 1.0, "DOC" to 0.9, "CONFIG" to 0.9, "TEST" to 0.6, "GENERATED" to 0.2),
     val nameBoost: Double = 1.5,
     val perDirectory: Int = 3,
