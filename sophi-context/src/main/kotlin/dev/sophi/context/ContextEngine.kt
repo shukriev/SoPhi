@@ -46,7 +46,8 @@ class ContextEngine(
             try {
                 val h = ArcadeHost.open(root, DATABASE, SCHEMA_VERSION, engineVersion = "sophi-context/$SCHEMA_VERSION")
                 h.withStore { ContextSchema.ensure(it) }
-                if (closed) h.close() else host = h
+                host = h
+                if (closed) { host = null; h.close() }
             } catch (e: IncompatibleHostException) {
                 System.err.println("context: ${e.message} — update this Sophi to use the shared index")
             } catch (e: Exception) {
@@ -61,7 +62,9 @@ class ContextEngine(
 
     fun <T> withStoreOrNull(block: (ArcadeStore) -> T): T? {
         val h = host ?: return null
-        return try { h.withStore(block) } catch (e: Exception) {
+        return try { h.withStore(block) } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt(); null
+        } catch (e: Exception) {
             val now = System.currentTimeMillis()
             if (now - lastError > 60_000) { lastError = now; System.err.println("context: store call failed (${e.message})") }
             null
@@ -75,6 +78,7 @@ class ContextEngine(
         return withStoreOrNull { s ->
             val existing = projects(s)
             existing.firstOrNull { resolved.startsWith(Path.of(it.root)) }?.let { return@withStoreOrNull RegisterResult.AlreadyCovered(it) }
+            s.deleteDocument(ContextSchema.REQUEST, "drop:${ProjectRegistry.projectId(resolved)}")
             val children = existing.filter { Path.of(it.root).startsWith(resolved) }
             children.forEach { c -> s.deleteDocument(ContextSchema.PROJECT, c.id); s.upsertDocument(ContextSchema.REQUEST, "drop:${c.id}", mapOf("projectId" to c.id, "kind" to "drop", "requestedAt" to System.currentTimeMillis())) }
             val id = ProjectRegistry.projectId(resolved)
@@ -116,10 +120,10 @@ class ContextEngine(
 
     override fun close() {
         closed = true
-        writer.shutdownNow()
-        runCatching { writer.awaitTermination(5, TimeUnit.SECONDS) }
-        host?.let { runCatching { it.close() } }
-        host = null
+        writer.shutdown()   // let an in-flight scan finish its file: Indexer polls `closed`
+        runCatching { writer.awaitTermination(10, TimeUnit.SECONDS) }
+        val h = host; host = null
+        h?.let { runCatching { it.close() } }
     }
 
     private fun requestScan(s: ArcadeStore, projectId: String) =
@@ -136,7 +140,7 @@ class ContextEngine(
         val h = host ?: return
         if (h.role != Role.HOST) { hostTermPrepared = false; return }
         h.withStore { s ->
-            val indexer = Indexer(s, git)
+            val indexer = Indexer(s, git, cancelled = { closed })
             if (!hostTermPrepared) { indexer.rebuildIfStale(SCHEMA_VERSION); hostTermPrepared = true }
             s.documents(ContextSchema.REQUEST).sortedBy { (it["requestedAt"] as Number?)?.toLong() ?: 0L }.forEach { req ->
                 if (closed) return@withStore

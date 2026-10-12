@@ -69,4 +69,21 @@ class ContextEngineTest : FunSpec({
         eventually { e.search("omega", listOf(p.id))?.isNotEmpty() == true }
         eventually { e.search("alpha", listOf(p.id))?.isEmpty() == true }
     }
+
+    test("re-registering right after remove keeps the project") {
+        val e = engine(tempdir().toPath())
+        val r = repo(); r.write("a.kt", "class Zeta")
+        val p = (e.register(r, auto = true) as RegisterResult.Registered).project
+        e.remove(p.id)
+        e.register(r, auto = true).shouldBeInstanceOf<RegisterResult.Registered>()
+        Thread.sleep(600)
+        e.projects().map { it.id } shouldBe listOf(p.id)
+        eventually { e.search("zeta", listOf(p.id))?.isNotEmpty() == true }
+    }
+
+    test("a folder containing the home folder is refused") {
+        val e = engine(tempdir().toPath())
+        val home = Path.of(System.getProperty("user.home")).toRealPath()
+        e.register(home.parent, auto = false).shouldBeInstanceOf<RegisterResult.Refused>()
+    }
 })

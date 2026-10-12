@@ -22,7 +22,11 @@ object ProjectRegistry {
 
     fun resolveRoot(path: Path, autoOnly: Boolean): Path? {
         val p = runCatching { path.toRealPath() }.getOrNull() ?: return null
-        findGitRoot(p)?.let { return it.toRealPath() }
+        findGitRoot(p)?.let { g ->
+            val gr = g.toRealPath()
+            // explicit add: a refused git root (dotfiles repo at ~/.git) falls back to the folder itself
+            if (autoOnly || refusal(gr) == null) return gr
+        }
         if (!autoOnly) return p
         val hasInstructions = INSTRUCTION_FILES.any { Files.exists(p.resolve(it)) } || Files.exists(p.resolve(".sophi/instructions.md"))
         return if (hasInstructions) p else null
@@ -32,6 +36,7 @@ object ProjectRegistry {
         val home = runCatching { Path.of(System.getProperty("user.home")).toRealPath() }.getOrNull()
         return when {
             root.parent == null -> "won't index the filesystem root"
+            home != null && home.startsWith(root) && root != home -> "won't index a folder that contains your home folder"
             root == home -> "won't index your whole home folder — pick a project folder inside it"
             else -> null
         }

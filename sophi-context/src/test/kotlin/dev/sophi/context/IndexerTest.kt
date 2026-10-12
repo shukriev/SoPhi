@@ -122,4 +122,13 @@ class IndexerTest : FunSpec({
             Thread.currentThread().isInterrupted shouldBe true
         } finally { Thread.interrupted() }
     }
+
+    test("a cancelled scan stops without deletions or a lastScanAt update") {
+        var calls = 0
+        val (s, ix, root) = setup(mk = { Indexer(it, GitProbe.none, cancelled = { calls++ >= 1 }) })
+        root.write("a.kt", "class Alpha"); root.write("b.kt", "class Beta")
+        ix.scan("p1")
+        s.documents(ContextSchema.FILE).size shouldBe 1
+        s.query("SELECT lastScanAt FROM Project WHERE id = ?", "p1").single()["lastScanAt"] shouldBe null
+    }
 })

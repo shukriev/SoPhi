@@ -18,7 +18,8 @@ class Indexer(
     private val git: GitProbe = GitProbe.system,
     private val now: () -> Long = System::currentTimeMillis,
     private val maxFiles: Int = ProjectFiles.MAX_FILES,
-    private val analyze: (String, Role, String, String) -> Analysis = Analyzers::analyze
+    private val analyze: (String, Role, String, String) -> Analysis = Analyzers::analyze,
+    private val cancelled: () -> Boolean = { false }
 ) {
     fun rebuildIfStale(schemaVersion: Int) {
         val m = ContextSchema.meta(store)
@@ -42,6 +43,7 @@ class Indexer(
             .associateBy { it["path"] as String }
         var added = 0; var changed = 0; var unchanged = 0
         for (f in listing.files) {
+            if (cancelled()) return ScanStats(added, changed, 0, unchanged, listing.partial)
             val old = known[f.relPath]
             if (old != null && (old["size"] as Number).toLong() == f.size && (old["mtime"] as Number).toLong() == f.mtime) { unchanged++; continue }
             try {
@@ -61,9 +63,11 @@ class Indexer(
         }
         val present = listing.files.mapTo(HashSet()) { it.relPath }
         val gone = if (listing.partial) emptyList() else known.keys.filter { it !in present }
-        val removedOk = gone.count { rel ->
+        var removedOk = 0
+        for (rel in gone) {
+            if (cancelled()) return ScanStats(added, changed, removedOk, unchanged, listing.partial)
             runCatching { removeFile(ContextSchema.fileId(projectId, rel)) }
-                .onFailure { System.err.println("context: skipped removal of $rel: ${it.message}") }.isSuccess
+                .onFailure { System.err.println("context: skipped removal of $rel: ${it.message}") }.onSuccess { removedOk++ }
         }
         val modules = listing.files.filter { !it.relPath.contains('/') && (it.relPath == "pom.xml" || it.relPath.startsWith("settings.gradle")) }
             .flatMap { f -> runCatching { Analyzers.analyze(f.relPath, f.role, f.lang, Files.readString(root.resolve(f.relPath))).modules }.getOrDefault(emptyList()) }
