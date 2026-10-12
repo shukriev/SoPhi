@@ -1,0 +1,52 @@
+package dev.sophi.context
+
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.shouldBe
+import java.nio.file.Files
+import java.nio.file.Path
+
+class ProjectFilesTest : FunSpec({
+    fun Path.write(rel: String, text: String = "x") = resolve(rel).also { Files.createDirectories(it.parent); Files.writeString(it, text) }
+
+    test("walk skips default dirs, .gitignore patterns, binaries and big files") {
+        val root = tempdir().toPath()
+        root.write("src/Main.kt", "fun main() {}")
+        root.write("node_modules/x/index.js"); root.write("build/out.txt"); root.write(".git/HEAD")
+        root.write(".gitignore", "*.log\nsecret/\n"); root.write("app.log"); root.write("secret/key.txt")
+        Files.write(root.resolve("img.png"), byteArrayOf(1, 0, 2))
+        Files.write(root.resolve("big.txt"), ByteArray((ProjectFiles.MAX_BYTES + 1).toInt()) { 'a'.code.toByte() })
+        ProjectFiles.list(root, GitProbe.none).files.map { it.relPath } shouldContainExactlyInAnyOrder listOf("src/Main.kt", ".gitignore")
+    }
+
+    test("git listing is used when available, still filtered for size and binaries") {
+        val root = tempdir().toPath()
+        root.write("a.kt"); Files.write(root.resolve("b.bin"), byteArrayOf(0, 1))
+        val git = GitProbe { listOf("a.kt", "b.bin", "gone.kt") }   // gone.kt: tracked but deleted
+        ProjectFiles.list(root, git).files.map { it.relPath } shouldBe listOf("a.kt")
+    }
+
+    test("classifies roles and languages") {
+        ProjectFiles.classify("sophi-core/src/main/kotlin/A.kt") shouldBe (Role.SOURCE to "kotlin")
+        ProjectFiles.classify("sophi-core/src/test/kotlin/ATest.kt") shouldBe (Role.TEST to "kotlin")
+        ProjectFiles.classify("doc/adr/ADR-001.md") shouldBe (Role.DOC to "markdown")
+        ProjectFiles.classify("AGENTS.md") shouldBe (Role.INSTRUCTION to "markdown")
+        ProjectFiles.classify("sub/.sophi/instructions.md") shouldBe (Role.INSTRUCTION to "markdown")
+        ProjectFiles.classify("pom.xml") shouldBe (Role.CONFIG to "xml")
+        ProjectFiles.classify("package-lock.json") shouldBe (Role.GENERATED to "json")
+        ProjectFiles.classify("web/app.min.js") shouldBe (Role.GENERATED to "javascript")
+    }
+
+    test("caps the listing and marks it partial") {
+        val root = tempdir().toPath()
+        repeat(5) { root.write("f$it.txt") }
+        ProjectFiles.list(root, GitProbe.none, maxFiles = 3).let { it.files.size shouldBe 3; it.partial shouldBe true }
+    }
+
+    test("findGitRoot walks up to the folder holding .git") {
+        val root = tempdir().toPath(); Files.createDirectories(root.resolve(".git")); Files.createDirectories(root.resolve("a/b"))
+        findGitRoot(root.resolve("a/b")) shouldBe root
+        findGitRoot(tempdir().toPath()) shouldBe null
+    }
+})
