@@ -139,7 +139,7 @@ internal suspend fun buildCliRuntime(
     Thread({ if (contextEngine.awaitReady(5_000)) registerCwd(contextEngine, cwd, onWarning) }, "sophi-context-register")
         .apply { isDaemon = true }.start()
 
-    val runtime = Sophi.runtime {
+    val runtime = try { Sophi.runtime {
         this.provider = provider
         model = opts.model
         maxTokens = opts.maxTokens
@@ -173,7 +173,7 @@ internal suspend fun buildCliRuntime(
                 memory(embModel, embBase, opts.apiKey, opts.embeddingDimensions, onWarning)
             }
         }
-    }
+    } } catch (e: Throwable) { contextEngine.close(); throw e }
     val currentSession = (opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
         ?: runtime.sessionManager.create()).also { session = it }
     hubClient = if (opts.noRemote) null else HubClient(opts.hubPort, currentSession.id)

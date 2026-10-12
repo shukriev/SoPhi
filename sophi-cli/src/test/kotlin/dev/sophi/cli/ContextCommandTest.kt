@@ -42,7 +42,14 @@ class ContextCommandTest : FunSpec({
         e.projects() shouldHaveSize 0
     }
 
-    test("reset deletes the database when nothing hosts it, and refuses while another process does") {
+    test("list and remove on a never-started engine print the not-ready message") {
+        val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none)); val out = mutableListOf<String>()
+        ContextList(e) { out += it }.run()
+        ContextRemove(e, "x") { out += it }.run()
+        out shouldBe listOf(NOT_READY_MSG, NOT_READY_MSG)
+    }
+
+    test("reset deletes the database when nothing hosts it") {
         val root = tempdir().toPath(); val out = mutableListOf<String>()
         val host = dev.sophi.store.arcade.ArcadeHost.open(root, ContextEngine.DATABASE, ContextEngine.SCHEMA_VERSION, "t")
         host.role shouldBe dev.sophi.store.arcade.Role.HOST
