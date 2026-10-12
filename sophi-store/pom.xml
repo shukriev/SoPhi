@@ -63,6 +63,11 @@
             <groupId>com.arcadedb</groupId>
             <artifactId>arcadedb-network</artifactId>
             <version>26.5.1</version>
+            <exclusions>
+                <exclusion><groupId>org.graalvm.polyglot</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.graalvm.js</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.graalvm.sdk</groupId><artifactId>*</artifactId></exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>io.kotest</groupId>
