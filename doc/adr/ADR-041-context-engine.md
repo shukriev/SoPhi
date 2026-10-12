@@ -32,7 +32,7 @@ addendum).
    and remote stores behave the same — one contract test suite runs against both.
    `nearestVectors` scores are cosine distance (lower is closer), identical embedded and remote.
 4. **Lucene is back on the classpath** (FULL_TEXT needs it) and the server/network jars are added:
-   the companion bundle grew from 251M to 302M.
+   the companion bundle grew from 251M to 267M.
 5. **Ranking is ours, not the database's.** ArcadeDB's `$score` counts matched terms; the engine
    computes BM25 over its own identifier-splitting, stemming tokenizer. In a bake-off with identical
    preprocessing, ArcadeDB candidates + Kotlin BM25, SQLite FTS5 and Lucene all scored hit@10 0.90 /
