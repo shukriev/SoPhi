@@ -11,11 +11,14 @@ data class ScanStats(val added: Int, val changed: Int, val removed: Int, val unc
  * Brings one project's index in line with its files (spec §5.2). Host-only and single-threaded by
  * contract (ContextEngine runs every call on its one writer thread): TermStat/ContextMeta are
  * read-modify-write, so two concurrent indexers would lose updates.
+ * Callers must run [rebuildIfStale] before the first [scan] (ContextEngine does).
  */
 class Indexer(
     private val store: ArcadeStore,
     private val git: GitProbe = GitProbe.system,
-    private val now: () -> Long = System::currentTimeMillis
+    private val now: () -> Long = System::currentTimeMillis,
+    private val maxFiles: Int = ProjectFiles.MAX_FILES,
+    private val analyze: (String, Role, String, String) -> Analysis = Analyzers::analyze
 ) {
     fun rebuildIfStale(schemaVersion: Int) {
         val m = ContextSchema.meta(store)
@@ -34,30 +37,38 @@ class Indexer(
             store.command("UPDATE ${ContextSchema.PROJECT} SET status = 'missing' WHERE id = ?", projectId)
             return ScanStats(0, 0, 0, 0, false)
         }
-        val listing = ProjectFiles.list(root, git)
+        val listing = ProjectFiles.list(root, git, maxFiles)
         val known = store.query("SELECT id, path, size, mtime, contentHash FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId)
             .associateBy { it["path"] as String }
         var added = 0; var changed = 0; var unchanged = 0
         for (f in listing.files) {
             val old = known[f.relPath]
             if (old != null && (old["size"] as Number).toLong() == f.size && (old["mtime"] as Number).toLong() == f.mtime) { unchanged++; continue }
-            val bytes = runCatching { Files.readAllBytes(root.resolve(f.relPath)) }.getOrNull() ?: continue
-            val hash = sha256(bytes)
-            if (old != null && old["contentHash"] == hash) {
-                store.command("UPDATE ${ContextSchema.FILE} SET mtime = ?, size = ? WHERE id = ?", f.mtime, f.size, old["id"])
-                unchanged++; continue
-            }
-            replaceFile(projectId, f, String(bytes, Charsets.UTF_8), hash)
-            if (old == null) added++ else changed++
+            val ok = runCatching {
+                // unreadable existing file keeps its old chunks: transient errors shouldn't delete
+                val bytes = runCatching { Files.readAllBytes(root.resolve(f.relPath)) }.getOrNull() ?: return@runCatching null
+                val hash = sha256(bytes)
+                if (old != null && old["contentHash"] == hash) {
+                    store.command("UPDATE ${ContextSchema.FILE} SET mtime = ?, size = ? WHERE id = ?", f.mtime, f.size, old["id"])
+                    unchanged++
+                } else {
+                    replaceFile(projectId, f, String(bytes, Charsets.UTF_8), hash)
+                    if (old == null) added++ else changed++
+                }
+            }.onFailure { System.err.println("context: skipped ${f.relPath}: ${it.message}") }
         }
         val present = listing.files.mapTo(HashSet()) { it.relPath }
         val gone = if (listing.partial) emptyList() else known.keys.filter { it !in present }
-        gone.forEach { removeFile(ContextSchema.fileId(projectId, it)) }
+        val removedOk = gone.count { rel ->
+            runCatching { removeFile(ContextSchema.fileId(projectId, rel)) }
+                .onFailure { System.err.println("context: skipped removal of $rel: ${it.message}") }.isSuccess
+        }
         val modules = listing.files.filter { !it.relPath.contains('/') && (it.relPath == "pom.xml" || it.relPath.startsWith("settings.gradle")) }
             .flatMap { f -> runCatching { Analyzers.analyze(f.relPath, f.role, f.lang, Files.readString(root.resolve(f.relPath))).modules }.getOrDefault(emptyList()) }
-        store.command("UPDATE ${ContextSchema.PROJECT} SET lastScanAt = ?, fileCount = ?, partial = ?, modules = ?, status = 'active' WHERE id = ?",
+        store.command("UPDATE ${ContextSchema.PROJECT} SET lastScanAt = ?, fileCount = ?, partial = ?, modules = ? WHERE id = ?",
             now(), listing.files.size, listing.partial, modules, projectId)
-        return ScanStats(added, changed, gone.size, unchanged, listing.partial)
+        store.command("UPDATE ${ContextSchema.PROJECT} SET status = 'active' WHERE id = ? AND status = 'missing'", projectId)
+        return ScanStats(added, changed, removedOk, unchanged, listing.partial)
     }
 
     fun dropProject(projectId: String) {
@@ -67,7 +78,7 @@ class Indexer(
 
     private fun replaceFile(projectId: String, f: FileEntry, text: String, hash: String) {
         val fileId = ContextSchema.fileId(projectId, f.relPath)
-        val analysis = Analyzers.analyze(f.relPath, f.role, f.lang, text)
+        val analysis = analyze(f.relPath, f.role, f.lang, text)
         val drafts = analysis.chunks.map { c -> c to Tokenizer.indexText(f.relPath, listOfNotNull(c.label, c.text).joinToString("\n")) }
         store.transaction {
             val (oldTerms, oldCount, oldLen) = deleteChunks(fileId)
