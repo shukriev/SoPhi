@@ -40,7 +40,9 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val trimmed = command.trim()
         val looksReadOnly = READ_ONLY_PREFIXES.any { trimmed.startsWith(it) } &&
             command.none { it in UNSAFE_SHELL_CHARS }
-        return if (looksReadOnly) RiskLevel.CAUTION else RiskLevel.DESTRUCTIVE
+        // Reading outside the workspace is not "read-only" in the sense that matters: `cat ~/.ssh/id_rsa`.
+        val staysInside = bashReachesOutside(command, root) == null
+        return if (looksReadOnly && staysInside) RiskLevel.CAUTION else RiskLevel.DESTRUCTIVE
     }
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
         // Unparseable: execute() decodes the same type and throws before doing anything, so don't prompt —
