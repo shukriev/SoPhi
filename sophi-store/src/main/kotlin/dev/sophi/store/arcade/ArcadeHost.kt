@@ -33,6 +33,7 @@ class ArcadeHost private constructor(
     private var lock: FileLock? = null
     private var server: LocalArcadeServer? = null
     @Volatile private var current: ArcadeStore? = null
+    private var connectedPort: Int = -1
     @Volatile var role: Role = Role.CLIENT
         private set
 
@@ -52,64 +53,86 @@ class ArcadeHost private constructor(
 
     /**
      * Runs [block] against the current store. If it fails while this process is a client and the
-     * host is gone, re-elects once and runs [block] again — so [block] may run twice and must be
-     * safe to repeat (every write here is an upsert into a rebuildable cache).
+     * host it was talking to is gone, re-elects once and runs [block] again — so [block] may run
+     * twice and must be safe to repeat (every write here is an upsert into a rebuildable cache).
      */
     fun <T> withStore(block: (ArcadeStore) -> T): T {
         val store = current ?: synchronized(this) { current ?: elect() }
-        return try {
-            block(store)
+        try {
+            return block(store)
         } catch (e: Exception) {
-            if (role != Role.CLIENT || hostAlive()) throw e
-            block(synchronized(this) { elect() })
+            if (role != Role.CLIENT) throw e
+            val next = synchronized(this) {
+                if (current !== store) current ?: elect() // someone already re-elected
+                else {
+                    val info = liveHostJson()
+                    if (info != null && runCatching { info.getInt("port") }.getOrNull() == connectedPort) throw e
+                    elect()
+                }
+            }
+            try {
+                return block(next)
+            } catch (e2: Exception) {
+                e2.addSuppressed(e)
+                throw e2
+            }
         }
     }
 
+    /** The lock is the source of truth: take it if free, else attach to the live host.json, until the deadline. */
     @Synchronized
     private fun elect(): ArcadeStore {
         current?.let { runCatching { it.close() } }
         current = null
-        val acquired = try { lockChannel.tryLock() } catch (e: OverlappingFileLockException) { null }
-        val store = if (acquired != null) becomeHost(acquired) else becomeClient()
-        current = store
-        return store
-    }
-
-    private fun becomeHost(acquired: FileLock): ArcadeStore {
-        lock = acquired
-        val srv = LocalArcadeServer.start(root)
-        server = srv
-        val store = EmbeddedArcadeStore(srv.database(database))
-        writeHostJson(srv.port)
-        role = Role.HOST
-        return store
-    }
-
-    private fun becomeClient(): ArcadeStore {
-        val info = awaitHostJson()
-        val theirs = info.getInt("schemaVersion")
-        if (theirs != schemaVersion) {
-            throw IncompatibleHostException(
-                "store at $root is served by ${info.getString("engineVersion")} (schema $theirs); this build uses schema $schemaVersion"
-            )
-        }
-        val password = LocalArcadeServer.readSecret(root)
-            ?: throw IllegalStateException("host is running but $root/secret is missing")
-        role = Role.CLIENT
-        return RemoteArcadeStore.connect(info.getInt("port"), database, password)
-    }
-
-    /** Waits for a host.json written by a live process — a stale file from a crashed host is ignored. */
-    private fun awaitHostJson(): JSONObject {
         val deadline = System.nanoTime() + waitForHostMillis * 1_000_000
         while (true) {
-            readHostJson()?.takeIf { pidAlive(it.getLong("pid")) }?.let { return it }
-            if (System.nanoTime() > deadline) throw IllegalStateException("no live host for $root after ${waitForHostMillis} ms")
+            val acquired = try { lockChannel.tryLock() } catch (e: OverlappingFileLockException) { null }
+            if (acquired != null) return becomeHost(acquired).also { current = it }
+            liveHostJson()?.let { return becomeClient(it).also { s -> current = s } }
+            if (System.nanoTime() > deadline) throw IllegalStateException("no live host for $root after $waitForHostMillis ms")
             Thread.sleep(POLL_MILLIS)
         }
     }
 
-    private fun hostAlive(): Boolean = readHostJson()?.let { pidAlive(it.getLong("pid")) } ?: false
+    private fun becomeHost(acquired: FileLock): ArcadeStore {
+        lock = acquired
+        try {
+            server = LocalArcadeServer.start(root)
+            val srv = server!!
+            val store = EmbeddedArcadeStore(srv.database(database))
+            writeHostJson(srv.port)
+            role = Role.HOST
+            connectedPort = srv.port
+            return store
+        } catch (e: Throwable) {
+            runCatching { server?.close() }
+            runCatching { acquired.release() }
+            server = null; lock = null; current = null; role = Role.CLIENT
+            throw e
+        }
+    }
+
+    private fun becomeClient(info: JSONObject): ArcadeStore {
+        val theirs = info.getInt("schemaVersion")
+        if (theirs != schemaVersion) {
+            throw IncompatibleHostException(
+                "store at $root is served by ${runCatching { info.getString("engineVersion") }.getOrDefault("?")} (schema $theirs); this build uses schema $schemaVersion"
+            )
+        }
+        val password = LocalArcadeServer.readSecret(root)
+            ?: throw IllegalStateException("host is running but $root/secret is missing")
+        val port = info.getInt("port")
+        val store = RemoteArcadeStore.connect(port, database, password)
+        role = Role.CLIENT
+        connectedPort = port
+        return store
+    }
+
+    /** host.json if readable, complete and written by a live process; else null. */
+    private fun liveHostJson(): JSONObject? =
+        readHostJson()?.takeIf {
+            runCatching { it.getInt("port"); it.getInt("schemaVersion"); pidAlive(it.getLong("pid")) }.getOrDefault(false)
+        }
 
     private fun pidAlive(pid: Long): Boolean = ProcessHandle.of(pid).map { it.isAlive }.orElse(false)
 
@@ -124,24 +147,31 @@ class ArcadeHost private constructor(
             .put("engineVersion", engineVersion)
             .put("schemaVersion", schemaVersion)
         val tmp = Files.createTempFile(root, "host", ".json")
-        restrictToOwner(tmp)
-        Files.writeString(tmp, json.toString())
-        Files.move(tmp, root.resolve("host.json"), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        try {
+            restrictToOwner(tmp)
+            Files.writeString(tmp, json.toString())
+            Files.move(tmp, root.resolve("host.json"), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (e: Throwable) {
+            runCatching { Files.deleteIfExists(tmp) }
+            throw e
+        }
     }
 
     @Synchronized
     override fun close() {
-        if (role == Role.HOST) {
-            // The server owns the embedded database instance; stopping it closes the database.
-            Files.deleteIfExists(root.resolve("host.json"))
-            server?.close()
-        } else {
-            current?.let { runCatching { it.close() } }
+        try {
+            if (role == Role.HOST) {
+                // The server owns the embedded database instance; stopping it closes the database.
+                try { Files.deleteIfExists(root.resolve("host.json")) } finally { server?.close() }
+            } else {
+                current?.let { runCatching { it.close() } }
+            }
+        } finally {
+            current = null
+            server = null
+            lock?.let { runCatching { it.release() } }
+            lock = null
+            lockChannel.close()
         }
-        current = null
-        server = null
-        lock?.let { runCatching { it.release() } }
-        lock = null
-        lockChannel.close()
     }
 }
