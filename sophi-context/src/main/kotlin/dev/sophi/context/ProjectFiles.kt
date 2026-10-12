@@ -34,9 +34,11 @@ fun interface GitProbe {
                 try {
                     val p = ProcessBuilder("git", "-C", root.toString(), "ls-files", "-co", "--exclude-standard", "-z")
                         .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(tmp.toFile()).start()
-                    if (!p.waitFor(30, TimeUnit.SECONDS)) { p.destroyForcibly(); null }
-                    else if (p.exitValue() != 0) null
-                    else Files.readString(tmp).split('\u0000').filter { it.isNotEmpty() }.distinct()
+                    try {
+                        if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) null
+                        else String(Files.readAllBytes(tmp), Charsets.UTF_8).split('\u0000').filter { it.isNotEmpty() }.distinct()
+                    } catch (e: InterruptedException) { Thread.currentThread().interrupt(); null }
+                    finally { if (p.isAlive) p.destroyForcibly() }
                 } finally { Files.deleteIfExists(tmp) }
             }.getOrNull()
         }
@@ -139,7 +141,8 @@ object ProjectFiles {
             }
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
                 val rel = root.relativize(file)
-                if (attrs.isSymbolicLink || isSecret(file.fileName.toString())) return FileVisitResult.CONTINUE
+                if (attrs.isSymbolicLink || !attrs.isRegularFile || attrs.size() > MAX_BYTES ||
+                    isSecret(file.fileName.toString()) || isBinary(file)) return FileVisitResult.CONTINUE
                 if (globs.none { it.matches(rel) }) out.add(rel.toString().replace('\\', '/'))
                 // early stop: list() only needs maxFiles + 1 acceptable files to know it is partial
                 return if (out.size > limit) FileVisitResult.TERMINATE else FileVisitResult.CONTINUE

@@ -69,8 +69,12 @@ class ProjectFilesTest : FunSpec({
         ProjectFiles.classify("sub/.sophi/instructions.md").first shouldBe Role.INSTRUCTION
     }
 
-    test("walk cap with 5 files and maxFiles 3 is partial with 3") {
-        val root = tempdir().toPath(); repeat(5) { root.write("g$it.txt") }
+    test("binary and oversized files do not count toward the walk cap") {
+        val root = tempdir().toPath()
+        repeat(5) { Files.write(root.resolve("b$it.bin"), byteArrayOf(0, 1)) }
+        repeat(3) { root.write("t$it.txt") }
+        ProjectFiles.list(root, GitProbe.none, maxFiles = 3).let { it.files.size shouldBe 3; it.partial shouldBe false }
+        root.write("t3.txt")
         ProjectFiles.list(root, GitProbe.none, maxFiles = 3).let { it.files.size shouldBe 3; it.partial shouldBe true }
     }
 })
