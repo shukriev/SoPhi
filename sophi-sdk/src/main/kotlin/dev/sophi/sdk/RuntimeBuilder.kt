@@ -1,5 +1,8 @@
 package dev.sophi.sdk
 
+import dev.sophi.context.ContextEngine
+import dev.sophi.context.ContextPlugin
+import dev.sophi.context.tools.contextTools
 import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.probeEmbeddingProvider
@@ -64,6 +67,7 @@ class RuntimeBuilder {
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
+    private var contextConfig: Triple<ContextEngine, () -> List<String>, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
     private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
@@ -72,6 +76,14 @@ class RuntimeBuilder {
     private var configVersionRef: Pair<String, VersionStore>? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
+    /**
+     * Gives the agent the context index (ADR-041): search_context, read_context, project_map, and
+     * a rescan after it edits files. [scope] returns the project ids the current session searches.
+     * With [owned] the runtime closes [engine] on [SophiRuntime.close].
+     */
+    fun context(engine: ContextEngine, owned: Boolean = true, scope: () -> List<String>): RuntimeBuilder =
+        apply { contextConfig = Triple(engine, scope, owned) }
+
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
     fun grants(names: Set<String>): RuntimeBuilder = apply { grants = names }
@@ -181,6 +193,10 @@ class RuntimeBuilder {
             store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
         }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
+        contextConfig?.let { (engine, scope, _) ->
+            contextTools(engine, scope).forEach { registry.register(it) }
+            plugins.add(ContextPlugin(engine, scope))
+        }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
             registry.register(SkillTool(loadSkills, topK = harnessConfig?.topKSkills))
@@ -312,7 +328,7 @@ class RuntimeBuilder {
         val schedulesDir = scheduleDir ?: Path.of(System.getProperty("user.home"), ".sophi", "schedule")
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
-            skillsDir, memoryPlugin, agentDefinitions, schedulesDir
+            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first
         )
     }
 }

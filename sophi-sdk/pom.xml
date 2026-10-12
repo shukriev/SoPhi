@@ -44,6 +44,10 @@
         </dependency>
         <dependency>
             <groupId>dev.sophi</groupId>
+            <artifactId>sophi-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.sophi</groupId>
             <artifactId>sophi-versioning</artifactId>
         </dependency>
         <dependency>

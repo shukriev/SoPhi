@@ -17,6 +17,7 @@ fun main(args: Array<String>) {
             MemoryCommand(),
             LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand()),
             FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand()),
+            ContextCommand().subcommands(ContextAddCommand(), ContextListCommand(), ContextRemoveCommand(), ContextResetCommand()),
             ExportCommand(),
             ScheduleCommand().subcommands(
                 ScheduleRunDueCommand(), ScheduleDaemonCommand(),

@@ -1,5 +1,6 @@
 package dev.sophi.sdk
 
+import dev.sophi.context.ContextEngine
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinition
@@ -54,7 +55,8 @@ class SophiRuntime internal constructor(
     private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
     val memoryPlugin: MemoryPlugin? = null,
     internal val agentDefinitions: List<AgentDefinition> = emptyList(),
-    private val schedulesDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule")
+    private val schedulesDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
+    private val contextEngine: ContextEngine? = null
 ) {
     private val skillInstaller = SkillInstaller()
     private val proposalStore get() = ProposalStore(schedulesDir.resolve("proposals.jsonl"))
@@ -62,6 +64,7 @@ class SophiRuntime internal constructor(
     fun close() {
         mcpClientManager?.close()
         memoryPlugin?.close()
+        contextEngine?.close()
     }
 
     fun toolNames(): List<String> = toolRegistry.names()

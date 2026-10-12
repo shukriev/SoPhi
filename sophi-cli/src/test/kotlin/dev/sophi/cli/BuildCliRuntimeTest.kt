@@ -39,6 +39,8 @@ internal fun optionsFor(
     // Points learning at the test's own directory; LearningConfig otherwise defaults to the
     // developer's real ~/.sophi/learning.
     learningHome = dir.resolve("learning"),
+    // Keep the context index out of the developer's real ~/.sophi/db.
+    contextRoot = dir.resolve("db"),
     braveApiKey = null,
     autoMode = autoMode,
     godMode = godMode,
