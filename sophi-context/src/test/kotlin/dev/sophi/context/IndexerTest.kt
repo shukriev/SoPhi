@@ -67,6 +67,7 @@ class IndexerTest : FunSpec({
         ix.scan("p1")
         ix.rebuildIfStale(schemaVersion = 99)
         s.documents(ContextSchema.FILE) shouldBe emptyList()
+        s.query("SELECT lastScanAt FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()["lastScanAt"] shouldBe null
         ix.scan("p1").added shouldBe 1
     }
 

@@ -36,6 +36,11 @@ private fun inScope(engine: ContextEngine, scope: () -> List<String>): List<Proj
     return engine.projectsOrNull()?.filter { it.id in ids }
 }
 
+/** First use must read as "still indexing", not "nothing here". */
+private fun indexingNote(projects: List<ProjectInfo>): String? =
+    projects.filter { it.lastScanAt == null }.takeIf { it.isNotEmpty() }
+        ?.let { "indexing ${it.joinToString(", ") { p -> p.name }} — results incomplete; use grep/glob/read meanwhile" }
+
 private class SearchContextTool(private val engine: ContextEngine, private val scope: () -> List<String>) : Tool {
     override val name = "search_context"
     override val description = "Find the files and code most relevant to a question in this project's index (ranked; faster and better than grep for 'where is X handled' questions). Returns path:lines, the symbol or heading, and a snippet."
@@ -49,9 +54,10 @@ private class SearchContextTool(private val engine: ContextEngine, private val s
         val args = runCatching { json.decodeFromString<SearchArgs>(argumentsJson) }.getOrNull() ?: return "invalid arguments"
         if (projects.isEmpty()) return "No indexed project here — run `sophi context add <dir>`."
         val hits = engine.search(args.query, projects.map { it.id }, args.limit.coerceIn(1, 20)) ?: return ContextEngine.NOT_READY
-        if (hits.isEmpty()) return "No matches — try other words, or grep"
+        val note = indexingNote(projects)
+        if (hits.isEmpty()) return note ?: "No matches — try other words, or grep"
         val names = projects.associate { it.id to it.name }
-        return hits.joinToString("\n") { h ->
+        return (note?.plus("\n") ?: "") + hits.joinToString("\n") { h ->
             val path = if (projects.size > 1) "${names[h.projectId]}:${h.path}" else h.path
             "$path:${h.startLine}-${h.endLine} · ${h.label ?: "-"} · ${h.role.lowercase()}\n" + h.snippet.lines().joinToString("\n") { "    $it" }
         }
@@ -119,6 +125,7 @@ private class ProjectMapTool(private val engine: ContextEngine, private val scop
         val projects = inScope(engine, scope) ?: return ContextEngine.NOT_READY
         val project = projects.firstOrNull() ?: return "No indexed project here — run `sophi context add <dir>`."
         val args = runCatching { json.decodeFromString<MapArgs>(argumentsJson) }.getOrNull() ?: MapArgs()
-        return ProjectMap.render(project, engine.fileSummariesOrNull(project.id) ?: return ContextEngine.NOT_READY, args.path)
+        val map = ProjectMap.render(project, engine.fileSummariesOrNull(project.id) ?: return ContextEngine.NOT_READY, args.path)
+        return (indexingNote(projects)?.plus("\n") ?: "") + map
     }
 }

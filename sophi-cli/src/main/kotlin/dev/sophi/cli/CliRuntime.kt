@@ -46,6 +46,8 @@ data class CliOptions(
     val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
     /** Overridable so tests don't open the real ~/.sophi/db. */
     val contextRoot: Path = ContextEngine.defaultRoot(),
+    /** Tests turn this off: no index host (ArcadeDB keeps a JVM shutdown hook per server) and no indexing of the repo they run in. */
+    val startContext: Boolean = true,
     val braveApiKey: String? = null,
     val autoMode: Boolean = false,
     val godMode: Boolean = false,
@@ -74,8 +76,12 @@ class CliRuntime(
     val planLog: PlanLog,
     val calendarProvider: CalendarProvider,
     val session: AgentSession,
-    val hubClient: HubClient?
-)
+    val hubClient: HubClient?,
+    private val contextEngine: ContextEngine
+) : AutoCloseable {
+    /** Stops the context index host (tests; the CLI process exits instead). */
+    override fun close() = contextEngine.close()
+}
 
 /**
  * Builds the whole agent runtime for an interactive `sophi` session.
@@ -133,10 +139,10 @@ internal suspend fun buildCliRuntime(
 
     val mcpConfigPath = Path.of(opts.mcpConfigPath)
 
-    val contextEngine = ContextEngine(opts.contextRoot).start()
+    val contextEngine = ContextEngine(opts.contextRoot).let { if (opts.startContext) it.start() else it }
     val cwd = Path.of("").toAbsolutePath()
     // Background: registration needs the store, which opens asynchronously — never delay startup.
-    Thread({ if (contextEngine.awaitReady(5_000)) registerCwd(contextEngine, cwd, onWarning) }, "sophi-context-register")
+    Thread({ if (opts.startContext && contextEngine.awaitReady(5_000)) registerCwd(contextEngine, cwd, onWarning) }, "sophi-context-register")
         .apply { isDaemon = true }.start()
 
     val runtime = try { Sophi.runtime {
@@ -194,6 +200,7 @@ internal suspend fun buildCliRuntime(
         planLog = planLog,
         calendarProvider = calendarProvider,
         session = currentSession,
-        hubClient = hubClient
+        hubClient = hubClient,
+        contextEngine = contextEngine
     )
 }

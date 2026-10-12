@@ -59,9 +59,10 @@ class ProjectFilesTest : FunSpec({
 
     test("secret-looking files are never listed") {
         val root = tempdir().toPath()
-        listOf(".env", ".env.local", "server.pem", "id_rsa", "a.kt").forEach { root.write(it) }
+        val secrets = listOf(".env", ".env.local", "server.pem", "id_rsa", ".npmrc", ".netrc", ".pgpass", ".envrc", "a.jks", "b.keystore", "prod.tfvars", "aws-Credentials.json", "my_SECRET.txt")
+        secrets.forEach { root.write(it) }; root.write("a.kt")
         ProjectFiles.list(root, GitProbe.none).files.map { it.relPath } shouldBe listOf("a.kt")
-        ProjectFiles.list(root, GitProbe { listOf(".env", ".env.local", "server.pem", "id_rsa", "a.kt") }).files.map { it.relPath } shouldBe listOf("a.kt")
+        ProjectFiles.list(root, GitProbe { secrets + "a.kt" }).files.map { it.relPath } shouldBe listOf("a.kt")
     }
 
     test("instruction match needs a slash boundary") {

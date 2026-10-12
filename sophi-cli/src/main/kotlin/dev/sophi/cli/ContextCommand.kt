@@ -10,7 +10,10 @@ import dev.sophi.context.RegisterResult
 import dev.sophi.store.arcade.ArcadeHost
 import dev.sophi.store.arcade.IncompatibleHostException
 import dev.sophi.store.arcade.Role
+import java.nio.channels.FileChannel
+import java.nio.channels.OverlappingFileLockException
 import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import java.nio.file.Path
 
 internal const val NOT_READY_MSG = "context index not ready (another Sophi may be starting, or it's from a different version) — try again"
@@ -19,13 +22,17 @@ internal const val NOT_READY_MSG = "context index not ready (another Sophi may b
 fun registerCwd(engine: ContextEngine, cwd: Path, echo: (String) -> Unit) {
     when (val r = engine.register(cwd, auto = true)) {
         is RegisterResult.Refused -> echo("context: ${r.reason}")
-        else -> Unit
+        is RegisterResult.AlreadyCovered -> {   // resume an interrupted first scan at session start
+            val last = r.project.lastScanAt
+            if (last == null || System.currentTimeMillis() - last > 30_000) engine.requestScan(r.project.id)
+        }
+        else -> Unit   // Registered already requested its scan
     }
 }
 
 class ContextAdd(private val engine: ContextEngine, private val dir: Path, private val echo: (String) -> Unit) {
     fun run() = when (val r = engine.register(dir, auto = false)) {
-        is RegisterResult.Registered -> echo("Indexing ${r.project.root} (${r.project.id})" + if (r.replaced.isNotEmpty()) " — replaces ${r.replaced.size} nested project(s)" else "")
+        is RegisterResult.Registered -> echo("Added ${r.project.root} — it's indexed in the background while a Sophi session runs, and searched from sessions started inside it" + if (r.replaced.isNotEmpty()) " — replaces ${r.replaced.size} nested project(s)" else "")
         is RegisterResult.AlreadyCovered -> echo("Already covered by ${r.project.root}")
         is RegisterResult.Refused -> echo("Not indexed: ${r.reason}")
     }
@@ -58,10 +65,22 @@ class ContextReset(private val root: Path, private val echo: (String) -> Unit) {
             echo("the index is used by a different Sophi version — quit it first"); return
         } catch (e: Exception) { null }
         val isHost = try { probe?.role == Role.HOST } finally { probe?.close() }
-        if (!isHost) { echo("Another Sophi process is using the index — quit it first."); return }
+        // A failed open is either a corrupted database (nobody hosting) or a live host we couldn't attach to:
+        // only the lock tells them apart.
+        if (!isHost && (probe != null || lockHeld())) { echo("Another Sophi process is using the index — quit it first."); return }
         val db = root.resolve("databases").resolve(ContextEngine.DATABASE)
-        if (Files.exists(db)) db.toFile().deleteRecursively()
-        echo("Context index deleted; projects will be re-added and re-indexed on next use.")
+        // outside databases/: the server would try to load a moved-aside corrupt copy
+        if (Files.exists(db)) Files.move(db, root.resolve("${ContextEngine.DATABASE}.corrupt-${System.currentTimeMillis()}"))
+        echo("Context index moved aside (${ContextEngine.DATABASE}.corrupt-* under the db folder); it will be rebuilt and projects re-indexed on next use.")
+    }
+
+    private fun lockHeld(): Boolean {
+        Files.createDirectories(root)
+        return try {
+            FileChannel.open(root.resolve("host.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { ch ->
+                val l = ch.tryLock(); l?.release(); l == null
+            }
+        } catch (e: OverlappingFileLockException) { true }
     }
 }
 

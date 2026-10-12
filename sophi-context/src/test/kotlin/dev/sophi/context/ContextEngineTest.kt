@@ -24,11 +24,11 @@ class ContextEngineTest : FunSpec({
 
     test("a subfolder of a repo registers the repo root; nested registration is covered; a parent replaces the child") {
         val e = engine(tempdir().toPath())
-        val r = repo(); Files.createDirectories(r.resolve("a/b"))
+        val outer = tempdir().toPath()   // test-owned parent, not the system temp dir
+        val r = outer.resolve("repo").also { Files.createDirectories(it.resolve(".git")); Files.createDirectories(it.resolve("a/b")) }
         val reg = e.register(r.resolve("a/b"), auto = true) as RegisterResult.Registered
         reg.project.root shouldBe r.toRealPath().toString()
         e.register(r.resolve("a"), auto = false).shouldBeInstanceOf<RegisterResult.AlreadyCovered>()
-        val outer = r.parent
         val parent = e.register(outer, auto = false) as RegisterResult.Registered
         parent.replaced shouldBe listOf(reg.project.id)
         e.projects().map { it.id } shouldBe listOf(parent.project.id)

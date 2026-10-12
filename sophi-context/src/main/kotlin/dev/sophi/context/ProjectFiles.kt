@@ -80,7 +80,9 @@ object ProjectFiles {
     )
 
     private fun isSecret(name: String) = name == ".env" || name.startsWith(".env.") ||
-        name.substringAfterLast('.', "").lowercase() in setOf("pem", "key", "p12", "pfx") ||
+        name in setOf(".npmrc", ".netrc", ".pgpass", ".envrc") ||
+        name.lowercase().let { "credentials" in it || "secret" in it } ||
+        name.substringAfterLast('.', "").lowercase() in setOf("pem", "key", "p12", "pfx", "jks", "keystore", "tfvars") ||
         name.startsWith("id_rsa") || name.startsWith("id_ed25519") || name.startsWith("id_ecdsa")
 
     fun classify(relPath: String): Pair<Role, String> {

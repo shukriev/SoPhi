@@ -37,6 +37,17 @@ class ContextToolsTest : FunSpec({
         out shouldContain "ContextCompactor"
     }
 
+    test("a registered but unscanned project reads as indexing, not empty") {
+        val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none, drainEveryMillis = 600_000).start())
+        e.awaitReady(10_000) shouldBe true
+        val r = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")) }
+        r.write("README.md", "# Demo\n")
+        val id = (e.register(r, auto = true) as RegisterResult.Registered).project.id
+        val name = r.toRealPath().fileName.toString()
+        runBlocking { tool(e, id, "search_context").execute("""{"query":"demo"}""") } shouldBe "indexing $name — results incomplete; use grep/glob/read meanwhile"
+        runBlocking { tool(e, id, "project_map").execute("{}") } shouldStartWith "indexing $name — results incomplete"
+    }
+
     test("read_context returns numbered lines of an indexed file") {
         val (e, id, _) = indexedRepo()
         runBlocking { tool(e, id, "read_context").execute("""{"path":"src/main/Compactor.kt","startLine":2,"endLine":2}""") } shouldBe "2: class ContextCompactor {"

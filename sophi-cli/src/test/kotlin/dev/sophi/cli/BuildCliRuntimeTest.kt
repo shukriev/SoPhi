@@ -41,6 +41,7 @@ internal fun optionsFor(
     learningHome = dir.resolve("learning"),
     // Keep the context index out of the developer's real ~/.sophi/db.
     contextRoot = dir.resolve("db"),
+    startContext = false,
     braveApiKey = null,
     autoMode = autoMode,
     godMode = godMode,
@@ -63,12 +64,12 @@ class BuildCliRuntimeTest : FunSpec({
         val dir = tempdir().toPath()
         val mcpPath = dir.resolve("mcp.json")
         if (writeMcpConfig) mcpPath.writeText("""{"servers":[]}""")
-        return buildCliRuntime(
+        return autoClose(buildCliRuntime(
             opts = optionsFor(dir, autoMode = autoMode, godMode = godMode),
             provider = mockk<LLMProvider>(relaxed = true),
             terminal = Terminal(),
             input = ScriptedInputSource(emptyList())
-        )
+        ))
     }
 
     test("registers the builtin, calendar, schedule and goal-decomposition tools") {
@@ -105,25 +106,25 @@ class BuildCliRuntimeTest : FunSpec({
 
     test("the --system prompt flows through to the agent config") {
         val dir = tempdir().toPath()
-        val cli = buildCliRuntime(
+        val cli = autoClose(buildCliRuntime(
             opts = optionsFor(dir).copy(systemPrompt = "BASE PROMPT"),
             provider = mockk<LLMProvider>(relaxed = true),
             terminal = Terminal(),
             input = ScriptedInputSource(emptyList())
-        )
+        ))
         cli.runtime.config.systemPrompt.shouldNotBeNull() shouldContain "BASE PROMPT"
     }
 
     test("memory enabled without an embedding model warns and leaves memory off") {
         val dir = tempdir().toPath()
         val warnings = mutableListOf<String>()
-        val cli = buildCliRuntime(
+        val cli = autoClose(buildCliRuntime(
             opts = optionsFor(dir).copy(memoryEnabled = true, embeddingModel = null),
             provider = mockk<LLMProvider>(relaxed = true),
             terminal = Terminal(),
             input = ScriptedInputSource(emptyList()),
             onWarning = { warnings.add(it) }
-        )
+        ))
         cli.runtime.memoryPlugin shouldBe null
         warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
     }
@@ -131,7 +132,7 @@ class BuildCliRuntimeTest : FunSpec({
     test("memory enabled without an embedding base URL or --base-url warns and leaves memory off") {
         val dir = tempdir().toPath()
         val warnings = mutableListOf<String>()
-        val cli = buildCliRuntime(
+        val cli = autoClose(buildCliRuntime(
             opts = optionsFor(dir).copy(
                 memoryEnabled = true, embeddingModel = "nomic-embed-text",
                 embeddingBaseUrl = null, baseUrl = null
@@ -140,7 +141,7 @@ class BuildCliRuntimeTest : FunSpec({
             terminal = Terminal(),
             input = ScriptedInputSource(emptyList()),
             onWarning = { warnings.add(it) }
-        )
+        ))
         cli.runtime.memoryPlugin shouldBe null
         warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
     }

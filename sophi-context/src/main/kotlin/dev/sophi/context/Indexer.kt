@@ -27,6 +27,8 @@ class Indexer(
         store.transaction {
             listOf(ContextSchema.FILE, ContextSchema.CHUNK, ContextSchema.TERM).forEach { store.deleteAll(it) }
             ContextSchema.putMeta(store, Meta(schemaVersion, Tokenizer.VERSION, 0, 0))
+            // so searches re-request scans right away
+            store.command("UPDATE ${ContextSchema.PROJECT} SET lastScanAt = null")
         }
     }
 

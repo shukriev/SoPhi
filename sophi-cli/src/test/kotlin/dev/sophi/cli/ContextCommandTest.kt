@@ -56,6 +56,38 @@ class ContextCommandTest : FunSpec({
         // Same-JVM second open can't take the OS lock the way another process would; only assert the free case.
         host.close()
         ContextReset(root) { out += it }.run()
-        out.single() shouldContain "deleted"
+        out.single() shouldContain "moved aside"
+    }
+
+    test("reset moves a corrupted index aside and a fresh engine rebuilds on that root") {
+        val root = tempdir().toPath(); val out = mutableListOf<String>()
+        ContextEngine(root, GitProbe.none, drainEveryMillis = 100).start().use { it.awaitReady(10_000) shouldBe true }
+        val db = root.resolve("databases").resolve(ContextEngine.DATABASE)
+        Files.walk(db).use { s -> s.filter { Files.isRegularFile(it) }.forEach { Files.write(it, ByteArray(4096) { i -> (i * 31 + 7).toByte() }) } }
+        ContextReset(root) { out += it }.run()
+        out.single() shouldContain "moved aside"
+        Files.list(root).use { s -> s.anyMatch { it.fileName.toString().startsWith("context.corrupt-") } } shouldBe true
+        val fresh = autoClose(ContextEngine(root, GitProbe.none, drainEveryMillis = 100).start())
+        fresh.awaitReady(10_000) shouldBe true
+        val repo = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")); Files.writeString(it.resolve("a.kt"), "class Zebra") }
+        val id = (fresh.register(repo, auto = true) as dev.sophi.context.RegisterResult.Registered).project.id
+        val end = System.currentTimeMillis() + 10_000
+        while (fresh.search("zebra", listOf(id))?.isNotEmpty() != true) { check(System.currentTimeMillis() < end) { "timed out" }; Thread.sleep(50) }
+    }
+
+    test("add says it is indexed while a session runs, not that it is indexing now") {
+        val e = engine(); val out = mutableListOf<String>()
+        ContextAdd(e, tempdir().toPath()) { out += it }.run()
+        out.single() shouldContain "indexed in the background while a Sophi session runs"
+    }
+
+    test("registerCwd re-requests a scan for a covered project that was never scanned") {
+        val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none, drainEveryMillis = 600_000).start()).also { it.awaitReady(10_000) shouldBe true }
+        val repo = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")); Files.writeString(it.resolve("a.kt"), "class Zebra") }
+        val id = (e.register(repo, auto = true) as dev.sophi.context.RegisterResult.Registered).project.id
+        e.withStoreOrNull { it.deleteDocument(dev.sophi.context.ContextSchema.REQUEST, id) }
+        e.withStoreOrNull { it.documents(dev.sophi.context.ContextSchema.REQUEST) }!! shouldHaveSize 0
+        registerCwd(e, repo) { }
+        e.withStoreOrNull { it.documents(dev.sophi.context.ContextSchema.REQUEST) }!! shouldHaveSize 1
     }
 })
