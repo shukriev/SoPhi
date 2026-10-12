@@ -126,4 +126,17 @@ class ArcadeHostTest : FunSpec({
             client.role shouldBe Role.HOST
         }
     }
+
+    test("stale host.json naming a live pid and the old port does not stop a client re-electing") {
+        val root = tempdir().toPath()
+        val host = open(root)
+        host.withStore { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "k", mapOf("v" to 1)) }
+        open(root).use { client ->
+            val stale = Files.readString(root.resolve("host.json"))
+            host.close()
+            Files.writeString(root.resolve("host.json"), stale) // same pid (this JVM), same port, but no lock holder
+            client.withStore { s -> s.documents("Note").size } shouldBe 1
+            client.role shouldBe Role.HOST
+        }
+    }
 })

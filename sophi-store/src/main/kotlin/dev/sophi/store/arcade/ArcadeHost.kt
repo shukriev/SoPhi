@@ -61,13 +61,24 @@ class ArcadeHost private constructor(
         try {
             return block(store)
         } catch (e: Exception) {
-            if (role != Role.CLIENT) throw e
             val next = synchronized(this) {
-                if (current !== store) current ?: elect() // someone already re-elected
-                else {
-                    val info = liveHostJson()
-                    if (info != null && runCatching { info.getInt("port") }.getOrNull() == connectedPort) throw e
-                    elect()
+                val now = current
+                if (now != null && now !== store) now // someone already re-elected
+                else try {
+                    val acquired = tryLockOrNull()
+                    if (acquired != null) {
+                        current?.let { runCatching { it.close() } }
+                        current = null
+                        becomeHost(acquired).also { current = it }
+                    } else {
+                        if (role == Role.HOST) throw e // a host's own error is genuine
+                        val info = liveHostJson()
+                        if (info != null && runCatching { info.getInt("port") }.getOrNull() == connectedPort) throw e
+                        elect()
+                    }
+                } catch (e2: Throwable) {
+                    if (e2 !== e) e2.addSuppressed(e)
+                    throw e2
                 }
             }
             try {
@@ -79,17 +90,24 @@ class ArcadeHost private constructor(
         }
     }
 
+    private fun tryLockOrNull(): FileLock? = try { lockChannel.tryLock() } catch (e: OverlappingFileLockException) { null }
+
     /** The lock is the source of truth: take it if free, else attach to the live host.json, until the deadline. */
     @Synchronized
     private fun elect(): ArcadeStore {
         current?.let { runCatching { it.close() } }
         current = null
         val deadline = System.nanoTime() + waitForHostMillis * 1_000_000
+        var last: Exception? = null
         while (true) {
-            val acquired = try { lockChannel.tryLock() } catch (e: OverlappingFileLockException) { null }
+            val acquired = tryLockOrNull()
             if (acquired != null) return becomeHost(acquired).also { current = it }
-            liveHostJson()?.let { return becomeClient(it).also { s -> current = s } }
-            if (System.nanoTime() > deadline) throw IllegalStateException("no live host for $root after $waitForHostMillis ms")
+            liveHostJson()?.let {
+                try { return becomeClient(it).also { s -> current = s } }
+                catch (e: IncompatibleHostException) { throw e }
+                catch (e: Exception) { last = e } // host may have just died; keep polling
+            }
+            if (System.nanoTime() > deadline) throw IllegalStateException("no live host for $root after $waitForHostMillis ms", last)
             Thread.sleep(POLL_MILLIS)
         }
     }
