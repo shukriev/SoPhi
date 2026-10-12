@@ -9,12 +9,15 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.Path
 
 /** Spec invariant 3: no exception escapes a context tool. */
 private inline fun guarded(block: () -> String): String =
     try { block() } catch (e: Exception) { "context tool failed: ${e.javaClass.simpleName}" }
+
+private const val MAX_BYTES = 1_000_000
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -76,10 +79,20 @@ private class ReadContextTool(private val engine: ContextEngine, private val sco
         // Containment must survive symlinks swapped in after indexing (the rescan is async): no link at the
         // leaf, and the real path (which resolves symlinked parent dirs) must stay under the real root.
         val attrs = try { Files.readAttributes(file, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS) } catch (e: java.io.IOException) { return refused }
-        if (attrs.isSymbolicLink || !attrs.isRegularFile || attrs.size() > 1_000_000) return refused
+        if (attrs.isSymbolicLink || !attrs.isRegularFile || attrs.size() > MAX_BYTES) return refused
         val real = try { file.toRealPath() to root.toRealPath() } catch (e: java.io.IOException) { return refused }
         if (!real.first.startsWith(real.second)) return refused
-        val lines = try { String(Files.readAllBytes(file), Charsets.UTF_8).removeSuffix("\n").lines() } catch (e: java.io.IOException) { return "cannot read ${args.path}: ${e.javaClass.simpleName}" }
+        // Reading the resolved real path with NOFOLLOW_LINKS closes the check-then-read window (a swap after the
+        // checks above can't redirect the read), and the capped read bounds a file that grew past 1 MB meanwhile.
+        val bytes = try {
+            Files.newByteChannel(real.first, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { ch ->
+                val buf = java.nio.ByteBuffer.allocate(MAX_BYTES + 1)
+                while (buf.hasRemaining() && ch.read(buf) >= 0) { /* fill */ }
+                buf.array().copyOf(buf.position())
+            }
+        } catch (e: java.io.IOException) { return "cannot read ${args.path}: ${e.javaClass.simpleName}" }
+        if (bytes.size > MAX_BYTES) return refused
+        val lines = try { String(bytes, Charsets.UTF_8).removeSuffix("\n").lines() } catch (e: java.io.IOException) { return "cannot read ${args.path}: ${e.javaClass.simpleName}" }
         if (args.startLine == null && args.endLine == null) return lines.joinToString("\n")
         val from = (args.startLine ?: 1).coerceAtLeast(1)
         val to = (args.endLine ?: lines.size).coerceAtMost(lines.size)
