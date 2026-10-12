@@ -35,5 +35,7 @@ class RemoteArcadeStore(private val remote: RemoteDatabase) : SqlArcadeStore(rem
             Scored(row["id"] as String, (row["distance"] as Number).toDouble())
         } }
 
+    override fun <T> transaction(block: () -> T): T = synchronized(remote) { super.transaction(block) }
+
     override fun close() = remote.close()
 }

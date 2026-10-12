@@ -79,6 +79,26 @@ abstract class ArcadeStoreContract(open: (Path) -> ArcadeStore) : FunSpec({
         listOf("x", "y").forEach { s.insertVertex("Thing", it, mapOf("name" to it)) }
         s.query("SELECT id FROM Thing").map { it["id"] } shouldContainExactlyInAnyOrder listOf("x", "y")
     }
+
+    test("transaction commits several writes together") {
+        val s = store()
+        s.transaction {
+            s.upsertDocument("Note", "a", mapOf("text" to "one"))
+            s.upsertDocument("Note", "b", mapOf("text" to "two"))
+        }
+        s.documents("Note").map { it["id"] } shouldContainExactlyInAnyOrder listOf("a", "b")
+    }
+
+    test("transaction rolls back every write when the block throws") {
+        val s = store()
+        runCatching {
+            s.transaction {
+                s.upsertDocument("Note", "a", mapOf("text" to "one"))
+                error("boom")
+            }
+        }.isFailure shouldBe true
+        s.documents("Note") shouldBe emptyList()
+    }
 })
 
 class EmbeddedArcadeStoreContractTest : ArcadeStoreContract({ EmbeddedArcadeStore.open(it) })

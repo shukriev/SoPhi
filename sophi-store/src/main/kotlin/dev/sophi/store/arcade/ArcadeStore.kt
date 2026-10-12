@@ -47,6 +47,9 @@ interface ArcadeStore : AutoCloseable {
     fun query(sql: String, vararg params: Any?): List<Map<String, Any?>>
     fun command(sql: String, vararg params: Any?)
 
+    /** Runs [block] in one transaction: operations inside join it, and a throw rolls all of them back. */
+    fun <T> transaction(block: () -> T): T
+
     fun deleteAll(type: String)
     fun ensureSchema(vertexTypes: List<String> = emptyList(), edgeTypes: List<String> = emptyList(), documentTypes: List<String> = emptyList())
 }

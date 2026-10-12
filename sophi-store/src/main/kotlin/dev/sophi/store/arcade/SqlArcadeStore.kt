@@ -26,6 +26,13 @@ abstract class SqlArcadeStore(protected val db: BasicDatabase) : ArcadeStore {
     // Embedded writes need an active transaction (it joins an enclosing one); on a remote database the wrapper is a plain client-side transaction (it ran DDL and nested use fine).
     override fun command(sql: String, vararg params: Any?) { db.transaction { db.command("sql", sql, *args(params)).close() } }
 
+    override fun <T> transaction(block: () -> T): T {
+        var result: Any? = null
+        db.transaction { result = block() }   // a throw inside rolls back and propagates
+        @Suppress("UNCHECKED_CAST")
+        return result as T
+    }
+
     override fun ensureSchema(vertexTypes: List<String>, edgeTypes: List<String>, documentTypes: List<String>) {
         vertexTypes.forEach { command("CREATE VERTEX TYPE $it IF NOT EXISTS") }
         edgeTypes.forEach { command("CREATE EDGE TYPE $it IF NOT EXISTS") }
