@@ -7,6 +7,9 @@ import com.arcadedb.query.sql.executor.ResultSet
  * Everything expressible in ArcadeDB SQL, written once for both an in-process database and a
  * RemoteDatabase reached through the elected host. Subclasses override only what needs the
  * embedded Java API ([EmbeddedArcadeStore]) or a wire-format tweak ([RemoteArcadeStore]).
+ *
+ * Type, property and field names and `where` fragments are interpolated into the SQL text: they must be
+ * code-supplied constants, never user input. Values always go through `?` parameters.
  */
 abstract class SqlArcadeStore(protected val db: BasicDatabase) : ArcadeStore {
 
@@ -20,7 +23,7 @@ abstract class SqlArcadeStore(protected val db: BasicDatabase) : ArcadeStore {
 
     override fun query(sql: String, vararg params: Any?): List<Map<String, Any?>> = rows(db.query("sql", sql, *args(params)))
 
-    // Embedded writes need an active transaction (it joins an enclosing one); a remote database commits per call.
+    // Embedded writes need an active transaction (it joins an enclosing one); on a remote database the wrapper is a plain client-side transaction (it ran DDL and nested use fine).
     override fun command(sql: String, vararg params: Any?) { db.transaction { db.command("sql", sql, *args(params)).close() } }
 
     override fun ensureSchema(vertexTypes: List<String>, edgeTypes: List<String>, documentTypes: List<String>) {

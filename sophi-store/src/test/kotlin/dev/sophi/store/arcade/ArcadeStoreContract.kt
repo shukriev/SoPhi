@@ -61,7 +61,7 @@ abstract class ArcadeStoreContract(open: (Path) -> ArcadeStore) : FunSpec({
         (rows.first()["score"] as Number).toDouble() shouldBe 2.0
     }
 
-    test("vectors inserted with the record are found by nearestVectors, score = similarity") {
+    test("vectors inserted with the record are found by nearestVectors, score = cosine distance") {
         val s = store()
         s.ensureVectorIndex("Thing", "emb", dimensions = 3)
         s.insertVertex("Thing", "a", mapOf("emb" to floatArrayOf(1f, 0f, 0f)))
@@ -82,3 +82,33 @@ abstract class ArcadeStoreContract(open: (Path) -> ArcadeStore) : FunSpec({
 })
 
 class EmbeddedArcadeStoreContractTest : ArcadeStoreContract({ EmbeddedArcadeStore.open(it) })
+
+/** Remote store against a real loopback server; closing the store stops its server. */
+class RemoteArcadeStoreContractTest : ArcadeStoreContract({ dir ->
+    val srv = LocalArcadeServer.start(dir)
+    srv.database("t")
+    val remote = RemoteArcadeStore.connect(srv.port, "t", srv.password)
+    object : ArcadeStore by remote {
+        override fun close() { remote.close(); srv.close() }
+    }
+})
+
+class RemoteEmbeddedAgreementTest : FunSpec({
+    test("remote and embedded agree on cosine distance for the same index") {
+        LocalArcadeServer.start(tempdir().toPath()).use { srv ->
+            val embedded = EmbeddedArcadeStore(srv.database("t"))
+            embedded.ensureSchema(vertexTypes = listOf("Thing"))
+            embedded.ensureVectorIndex("Thing", "emb", dimensions = 3)
+            embedded.insertVertex("Thing", "a", mapOf("emb" to floatArrayOf(1f, 0f, 0f)))
+            embedded.insertVertex("Thing", "b", mapOf("emb" to floatArrayOf(0.6f, 0.8f, 0f)))
+            embedded.insertVertex("Thing", "c", mapOf("emb" to floatArrayOf(0f, 0f, 1f)))
+            RemoteArcadeStore.connect(srv.port, "t", srv.password).use { remote ->
+                val q = floatArrayOf(1f, 0.2f, 0f)
+                val e = embedded.nearestVectors("Thing", "emb", q, 3)
+                val r = remote.nearestVectors("Thing", "emb", q, 3)
+                r.map { it.id } shouldBe e.map { it.id }
+                r.zip(e).forEach { (x, y) -> x.score shouldBe (y.score plusOrMinus 1e-3) }
+            }
+        }
+    }
+})
