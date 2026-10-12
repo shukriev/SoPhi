@@ -7,6 +7,8 @@ import java.nio.file.Path
 object HostProcessMain {
     @JvmStatic
     fun main(args: Array<String>) {
+        // Don't outlive a dead surefire JVM.
+        ProcessHandle.current().parent().ifPresent { p -> p.onExit().thenRun { kotlin.system.exitProcess(0) } }
         val root = Path.of(args[0])
         val ready = Path.of(args[1])
         val host = ArcadeHost.open(root, database = "ctx", schemaVersion = 1, engineVersion = "child")

@@ -24,7 +24,8 @@ interface ArcadeStore : AutoCloseable {
     /** Lazily declares the vector property + HNSW index for [vertexType].[property] on first use. */
     fun putVector(vertexType: String, id: String, property: String, vector: FloatArray)
     /** Nearest neighbours by cosine, closest first. Observed on the embedded store (26.5.1): [Scored.score] is the
-     *  index's cosine distance (identical vector = 0.0, lower is closer), not a similarity. */
+     *  index's cosine distance (identical vector = 0.0, lower is closer), not a similarity.
+     *  Callers must [ensureVectorIndex] first; behaviour without the index differs: embedded returns empty, remote throws. */
     fun nearestVectors(vertexType: String, property: String, query: FloatArray, k: Int): List<Scored>
     fun ensureVectorIndex(vertexType: String, property: String, dimensions: Int)
 

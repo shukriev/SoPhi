@@ -21,12 +21,19 @@ class RemoteArcadeStore(private val remote: RemoteDatabase) : SqlArcadeStore(rem
     override fun putVector(vertexType: String, id: String, property: String, vector: FloatArray) =
         throw UnsupportedOperationException("vector writes run on the elected host; use insertVertex or the host's store")
 
+    // RemoteDatabase keeps its transaction state in one shared sessionId, so concurrent calls corrupt each other.
+    // ponytail: one lock per client; pool a RemoteDatabase per thread if remote write throughput ever matters
+    override fun query(sql: String, vararg params: Any?): List<Map<String, Any?>> = synchronized(remote) { super.query(sql, *params) }
+    override fun command(sql: String, vararg params: Any?) = synchronized(remote) { super.command(sql, *params) }
+    override fun upsertEdge(type: String, vertexType: String, fromId: String, toId: String, properties: Map<String, Any?>) =
+        synchronized(remote) { super.upsertEdge(type, vertexType, fromId, toId, properties) }
+
     override fun nearestVectors(vertexType: String, property: String, query: FloatArray, k: Int): List<Scored> =
         // `this.` because the `query` parameter (the vector) shadows the method.
-        this.query("SELECT expand(vectorNeighbors('$vertexType[$property]', ?, $k))", query).map { row ->
+        synchronized(remote) { this.query("SELECT expand(vectorNeighbors('$vertexType[$property]', ?, $k))", query).map { row ->
             // The contract is cosine distance (lower = closer), same as EmbeddedArcadeStore: pass SQL's value through.
             Scored(row["id"] as String, (row["distance"] as Number).toDouble())
-        }
+        } }
 
     override fun close() = remote.close()
 }

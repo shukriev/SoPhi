@@ -22,8 +22,8 @@ class ArcadeHostTwoProcessTest : FunSpec({
     fun awaitFile(file: Path, timeoutMs: Long, child: Process) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (!Files.exists(file)) {
-            check(child.isAlive) { "host child exited early with ${child.exitValue()}" }
-            check(System.currentTimeMillis() < deadline) { "host child not ready after $timeoutMs ms" }
+            check(child.isAlive) { "host child exited early with ${child.exitValue()} (see ${file.resolveSibling("child.log")})" }
+            check(System.currentTimeMillis() < deadline) { "host child not ready after $timeoutMs ms (see ${file.resolveSibling("child.log")})" }
             Thread.sleep(50)
         }
     }

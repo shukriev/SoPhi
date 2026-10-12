@@ -54,7 +54,7 @@ class ArcadeHost private constructor(
     /**
      * Runs [block] against the current store. If it fails while this process is a client and the
      * host it was talking to is gone, re-elects once and runs [block] again — so [block] may run
-     * twice and must be safe to repeat (every write here is an upsert into a rebuildable cache).
+     * twice and must be idempotent (insertVertex and raw commands are not upserts, so callers must pass blocks that are safe to repeat).
      */
     fun <T> withStore(block: (ArcadeStore) -> T): T {
         val store = current ?: synchronized(this) { current ?: elect() }

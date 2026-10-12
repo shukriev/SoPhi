@@ -36,6 +36,8 @@ class LocalArcadeServer private constructor(
             // attempts covers it. Bind to port 0 directly if ArcadeDB ever exposes the bound port.
             repeat(PORT_ATTEMPTS) {
                 val port = ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { it.localPort }
+                // ponytail: ArcadeDBServer.init() registers a JVM shutdown hook per instance (also for failed port attempts) that is never removed:
+                // one leaked hook per start, harmless for a long-lived companion; revisit if hosts are started repeatedly in one process.
                 val server = ArcadeDBServer(config(root, password, port))
                 try {
                     server.start()
