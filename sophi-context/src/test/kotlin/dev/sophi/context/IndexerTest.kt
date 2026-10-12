@@ -5,6 +5,7 @@ import dev.sophi.store.arcade.EmbeddedArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -111,5 +112,14 @@ class IndexerTest : FunSpec({
         s.query("SELECT status FROM Project WHERE id = ?", "p1").single()["status"] shouldBe "missing"
         s.documents(ContextSchema.FILE).size shouldBe 1
         s.documents(ContextSchema.CHUNK).isNotEmpty() shouldBe true
+    }
+
+    test("an interrupt during a file analysis propagates and keeps the interrupt flag") {
+        val (_, ix, root) = setup(mk = { Indexer(it, GitProbe.none, analyze = { _, _, _, _ -> throw InterruptedException("stop") }) })
+        root.write("a.kt", "class Alpha")
+        try {
+            runCatching { ix.scan("p1") }.exceptionOrNull().shouldBeInstanceOf<InterruptedException>()
+            Thread.currentThread().isInterrupted shouldBe true
+        } finally { Thread.interrupted() }
     }
 })

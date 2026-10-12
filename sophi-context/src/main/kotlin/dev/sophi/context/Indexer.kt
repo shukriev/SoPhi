@@ -44,9 +44,9 @@ class Indexer(
         for (f in listing.files) {
             val old = known[f.relPath]
             if (old != null && (old["size"] as Number).toLong() == f.size && (old["mtime"] as Number).toLong() == f.mtime) { unchanged++; continue }
-            val ok = runCatching {
+            try {
                 // unreadable existing file keeps its old chunks: transient errors shouldn't delete
-                val bytes = runCatching { Files.readAllBytes(root.resolve(f.relPath)) }.getOrNull() ?: return@runCatching null
+                val bytes = try { Files.readAllBytes(root.resolve(f.relPath)) } catch (e: java.io.IOException) { continue }
                 val hash = sha256(bytes)
                 if (old != null && old["contentHash"] == hash) {
                     store.command("UPDATE ${ContextSchema.FILE} SET mtime = ?, size = ? WHERE id = ?", f.mtime, f.size, old["id"])
@@ -55,7 +55,9 @@ class Indexer(
                     replaceFile(projectId, f, String(bytes, Charsets.UTF_8), hash)
                     if (old == null) added++ else changed++
                 }
-            }.onFailure { System.err.println("context: skipped ${f.relPath}: ${it.message}") }
+            } catch (e: InterruptedException) { Thread.currentThread().interrupt(); throw e
+            } catch (e: Error) { throw e
+            } catch (e: Exception) { System.err.println("context: skipped ${f.relPath}: ${e.message}") }
         }
         val present = listing.files.mapTo(HashSet()) { it.relPath }
         val gone = if (listing.partial) emptyList() else known.keys.filter { it !in present }
