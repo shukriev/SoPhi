@@ -3,6 +3,7 @@ package dev.sophi.context
 import java.io.IOException
 import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
@@ -27,18 +28,26 @@ fun interface GitProbe {
         val system = GitProbe { root ->
             if (findGitRoot(root) == null || !gitUsable()) null
             else runCatching {
-                val p = ProcessBuilder("git", "-C", root.toString(), "ls-files", "-co", "--exclude-standard", "-z")
-                    .redirectErrorStream(false).start()
-                val out = p.inputStream.readAllBytes().toString(Charsets.UTF_8)
-                if (!p.waitFor(30, TimeUnit.SECONDS) || p.exitValue() != 0) null
-                else out.split('\u0000').filter { it.isNotEmpty() }
+                // stdout to a temp file and stderr discarded, so neither pipe can fill and block git;
+                // waitFor then really enforces the timeout, and a hung git is killed.
+                val tmp = Files.createTempFile("sophi-ls-files", ".out")
+                try {
+                    val p = ProcessBuilder("git", "-C", root.toString(), "ls-files", "-co", "--exclude-standard", "-z")
+                        .redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(tmp.toFile()).start()
+                    if (!p.waitFor(30, TimeUnit.SECONDS)) { p.destroyForcibly(); null }
+                    else if (p.exitValue() != 0) null
+                    else Files.readString(tmp).split('\u0000').filter { it.isNotEmpty() }.distinct()
+                } finally { Files.deleteIfExists(tmp) }
             }.getOrNull()
         }
 
         private val usable: Boolean by lazy {
             val isMac = System.getProperty("os.name").lowercase().contains("mac")
             val cmd = if (isMac) listOf("xcode-select", "-p") else listOf("git", "--version")
-            runCatching { ProcessBuilder(cmd).start().let { it.waitFor(5, TimeUnit.SECONDS) && it.exitValue() == 0 } }.getOrDefault(false)
+            runCatching {
+                val p = ProcessBuilder(cmd).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+                if (p.waitFor(5, TimeUnit.SECONDS)) p.exitValue() == 0 else { p.destroyForcibly(); false }
+            }.getOrDefault(false)
         }
         private fun gitUsable() = usable
     }
@@ -68,12 +77,16 @@ object ProjectFiles {
         "html" to "html", "css" to "css", "sql" to "sql", "txt" to "text", "properties" to "properties"
     )
 
+    private fun isSecret(name: String) = name == ".env" || name.startsWith(".env.") ||
+        name.substringAfterLast('.', "").lowercase() in setOf("pem", "key", "p12", "pfx") ||
+        name.startsWith("id_rsa") || name.startsWith("id_ed25519") || name.startsWith("id_ecdsa")
+
     fun classify(relPath: String): Pair<Role, String> {
         val name = relPath.substringAfterLast('/')
         val ext = name.substringAfterLast('.', "").lowercase()
         val lang = LANGS[ext] ?: if (name == "Dockerfile" || name == "Makefile") name.lowercase() else ext.ifEmpty { "text" }
         val role = when {
-            name in INSTRUCTION_FILES || relPath.endsWith(".sophi/instructions.md") || relPath == ".sophi/instructions.md" -> Role.INSTRUCTION
+            name in INSTRUCTION_FILES || relPath == ".sophi/instructions.md" || relPath.endsWith("/.sophi/instructions.md") -> Role.INSTRUCTION
             name in LOCKFILES || name.contains(".min.") -> Role.GENERATED
             name in CONFIG_NAMES -> Role.CONFIG
             relPath.contains("/test/") || relPath.startsWith("test/") || relPath.contains("/tests/") || relPath.startsWith("tests/") ||
@@ -89,14 +102,15 @@ object ProjectFiles {
     }.getOrDefault(true)
 
     fun list(root: Path, git: GitProbe = GitProbe.system, maxFiles: Int = MAX_FILES): Listing {
-        val candidates = git.lsFiles(root) ?: walk(root)
+        val candidates = git.lsFiles(root) ?: walk(root, maxFiles)
         val out = ArrayList<FileEntry>()
         var partial = false
         for (rel in candidates) {
-            if (rel.split('/').any { it in SKIP_DIRS }) continue
+            val parts = rel.split('/')
+            if (parts.dropLast(1).any { it in SKIP_DIRS } || isSecret(parts.last())) continue
             val path = root.resolve(rel)
-            val attrs = runCatching { Files.readAttributes(path, BasicFileAttributes::class.java) }.getOrNull() ?: continue
-            if (!attrs.isRegularFile || attrs.size() > MAX_BYTES || isBinary(path)) continue
+            val attrs = runCatching { Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS) }.getOrNull() ?: continue
+            if (attrs.isSymbolicLink || !attrs.isRegularFile || attrs.size() > MAX_BYTES || isBinary(path)) continue
             if (out.size >= maxFiles) { partial = true; break }
             val (role, lang) = classify(rel)
             out.add(FileEntry(rel, attrs.size(), attrs.lastModifiedTime().toMillis(), role, lang))
@@ -107,7 +121,7 @@ object ProjectFiles {
     // ponytail: .gitignore subset — root file only, glob lines and dir/ lines, no negation or nested
     // .gitignore files; git repos never reach this path (ls-files is exact). Upgrade if non-git folders
     // with complex ignores show up.
-    private fun walk(root: Path): List<String> {
+    private fun walk(root: Path, limit: Int): List<String> {
         val patterns = listOf(".gitignore", ".sophiignore").flatMap { f ->
             root.resolve(f).takeIf { Files.isRegularFile(it) }?.let { Files.readAllLines(it) }.orEmpty()
         }.map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("!") }
@@ -125,8 +139,10 @@ object ProjectFiles {
             }
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
                 val rel = root.relativize(file)
+                if (attrs.isSymbolicLink || isSecret(file.fileName.toString())) return FileVisitResult.CONTINUE
                 if (globs.none { it.matches(rel) }) out.add(rel.toString().replace('\\', '/'))
-                return FileVisitResult.CONTINUE
+                // early stop: list() only needs maxFiles + 1 acceptable files to know it is partial
+                return if (out.size > limit) FileVisitResult.TERMINATE else FileVisitResult.CONTINUE
             }
             override fun visitFileFailed(file: Path, exc: IOException) = FileVisitResult.CONTINUE
         })

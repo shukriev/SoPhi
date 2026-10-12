@@ -49,4 +49,28 @@ class ProjectFilesTest : FunSpec({
         findGitRoot(root.resolve("a/b")) shouldBe root
         findGitRoot(tempdir().toPath()) shouldBe null
     }
+
+    test("symlinks are never listed, on the walk or the git path") {
+        val root = tempdir().toPath(); val outside = tempdir().toPath().write("secret.txt", "s")
+        root.write("ok.txt"); Files.createSymbolicLink(root.resolve("link.txt"), outside)
+        ProjectFiles.list(root, GitProbe.none).files.map { it.relPath } shouldBe listOf("ok.txt")
+        ProjectFiles.list(root, GitProbe { listOf("link.txt", "ok.txt") }).files.map { it.relPath } shouldBe listOf("ok.txt")
+    }
+
+    test("secret-looking files are never listed") {
+        val root = tempdir().toPath()
+        listOf(".env", ".env.local", "server.pem", "id_rsa", "a.kt").forEach { root.write(it) }
+        ProjectFiles.list(root, GitProbe.none).files.map { it.relPath } shouldBe listOf("a.kt")
+        ProjectFiles.list(root, GitProbe { listOf(".env", ".env.local", "server.pem", "id_rsa", "a.kt") }).files.map { it.relPath } shouldBe listOf("a.kt")
+    }
+
+    test("instruction match needs a slash boundary") {
+        ProjectFiles.classify("foo.sophi/instructions.md").first shouldBe Role.DOC
+        ProjectFiles.classify("sub/.sophi/instructions.md").first shouldBe Role.INSTRUCTION
+    }
+
+    test("walk cap with 5 files and maxFiles 3 is partial with 3") {
+        val root = tempdir().toPath(); repeat(5) { root.write("g$it.txt") }
+        ProjectFiles.list(root, GitProbe.none, maxFiles = 3).let { it.files.size shouldBe 3; it.partial shouldBe true }
+    }
 })
