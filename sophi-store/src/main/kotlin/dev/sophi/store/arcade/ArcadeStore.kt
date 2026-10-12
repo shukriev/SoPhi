@@ -47,7 +47,12 @@ interface ArcadeStore : AutoCloseable {
     fun query(sql: String, vararg params: Any?): List<Map<String, Any?>>
     fun command(sql: String, vararg params: Any?)
 
-    /** Runs [block] in one transaction: operations inside join it, and a throw rolls all of them back. */
+    /**
+     * Runs [block] in one transaction: operations inside join it, and a throw rolls all of them back.
+     * Block runs on the calling thread; do not call the store from other threads inside it.
+     * On the remote store the client lock is held for the whole block, so other callers wait.
+     * ArcadeDB may retry the block on a concurrent-modification conflict, so it must be safe to run again.
+     */
     fun <T> transaction(block: () -> T): T
 
     fun deleteAll(type: String)
