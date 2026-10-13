@@ -4,11 +4,11 @@ package dev.sophi.context
 object ProjectMap {
     fun render(project: ProjectInfo, files: List<Triple<String, String, String?>>, under: String? = null, maxLines: Int = 120): String {
         val prefix = under?.trim('/')?.takeIf { it.isNotEmpty() }?.let { "$it/" } ?: ""
-        val scoped = files.filter { it.first.startsWith(prefix) }
+        val scoped = files.filter { it.first.startsWith(prefix) }.sortedBy { it.first }
         val out = ArrayList<String>()
         out += "# ${project.name}${if (prefix.isNotEmpty()) " / $prefix" else ""}  (${project.root})"
         if (project.partial) out += "(partially indexed — over the file cap)"
-        val langs = scoped.groupingBy { langOf(it.first) }.eachCount().entries.sortedByDescending { it.value }.take(6)
+        val langs = scoped.groupingBy { langOf(it.first) }.eachCount().entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).take(6)
         if (langs.isNotEmpty()) out += "Languages: " + langs.joinToString(" · ") { "${it.key} ${it.value}" }
         if (prefix.isEmpty() && project.modules.isNotEmpty()) out += "Modules: " + project.modules.joinToString(", ")
         val instructions = scoped.filter { it.second == Role.INSTRUCTION.name }.map { it.first }

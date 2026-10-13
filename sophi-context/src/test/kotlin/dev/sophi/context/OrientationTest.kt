@@ -3,7 +3,9 @@ package dev.sophi.context
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.comparables.shouldBeLessThan
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeLessThanOrEqual
+import kotlin.random.Random
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -94,6 +96,7 @@ class OrientationTest : FunSpec({
         val out = f.render(mode = "both")!!   // files may be empty: instructions read from disk
         out shouldContain "Use tabs."
         out shouldContain "project map pending"
+        f.render(budget = 60)!!.length shouldBeLessThanOrEqual 60
     }
 
     test("a symlinked AGENTS.md pointing outside the root is not included") {
@@ -125,7 +128,58 @@ class OrientationTest : FunSpec({
         val g = tempdir().toPath().write("instructions.md", "Always be brief.\n")
         val out = f.render(global = g)!!
         out shouldStartWith "## Your standing instructions (~/.sophi/instructions.md)\nAlways be brief."
-        out.indexOf("Project rule.") shouldBeGreater out.indexOf("Always be brief.")
+        out.indexOf("Project rule.") shouldBeGreaterThan out.indexOf("Always be brief.")
+    }
+
+    test("render is independent of file row order") {
+        val f = fixture({ r -> r.write("AGENTS.md", "Rules.\n"); r.write("sub/AGENTS.md", "S\n"); r.write("a.py", "x=1\n"); r.write("b.go", "package b\n"); r.write("c.rs", "fn main(){}\n") })
+        val files = f.files()
+        Orientation.render(f.p, files.shuffled(Random(1)), 10_240, "both", null) shouldBe Orientation.render(f.p, files, 10_240, "both", null)
+        ProjectMap.render(f.p, files.shuffled(Random(2))) shouldBe ProjectMap.render(f.p, files)
+    }
+
+    test("cut inside the nested Also section: lines that fit, then the omitted marker, never an earlier file again") {
+        val f = fixture({ r -> r.write("AGENTS.md", "Rules.\n"); (1..30).forEach { r.write("module$it/AGENTS.md", "m\n") } })
+        val out = f.render(budget = 560)!!
+        out.length shouldBeLessThanOrEqual 560
+        out shouldContain "more nested instruction files omitted"
+        out shouldContain "Also: module1/AGENTS.md"
+        out.split("## Project conventions").size shouldBe 2
+    }
+
+    test("only nested files and a tiny budget still renders within budget") {
+        val f = fixture({ r -> (1..10).forEach { r.write("module$it/AGENTS.md", "m\n") } })
+        val out = f.render(budget = 50, mode = "instructions")!!
+        out.length shouldBeLessThanOrEqual 50
+        out shouldContain "omitted"
+    }
+
+    test("a huge global file takes at most half the budget and leaves room for the project conventions") {
+        val f = fixture({ it.write("AGENTS.md", "Project rule.\n") })
+        val g = tempdir().toPath().write("instructions.md", "g".repeat(60_000))
+        val out = f.render(budget = 2_000, global = g)!!
+        out.length shouldBeLessThanOrEqual 2_000
+        out shouldStartWith "## Your standing instructions"
+        out shouldContain "*truncated — see ~/.sophi/instructions.md*"
+        out shouldContain "## Project conventions"
+        out shouldContain "Project rule."
+        (out.indexOf("## Project conventions")) shouldBeLessThanOrEqual 1_002
+    }
+
+    test("a symlinked global instructions file is read") {
+        val f = fixture({ it.write("AGENTS.md", "Project rule.\n") })
+        val real = tempdir().toPath().write("dotfiles/instr.md", "Dotfile rule.\n")
+        val link = tempdir().toPath().resolve("instructions.md").also { Files.createSymbolicLink(it, real) }
+        f.render(global = link)!! shouldContain "Dotfile rule."
+    }
+
+    test("plugin picks the first project in scope order") {
+        val a = fixture({ it.write("AGENTS.md", "Rule A.\n") })
+        val e = a.e
+        val r2 = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")); it.write("AGENTS.md", "Rule B.\n") }
+        val id2 = (e.register(r2, auto = true) as RegisterResult.Registered).project.id
+        eventually { e.projectsOrNull()!!.first { it.id == id2 }.lastScanAt != null && e.fileSummariesOrNull(id2)!!.isNotEmpty() }
+        val out = runBlocking { OrientationPlugin(e, { listOf(id2, a.p.id) }, ContextBudget(32_000)).contribute("s", "hi") }
+        out!! shouldContain "Rule B."
     }
 })
-infix fun Int.shouldBeGreater(o: Int) = check(this > o) { "$this !> $o" }

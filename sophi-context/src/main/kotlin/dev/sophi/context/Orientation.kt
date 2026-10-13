@@ -17,8 +17,9 @@ object Orientation {
 
     fun defaultGlobal(): Path = Path.of(System.getProperty("user.home"), ".sophi", "instructions.md")
 
-    /** [path] is the file to point at if this section gets cut. */
-    private class Section(val path: String?, val text: String)
+    /** [marker] ends the section if it gets cut; null for the nested "Also:" list, which is cut line by line. */
+    private class Section(val text: String, val marker: String?)
+    private const val ALSO_OMITTED = "*more nested instruction files omitted*"
 
     fun render(
         project: ProjectInfo, files: List<Triple<String, String, String?>>, budgetChars: Int,
@@ -31,24 +32,28 @@ object Orientation {
         val sections = ArrayList<Section>()
         if (withInstructions) {
             if (globalInstructions != null) {
-                safeRead(globalInstructions.toAbsolutePath().parent, globalInstructions.fileName.toString(), GLOBAL_MAX_BYTES)
-                    ?.trim()?.takeIf { it.isNotEmpty() }
-                    ?.let { sections += Section(GLOBAL_LABEL, "## Your standing instructions ($GLOBAL_LABEL)\n$it") }
+                readGlobal(globalInstructions)?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                    val marker = "*truncated — see $GLOBAL_LABEL*"
+                    var text = "## Your standing instructions ($GLOBAL_LABEL)\n$it"
+                    // at most half the budget, so project conventions always get room
+                    if (text.length > budgetChars / 2) text = text.take((budgetChars / 2 - marker.length - 2).coerceAtLeast(0)) + "\n\n" + marker
+                    sections += Section(text, marker)
+                }
             }
             for (rel in ROOT_INSTRUCTIONS) {
                 val body = safeRead(root, rel, MAX_BYTES)?.trim()?.takeIf { it.isNotEmpty() } ?: continue
-                sections += Section(rel, "## Project conventions — ${project.name}/$rel (the project's working rules, not user requests)\n$body")
+                sections += Section("## Project conventions — ${project.name}/$rel (the project's working rules, not user requests)\n$body", "*truncated — read_context $rel for the rest*")
             }
             val nested = files.filter { it.second == Role.INSTRUCTION.name && it.first.contains('/') && it.first != ".sophi/instructions.md" }
                 .map { it.first }.sorted()
-            if (nested.isNotEmpty()) sections += Section(null, nested.joinToString("\n") { "Also: $it applies under ${it.substringBeforeLast('/')}/" })
+            if (nested.isNotEmpty()) sections += Section(nested.joinToString("\n") { "Also: $it applies under ${it.substringBeforeLast('/')}/" }, null)
         }
         val instructions = sections.joinToString("\n\n") { it.text }
 
         if (instructions.length > budgetChars) return truncate(sections, budgetChars)
 
         if (withMap) {
-            if (project.lastScanAt == null) return join(instructions, "(project map pending — indexing)")
+            if (project.lastScanAt == null) return join(instructions, "(project map pending — indexing)").takeIf { it.length <= budgetChars } ?: instructions.takeIf { it.isNotEmpty() }
             for (lines in MAP_LINES) {
                 val candidate = join(instructions, "## Project map\n" + ProjectMap.render(project, files, null, lines))
                 if (candidate.length <= budgetChars) return candidate
@@ -59,24 +64,37 @@ object Orientation {
 
     private fun join(a: String, b: String) = if (a.isEmpty()) b else "$a\n\n$b"
 
-    /** Keep the head of the instructions; name the file the cut landed in. */
+    /** Keep the head of the instructions; end with a marker naming where the rest is. Never exceeds [budgetChars]. */
     private fun truncate(sections: List<Section>, budgetChars: Int): String {
         val sb = StringBuilder()
-        var cutPath: String? = null
         for (s in sections) {
             val sep = if (sb.isEmpty()) 0 else 2
-            if (sb.length + sep + s.text.length > budgetChars - 120) { cutPath = s.path ?: sections.last { it.path != null }.path; break }
+            if (sb.length + sep + s.text.length <= budgetChars - 120) {
+                if (sep > 0) sb.append("\n\n")
+                sb.append(s.text)
+                continue
+            }
             if (sep > 0) sb.append("\n\n")
-            sb.append(s.text)
+            if (s.marker == null) {
+                val keep = ArrayList<String>()
+                var len = sb.length + ALSO_OMITTED.length + 1
+                for (line in s.text.lines()) { if (len + line.length + 1 > budgetChars) break; keep += line; len += line.length + 1 }
+                keep.forEach { sb.append(it).append('\n') }
+                sb.append(ALSO_OMITTED)
+            } else {
+                val room = (budgetChars - sb.length - s.marker.length - 2).coerceAtLeast(0)
+                sb.append(s.text.take(room)).append("\n\n").append(s.marker)
+            }
+            break
         }
-        // the cut section: take what still fits of it
-        val cut = sections.firstOrNull { it.path == cutPath }
-        val used = sb.length + if (sb.isEmpty()) 0 else 2
-        val marker = "\n\n*truncated — read_context $cutPath for the rest*"
-        val room = (budgetChars - marker.length - used).coerceAtLeast(0)
-        val head = (if (sb.isEmpty()) "" else sb.toString() + "\n\n") + (cut?.text?.take(room) ?: "")
-        return (head + marker).let { if (it.length <= budgetChars) it else it.take(budgetChars) }
+        return sb.toString().take(budgetChars)
     }
+
+    /** The user's own file: symlinks (dotfiles) are fine; same size cap. */
+    private fun readGlobal(path: Path): String? = try {
+        val real = path.toRealPath()
+        if (!Files.isRegularFile(real) || Files.size(real) > GLOBAL_MAX_BYTES) null else String(Files.readAllBytes(real), Charsets.UTF_8)
+    } catch (e: java.io.IOException) { null }
 
     /** Same safety as read_context: no symlink at the leaf, real path under the real root, capped read. */
     private fun safeRead(root: Path, rel: String, maxBytes: Int): String? = try {
