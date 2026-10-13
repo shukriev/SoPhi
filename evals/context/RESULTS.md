@@ -159,3 +159,7 @@ Selected point: **minScore 10.0, minRatio 1.0**.
 Trace of the rule: qualifying needs precision >= 0.80 on queries.tsv and >= 0.70 on commits.tsv. At minRatio 1.1 and above, queries.tsv coverage is <= 0.839, so those points lose to coverage 1.000. At minRatio 1.0, minScore 0-10 all reach queries.tsv coverage 1.000 (precision 0.839) with commits.tsv precision 0.733 (0-8) or 0.735 (10), so all qualify and tie on coverage. minScore 12 and 15 fall to 0.968 coverage and are out. Tie-break is higher commits.tsv precision: 0.735 at minScore 10 beats 0.733, so minScore 10.0 / minRatio 1.0 is selected. Defaults in `HintGate` are set to these values.
 
 Limits: the grid's score range (0-15) sat below the real top-1 distribution (median 27-30), so minScore <= 10 barely filters and minRatio 1.0 always passes; the chosen gate is effectively "at least 3 content terms and top score >= 10". Both query sets contain only real questions, with no chit-chat or off-topic negatives, so offline E1 cannot measure false fires. Roughly 1 in 6 (queries.tsv) to 1 in 4 (commits.tsv) fired hints point at a wrong file. The live E1 (deferred to the end of the work) decides whether the hint helps, and should include negative messages.
+
+## Pending live runs
+
+The live E1 (hint) and E5 (orientation) runs and the live prompt-cache check are deferred to the end of the work (no provider was reachable when M2 landed). Procedure: `evals/context/EXPERIMENTS.md`. Hint gate calibration: "Hint gate results (E1, offline)" above.

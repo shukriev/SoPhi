@@ -1,7 +1,7 @@
 # ADR-041: Context engine on a shared, lock-elected ArcadeDB store
 
 **Date:** 2026-10-12
-**Status:** Accepted — M0 (shared store) and M1 (lexical engine) implemented; M2 planned
+**Status:** Accepted — M0–M2 implemented; live E1/E5 and the live cache check pending
 
 ## Context
 
@@ -51,8 +51,31 @@ addendum).
    0.97, MRR 0.80 (grep MRR 0.12); on 258 git-mined commit queries engine MRR 0.64 vs grep 0.26 (2.4x).
    Chosen weights: k1 1.2, b 0.5, name boost 1.5, at most 3 hits per directory, role priors
    SOURCE/INSTRUCTION 1.0, DOC/CONFIG 0.9, TEST 0.6, GENERATED 0.2. The no-priors BM25 baseline
-   scores 0.94 / 0.79 on today's repos, so the priors and the k1/b choice earn the margin. Orientation,
-   a gated per-turn hint and a token budget follow in M2.
+   scores 0.94 / 0.79 on today's repos, so the priors and the k1/b choice earn the margin.
+7. **M2 — placement, caching, orientation and hint.** A `ContextContributor` declares a `Placement`.
+   `STABLE` text goes into the system prompt; `VOLATILE` text is wrapped in `<context>…</context>` and
+   prefixed to the current turn's user message in the request only (never persisted, so the session
+   keeps the raw input). It is not a SYSTEM message because Spring AI hoists SYSTEM messages into
+   Anthropic's system field, which would change the cached prefix every turn; it is not a separate
+   USER message because strict-alternation chat templates reject two USER turns in a row.
+   `MemoryPlugin`, `LearningPlugin` and `SiteSkillRecallPlugin` are `VOLATILE`; `sophi-web` and
+   `ScheduleEngine` still use `collectContext` (system prompt), a follow-up. With the system prompt now
+   byte-identical across turns (`RuntimeBuilderContextTest`), Anthropic prompt caching
+   (`SYSTEM_AND_TOOLS`) is on for every request; `TokenUsage.inputTokens` is the total prompt including
+   cache read/write and `cacheReadTokens` is reported; `SOPHI_USAGE_LOG` writes a JSONL of numbers
+   (kind `turn`/`summarise`). Orientation (STABLE) = `~/.sophi/instructions.md` (at most half the budget,
+   symlink allowed), root `AGENTS.md` / `CLAUDE.md` / `.sophi/instructions.md` framed as project
+   conventions, nested instruction files listed, and a deterministic sorted project map; budget 8% of
+   the window clamped to 600–4,000 tokens, over-budget text keeps its head plus a truncation marker, and
+   the first turn waits at most 1 s for the engine. The hint (VOLATILE) is at most 3 lines of
+   `path:line — label — summary`, no file content, repo-derived text sanitised (`‹ ›`), budget
+   min(1% of window, 300) tokens, and fires only with >= 3 content terms and top score >= 10 (plus
+   ratio 1.0, or an identifier in the message). Gate values come from the offline E1 grid
+   (`evals/context/RESULTS.md`, "Hint gate results"): queries.tsv coverage 1.000 / precision 0.839,
+   commits.tsv 0.981 / 0.735. Offline limits: no negative messages, and the absolute floor does not fire
+   on tiny repos. Knobs: `SOPHI_CONTEXT_HINT`, `SOPHI_CONTEXT_ORIENTATION`, `SOPHI_USAGE_LOG`.
+   Pending: live E1/E5 and the live cache check (`evals/context/EXPERIMENTS.md`), deferred to the end
+   of the work.
 
 ## Reasons
 
