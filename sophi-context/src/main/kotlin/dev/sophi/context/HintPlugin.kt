@@ -40,11 +40,13 @@ class HintPlugin(
             if (hits.isEmpty()) return null
             val projects = engine.projectsOrNull() ?: return null
             val multi = ids.size > 1
+            fun clean(t: String) = t.replace('\r', ' ').replace('\n', ' ').replace('<', '‹').replace('>', '›').trim()
+            val summaries = hits.map { it.projectId }.distinct().associateWith { engine.fileSummariesOrNull(it) }
             val lines = hits.take(3).map { h ->
-                val summary = engine.fileSummariesOrNull(h.projectId)?.firstOrNull { it.first == h.path }?.third?.takeIf { it.isNotBlank() }
-                    ?: h.snippet.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
-                val shown = if (multi) "${projects.firstOrNull { it.id == h.projectId }?.name ?: h.projectId}:${h.path}" else h.path
-                "$shown:${h.startLine} — ${h.label ?: "-"} — ${summary.replace('\n', ' ')}"
+                val summary = clean(summaries[h.projectId]?.firstOrNull { it.first == h.path }?.third?.takeIf { it.isNotBlank() }
+                    ?: h.snippet.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty())
+                val shown = clean(if (multi) "${projects.firstOrNull { it.id == h.projectId }?.name ?: h.projectId}:${h.path}" else h.path)
+                "$shown:${h.startLine} — ${clean(h.label ?: "-")}" + if (summary.isEmpty()) "" else " — $summary"
             }
             val head = "<context_hint>Files likely relevant to this message (from the project index — read them before relying on them):"
             val tail = "</context_hint>"
