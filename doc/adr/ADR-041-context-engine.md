@@ -1,7 +1,7 @@
 # ADR-041: Context engine on a shared, lock-elected ArcadeDB store
 
 **Date:** 2026-10-12
-**Status:** Accepted — M0–M2 implemented; live E1/E5 and the live cache check pending
+**Status:** Accepted — M0–M3 implemented; live E1/E5 and the live cache check pending
 
 ## Context
 
@@ -77,6 +77,27 @@ addendum).
    on tiny repos. Knobs: `SOPHI_CONTEXT_HINT`, `SOPHI_CONTEXT_ORIENTATION`, `SOPHI_USAGE_LOG`.
    Pending: live E1/E5 and the live cache check (`evals/context/EXPERIMENTS.md`), deferred to the end
    of the work.
+8. **M3 — session scope and the management surface.** A session is bound to at most one primary project
+   through `ProjectOf = (sessionId) -> projectId?` (CLI: the project containing the working directory;
+   companion: the chat's project chip, none by default). `ContextScope.searchIds(primary, projects)` gives the
+   search scope: the primary project plus every project flagged global, deduplicated and sorted by root.
+   `search_context`, `read_context` and `project_map` use that scope; orientation (STABLE) is rendered for the
+   primary project only, and its store-failure fallback is keyed on the primary project so a session never
+   serves another project's last render. `RuntimeBuilder.context(engine, owned, project: ProjectOf)` replaced
+   the `scope: () -> List<String>` form (breaking for SDK users). `ContextEngine` gained `setGlobal`,
+   `unavailableReason`, `status(): IndexStatus` (role host/client, per-project info, database disk size) and
+   per-project scan progress (`scanned`/`scanTotal`, cleared when a scan ends, is cancelled or the root is
+   missing). `IndexReset`/`ResetResult` (`Done`, `InUse`, `OtherVersion`) moved from the CLI into
+   `sophi-context` as a library call: it moves the database aside only when no process is hosting it.
+   CLI: `sophi context global <id|dir> on|off`, and `list` marks global projects. The companion owns one
+   engine for the whole app (`ContextEngineHolder`, handed to the runtime with `owned = false` so settings
+   rebuilds never close it; a reset swaps in a fresh engine and bumps a generation that makes the UI rebuild
+   the runtime), remembers each chat's project in `~/.sophi/companion/session-projects.json`, and exposes
+   Settings -> Projects (add/remove, "All chats" switch, rescan, status and scan progress, disk use,
+   Reset index) plus a per-chat project chip for local chats. `ProjectSuggestions`
+   (`~/.sophi/companion/project-suggestions.json`) offers the notes vault, the workspace and CLI folders seen
+   twice; nothing is indexed without a click. Pending: live E1/E5 and the live cache check, as above; the
+   M3 companion UI has not been run end to end by this record.
 
 ## Reasons
 
