@@ -53,6 +53,9 @@ class RuntimeBuilder {
     var usageLogPath: Path? = System.getenv("SOPHI_USAGE_LOG")?.let(Path::of)
     /** Internal experiment knobs (SOPHI_CONTEXT_HINT, SOPHI_CONTEXT_ORIENTATION); tests override. */
     var contextKnobs: Map<String, String> = System.getenv()
+    /** Case-insensitive knob lookup; an unset or unknown value falls back to [default]. */
+    private fun knob(name: String, default: String, vararg others: String): String =
+        contextKnobs[name]?.trim()?.lowercase()?.takeIf { it == default || it in others } ?: default
     /** Global instructions file for the orientation section; null = none. */
     var contextGlobalInstructions: Path? = Orientation.defaultGlobal()
     var model: String = "claude-sonnet-4-5"
@@ -208,9 +211,9 @@ class RuntimeBuilder {
             contextTools(engine, scope).forEach { registry.register(it) }
             plugins.add(ContextPlugin(engine, scope))
             val budget = ContextBudget(window)
-            plugins.add(OrientationPlugin(engine, scope, budget, contextKnobs["SOPHI_CONTEXT_ORIENTATION"] ?: "both",
+            plugins.add(OrientationPlugin(engine, scope, budget, knob("SOPHI_CONTEXT_ORIENTATION", "both", "instructions", "map", "off"),
                 globalInstructions = contextGlobalInstructions))
-            plugins.add(HintPlugin(engine, scope, budget, HintGate(), contextKnobs["SOPHI_CONTEXT_HINT"] ?: "gated"))
+            plugins.add(HintPlugin(engine, scope, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
         }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)

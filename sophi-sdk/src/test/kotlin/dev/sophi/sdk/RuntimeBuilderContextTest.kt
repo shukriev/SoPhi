@@ -66,11 +66,15 @@ class RuntimeBuilderContextTest : FunSpec({
         r1.systemPrompt!! shouldContain "Project conventions"
         r1.systemPrompt shouldContain "## Project map"
         r1.systemPrompt shouldNotContain "<context_hint>"
-        println("SYSTEM PROMPT:\n" + r1.systemPrompt!!.substringAfter("Project conventions").lines().take(30).joinToString("\n"))
-        println("USER MESSAGE:\n" + r1.messages.last().content)
         r1.messages.last().content shouldContain "<context_hint>"
         r1.messages.dropLast(1).none { it.content.contains("<context_hint>") } shouldBe true
         r2.messages.none { it.role == MessageRole.SYSTEM && it.content.contains("<context_hint>") } shouldBe true
+    }
+
+    test("unknown knob values fall back to the defaults, case-insensitively") {
+        val r = twoTurns(mapOf("SOPHI_CONTEXT_HINT" to "ALWAYS", "SOPHI_CONTEXT_ORIENTATION" to "bogus")).component1()
+        r.systemPrompt!! shouldContain "Project conventions" // "bogus" -> both
+        r.messages.last().content shouldContain "<context_hint>" // "ALWAYS" -> always
     }
 
     test("knobs off: no orientation, no hint") {
