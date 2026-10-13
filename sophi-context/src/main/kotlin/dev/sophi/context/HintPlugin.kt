@@ -14,7 +14,7 @@ fun hasIdentifier(message: String): Boolean = IDENTIFIER.containsMatchIn(message
 
 /** Confidence gate for the per-turn hint; defaults are calibrated by the M2 eval. */
 data class HintGate(val minTerms: Int = 3, val minScore: Double = DEFAULT_MIN_SCORE, val minRatio: Double = DEFAULT_MIN_RATIO) {
-    companion object { const val DEFAULT_MIN_SCORE = 0.0; const val DEFAULT_MIN_RATIO = 1.0 }
+    companion object { const val DEFAULT_MIN_SCORE = 10.0; const val DEFAULT_MIN_RATIO = 1.0 }
 
     fun fires(message: String, hits: List<SearchHit>): Boolean =
         Tokenizer.tokens(message).toSet().size >= minTerms && hits.isNotEmpty() && hits[0].score >= minScore &&

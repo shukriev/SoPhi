@@ -3,6 +3,7 @@ package dev.sophi.cli
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.multiple
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import dev.sophi.context.ContextEngine
@@ -111,8 +112,16 @@ class ContextResetCommand : CliktCommand(name = "reset", help = "Delete the cont
 class ContextEvalCommand : CliktCommand(name = "eval", help = "Measure retrieval quality on a labelled query set") {
     private val projectSpecs by option("--project", help = "NAME=PATH, repeatable").multiple(required = true)
     private val queries by option("--queries").required()
+    private val hintGrid by option("--hint-grid", help = "Sweep the hint gate (minScore x minRatio) instead of scoring retrieval").flag()
     override fun run() {
         val projects = projectSpecs.associate { it.substringBefore('=') to Path.of(it.substringAfter('=')) }
-        echo(dev.sophi.context.ContextEval(projects).run(dev.sophi.context.ContextEval.load(Path.of(queries))).toString())
+        val eval = dev.sophi.context.ContextEval(projects)
+        val qs = dev.sophi.context.ContextEval.load(Path.of(queries))
+        if (!hintGrid) { echo(eval.run(qs).toString()); return }
+        val (grid, tops) = eval.hintAnalysis(qs, listOf(0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 15.0), listOf(1.0, 1.1, 1.25, 1.5, 2.0))
+        val t = tops.sorted()
+        echo("n=${qs.size}  top-1 score min=%.2f median=%.2f p90=%.2f max=%.2f".format(t.first(), t[t.size / 2], t[(t.size * 0.9).toInt().coerceAtMost(t.size - 1)], t.last()))
+        echo("minScore minRatio coverage precision")
+        grid.forEach { echo("%8.1f %8.2f %8.3f %9.3f".format(it.minScore, it.minRatio, it.coverage, it.precision)) }
     }
 }

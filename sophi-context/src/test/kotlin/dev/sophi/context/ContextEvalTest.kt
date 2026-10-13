@@ -27,6 +27,23 @@ class ContextEvalTest : FunSpec({
         r.misses.size shouldBe 1
     }
 
+    test("hintGrid: open gate covers the relevant queries, a huge minScore covers none") {
+        val root = tempdir().toPath()
+        root.write("core/Compactor.kt", "class ContextCompactor { fun compact() { summarise older rounds when the window fills } }")
+        root.write("hub/HubServer.kt", "class HubServer(val port: Int = 8765) { hub server port listener }")
+        root.write("docs/notes.md", "# Notes\n\nNothing relevant.\n")
+        val queries = listOf(
+            EvalQuery("summarise older rounds when window fills", listOf("demo/core/Compactor.kt")),
+            EvalQuery("hub server port listener", listOf("demo/hub/HubServer.kt")),
+            EvalQuery("zebra crossing giraffe", listOf("demo/nope.kt"))
+        )
+        val g = ContextEval(mapOf("demo" to root), GitProbe.none).hintGrid(queries, listOf(0.0, 1e6), listOf(1.0))
+        g[0].coverage shouldBe (2.0 / 3)
+        g[0].precision shouldBe 1.0
+        g[1].coverage shouldBe 0.0
+        g[1].precision shouldBe 1.0
+    }
+
     test("load reads TSV and skips comments") {
         val f = tempdir().toPath().resolve("q.tsv")
         Files.writeString(f, "# header\nwhere is x\ta/b.kt,c.kt\n\n")

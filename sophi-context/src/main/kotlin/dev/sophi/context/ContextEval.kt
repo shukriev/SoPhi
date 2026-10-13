@@ -17,6 +17,8 @@ data class EvalReport(
     }
 }
 
+data class HintPoint(val minScore: Double, val minRatio: Double, val coverage: Double, val precision: Double)
+
 /**
  * Retrieval eval (spec §9): indexes [projects] into a throwaway store, so numbers are reproducible
  * and the user's ~/.sophi/db is never touched. The grep baseline mirrors the bake-off's: files
@@ -33,7 +35,8 @@ class ContextEval(
             .map { line -> EvalQuery(line.substringBefore('\t'), line.substringAfter('\t').split(',').map { it.trim() }.filter { it.isNotEmpty() }) }
     }
 
-    fun run(queries: List<EvalQuery>): EvalReport {
+    /** Indexes [projects] into a throwaway store, runs [block], and always deletes the store. */
+    private fun <T> withIndex(block: (Retriever, Map<String, String>) -> T): T {
         val dir = Files.createTempDirectory("sophi-context-eval")
         try {
             EmbeddedArcadeStore.open(dir).use { store ->
@@ -47,7 +50,30 @@ class ContextEval(
                     store.upsertDocument(ContextSchema.PROJECT, id, mapOf("root" to root.toRealPath().toString(), "name" to name, "status" to "active"))
                     indexer.scan(id)
                 }
-                val retriever = Retriever(store, weights)
+                return block(Retriever(store, weights), names)
+            }
+        } finally { dir.toFile().deleteRecursively() }
+    }
+
+    /** Hint-gate sweep (spec §6.7): one index, every (minScore, minRatio) point scored on the same top-3 hits. */
+    fun hintGrid(queries: List<EvalQuery>, scores: List<Double>, ratios: List<Double>): List<HintPoint> = hintAnalysis(queries, scores, ratios).first
+
+    /** [hintGrid] plus the top-1 score of every query (for judging τ against the corpus's score scale). */
+    fun hintAnalysis(queries: List<EvalQuery>, scores: List<Double>, ratios: List<Double>): Pair<List<HintPoint>, List<Double>> = withIndex { retriever, names ->
+        val ids = names.keys.toList()
+        val searched = queries.map { q -> q to retriever.search(q.text, ids, limit = 3) }
+        val grid = scores.flatMap { s -> ratios.map { r ->
+            val gate = HintGate(3, s, r)
+            val fired = searched.filter { (q, hits) -> gate.fires(q.text, hits) }
+            val correct = fired.count { (q, hits) -> hits.any { h -> "${names[h.projectId]}/${h.path}".let { f -> q.expected.any { f.contains(it) } } } }
+            HintPoint(s, r, fired.size / queries.size.coerceAtLeast(1).toDouble(), if (fired.isEmpty()) 1.0 else correct.toDouble() / fired.size)
+        } }
+        grid to searched.map { (_, hits) -> hits.firstOrNull()?.score ?: 0.0 }
+    }
+
+    fun run(queries: List<EvalQuery>): EvalReport {
+        return withIndex { retriever, names ->
+            run {
                 val grepFiles = projects.flatMap { (name, root) -> ProjectFiles.list(root, git).files.map { "$name/${it.relPath}" to root.resolve(it.relPath) } }
                     .mapNotNull { (k, p) -> runCatching { k to Files.readAllLines(p).map { it.lowercase() } }.getOrNull() }
                 var h1 = 0; var h5 = 0; var h10 = 0; var mrr = 0.0; var gH10 = 0; var gMrr = 0.0
@@ -68,10 +94,10 @@ class ContextEval(
                 }
                 lat.sort()
                 val n = queries.size.coerceAtLeast(1).toDouble()
-                return EvalReport(queries.size, h1 / n, h5 / n, h10 / n, mrr / n,
+                EvalReport(queries.size, h1 / n, h5 / n, h10 / n, mrr / n,
                     lat.getOrElse(lat.size / 2) { 0.0 }, lat.getOrElse((lat.size * 0.95).toInt()) { 0.0 }, gMrr / n, gH10 / n, misses)
             }
-        } finally { dir.toFile().deleteRecursively() }
+        }
     }
 
     private fun grep(query: String, files: List<Pair<String, List<String>>>): List<String> {
