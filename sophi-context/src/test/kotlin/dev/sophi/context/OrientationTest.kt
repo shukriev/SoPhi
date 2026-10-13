@@ -87,7 +87,7 @@ class OrientationTest : FunSpec({
         f.render(mode = "instructions")!!.let { it shouldContain "Use tabs."; it shouldNotContain "## Project map" }
         f.render(mode = "map")!!.let { it shouldContain "## Project map"; it shouldNotContain "Project conventions" }
         f.render(mode = "off").shouldBeNull()
-        val plugin = OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), mode = "off")
+        val plugin = OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), mode = "off", globalInstructions = null)
         runBlocking { plugin.contribute("s", "hi") }.shouldBeNull()
     }
 
@@ -108,7 +108,7 @@ class OrientationTest : FunSpec({
 
     test("not ready returns null within 1s; a second call returns immediately") {
         val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none))   // never started
-        val plugin = OrientationPlugin(e, { listOf("p") }, ContextBudget(32_000))
+        val plugin = OrientationPlugin(e, { listOf("p") }, ContextBudget(32_000), globalInstructions = null)
         val t0 = System.currentTimeMillis()
         runBlocking { plugin.contribute("s", "hi") }.shouldBeNull()
         (System.currentTimeMillis() - t0) shouldBeLessThan 1_500L
@@ -119,7 +119,7 @@ class OrientationTest : FunSpec({
 
     test("plugin contributes orientation for the project in scope") {
         val f = fixture({ it.write("AGENTS.md", "Use tabs.\n") })
-        val out = runBlocking { OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000)).contribute("s", "hi") }
+        val out = runBlocking { OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), globalInstructions = null).contribute("s", "hi") }
         out!! shouldContain "Use tabs."
     }
 
@@ -179,7 +179,7 @@ class OrientationTest : FunSpec({
         val r2 = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")); it.write("AGENTS.md", "Rule B.\n") }
         val id2 = (e.register(r2, auto = true) as RegisterResult.Registered).project.id
         eventually { e.projectsOrNull()!!.first { it.id == id2 }.lastScanAt != null && e.fileSummariesOrNull(id2)!!.isNotEmpty() }
-        val out = runBlocking { OrientationPlugin(e, { listOf(id2, a.p.id) }, ContextBudget(32_000)).contribute("s", "hi") }
+        val out = runBlocking { OrientationPlugin(e, { listOf(id2, a.p.id) }, ContextBudget(32_000), globalInstructions = null).contribute("s", "hi") }
         out!! shouldContain "Rule B."
     }
 })

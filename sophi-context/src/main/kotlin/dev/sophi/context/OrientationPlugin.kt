@@ -11,7 +11,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Stable system-prompt section: project conventions + map. Waits for the engine only on its first call. */
 class OrientationPlugin(
     private val engine: ContextEngine, private val scope: () -> List<String>, private val budget: ContextBudget,
-    private val mode: String = "both", private val firstWaitMillis: Long = 1_000
+    private val mode: String = "both", private val firstWaitMillis: Long = 1_000,
+    private val globalInstructions: java.nio.file.Path? = Orientation.defaultGlobal()
 ) : SophiPlugin, ContextContributor {
     override val name = "orientation"
     override val placement = Placement.STABLE
@@ -26,7 +27,7 @@ class OrientationPlugin(
             val projects = engine.projectsOrNull() ?: return null
             val project = scope().firstNotNullOfOrNull { id -> projects.firstOrNull { it.id == id } } ?: return null
             val files = engine.fileSummariesOrNull(project.id) ?: return null
-            Orientation.render(project, files, budget.orientationChars, mode)
+            Orientation.render(project, files, budget.orientationChars, mode, globalInstructions)
         } catch (e: kotlin.coroutines.cancellation.CancellationException) { throw e
         } catch (e: Exception) { null }
     }
