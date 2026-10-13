@@ -1,6 +1,11 @@
 package dev.sophi.sdk
 
+import dev.sophi.context.ContextBudget
 import dev.sophi.context.ContextEngine
+import dev.sophi.context.HintGate
+import dev.sophi.context.HintPlugin
+import dev.sophi.context.Orientation
+import dev.sophi.context.OrientationPlugin
 import dev.sophi.context.ContextPlugin
 import dev.sophi.context.tools.contextTools
 import dev.sophi.ai.api.EmbeddingProvider
@@ -46,6 +51,10 @@ class RuntimeBuilder {
     var provider: LLMProvider? = null
     /** Opt-in JSONL usage log (numbers only, never content): input = all prompt tokens, cacheRead = the part served from cache. Internal experiment knob. */
     var usageLogPath: Path? = System.getenv("SOPHI_USAGE_LOG")?.let(Path::of)
+    /** Internal experiment knobs (SOPHI_CONTEXT_HINT, SOPHI_CONTEXT_ORIENTATION); tests override. */
+    var contextKnobs: Map<String, String> = System.getenv()
+    /** Global instructions file for the orientation section; null = none. */
+    var contextGlobalInstructions: Path? = Orientation.defaultGlobal()
     var model: String = "claude-sonnet-4-5"
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
@@ -198,6 +207,10 @@ class RuntimeBuilder {
         contextConfig?.let { (engine, scope, _) ->
             contextTools(engine, scope).forEach { registry.register(it) }
             plugins.add(ContextPlugin(engine, scope))
+            val budget = ContextBudget(window)
+            plugins.add(OrientationPlugin(engine, scope, budget, contextKnobs["SOPHI_CONTEXT_ORIENTATION"] ?: "both",
+                globalInstructions = contextGlobalInstructions))
+            plugins.add(HintPlugin(engine, scope, budget, HintGate(), contextKnobs["SOPHI_CONTEXT_HINT"] ?: "gated"))
         }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
