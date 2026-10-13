@@ -38,7 +38,7 @@ class Indexer(
             ?: return ScanStats(0, 0, 0, 0, false)
         val root = Path.of(project["root"] as String)
         if (!Files.isDirectory(root)) {
-            store.command("UPDATE ${ContextSchema.PROJECT} SET status = 'missing' WHERE id = ?", projectId)
+            store.command("UPDATE ${ContextSchema.PROJECT} SET status = 'missing', scanned = null, scanTotal = null WHERE id = ?", projectId)
             return ScanStats(0, 0, 0, 0, false)
         }
         val listing = ProjectFiles.list(root, git, maxFiles)
@@ -47,7 +47,7 @@ class Indexer(
         store.command("UPDATE ${ContextSchema.PROJECT} SET scanned = 0, scanTotal = ? WHERE id = ?", listing.files.size, projectId)
         var added = 0; var changed = 0; var unchanged = 0; var seen = 0
         for (f in listing.files) {
-            if (cancelled()) return ScanStats(added, changed, 0, unchanged, listing.partial)
+            if (cancelled()) { clearProgress(projectId); return ScanStats(added, changed, 0, unchanged, listing.partial) }
             if (++seen % progressEvery == 0) store.command("UPDATE ${ContextSchema.PROJECT} SET scanned = ? WHERE id = ?", seen, projectId)
             val old = known[f.relPath]
             if (old != null && (old["size"] as Number).toLong() == f.size && (old["mtime"] as Number).toLong() == f.mtime) { unchanged++; continue }
@@ -70,7 +70,7 @@ class Indexer(
         val gone = if (listing.partial) emptyList() else known.keys.filter { it !in present }
         var removedOk = 0
         for (rel in gone) {
-            if (cancelled()) return ScanStats(added, changed, removedOk, unchanged, listing.partial)
+            if (cancelled()) { clearProgress(projectId); return ScanStats(added, changed, removedOk, unchanged, listing.partial) }
             runCatching { removeFile(ContextSchema.fileId(projectId, rel)) }
                 .onFailure { System.err.println("context: skipped removal of $rel: ${it.message}") }.onSuccess { removedOk++ }
         }
@@ -81,6 +81,9 @@ class Indexer(
         store.command("UPDATE ${ContextSchema.PROJECT} SET status = 'active' WHERE id = ? AND status = 'missing'", projectId)
         return ScanStats(added, changed, removedOk, unchanged, listing.partial)
     }
+
+    private fun clearProgress(projectId: String) =
+        store.command("UPDATE ${ContextSchema.PROJECT} SET scanned = null, scanTotal = null WHERE id = ?", projectId)
 
     fun dropProject(projectId: String) {
         store.query("SELECT id FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId).forEach { removeFile(it["id"] as String) }

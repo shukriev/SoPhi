@@ -126,8 +126,20 @@ class ContextEngine(
             diskBytes = dirSize(root.resolve("databases").resolve(DATABASE)))
     }
 
-    private fun dirSize(p: Path): Long = if (!Files.exists(p)) 0 else
-        Files.walk(p).use { s -> s.filter { Files.isRegularFile(it) }.mapToLong { runCatching { Files.size(it) }.getOrDefault(0) }.sum() }
+    /** Best effort: ArcadeDB creates/deletes files while we walk, so unreadable or vanished entries are skipped. */
+    internal fun dirSize(p: Path): Long {
+        var total = 0L
+        try {
+            Files.walkFileTree(p, object : java.nio.file.SimpleFileVisitor<Path>() {
+                override fun visitFile(file: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
+                    if (attrs.isRegularFile) total += attrs.size()
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+                override fun visitFileFailed(file: Path, exc: java.io.IOException) = java.nio.file.FileVisitResult.CONTINUE
+            })
+        } catch (e: Exception) { /* partial sum */ }
+        return total
+    }
 
     fun requestScan(projectId: String) { withStoreOrNull { requestScan(it, projectId) } }
 

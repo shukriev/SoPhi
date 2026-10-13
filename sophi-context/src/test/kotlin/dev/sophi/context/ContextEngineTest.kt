@@ -110,4 +110,12 @@ class ContextEngineTest : FunSpec({
         val s = e.status()
         s.ready shouldBe false; s.reason.shouldNotBeNull(); s.projects shouldBe emptyList()
     }
+
+    test("dirSize of a missing path is 0 and sums files of an existing one; status never throws") {
+        val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none))   // never started
+        e.dirSize(tempdir().toPath().resolve("nope")) shouldBe 0L
+        val d = tempdir().toPath().also { it.write("a/x.bin", "12345"); it.write("y.bin", "123") }
+        e.dirSize(d) shouldBe 8L
+        e.status().let { it.ready shouldBe false; it.diskBytes shouldBe 0L }
+    }
 })

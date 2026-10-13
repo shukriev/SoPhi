@@ -136,14 +136,28 @@ class IndexerTest : FunSpec({
 
     test("progress fields are set during a scan and cleared after it") {
         var checks = 0
+        var mid: Map<String, Any?> = emptyMap()
         val (s, _, root) = setup()
         (1..5).forEach { root.write("f$it.kt", "class C$it") }
-        Indexer(s, GitProbe.none, progressEvery = 2, cancelled = { ++checks > 3 }).scan("p1")
-        val mid = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()
+        // a cancelled scan clears progress on return, so observe the mid-scan state from inside the cancel hook
+        val cancelled = Indexer(s, GitProbe.none, progressEvery = 2, cancelled = {
+            (++checks > 3).also { if (it) mid = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single() }
+        })
+        cancelled.scan("p1")
+        s.query("SELECT scanned FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()["scanned"].shouldBeNull()
         (mid["scanTotal"] as Number).toInt() shouldBe 5
         (mid["scanned"] as Number).toInt() shouldBe 2
         Indexer(s, GitProbe.none, progressEvery = 2).scan("p1")
         val done = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()
         done["scanned"].shouldBeNull(); done["scanTotal"].shouldBeNull()
+    }
+
+    test("a scan of a missing root leaves no progress fields") {
+        val (s, ix, root) = setup()
+        s.command("UPDATE ${ContextSchema.PROJECT} SET scanned = 1, scanTotal = 5 WHERE id = ?", "p1")
+        Files.delete(root)
+        ix.scan("p1")
+        val r = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()
+        r["scanned"].shouldBeNull(); r["scanTotal"].shouldBeNull()
     }
 })
