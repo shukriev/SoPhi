@@ -45,3 +45,117 @@ Pre-registered selection rule (written before any grid was run):
 - A fired hint is correct if any of its (up to 3) files matches an expected substring. coverage = fired / n; precision = correct / fired (1.0 when nothing fired).
 - Select the point with the highest coverage among those with precision >= 0.80 on queries.tsv AND precision >= 0.70 on commits.tsv. Ties: higher precision on commits.tsv.
 - Coverage for the selection is read from queries.tsv. If no point qualifies, the gate stays closed by default (hint mode default becomes `off`). The rule is not loosened and the queries are not edited.
+
+## Hint gate results (E1, offline)
+
+Corpus: SoPhi and sophi-companion main checkouts indexed into a temp store. Raw output of `sophi context eval ... --hint-grid` (top-3 hits, minTerms 3, identifier bypass included in the gate).
+
+queries.tsv:
+```
+n=31  top-1 score min=11.11 median=29.59 p90=42.69 max=55.17
+minScore minRatio coverage precision
+     0.0     1.00    1.000     0.839
+     0.0     1.10    0.839     0.846
+     0.0     1.25    0.516     1.000
+     0.0     1.50    0.290     1.000
+     0.0     2.00    0.194     1.000
+     2.0     1.00    1.000     0.839
+     2.0     1.10    0.839     0.846
+     2.0     1.25    0.516     1.000
+     2.0     1.50    0.290     1.000
+     2.0     2.00    0.194     1.000
+     4.0     1.00    1.000     0.839
+     4.0     1.10    0.839     0.846
+     4.0     1.25    0.516     1.000
+     4.0     1.50    0.290     1.000
+     4.0     2.00    0.194     1.000
+     6.0     1.00    1.000     0.839
+     6.0     1.10    0.839     0.846
+     6.0     1.25    0.516     1.000
+     6.0     1.50    0.290     1.000
+     6.0     2.00    0.194     1.000
+     8.0     1.00    1.000     0.839
+     8.0     1.10    0.839     0.846
+     8.0     1.25    0.516     1.000
+     8.0     1.50    0.290     1.000
+     8.0     2.00    0.194     1.000
+    10.0     1.00    1.000     0.839
+    10.0     1.10    0.839     0.846
+    10.0     1.25    0.516     1.000
+    10.0     1.50    0.290     1.000
+    10.0     2.00    0.194     1.000
+    12.0     1.00    0.968     0.833
+    12.0     1.10    0.839     0.846
+    12.0     1.25    0.516     1.000
+    12.0     1.50    0.290     1.000
+    12.0     2.00    0.194     1.000
+    15.0     1.00    0.968     0.833
+    15.0     1.10    0.839     0.846
+    15.0     1.25    0.516     1.000
+    15.0     1.50    0.290     1.000
+    15.0     2.00    0.194     1.000
+```
+
+commits.tsv:
+```
+n=258  top-1 score min=5.52 median=26.63 p90=54.21 max=90.24
+minScore minRatio coverage precision
+     0.0     1.00    0.988     0.733
+     0.0     1.10    0.733     0.767
+     0.0     1.25    0.574     0.784
+     0.0     1.50    0.419     0.870
+     0.0     2.00    0.360     0.882
+     2.0     1.00    0.988     0.733
+     2.0     1.10    0.733     0.767
+     2.0     1.25    0.574     0.784
+     2.0     1.50    0.419     0.870
+     2.0     2.00    0.360     0.882
+     4.0     1.00    0.988     0.733
+     4.0     1.10    0.733     0.767
+     4.0     1.25    0.574     0.784
+     4.0     1.50    0.419     0.870
+     4.0     2.00    0.360     0.882
+     6.0     1.00    0.988     0.733
+     6.0     1.10    0.733     0.767
+     6.0     1.25    0.574     0.784
+     6.0     1.50    0.419     0.870
+     6.0     2.00    0.360     0.882
+     8.0     1.00    0.988     0.733
+     8.0     1.10    0.733     0.767
+     8.0     1.25    0.574     0.784
+     8.0     1.50    0.419     0.870
+     8.0     2.00    0.360     0.882
+    10.0     1.00    0.981     0.735
+    10.0     1.10    0.733     0.767
+    10.0     1.25    0.574     0.784
+    10.0     1.50    0.419     0.870
+    10.0     2.00    0.360     0.882
+    12.0     1.00    0.969     0.744
+    12.0     1.10    0.725     0.775
+    12.0     1.25    0.574     0.784
+    12.0     1.50    0.419     0.870
+    12.0     2.00    0.360     0.882
+    15.0     1.00    0.868     0.768
+    15.0     1.10    0.698     0.789
+    15.0     1.25    0.566     0.788
+    15.0     1.50    0.415     0.869
+    15.0     2.00    0.360     0.882
+```
+
+Top-1 BM25 score distribution:
+
+| Set | n | min | median | p90 | max |
+|---|---|---|---|---|---|
+| queries.tsv | 31 | 11.11 | 29.59 | 42.69 | 55.17 |
+| commits.tsv | 258 | 5.52 | 26.63 | 54.21 | 90.24 |
+
+Selected point: **minScore 10.0, minRatio 1.0**.
+
+| Set | coverage | precision |
+|---|---|---|
+| queries.tsv | 1.000 | 0.839 |
+| commits.tsv | 0.981 | 0.735 |
+
+Trace of the rule: qualifying needs precision >= 0.80 on queries.tsv and >= 0.70 on commits.tsv. At minRatio 1.1 and above, queries.tsv coverage is <= 0.839, so those points lose to coverage 1.000. At minRatio 1.0, minScore 0-10 all reach queries.tsv coverage 1.000 (precision 0.839) with commits.tsv precision 0.733 (0-8) or 0.735 (10), so all qualify and tie on coverage. minScore 12 and 15 fall to 0.968 coverage and are out. Tie-break is higher commits.tsv precision: 0.735 at minScore 10 beats 0.733, so minScore 10.0 / minRatio 1.0 is selected. Defaults in `HintGate` are set to these values.
+
+Limits: the grid's score range (0-15) sat below the real top-1 distribution (median 27-30), so minScore <= 10 barely filters and minRatio 1.0 always passes; the chosen gate is effectively "at least 3 content terms and top score >= 10". Both query sets contain only real questions, with no chit-chat or off-topic negatives, so offline E1 cannot measure false fires. Roughly 1 in 6 (queries.tsv) to 1 in 4 (commits.tsv) fired hints point at a wrong file. The live E1 (deferred to the end of the work) decides whether the hint helps, and should include negative messages.

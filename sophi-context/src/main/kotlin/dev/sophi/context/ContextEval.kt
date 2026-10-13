@@ -73,30 +73,28 @@ class ContextEval(
 
     fun run(queries: List<EvalQuery>): EvalReport {
         return withIndex { retriever, names ->
-            run {
-                val grepFiles = projects.flatMap { (name, root) -> ProjectFiles.list(root, git).files.map { "$name/${it.relPath}" to root.resolve(it.relPath) } }
-                    .mapNotNull { (k, p) -> runCatching { k to Files.readAllLines(p).map { it.lowercase() } }.getOrNull() }
-                var h1 = 0; var h5 = 0; var h10 = 0; var mrr = 0.0; var gH10 = 0; var gMrr = 0.0
-                val lat = ArrayList<Double>(); val misses = ArrayList<String>()
-                for (q in queries) {
-                    var files: List<String> = emptyList()
-                    repeat(3) { rep ->
-                        val t0 = System.nanoTime()
-                        files = retriever.search(q.text, names.keys.toList(), limit = 10).map { "${names[it.projectId]}/${it.path}" }
-                        if (rep > 0) lat.add((System.nanoTime() - t0) / 1e6)
-                    }
-                    val rank = files.indexOfFirst { f -> q.expected.any { f.contains(it) } } + 1
-                    if (rank == 1) h1++; if (rank in 1..5) h5++; if (rank in 1..10) h10++; if (rank > 0) mrr += 1.0 / rank
-                    if (rank == 0 || rank > 5) misses += (if (rank == 0) "MISS " else "r$rank ") + q.text + " -> " + (files.firstOrNull() ?: "-")
-                    val g = grep(q.text, grepFiles)
-                    val gRank = g.indexOfFirst { f -> q.expected.any { f.contains(it) } } + 1
-                    if (gRank in 1..10) gH10++; if (gRank in 1..10) gMrr += 1.0 / gRank
+            val grepFiles = projects.flatMap { (name, root) -> ProjectFiles.list(root, git).files.map { "$name/${it.relPath}" to root.resolve(it.relPath) } }
+                .mapNotNull { (k, p) -> runCatching { k to Files.readAllLines(p).map { it.lowercase() } }.getOrNull() }
+            var h1 = 0; var h5 = 0; var h10 = 0; var mrr = 0.0; var gH10 = 0; var gMrr = 0.0
+            val lat = ArrayList<Double>(); val misses = ArrayList<String>()
+            for (q in queries) {
+                var files: List<String> = emptyList()
+                repeat(3) { rep ->
+                    val t0 = System.nanoTime()
+                    files = retriever.search(q.text, names.keys.toList(), limit = 10).map { "${names[it.projectId]}/${it.path}" }
+                    if (rep > 0) lat.add((System.nanoTime() - t0) / 1e6)
                 }
-                lat.sort()
-                val n = queries.size.coerceAtLeast(1).toDouble()
-                EvalReport(queries.size, h1 / n, h5 / n, h10 / n, mrr / n,
-                    lat.getOrElse(lat.size / 2) { 0.0 }, lat.getOrElse((lat.size * 0.95).toInt()) { 0.0 }, gMrr / n, gH10 / n, misses)
+                val rank = files.indexOfFirst { f -> q.expected.any { f.contains(it) } } + 1
+                if (rank == 1) h1++; if (rank in 1..5) h5++; if (rank in 1..10) h10++; if (rank > 0) mrr += 1.0 / rank
+                if (rank == 0 || rank > 5) misses += (if (rank == 0) "MISS " else "r$rank ") + q.text + " -> " + (files.firstOrNull() ?: "-")
+                val g = grep(q.text, grepFiles)
+                val gRank = g.indexOfFirst { f -> q.expected.any { f.contains(it) } } + 1
+                if (gRank in 1..10) gH10++; if (gRank in 1..10) gMrr += 1.0 / gRank
             }
+            lat.sort()
+            val n = queries.size.coerceAtLeast(1).toDouble()
+            EvalReport(queries.size, h1 / n, h5 / n, h10 / n, mrr / n,
+                lat.getOrElse(lat.size / 2) { 0.0 }, lat.getOrElse((lat.size * 0.95).toInt()) { 0.0 }, gMrr / n, gH10 / n, misses)
         }
     }
 
