@@ -187,7 +187,8 @@ class OrientationTest : FunSpec({
 
     test("orientation stays byte-identical across a store failure and refreshes when the key changes") {
         val f = fixture({ it.write("AGENTS.md", "Use tabs.\n") })
-        val plugin = OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), globalInstructions = null)
+        var scoped = listOf(f.p.id)
+        val plugin = OrientationPlugin(f.e, { scoped }, ContextBudget(32_000), globalInstructions = null)
         val first = runBlocking { plugin.contribute("s", "hi") }.shouldNotBeNull()
         runBlocking { plugin.contribute("s", "hi") } shouldBe first
         // an instruction-file change is a new key: re-rendered
@@ -198,6 +199,9 @@ class OrientationTest : FunSpec({
         // the store goes away: the last good render is returned unchanged
         f.e.close()
         runBlocking { plugin.contribute("s", "hi") } shouldBe changed
+        // a scope switch during the outage must not serve another project's orientation
+        scoped = listOf("other-project")
+        runBlocking { plugin.contribute("s", "hi") }.shouldBeNull()
     }
 
     test("mode is normalised: Both and OFF work from a direct caller") {

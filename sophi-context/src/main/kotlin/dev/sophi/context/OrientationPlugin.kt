@@ -25,7 +25,6 @@ class OrientationPlugin(
     private val first = AtomicBoolean(true)
     private class Rendered(val key: String, val text: String?)
     private val last = java.util.concurrent.ConcurrentHashMap<String, Rendered>()
-    @Volatile private var lastId: String? = null
 
     private fun stamp(p: java.nio.file.Path?): String =
         (try { p?.let { "${java.nio.file.Files.getLastModifiedTime(it).toMillis()}/${java.nio.file.Files.size(it)}" } } catch (e: java.io.IOException) { null }).toString()
@@ -40,7 +39,6 @@ class OrientationPlugin(
             val root = java.nio.file.Path.of(project.root)
             val key = listOf(project.id, project.lastScanAt, stamp(globalInstructions),
                 stamp(root.resolve("AGENTS.md")), stamp(root.resolve("CLAUDE.md")), stamp(root.resolve(".sophi/instructions.md"))).joinToString("|")
-            lastId = project.id
             last[project.id]?.takeIf { it.key == key }?.let { return it.text }
             val files = engine.fileSummariesOrNull(project.id) ?: return fallback()
             val text = Orientation.render(project, files, budget.orientationChars, mode, globalInstructions)
@@ -50,6 +48,6 @@ class OrientationPlugin(
         } catch (e: Exception) { fallback() }
     }
 
-    /** Store trouble: keep serving the last good render rather than dropping the section for a turn. */
-    private fun fallback(): String? = lastId?.let { last[it]?.text }
+    /** Store trouble: keep serving the current scope's last good render rather than dropping the section for a turn. */
+    private fun fallback(): String? = scope().firstNotNullOfOrNull { last[it]?.text }
 }
