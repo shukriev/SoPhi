@@ -4,11 +4,14 @@ import dev.sophi.store.arcade.ArcadeHost
 import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.IncompatibleHostException
 import dev.sophi.store.arcade.Role
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+
+data class IndexStatus(val ready: Boolean, val reason: String?, val role: String?, val projects: List<ProjectInfo>, val diskBytes: Long)
 
 /**
  * The context index shared by every Sophi process (spec §4). Opens the M0 [ArcadeHost] in the
@@ -41,6 +44,9 @@ class ContextEngine(
 
     val ready: Boolean get() = host != null && !closed
 
+    /** Why the index failed to open; null while opening or ready. */
+    @Volatile var unavailableReason: String? = null; private set
+
     fun start(): ContextEngine {
         Thread({
             try {
@@ -49,8 +55,10 @@ class ContextEngine(
                 host = h
                 if (closed) { host = null; h.close() }
             } catch (e: IncompatibleHostException) {
+                unavailableReason = "another Sophi version is using the index — update this app or the CLI"
                 System.err.println("context: ${e.message} — update this Sophi to use the shared index")
             } catch (e: Exception) {
+                unavailableReason = "index unavailable (${e.message})"
                 System.err.println("context: index unavailable (${e.message})")
             } finally { opened.countDown() }
         }, "sophi-context-open").apply { isDaemon = true }.start()
@@ -105,6 +113,22 @@ class ContextEngine(
         }
     }
 
+    /** false = not ready or unknown project id. */
+    fun setGlobal(projectId: String, global: Boolean): Boolean = withStoreOrNull { s ->
+        if (s.query("SELECT id FROM ${ContextSchema.PROJECT} WHERE id = ?", projectId).isEmpty()) false
+        else { s.command("UPDATE ${ContextSchema.PROJECT} SET isGlobal = ? WHERE id = ?", global, projectId); true }
+    } ?: false
+
+    fun status(): IndexStatus {
+        val projects = if (closed) null else projectsOrNull()
+        return IndexStatus(ready = projects != null, reason = if (projects != null) null else unavailableReason ?: NOT_READY,
+            role = host?.role?.let { if (it == Role.HOST) "host" else "client" }, projects = projects ?: emptyList(),
+            diskBytes = dirSize(root.resolve("databases").resolve(DATABASE)))
+    }
+
+    private fun dirSize(p: Path): Long = if (!Files.exists(p)) 0 else
+        Files.walk(p).use { s -> s.filter { Files.isRegularFile(it) }.mapToLong { runCatching { Files.size(it) }.getOrDefault(0) }.sum() }
+
     fun requestScan(projectId: String) { withStoreOrNull { requestScan(it, projectId) } }
 
     fun search(query: String, projectIds: List<String>, limit: Int = 8): List<SearchHit>? = withStoreOrNull { s ->
@@ -146,7 +170,8 @@ class ContextEngine(
     private fun projects(s: ArcadeStore): List<ProjectInfo> = s.documents(ContextSchema.PROJECT).map { r ->
         ProjectInfo(r["id"] as String, r["root"] as String, r["name"] as String, (r["status"] as String?) ?: "active",
             (r["isGlobal"] as Boolean?) ?: false, (r["lastScanAt"] as Number?)?.toLong(), (r["fileCount"] as Number?)?.toInt(),
-            (r["partial"] as Boolean?) ?: false, (r["modules"] as List<*>?)?.map { it.toString() } ?: emptyList())
+            (r["partial"] as Boolean?) ?: false, (r["modules"] as List<*>?)?.map { it.toString() } ?: emptyList(),
+            (r["scanned"] as Number?)?.toInt(), (r["scanTotal"] as Number?)?.toInt())
     }.sortedBy { it.root }
 
     /** Writer thread only. */

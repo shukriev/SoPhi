@@ -6,7 +6,8 @@ import java.security.MessageDigest
 
 data class ProjectInfo(
     val id: String, val root: String, val name: String, val status: String, val global: Boolean,
-    val lastScanAt: Long?, val fileCount: Int?, val partial: Boolean, val modules: List<String>
+    val lastScanAt: Long?, val fileCount: Int?, val partial: Boolean, val modules: List<String>,
+    val scanned: Int? = null, val scanTotal: Int? = null   // non-null only while a scan runs
 )
 
 sealed interface RegisterResult {

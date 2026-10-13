@@ -4,6 +4,7 @@ import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import java.nio.file.Files
@@ -131,5 +132,18 @@ class IndexerTest : FunSpec({
         ix.scan("p1")
         s.documents(ContextSchema.FILE).size shouldBe 1
         s.query("SELECT lastScanAt FROM Project WHERE id = ?", "p1").single()["lastScanAt"] shouldBe null
+    }
+
+    test("progress fields are set during a scan and cleared after it") {
+        var checks = 0
+        val (s, _, root) = setup()
+        (1..5).forEach { root.write("f$it.kt", "class C$it") }
+        Indexer(s, GitProbe.none, progressEvery = 2, cancelled = { ++checks > 3 }).scan("p1")
+        val mid = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()
+        (mid["scanTotal"] as Number).toInt() shouldBe 5
+        (mid["scanned"] as Number).toInt() shouldBe 2
+        Indexer(s, GitProbe.none, progressEvery = 2).scan("p1")
+        val done = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()
+        done["scanned"].shouldBeNull(); done["scanTotal"].shouldBeNull()
     }
 })

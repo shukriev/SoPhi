@@ -49,30 +49,19 @@ class ContextCommandTest : FunSpec({
         out shouldBe listOf(NOT_READY_MSG, NOT_READY_MSG)
     }
 
-    test("reset deletes the database when nothing hosts it") {
-        val root = tempdir().toPath(); val out = mutableListOf<String>()
-        val host = dev.sophi.store.arcade.ArcadeHost.open(root, ContextEngine.DATABASE, ContextEngine.SCHEMA_VERSION, "t")
-        host.role shouldBe dev.sophi.store.arcade.Role.HOST
-        // Same-JVM second open can't take the OS lock the way another process would; only assert the free case.
-        host.close()
-        ContextReset(root) { out += it }.run()
+    test("reset maps the result to a message") {
+        val out = mutableListOf<String>()
+        ContextReset(tempdir().toPath()) { out += it }.run()
         out.single() shouldContain "moved aside"
     }
 
-    test("reset moves a corrupted index aside and a fresh engine rebuilds on that root") {
-        val root = tempdir().toPath(); val out = mutableListOf<String>()
-        ContextEngine(root, GitProbe.none, drainEveryMillis = 100).start().use { it.awaitReady(10_000) shouldBe true }
-        val db = root.resolve("databases").resolve(ContextEngine.DATABASE)
-        Files.walk(db).use { s -> s.filter { Files.isRegularFile(it) }.forEach { Files.write(it, ByteArray(4096) { i -> (i * 31 + 7).toByte() }) } }
-        ContextReset(root) { out += it }.run()
-        out.single() shouldContain "moved aside"
-        Files.list(root).use { s -> s.anyMatch { it.fileName.toString().startsWith("context.corrupt-") } } shouldBe true
-        val fresh = autoClose(ContextEngine(root, GitProbe.none, drainEveryMillis = 100).start())
-        fresh.awaitReady(10_000) shouldBe true
-        val repo = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")); Files.writeString(it.resolve("a.kt"), "class Zebra") }
-        val id = (fresh.register(repo, auto = true) as dev.sophi.context.RegisterResult.Registered).project.id
-        val end = System.currentTimeMillis() + 10_000
-        while (fresh.search("zebra", listOf(id))?.isNotEmpty() != true) { check(System.currentTimeMillis() < end) { "timed out" }; Thread.sleep(50) }
+    test("global flags a project by directory and list shows it") {
+        val e = engine(); val dir = tempdir().toPath(); val out = mutableListOf<String>()
+        ContextAdd(e, dir) { }.run()
+        ContextGlobal(e, dir.toString(), true) { out += it }.run()
+        ContextList(e) { out += it }.run()
+        out[0] shouldContain "now global"
+        out[1] shouldContain " global"
     }
 
     test("add says it is indexed while a session runs, not that it is indexing now") {

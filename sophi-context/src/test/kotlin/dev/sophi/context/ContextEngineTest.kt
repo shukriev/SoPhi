@@ -2,6 +2,7 @@ package dev.sophi.context
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import java.nio.file.Files
@@ -85,5 +86,28 @@ class ContextEngineTest : FunSpec({
         val e = engine(tempdir().toPath())
         val home = Path.of(System.getProperty("user.home")).toRealPath()
         e.register(home.parent, auto = false).shouldBeInstanceOf<RegisterResult.Refused>()
+    }
+
+    test("setGlobal flips the flag and a fresh read sees it") {
+        val e = engine(tempdir().toPath())
+        val id = (e.register(repo(), auto = false) as RegisterResult.Registered).project.id
+        e.setGlobal(id, true) shouldBe true
+        e.projects().first { it.id == id }.global shouldBe true
+        e.setGlobal("nope", true) shouldBe false
+    }
+
+    test("status reports host role, projects and a positive disk size once a scan wrote data") {
+        val e = engine(tempdir().toPath())
+        e.register(repo().also { it.write("a.kt", "class Alpha") }, auto = false)
+        eventually { e.projects().single().lastScanAt != null }
+        val s = e.status()
+        s.ready shouldBe true; s.role shouldBe "host"; s.projects.size shouldBe 1; (s.diskBytes > 0) shouldBe true
+    }
+
+    test("status of an engine that could not open carries the reason and no projects") {
+        val e = autoClose(ContextEngine(tempdir().toPath().resolve("file-not-dir").also { Files.writeString(it, "x") }).start())
+        e.awaitReady(5_000) shouldBe false
+        val s = e.status()
+        s.ready shouldBe false; s.reason.shouldNotBeNull(); s.projects shouldBe emptyList()
     }
 })

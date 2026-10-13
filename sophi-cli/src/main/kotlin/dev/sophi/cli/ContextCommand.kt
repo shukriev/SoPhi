@@ -3,18 +3,14 @@ package dev.sophi.cli
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import dev.sophi.context.ContextEngine
+import dev.sophi.context.IndexReset
 import dev.sophi.context.RegisterResult
-import dev.sophi.store.arcade.ArcadeHost
-import dev.sophi.store.arcade.IncompatibleHostException
-import dev.sophi.store.arcade.Role
-import java.nio.channels.FileChannel
-import java.nio.channels.OverlappingFileLockException
-import java.nio.file.Files
-import java.nio.file.StandardOpenOption
+import dev.sophi.context.ResetResult
 import java.nio.file.Path
 
 internal const val NOT_READY_MSG = "context index not ready (another Sophi may be starting, or it's from a different version) — try again"
@@ -43,7 +39,7 @@ class ContextList(private val engine: ContextEngine, private val echo: (String) 
     fun run() {
         val ps = engine.projectsOrNull() ?: run { echo(NOT_READY_MSG); return }
         if (ps.isEmpty()) { echo("No indexed projects."); return }
-        ps.forEach { p -> echo("${p.id}  ${p.status}${if (p.partial) " (partial)" else ""}  files=${p.fileCount ?: "…"}  ${p.root}") }
+        ps.forEach { p -> echo("${p.id}  ${p.status}${if (p.global) " global" else ""}${if (p.partial) " (partial)" else ""}  files=${p.fileCount ?: "…"}  ${p.root}") }
     }
 }
 
@@ -57,31 +53,22 @@ class ContextRemove(private val engine: ContextEngine, private val idOrDir: Stri
     }
 }
 
-/** Deletes the context database — only when no Sophi process is hosting it. Leaves secret/host.json/the lock alone. */
+/** Maps [IndexReset] outcomes to the CLI messages. */
 class ContextReset(private val root: Path, private val echo: (String) -> Unit) {
-    fun run() {
-        val probe = try {
-            ArcadeHost.open(root, ContextEngine.DATABASE, ContextEngine.SCHEMA_VERSION, "reset", waitForHostMillis = 500)
-        } catch (e: IncompatibleHostException) {
-            echo("the index is used by a different Sophi version — quit it first"); return
-        } catch (e: Exception) { null }
-        val isHost = try { probe?.role == Role.HOST } finally { probe?.close() }
-        // A failed open is either a corrupted database (nobody hosting) or a live host we couldn't attach to:
-        // only the lock tells them apart.
-        if (!isHost && (probe != null || lockHeld())) { echo("Another Sophi process is using the index — quit it first."); return }
-        val db = root.resolve("databases").resolve(ContextEngine.DATABASE)
-        // outside databases/: the server would try to load a moved-aside corrupt copy
-        if (Files.exists(db)) Files.move(db, root.resolve("${ContextEngine.DATABASE}.corrupt-${System.currentTimeMillis()}"))
-        echo("Context index moved aside (${ContextEngine.DATABASE}.corrupt-* under the db folder); it will be rebuilt and projects re-indexed on next use.")
-    }
+    fun run() = echo(when (IndexReset(root).run()) {
+        ResetResult.OtherVersion -> "the index is used by a different Sophi version — quit it first"
+        ResetResult.InUse -> "Another Sophi process is using the index — quit it first."
+        ResetResult.Done -> "Context index moved aside (${ContextEngine.DATABASE}.corrupt-* under the db folder); it will be rebuilt and projects re-indexed on next use."
+    })
+}
 
-    private fun lockHeld(): Boolean {
-        Files.createDirectories(root)
-        return try {
-            FileChannel.open(root.resolve("host.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { ch ->
-                val l = ch.tryLock(); l?.release(); l == null
-            }
-        } catch (e: OverlappingFileLockException) { true }
+class ContextGlobal(private val engine: ContextEngine, private val idOrDir: String, private val on: Boolean, private val echo: (String) -> Unit) {
+    fun run() {
+        val ps = engine.projectsOrNull() ?: run { echo(NOT_READY_MSG); return }
+        val p = ps.firstOrNull { it.id == idOrDir }
+            ?: runCatching { Path.of(idOrDir).toRealPath().toString() }.getOrNull()?.let { root -> ps.firstOrNull { it.root == root } }
+        if (p == null) { echo("No indexed project matches $idOrDir"); return }
+        if (engine.setGlobal(p.id, on)) echo("${p.root} is ${if (on) "now" else "no longer"} global") else echo(NOT_READY_MSG)
     }
 }
 
@@ -103,6 +90,12 @@ class ContextListCommand : CliktCommand(name = "list", help = "List indexed proj
 class ContextRemoveCommand : CliktCommand(name = "remove", help = "Stop indexing a project (by id or folder)") {
     private val target by argument()
     override fun run() = withEngine(::echo) { ContextRemove(it, target) { m -> echo(m) }.run() }
+}
+
+class ContextGlobalCommand : CliktCommand(name = "global", help = "Search a project from every session, bound or not (on|off)") {
+    private val target by argument()
+    private val state by argument().choice("on", "off")
+    override fun run() = withEngine(::echo) { ContextGlobal(it, target, state == "on") { m -> echo(m) }.run() }
 }
 
 class ContextResetCommand : CliktCommand(name = "reset", help = "Delete the context index (it is rebuilt from your files)") {

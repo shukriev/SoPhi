@@ -19,7 +19,8 @@ class Indexer(
     private val now: () -> Long = System::currentTimeMillis,
     private val maxFiles: Int = ProjectFiles.MAX_FILES,
     private val analyze: (String, Role, String, String) -> Analysis = Analyzers::analyze,
-    private val cancelled: () -> Boolean = { false }
+    private val cancelled: () -> Boolean = { false },
+    private val progressEvery: Int = 250
 ) {
     fun rebuildIfStale(schemaVersion: Int) {
         val m = ContextSchema.meta(store)
@@ -43,9 +44,11 @@ class Indexer(
         val listing = ProjectFiles.list(root, git, maxFiles)
         val known = store.query("SELECT id, path, size, mtime, contentHash FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId)
             .associateBy { it["path"] as String }
-        var added = 0; var changed = 0; var unchanged = 0
+        store.command("UPDATE ${ContextSchema.PROJECT} SET scanned = 0, scanTotal = ? WHERE id = ?", listing.files.size, projectId)
+        var added = 0; var changed = 0; var unchanged = 0; var seen = 0
         for (f in listing.files) {
             if (cancelled()) return ScanStats(added, changed, 0, unchanged, listing.partial)
+            if (++seen % progressEvery == 0) store.command("UPDATE ${ContextSchema.PROJECT} SET scanned = ? WHERE id = ?", seen, projectId)
             val old = known[f.relPath]
             if (old != null && (old["size"] as Number).toLong() == f.size && (old["mtime"] as Number).toLong() == f.mtime) { unchanged++; continue }
             try {
@@ -73,7 +76,7 @@ class Indexer(
         }
         val modules = listing.files.filter { !it.relPath.contains('/') && (it.relPath == "pom.xml" || it.relPath.startsWith("settings.gradle")) }
             .flatMap { f -> runCatching { Analyzers.analyze(f.relPath, f.role, f.lang, Files.readString(root.resolve(f.relPath))).modules }.getOrDefault(emptyList()) }
-        store.command("UPDATE ${ContextSchema.PROJECT} SET lastScanAt = ?, fileCount = ?, partial = ?, modules = ? WHERE id = ?",
+        store.command("UPDATE ${ContextSchema.PROJECT} SET lastScanAt = ?, fileCount = ?, partial = ?, modules = ?, scanned = null, scanTotal = null WHERE id = ?",
             now(), listing.files.size, listing.partial, modules, projectId)
         store.command("UPDATE ${ContextSchema.PROJECT} SET status = 'active' WHERE id = ? AND status = 'missing'", projectId)
         return ScanStats(added, changed, removedOk, unchanged, listing.partial)
