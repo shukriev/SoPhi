@@ -10,7 +10,7 @@ Environment variables, read once when the runtime is built; internal, not user s
 |---|---|
 | `SOPHI_CONTEXT_HINT` | `gated`, `always`, `off` |
 | `SOPHI_CONTEXT_ORIENTATION` | `both`, `instructions`, `map`, `off` |
-| `SOPHI_USAGE_LOG` | path of a JSONL usage log (unset = none); one line per `turn` / `summarise` call: input tokens (all prompt tokens, including cache read/write), `cacheRead`, output, timing |
+| `SOPHI_USAGE_LOG` | path of a JSONL usage log (unset = none); one line per `turn` / `summarise` call: input tokens (all prompt tokens, including cache read/write), `cacheRead`, output, model, wall-clock `ts` (latency only from `ts` deltas) |
 
 ## Runs
 
@@ -18,7 +18,7 @@ Run each variant on the same task set, in a registered project, with a fresh `HO
 
 - **E1 — hint:** `SOPHI_CONTEXT_HINT` = `off` / `always` / `gated`, orientation at its default.
 - **E5 — orientation:** `SOPHI_CONTEXT_ORIENTATION` = `off` / `instructions` / `map` / `both`, hint `off` so the effect is isolated.
-- **Live cache check (E5):** two consecutive turns on Anthropic with `SOPHI_USAGE_LOG` set; turn 2 `cacheRead` should be > 0 (system prompt >= 1,024 tokens). On LM Studio `cacheRead` may stay 0 if the server does not report it; record input tokens and timings instead. The structural guarantee (byte-identical system prompts across turns) is already covered by `RuntimeBuilderContextTest`.
+- **Live cache check (E5):** two consecutive turns on Anthropic with `SOPHI_USAGE_LOG` set; turn 2 `cacheRead` should be > 0 (system prompt above the model's minimum cacheable prefix, e.g. 1,024 tokens for Sonnet). On LM Studio `cacheRead` may stay 0 if the server does not report it; record input tokens and timings instead. The structural guarantee (byte-identical system prompts across turns) is already covered by `RuntimeBuilderContextTest`.
 
 ## Metrics per run
 

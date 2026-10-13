@@ -64,11 +64,11 @@ addendum).
    (`SYSTEM_AND_TOOLS`) is on for every request; `TokenUsage.inputTokens` is the total prompt including
    cache read/write and `cacheReadTokens` is reported; `SOPHI_USAGE_LOG` writes a JSONL of numbers
    (kind `turn`/`summarise`). Orientation (STABLE) = `~/.sophi/instructions.md` (at most half the budget,
-   symlink allowed), root `AGENTS.md` / `CLAUDE.md` / `.sophi/instructions.md` framed as project
+   symlink allowed for the global file only), root `AGENTS.md` / `CLAUDE.md` / `.sophi/instructions.md` framed as project
    conventions, nested instruction files listed, and a deterministic sorted project map; budget 8% of
    the window clamped to 600–4,000 tokens, over-budget text keeps its head plus a truncation marker, and
    the first turn waits at most 1 s for the engine. The hint (VOLATILE) is at most 3 lines of
-   `path:line — label — summary`, no file content, repo-derived text sanitised (`‹ ›`), budget
+   `path:line — label — summary`, no file content beyond a one-line summary or snippet head, repo-derived text sanitised (`‹ ›`), budget
    min(1% of window, 300) tokens, and fires only with >= 3 content terms and top score >= 10 (plus
    ratio 1.0, or an identifier in the message). Gate values come from the offline E1 grid
    (`evals/context/RESULTS.md`, "Hint gate results"): queries.tsv coverage 1.000 / precision 0.839,
