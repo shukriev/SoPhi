@@ -12,6 +12,7 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.Placement
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
@@ -101,17 +102,19 @@ class SophiRuntime internal constructor(
         pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(session.id, userInput = input))
         // BEFORE_TURN fires first so a plugin can prime state that its own contribute() then reads.
         // The merged prompt is scoped to this call only — config stays the base prompt.
-        val extra = pluginRegistry.collectContext(session.id, input)
-            .takeIf { it.isNotEmpty() }?.joinToString("\n\n")
-        val turnConfig = if (extra == null) config
-            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
+        val placed = pluginRegistry.collectPlacedContext(session.id, input)
+        val stable = placed.filter { it.placement == Placement.STABLE }.map { it.text }
+        val volatile = placed.filter { it.placement == Placement.VOLATILE }.map { it.text }
+        val turnConfig = if (stable.isEmpty()) config
+            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, stable.joinToString("\n\n")).joinToString("\n\n"))
+        val preamble = volatile.takeIf { it.isNotEmpty() }?.let { "<context>\n${it.joinToString("\n\n")}\n</context>" }
         val bridge = pluginRegistry.turnEventBridge(session.id)
         // Buffered here, not only in the caller's UI layer: an interrupted turn still has to
         // report what the assistant managed to say, or AFTER_TURN fires with a null
         // assistantReply and the hooks that encode the exchange drop the turn.
         val partial = StringBuilder()
         return try {
-            val updated = agentLoop.streamTurn(session, input, turnConfig) { event ->
+            val updated = agentLoop.streamTurn(session, input, turnConfig, preamble) { event ->
                 if (event is TurnEvent.Token) partial.append(event.text)
                 bridge(event)
                 onEvent(event)

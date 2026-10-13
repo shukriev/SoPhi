@@ -337,7 +337,7 @@ class PlanRunner(
         onProgress(PlanProgressEvent.StepAttempt(plan.id, step, plan.version, model, stepSession.id, attempt))
         val agentConfig = AgentConfig(model = model, maxTokens = config.maxTokens, systemPrompt = config.systemPrompt)
         return try {
-            val result = agentLoop.turn(stepSession, instruction, agentConfig, onEvent)
+            val result = agentLoop.turn(stepSession, instruction, agentConfig, onEvent = onEvent)
             val stopReasonName = result.tip?.metadata?.get("stopReason")
             val stopReason = stopReasonName?.let { name -> runCatching { TurnStopReason.valueOf(name) }.getOrNull() }
             StepExecution(result.tip?.content ?: "", ok = true, stopReason = stopReason)

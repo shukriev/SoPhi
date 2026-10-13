@@ -177,7 +177,7 @@ class ScheduleEngine(
                         val effectiveConfig = if (extra == null) config
                             else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
                         val result = withContext(SessionIdContext(session.id)) {
-                            loop.turn(session, task.prompt, effectiveConfig, bridge)
+                            loop.turn(session, task.prompt, effectiveConfig, onEvent = bridge)
                         }
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
