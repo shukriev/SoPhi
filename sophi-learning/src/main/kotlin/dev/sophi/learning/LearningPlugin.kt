@@ -5,6 +5,7 @@ import dev.sophi.extensions.AgentHook
 import dev.sophi.extensions.ContextContributor
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
+import dev.sophi.extensions.Placement
 import dev.sophi.extensions.SophiPlugin
 import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
@@ -18,6 +19,8 @@ class LearningPlugin(
     private val embeddingProvider: EmbeddingProvider? = null
 ) : SophiPlugin, ContextContributor {
     override val name = "learning"
+    // Lessons are recalled against the user message, so they change per turn.
+    override val placement = Placement.VOLATILE
 
     private val json = Json { encodeDefaults = true }
     private val toolEvents = JsonlLog(config.home.resolve("tool-events.jsonl"))

@@ -43,15 +43,7 @@ class PluginRegistry(
         sessionId: String,
         userInput: String,
         timeoutMillis: Long = 2_000
-    ): List<String> = _plugins.filterIsInstance<ContextContributor>().mapNotNull { contributor ->
-        try {
-            withTimeoutOrNull(timeoutMillis) { contributor.contribute(sessionId, userInput) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
-        }
-    }
+    ): List<String> = collectPlacedContext(sessionId, userInput, timeoutMillis).map { it.text }
 
     /** [collectContext] with each contribution's [Placement] kept, for callers that place them. */
     suspend fun collectPlacedContext(

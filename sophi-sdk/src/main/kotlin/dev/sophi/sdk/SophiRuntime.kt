@@ -12,8 +12,8 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.HookContext
-import dev.sophi.extensions.Placement
 import dev.sophi.extensions.HookPoint
+import dev.sophi.extensions.Placement
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningPlugin

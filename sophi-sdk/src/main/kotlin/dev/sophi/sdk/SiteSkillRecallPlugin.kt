@@ -20,7 +20,6 @@ class SiteSkillRecallPlugin(
 ) : SophiPlugin, ContextContributor {
     override val placement = Placement.VOLATILE
 
-
     override val name = "site-skill-recall"
 
     override fun hooks(): List<AgentHook> = emptyList()

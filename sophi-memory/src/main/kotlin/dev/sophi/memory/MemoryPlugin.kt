@@ -2,9 +2,9 @@ package dev.sophi.memory
 
 import dev.sophi.extensions.AgentHook
 import dev.sophi.extensions.ContextContributor
-import dev.sophi.extensions.Placement
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
+import dev.sophi.extensions.Placement
 import dev.sophi.extensions.SophiPlugin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

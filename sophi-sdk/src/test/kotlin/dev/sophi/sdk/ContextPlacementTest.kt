@@ -6,6 +6,8 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.tools.Tool
 import dev.sophi.extensions.AgentHook
 import dev.sophi.extensions.ContextContributor
 import dev.sophi.extensions.Placement
@@ -20,11 +22,17 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 
-class RecordingStreamProvider : LLMProvider {
+internal class RecordingStreamProvider : LLMProvider {
     val requests = mutableListOf<CompletionRequest>()
+    var toolRoundFirst = false
     override val name = "recording"
     override suspend fun complete(request: CompletionRequest) = LLMResponse.Text("ok", usage = TokenUsage(0, 0))
-    override fun stream(request: CompletionRequest): Flow<StreamEvent> { requests += request; return flowOf(StreamEvent.Content("ok")) }
+    override fun stream(request: CompletionRequest): Flow<StreamEvent> {
+        requests += request
+        return if (toolRoundFirst && requests.size == 1)
+            flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "echo", "{}"))))
+        else flowOf(StreamEvent.Content("ok"))
+    }
 }
 
 class ContextPlacementTest : FunSpec({
@@ -69,6 +77,26 @@ class ContextPlacementTest : FunSpec({
         }.build()
         runBlocking { runtime.streamTurn(runtime.sessionManager.create(), "plain") {} }
         provider.requests.single().messages.last().content shouldBe "plain"
+        runtime.close()
+    }
+
+    test("the same preamble rides on every round of a tool-using turn; persisted entry stays raw") {
+        val provider = RecordingStreamProvider().apply { toolRoundFirst = true }
+        val echo = object : Tool {
+            override val name = "echo"
+            override val description = "echo"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String) = "echoed"
+        }
+        val runtime = RuntimeBuilder().apply {
+            this.provider = provider; contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
+            tool(echo)
+            plugin(contributor(Placement.VOLATILE) { "hint for: $it" })
+        }.build()
+        val s = runBlocking { runtime.streamTurn(runtime.sessionManager.create(), "do it") {} }
+        provider.requests.size shouldBe 2
+        provider.requests.forEach { it.messages.first { m -> m.role == MessageRole.USER }.content shouldStartWith "<context>\nhint for: do it\n</context>\n\ndo it" }
+        runtime.sessionManager.load(s.id).branch().first { it.role.name == "USER" }.content shouldBe "do it"
         runtime.close()
     }
 })
