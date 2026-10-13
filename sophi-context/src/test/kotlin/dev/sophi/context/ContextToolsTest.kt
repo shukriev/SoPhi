@@ -7,6 +7,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import dev.sophi.core.session.SessionIdContext
+import kotlinx.coroutines.withContext
 import io.kotest.matchers.string.shouldStartWith
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
@@ -28,7 +31,7 @@ class ContextToolsTest : FunSpec({
         eventually { e.search("compactor", listOf(id))?.isNotEmpty() == true }
         return Triple(e, id, r)
     }
-    fun tool(e: ContextEngine, id: String, name: String) = contextTools(e) { listOf(id) }.first { it.name == name }
+    fun tool(e: ContextEngine, id: String, name: String) = contextTools(e) { id }.first { it.name == name }
 
     test("search_context lists path, lines, label and a snippet") {
         val (e, id, _) = indexedRepo()
@@ -101,16 +104,28 @@ class ContextToolsTest : FunSpec({
 
     test("tools answer not-ready when the engine has no store") {
         val e = ContextEngine(tempdir().toPath(), GitProbe.none)   // never started
-        contextTools(e) { listOf("x") }.forEach { t ->
+        contextTools(e) { "x" }.forEach { t ->
             runBlocking { t.execute("""{"query":"a","path":"a"}""") } shouldBe ContextEngine.NOT_READY
         }
         e.close()
     }
 
+    test("tools search the session's project plus globals, read from the coroutine's session id") {
+        val (e, a, _) = indexedRepo()
+        val g = tempdir().toPath().also { it.write("notes/beta.md", "# Beta gardening\n\nTomatoes and basil.\n") }
+        val gid = (e.register(g, auto = false) as RegisterResult.Registered).project.id
+        e.withStoreOrNull { it.command("UPDATE ${ContextSchema.PROJECT} SET isGlobal = true WHERE id = ?", gid) }
+        eventually { e.search("gardening", listOf(gid))?.isNotEmpty() == true }
+        val search = contextTools(e) { sid -> if (sid == "s-a") a else null }.first { it.name == "search_context" }
+        runBlocking { withContext(SessionIdContext("s-a")) { search.execute("""{"query":"compactor"}""") } } shouldContain "src/main/Compactor.kt"
+        runBlocking { withContext(SessionIdContext("s-none")) { search.execute("""{"query":"compactor"}""") } } shouldNotContain "Compactor.kt"
+        runBlocking { withContext(SessionIdContext("s-none")) { search.execute("""{"query":"gardening"}""") } } shouldContain "beta.md"
+    }
+
     test("a successful write_file, edit_file or bash requests a rescan") {
         val (e, id, r) = indexedRepo()
         Thread.sleep(5); r.write("src/main/New.kt", "class Zeppelin")
-        val plugin = ContextPlugin(e) { listOf(id) }
+        val plugin = ContextPlugin(e) { id }
         runBlocking { plugin.hooks().single { it.point == HookPoint.AFTER_TOOL }.invoke(HookContext("s", toolName = "write_file", success = true)) }
         eventually { e.search("zeppelin", listOf(id))?.isNotEmpty() == true }
     }
@@ -118,7 +133,7 @@ class ContextToolsTest : FunSpec({
     test("a failed write_file or a successful read_file requests no rescan") {
         val (e, id, r) = indexedRepo()
         r.write("src/main/New.kt", "class Zeppelin")
-        val hook = ContextPlugin(e) { listOf(id) }.hooks().single { it.point == HookPoint.AFTER_TOOL }
+        val hook = ContextPlugin(e) { id }.hooks().single { it.point == HookPoint.AFTER_TOOL }
         runBlocking {
             hook.invoke(HookContext("s", toolName = "write_file", success = false))
             hook.invoke(HookContext("s", toolName = "read_file", success = true))

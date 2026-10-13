@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * unchanged, and returned when the store fails, so the cached prompt prefix neither churns nor loses the section.
  */
 class OrientationPlugin(
-    private val engine: ContextEngine, private val scope: () -> List<String>, private val budget: ContextBudget,
+    private val engine: ContextEngine, private val project: ProjectOf, private val budget: ContextBudget,
     mode: String = "both", private val firstWaitMillis: Long = 1_000,
     private val globalInstructions: java.nio.file.Path? = Orientation.defaultGlobal()
 ) : SophiPlugin, ContextContributor {
@@ -33,21 +33,22 @@ class OrientationPlugin(
         if (mode == "off") return null
         return try {
             if (first.compareAndSet(true, false)) runInterruptible(Dispatchers.IO) { engine.awaitReady(firstWaitMillis) }
-            if (!engine.ready) return fallback()
-            val projects = engine.projectsOrNull() ?: return fallback()
-            val project = scope().firstNotNullOfOrNull { id -> projects.firstOrNull { it.id == id } } ?: return null
+            val primary = project(sessionId) ?: return null
+            if (!engine.ready) return fallback(primary)
+            val projects = engine.projectsOrNull() ?: return fallback(primary)
+            val project = projects.firstOrNull { it.id == primary } ?: return null
             val root = java.nio.file.Path.of(project.root)
             val key = listOf(project.id, project.lastScanAt, stamp(globalInstructions),
                 stamp(root.resolve("AGENTS.md")), stamp(root.resolve("CLAUDE.md")), stamp(root.resolve(".sophi/instructions.md"))).joinToString("|")
             last[project.id]?.takeIf { it.key == key }?.let { return it.text }
-            val files = engine.fileSummariesOrNull(project.id) ?: return fallback()
+            val files = engine.fileSummariesOrNull(project.id) ?: return fallback(primary)
             val text = Orientation.render(project, files, budget.orientationChars, mode, globalInstructions)
             last[project.id] = Rendered(key, text)
             text
         } catch (e: kotlin.coroutines.cancellation.CancellationException) { throw e
-        } catch (e: Exception) { fallback() }
+        } catch (e: Exception) { project(sessionId)?.let { fallback(it) } }
     }
 
-    /** Store trouble: keep serving the current scope's last good render rather than dropping the section for a turn. */
-    private fun fallback(): String? = scope().firstNotNullOfOrNull { last[it]?.text }
+    /** Store trouble: keep serving the primary project's last good render rather than dropping the section for a turn. */
+    private fun fallback(primary: String): String? = last[primary]?.text
 }

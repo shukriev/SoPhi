@@ -22,7 +22,7 @@ class RuntimeBuilderContextTest : FunSpec({
             provider = mockk<LLMProvider>()
             contextWindowTokens(32_000)
             sessionsDir = tempdir().toPath()
-            context(engine) { emptyList() }
+            context(engine) { _ -> null }
         }.build()
         runtime.toolNames() shouldContainAll listOf("search_context", "read_context", "project_map")
         runtime.close()
@@ -51,7 +51,7 @@ class RuntimeBuilderContextTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider; contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
             contextKnobs = knobs; contextGlobalInstructions = null
-            context(engine, owned = false) { listOf(id) }
+            context(engine, owned = false) { id }
         }.build()
         val s1 = runBlocking { runtime.streamTurn(runtime.sessionManager.create(), "which port does the hub server listen on") {} }
         runBlocking { runtime.streamTurn(s1, "ok thanks") {} }

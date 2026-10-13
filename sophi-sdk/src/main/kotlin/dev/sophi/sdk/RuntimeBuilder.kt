@@ -5,6 +5,7 @@ import dev.sophi.context.ContextEngine
 import dev.sophi.context.HintGate
 import dev.sophi.context.HintPlugin
 import dev.sophi.context.Orientation
+import dev.sophi.context.ProjectOf
 import dev.sophi.context.normalizeKnob
 import dev.sophi.context.OrientationPlugin
 import dev.sophi.context.ContextPlugin
@@ -82,7 +83,7 @@ class RuntimeBuilder {
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
-    private var contextConfig: Triple<ContextEngine, () -> List<String>, Boolean>? = null
+    private var contextConfig: Triple<ContextEngine, ProjectOf, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
     private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
@@ -93,11 +94,11 @@ class RuntimeBuilder {
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     /**
      * Gives the agent the context index (ADR-041): search_context, read_context, project_map, and
-     * a rescan after it edits files. [scope] returns the project ids the current session searches.
+     * a rescan after it edits files. [project] returns the session's bound project id (null = unbound: only global projects are searched, no orientation).
      * With [owned] the runtime closes [engine] on [SophiRuntime.close].
      */
-    fun context(engine: ContextEngine, owned: Boolean = true, scope: () -> List<String>): RuntimeBuilder =
-        apply { contextConfig = Triple(engine, scope, owned) }
+    fun context(engine: ContextEngine, owned: Boolean = true, project: ProjectOf): RuntimeBuilder =
+        apply { contextConfig = Triple(engine, project, owned) }
 
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
@@ -208,13 +209,13 @@ class RuntimeBuilder {
             store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
         }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
-        contextConfig?.let { (engine, scope, _) ->
-            contextTools(engine, scope).forEach { registry.register(it) }
-            plugins.add(ContextPlugin(engine, scope))
+        contextConfig?.let { (engine, project, _) ->
+            contextTools(engine, project).forEach { registry.register(it) }
+            plugins.add(ContextPlugin(engine, project))
             val budget = ContextBudget(window)
-            plugins.add(OrientationPlugin(engine, scope, budget, knob("SOPHI_CONTEXT_ORIENTATION", "both", "instructions", "map", "off"),
+            plugins.add(OrientationPlugin(engine, project, budget, knob("SOPHI_CONTEXT_ORIENTATION", "both", "instructions", "map", "off"),
                 globalInstructions = contextGlobalInstructions))
-            plugins.add(HintPlugin(engine, scope, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
+            plugins.add(HintPlugin(engine, project, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
         }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)

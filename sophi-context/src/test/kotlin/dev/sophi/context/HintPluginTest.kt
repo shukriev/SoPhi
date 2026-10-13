@@ -20,7 +20,7 @@ class HintPluginTest : FunSpec({
 
     class Fx(val e: ContextEngine, val id: String) {
         fun hint(msg: String, budget: ContextBudget = ContextBudget(32_000), gate: HintGate = HintGate(minScore = 0.0), mode: String = "gated") =
-            runBlocking { HintPlugin(e, { listOf(id) }, budget, gate, mode).contribute("s", msg) }
+            runBlocking { HintPlugin(e, { id }, budget, gate, mode).contribute("s", msg) }
     }
 
     fun fixture(): Fx {
@@ -96,17 +96,18 @@ class HintPluginTest : FunSpec({
     test("not ready: null immediately, without waiting") {
         val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none))   // never started
         val t0 = System.nanoTime()
-        val out = runBlocking { HintPlugin(e, { listOf("p") }, ContextBudget(32_000), HintGate(minScore = 0.0)).contribute("s", "which port does the hub server listen on") }
+        val out = runBlocking { HintPlugin(e, { "p" }, ContextBudget(32_000), HintGate(minScore = 0.0)).contribute("s", "which port does the hub server listen on") }
         out.shouldBeNull()
         ((System.nanoTime() - t0) / 1_000_000) shouldBeLessThan 200L
     }
 
-    test("paths carry the project name when more than one project is in scope") {
+    test("paths carry the project name when a global project is searched alongside the primary") {
         val f = fixture()
         val r2 = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")) }.also { it.write("README.md", "# Other\n") }
         val id2 = (f.e.register(r2, auto = true) as RegisterResult.Registered).project.id
+        f.e.withStoreOrNull { it.command("UPDATE ${ContextSchema.PROJECT} SET isGlobal = true WHERE id = ?", id2) }
         val name = f.e.projectsOrNull()!!.first { it.id == f.id }.name
-        val out = runBlocking { HintPlugin(f.e, { listOf(f.id, id2) }, ContextBudget(32_000), HintGate(minScore = 0.0)).contribute("s", "which port does the hub server listen on") }
+        val out = runBlocking { HintPlugin(f.e, { f.id }, ContextBudget(32_000), HintGate(minScore = 0.0)).contribute("s", "which port does the hub server listen on") }
         out.shouldNotBeNull().lines()[1] shouldStartWith "$name:src/main/HubServer.kt:"
     }
 

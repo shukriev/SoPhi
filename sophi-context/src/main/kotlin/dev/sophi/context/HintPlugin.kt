@@ -23,7 +23,7 @@ data class HintGate(val minTerms: Int = 3, val minScore: Double = DEFAULT_MIN_SC
 
 /** Volatile per-turn pointer to at most three likely files, only when retrieval is confident. Never waits for the engine. */
 class HintPlugin(
-    private val engine: ContextEngine, private val scope: () -> List<String>, private val budget: ContextBudget,
+    private val engine: ContextEngine, private val project: ProjectOf, private val budget: ContextBudget,
     private val gate: HintGate = HintGate(), mode: String = "gated"
 ) : SophiPlugin, ContextContributor {
     private val mode = normalizeKnob(mode, "gated", "always", "off")
@@ -34,12 +34,12 @@ class HintPlugin(
     override suspend fun contribute(sessionId: String, userInput: String): String? {
         if (mode == "off" || !engine.ready) return null
         return try {
-            val ids = scope().distinct()
+            val projects = engine.projectsOrNull() ?: return null
+            val ids = ContextScope.searchIds(project(sessionId), projects)
             if (ids.isEmpty()) return null
             val hits = engine.search(userInput, ids, 3) ?: return null
             if (mode != "always" && !gate.fires(userInput, hits)) return null
             if (hits.isEmpty()) return null
-            val projects = engine.projectsOrNull() ?: return null
             val multi = ids.size > 1
             val clean = ::cleanPromptText
             val top = hits.take(3)

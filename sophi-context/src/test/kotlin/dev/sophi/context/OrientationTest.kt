@@ -89,7 +89,7 @@ class OrientationTest : FunSpec({
         f.render(mode = "instructions")!!.let { it shouldContain "Use tabs."; it shouldNotContain "## Project map" }
         f.render(mode = "map")!!.let { it shouldContain "## Project map"; it shouldNotContain "Project conventions" }
         f.render(mode = "off").shouldBeNull()
-        val plugin = OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), mode = "off", globalInstructions = null)
+        val plugin = OrientationPlugin(f.e, { f.p.id }, ContextBudget(32_000), mode = "off", globalInstructions = null)
         runBlocking { plugin.contribute("s", "hi") }.shouldBeNull()
     }
 
@@ -110,7 +110,7 @@ class OrientationTest : FunSpec({
 
     test("not ready returns null within 1s; a second call returns immediately") {
         val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none))   // never started
-        val plugin = OrientationPlugin(e, { listOf("p") }, ContextBudget(32_000), globalInstructions = null)
+        val plugin = OrientationPlugin(e, { "p" }, ContextBudget(32_000), globalInstructions = null)
         val t0 = System.currentTimeMillis()
         runBlocking { plugin.contribute("s", "hi") }.shouldBeNull()
         (System.currentTimeMillis() - t0) shouldBeLessThan 1_500L
@@ -121,7 +121,7 @@ class OrientationTest : FunSpec({
 
     test("plugin contributes orientation for the project in scope") {
         val f = fixture({ it.write("AGENTS.md", "Use tabs.\n") })
-        val out = runBlocking { OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), globalInstructions = null).contribute("s", "hi") }
+        val out = runBlocking { OrientationPlugin(f.e, { f.p.id }, ContextBudget(32_000), globalInstructions = null).contribute("s", "hi") }
         out!! shouldContain "Use tabs."
     }
 
@@ -175,20 +175,16 @@ class OrientationTest : FunSpec({
         f.render(global = link)!! shouldContain "Dotfile rule."
     }
 
-    test("plugin picks the first project in scope order") {
+    test("orientation is per session: the primary project only, none for an unbound session") {
         val a = fixture({ it.write("AGENTS.md", "Rule A.\n") })
-        val e = a.e
-        val r2 = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")); it.write("AGENTS.md", "Rule B.\n") }
-        val id2 = (e.register(r2, auto = true) as RegisterResult.Registered).project.id
-        eventually { e.projectsOrNull()!!.first { it.id == id2 }.lastScanAt != null && e.fileSummariesOrNull(id2)!!.isNotEmpty() }
-        val out = runBlocking { OrientationPlugin(e, { listOf(id2, a.p.id) }, ContextBudget(32_000), globalInstructions = null).contribute("s", "hi") }
-        out!! shouldContain "Rule B."
+        val plugin = OrientationPlugin(a.e, { sid -> if (sid == "bound") a.p.id else null }, ContextBudget(32_000), globalInstructions = null)
+        runBlocking { plugin.contribute("bound", "hi") }!! shouldContain "Rule A."
+        runBlocking { plugin.contribute("unbound", "hi") }.shouldBeNull()
     }
 
     test("orientation stays byte-identical across a store failure and refreshes when the key changes") {
         val f = fixture({ it.write("AGENTS.md", "Use tabs.\n") })
-        var scoped = listOf(f.p.id)
-        val plugin = OrientationPlugin(f.e, { scoped }, ContextBudget(32_000), globalInstructions = null)
+        val plugin = OrientationPlugin(f.e, { sid -> if (sid == "s") f.p.id else "other-project" }, ContextBudget(32_000), globalInstructions = null)
         val first = runBlocking { plugin.contribute("s", "hi") }.shouldNotBeNull()
         runBlocking { plugin.contribute("s", "hi") } shouldBe first
         // an instruction-file change is a new key: re-rendered
@@ -200,8 +196,7 @@ class OrientationTest : FunSpec({
         f.e.close()
         runBlocking { plugin.contribute("s", "hi") } shouldBe changed
         // a scope switch during the outage must not serve another project's orientation
-        scoped = listOf("other-project")
-        runBlocking { plugin.contribute("s", "hi") }.shouldBeNull()
+        runBlocking { plugin.contribute("other", "hi") }.shouldBeNull()
     }
 
     test("mode is normalised: Both and OFF work from a direct caller") {
@@ -210,7 +205,7 @@ class OrientationTest : FunSpec({
         f.render(mode = "INSTRUCTIONS")!! shouldNotContain "## Project map"
         f.render(mode = "OFF").shouldBeNull()
         f.render(mode = "bogus")!! shouldContain "Use tabs."
-        runBlocking { OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), mode = "Off", globalInstructions = null).contribute("s", "hi") }.shouldBeNull()
+        runBlocking { OrientationPlugin(f.e, { f.p.id }, ContextBudget(32_000), mode = "Off", globalInstructions = null).contribute("s", "hi") }.shouldBeNull()
     }
 
     test("a filename with a newline cannot forge a heading in the map or the nested-instructions list") {
