@@ -44,7 +44,7 @@ import java.nio.file.Path
 
 class RuntimeBuilder {
     var provider: LLMProvider? = null
-    /** Opt-in JSONL usage log (numbers only, never content). Internal experiment knob. */
+    /** Opt-in JSONL usage log (numbers only, never content): input = all prompt tokens, cacheRead = the part served from cache. Internal experiment knob. */
     var usageLogPath: Path? = System.getenv("SOPHI_USAGE_LOG")?.let(Path::of)
     var model: String = "claude-sonnet-4-5"
     var maxTokens: Int = 4096
@@ -230,11 +230,12 @@ class RuntimeBuilder {
             loopGuard = loopGuardPolicy,
             contextWindowTokens = window,
             onUsage = usageLogPath?.let { path ->
-                { u: dev.sophi.ai.api.TokenUsage ->
-                    val line = """{"ts":${System.currentTimeMillis()},"model":${Json.encodeToString(model)},"input":${u.inputTokens},"output":${u.outputTokens},"cacheRead":${u.cacheReadTokens}}"""
+                { u: dev.sophi.ai.api.TokenUsage, kind: String ->
+                    val line = """{"ts":${System.currentTimeMillis()},"model":${Json.encodeToString(model)},"kind":"$kind","input":${u.inputTokens},"output":${u.outputTokens},"cacheRead":${u.cacheReadTokens}}"""
+                    path.parent?.let { java.nio.file.Files.createDirectories(it) }
                     java.nio.file.Files.writeString(path, line + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
                 }
-            } ?: {}
+            } ?: { _, _ -> }
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))

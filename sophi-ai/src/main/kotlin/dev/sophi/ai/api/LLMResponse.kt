@@ -1,5 +1,6 @@
 package dev.sophi.ai.api
 
+/** [inputTokens] = all prompt tokens (including cache reads/writes); [cacheReadTokens] = the part served from cache. */
 data class TokenUsage(val inputTokens: Int, val outputTokens: Int, val cacheReadTokens: Int = 0)
 
 data class ToolCall(val id: String, val name: String, val argumentsJson: String)

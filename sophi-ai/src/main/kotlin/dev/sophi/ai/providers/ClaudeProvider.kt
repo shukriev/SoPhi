@@ -27,7 +27,7 @@ class ClaudeProvider(
         withContext(Dispatchers.IO) {
             runCatching { chatModel.call(request.toPrompt()) }
                 .fold(
-                    onSuccess = { it.toLLMResponse() },
+                    onSuccess = { it.toLLMResponse(cacheOutsidePrompt = true) },
                     onFailure = { LLMResponse.Error(it.message ?: "unknown error", it) }
                 )
         }
@@ -40,6 +40,7 @@ class ClaudeProvider(
         var inputTokens = 0
         var outputTokens = 0
         var cacheRead = 0
+        var cacheWrite = 0
         chatModel.stream(request.toPrompt()).asFlow().collect { response ->
             val text = response.result?.output?.text
             if (!text.isNullOrEmpty()) emit(StreamEvent.Content(text))
@@ -47,9 +48,11 @@ class ClaudeProvider(
             inputTokens = maxOf(inputTokens, chunkUsage?.promptTokens ?: 0)
             outputTokens = maxOf(outputTokens, chunkUsage?.completionTokens ?: 0)
             cacheRead = maxOf(cacheRead, chunkUsage?.cacheReadInputTokens?.toInt() ?: 0)
+            cacheWrite = maxOf(cacheWrite, chunkUsage?.cacheWriteInputTokens?.toInt() ?: 0)
         }
         if (inputTokens > 0 || outputTokens > 0) {
-            emit(StreamEvent.Usage(TokenUsage(inputTokens, outputTokens, cacheRead)))
+            emit(StreamEvent.Usage(// Anthropic's input_tokens excludes cache reads/writes; normalise to total prompt tokens.
+            TokenUsage(inputTokens + cacheRead + cacheWrite, outputTokens, cacheRead)))
         }
     }.catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }
 

@@ -54,10 +54,11 @@ class ClaudeProviderTest : FunSpec({
         }
     }
 
-    fun streamChunk(text: String?, promptTokens: Int = 0, completionTokens: Int = 0): ChatResponse {
+    fun streamChunk(text: String?, promptTokens: Int = 0, completionTokens: Int = 0, cacheRead: Long? = null): ChatResponse {
         val chunkUsage = mockk<Usage>(relaxed = true) {
             every { this@mockk.promptTokens } returns promptTokens
             every { this@mockk.completionTokens } returns completionTokens
+            every { cacheReadInputTokens } returns cacheRead
         }
         val chunkMeta = mockk<ChatResponseMetadata> {
             every { this@mockk.usage } returns chunkUsage
@@ -206,6 +207,17 @@ class ClaudeProviderTest : FunSpec({
             StreamEvent.Content("hi"),
             StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
         )
+    }
+
+    test("stream() reports max cache-read tokens and normalises input to include them") {
+        every { mockChatModel.stream(any<Prompt>()) } returns
+            Flux.just(streamChunk("hi", promptTokens = 20, completionTokens = 1, cacheRead = 50),
+                      streamChunk("", promptTokens = 20, completionTokens = 9, cacheRead = 100))
+
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
+        val events = provider.stream(req).toList()
+
+        events.last() shouldBe StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 9, cacheReadTokens = 100))
     }
 
     test("complete() maps request.tools into AnthropicChatOptions.toolCallbacks") {

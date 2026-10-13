@@ -5,11 +5,13 @@ import dev.sophi.ai.api.ToolCall
 import dev.sophi.ai.api.TokenUsage
 import org.springframework.ai.chat.model.ChatResponse
 
-internal fun ChatResponse.toLLMResponse(): LLMResponse {
+/** [cacheOutsidePrompt]: true for Anthropic, whose prompt tokens exclude cache reads/writes. */
+internal fun ChatResponse.toLLMResponse(cacheOutsidePrompt: Boolean = false): LLMResponse {
     val output = result?.output
         ?: return LLMResponse.Error("null output from model")
     val usage = TokenUsage(
-        inputTokens = metadata.usage.promptTokens ?: 0,
+        inputTokens = (metadata.usage.promptTokens ?: 0) +
+            if (cacheOutsidePrompt) (metadata.usage.cacheReadInputTokens ?: 0L).toInt() + (metadata.usage.cacheWriteInputTokens ?: 0L).toInt() else 0,
         outputTokens = metadata.usage.completionTokens ?: 0,
         cacheReadTokens = metadata.usage.cacheReadInputTokens?.toInt() ?: 0
     )

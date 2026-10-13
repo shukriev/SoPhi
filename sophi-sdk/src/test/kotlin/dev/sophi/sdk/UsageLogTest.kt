@@ -25,7 +25,7 @@ class UsageLogTest : FunSpec({
         }.build()
         runBlocking { runtime.streamTurn(runtime.sessionManager.create(), "hi") {} }
         val line = Files.readAllLines(log).single()
-        line shouldContain "\"input\":120"; line shouldContain "\"cacheRead\":100"
+        line shouldContain "\"kind\":\"turn\""; line shouldContain "\"input\":120"; line shouldContain "\"cacheRead\":100"
         runtime.close()
     }
 })
