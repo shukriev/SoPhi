@@ -60,7 +60,8 @@ addendum).
    USER message because strict-alternation chat templates reject two USER turns in a row.
    `MemoryPlugin`, `LearningPlugin` and `SiteSkillRecallPlugin` are `VOLATILE`; `sophi-web` and
    `ScheduleEngine` still use `collectContext` (system prompt), a follow-up. With the system prompt now
-   byte-identical across turns (`RuntimeBuilderContextTest`), Anthropic prompt caching
+   byte-identical across turns (`RuntimeBuilderContextTest`; caveat: in a project not yet indexed, orientation may be
+   absent or "map pending" for the first turns and then becomes stable; the last good render is reused if the store fails), Anthropic prompt caching
    (`SYSTEM_AND_TOOLS`) is on for every request; `TokenUsage.inputTokens` is the total prompt including
    cache read/write and `cacheReadTokens` is reported; `SOPHI_USAGE_LOG` writes a JSONL of numbers
    (kind `turn`/`summarise`). Orientation (STABLE) = `~/.sophi/instructions.md` (at most half the budget,

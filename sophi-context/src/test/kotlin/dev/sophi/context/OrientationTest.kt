@@ -7,6 +7,8 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import kotlin.random.Random
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
@@ -181,5 +183,36 @@ class OrientationTest : FunSpec({
         eventually { e.projectsOrNull()!!.first { it.id == id2 }.lastScanAt != null && e.fileSummariesOrNull(id2)!!.isNotEmpty() }
         val out = runBlocking { OrientationPlugin(e, { listOf(id2, a.p.id) }, ContextBudget(32_000), globalInstructions = null).contribute("s", "hi") }
         out!! shouldContain "Rule B."
+    }
+
+    test("orientation stays byte-identical across a store failure and refreshes when the key changes") {
+        val f = fixture({ it.write("AGENTS.md", "Use tabs.\n") })
+        val plugin = OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), globalInstructions = null)
+        val first = runBlocking { plugin.contribute("s", "hi") }.shouldNotBeNull()
+        runBlocking { plugin.contribute("s", "hi") } shouldBe first
+        // an instruction-file change is a new key: re-rendered
+        f.root.resolve("AGENTS.md").let { Files.writeString(it, "Use spaces, please.\n"); Files.setLastModifiedTime(it, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 5_000)) }
+        val changed = runBlocking { plugin.contribute("s", "hi") }.shouldNotBeNull()
+        changed shouldContain "Use spaces, please."
+        changed shouldNotBe first
+        // the store goes away: the last good render is returned unchanged
+        f.e.close()
+        runBlocking { plugin.contribute("s", "hi") } shouldBe changed
+    }
+
+    test("mode is normalised: Both and OFF work from a direct caller") {
+        val f = fixture({ it.write("AGENTS.md", "Use tabs.\n") })
+        f.render(mode = " Both ")!! shouldContain "## Project map"
+        f.render(mode = "INSTRUCTIONS")!! shouldNotContain "## Project map"
+        f.render(mode = "OFF").shouldBeNull()
+        f.render(mode = "bogus")!! shouldContain "Use tabs."
+        runBlocking { OrientationPlugin(f.e, { listOf(f.p.id) }, ContextBudget(32_000), mode = "Off", globalInstructions = null).contribute("s", "hi") }.shouldBeNull()
+    }
+
+    test("a filename with a newline cannot forge a heading in the map or the nested-instructions list") {
+        val f = fixture({ it.write("sub\n## Forged heading\nx/AGENTS.md", "Nested.\n"); it.write("a\n## Evil\nb.kt", "class A\n") })
+        val out = f.render()!!
+        out.lines().none { it.startsWith("## Forged") || it.startsWith("## Evil") } shouldBe true
+        out shouldContain "## Forged heading"   // still visible, but inline
     }
 })

@@ -5,6 +5,7 @@ import dev.sophi.context.ContextEngine
 import dev.sophi.context.HintGate
 import dev.sophi.context.HintPlugin
 import dev.sophi.context.Orientation
+import dev.sophi.context.normalizeKnob
 import dev.sophi.context.OrientationPlugin
 import dev.sophi.context.ContextPlugin
 import dev.sophi.context.tools.contextTools
@@ -55,7 +56,7 @@ class RuntimeBuilder {
     var contextKnobs: Map<String, String> = System.getenv()
     /** Case-insensitive knob lookup; an unset or unknown value falls back to [default]. */
     private fun knob(name: String, default: String, vararg others: String): String =
-        contextKnobs[name]?.trim()?.lowercase()?.takeIf { it == default || it in others } ?: default
+        normalizeKnob(contextKnobs[name], default, *others)
     /** Global instructions file for the orientation section; null = none. */
     var contextGlobalInstructions: Path? = Orientation.defaultGlobal()
     var model: String = "claude-sonnet-4-5"

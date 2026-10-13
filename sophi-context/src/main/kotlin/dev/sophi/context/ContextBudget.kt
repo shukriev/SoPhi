@@ -7,3 +7,11 @@ data class ContextBudget(val windowTokens: Int) {
     val orientationChars: Int get() = orientationTokens * 4
     val hintChars: Int get() = hintTokens * 4
 }
+
+/** Trim + lowercase a mode/knob value; anything but [default] or [others] falls back to [default]. */
+fun normalizeKnob(raw: String?, default: String, vararg others: String): String =
+    raw?.trim()?.lowercase()?.takeIf { it == default || it in others } ?: default
+
+/** Repo-derived text goes into the prompt on one line, with no way to open a tag or forge a heading. */
+internal fun cleanPromptText(t: String): String =
+    t.map { if (it.isISOControl()) ' ' else if (it == '<') '‹' else if (it == '>') '›' else it }.joinToString("").trim()

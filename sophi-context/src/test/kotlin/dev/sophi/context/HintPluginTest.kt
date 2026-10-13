@@ -117,4 +117,11 @@ class HintPluginTest : FunSpec({
         out.contains("</context>") shouldBe false
         out shouldContain "Evil.kt"
     }
+
+    test("mode is normalised: Always fires below the gate, OFF is silent") {
+        val f = fixture()
+        f.hint("which port does the hub server listen on", gate = HintGate(), mode = "ALWAYS").shouldNotBeNull()
+        f.hint("which port does the hub server listen on", mode = " Off ").shouldBeNull()
+        f.hint("which port does the hub server listen on", mode = "Gated").shouldNotBeNull()
+    }
 })

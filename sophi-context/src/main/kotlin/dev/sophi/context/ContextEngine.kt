@@ -125,6 +125,13 @@ class ContextEngine(
         withStoreOrNull { s -> s.query("SELECT path, role, summary FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId)
             .map { Triple(it["path"] as String, it["role"] as String, it["summary"] as String?) } }
 
+    /** Summaries of just these files (a few id lookups, not the whole table); null = store failed. */
+    fun summariesOrNull(projectId: String, paths: List<String>): Map<String, String?>? = withStoreOrNull { s ->
+        paths.distinct().associateWith { p ->
+            s.query("SELECT summary FROM ${ContextSchema.FILE} WHERE id = ?", ContextSchema.fileId(projectId, p)).firstOrNull()?.get("summary") as String?
+        }
+    }
+
     override fun close() {
         closed = true
         writer.shutdown()   // let an in-flight scan finish its file: Indexer polls `closed`

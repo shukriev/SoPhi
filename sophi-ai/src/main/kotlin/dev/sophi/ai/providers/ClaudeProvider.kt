@@ -51,7 +51,8 @@ class ClaudeProvider(
             cacheWrite = maxOf(cacheWrite, chunkUsage?.cacheWriteInputTokens?.toInt() ?: 0)
         }
         if (inputTokens > 0 || outputTokens > 0) {
-            emit(StreamEvent.Usage(// Anthropic's input_tokens excludes cache reads/writes; normalise to total prompt tokens.
+            // Anthropic's input_tokens excludes cache reads/writes; normalise to total prompt tokens.
+            emit(StreamEvent.Usage(
             TokenUsage(inputTokens + cacheRead + cacheWrite, outputTokens, cacheRead)))
         }
     }.catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }

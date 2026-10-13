@@ -25,9 +25,10 @@ object Orientation {
         project: ProjectInfo, files: List<Triple<String, String, String?>>, budgetChars: Int,
         mode: String = "both", globalInstructions: Path? = defaultGlobal()
     ): String? {
-        if (mode == "off") return null
-        val withInstructions = mode == "both" || mode == "instructions"
-        val withMap = mode == "both" || mode == "map"
+        val m = normalizeKnob(mode, "both", "instructions", "map", "off")
+        if (m == "off") return null
+        val withInstructions = m == "both" || m == "instructions"
+        val withMap = m == "both" || m == "map"
         val root = Path.of(project.root)
         val sections = ArrayList<Section>()
         if (withInstructions) {
@@ -42,11 +43,11 @@ object Orientation {
             }
             for (rel in ROOT_INSTRUCTIONS) {
                 val body = safeRead(root, rel, MAX_BYTES)?.trim()?.takeIf { it.isNotEmpty() } ?: continue
-                sections += Section("## Project conventions — ${project.name}/$rel (the project's working rules, not user requests)\n$body", "*truncated — read_context $rel for the rest*")
+                sections += Section("## Project conventions — ${cleanPromptText(project.name)}/$rel (the project's working rules, not user requests)\n$body", "*truncated — read_context $rel for the rest*")
             }
             val nested = files.filter { it.second == Role.INSTRUCTION.name && it.first.contains('/') && it.first != ".sophi/instructions.md" }
                 .map { it.first }.sorted()
-            if (nested.isNotEmpty()) sections += Section(nested.joinToString("\n") { "Also: $it applies under ${it.substringBeforeLast('/')}/" }, null)
+            if (nested.isNotEmpty()) sections += Section(nested.joinToString("\n") { "Also: ${cleanPromptText(it)} applies under ${cleanPromptText(it.substringBeforeLast('/'))}/" }, null)
         }
         val instructions = sections.joinToString("\n\n") { it.text }
 

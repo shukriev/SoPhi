@@ -24,8 +24,9 @@ data class HintGate(val minTerms: Int = 3, val minScore: Double = DEFAULT_MIN_SC
 /** Volatile per-turn pointer to at most three likely files, only when retrieval is confident. Never waits for the engine. */
 class HintPlugin(
     private val engine: ContextEngine, private val scope: () -> List<String>, private val budget: ContextBudget,
-    private val gate: HintGate = HintGate(), private val mode: String = "gated"
+    private val gate: HintGate = HintGate(), mode: String = "gated"
 ) : SophiPlugin, ContextContributor {
+    private val mode = normalizeKnob(mode, "gated", "always", "off")
     override val name = "hint"
     override val placement = Placement.VOLATILE
     override fun hooks(): List<AgentHook> = emptyList()
@@ -40,10 +41,11 @@ class HintPlugin(
             if (hits.isEmpty()) return null
             val projects = engine.projectsOrNull() ?: return null
             val multi = ids.size > 1
-            fun clean(t: String) = t.replace('\r', ' ').replace('\n', ' ').replace('<', '‹').replace('>', '›').trim()
-            val summaries = hits.map { it.projectId }.distinct().associateWith { engine.fileSummariesOrNull(it) }
-            val lines = hits.take(3).map { h ->
-                val summary = clean(summaries[h.projectId]?.firstOrNull { it.first == h.path }?.third?.takeIf { it.isNotBlank() }
+            val clean = ::cleanPromptText
+            val top = hits.take(3)
+            val summaries = top.map { it.projectId }.distinct().associateWith { id -> engine.summariesOrNull(id, top.filter { it.projectId == id }.map { it.path }) }
+            val lines = top.map { h ->
+                val summary = clean(summaries[h.projectId]?.get(h.path)?.takeIf { it.isNotBlank() }
                     ?: h.snippet.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty())
                 val shown = clean(if (multi) "${projects.firstOrNull { it.id == h.projectId }?.name ?: h.projectId}:${h.path}" else h.path)
                 "$shown:${h.startLine} — ${clean(h.label ?: "-")}" + if (summary.isEmpty()) "" else " — $summary"

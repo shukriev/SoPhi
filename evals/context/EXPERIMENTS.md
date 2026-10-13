@@ -18,7 +18,7 @@ Run each variant on the same task set, in a registered project, with a fresh `HO
 
 - **E1 — hint:** `SOPHI_CONTEXT_HINT` = `off` / `always` / `gated`, orientation at its default.
 - **E5 — orientation:** `SOPHI_CONTEXT_ORIENTATION` = `off` / `instructions` / `map` / `both`, hint `off` so the effect is isolated.
-- **Live cache check (E5):** two consecutive turns on Anthropic with `SOPHI_USAGE_LOG` set; turn 2 `cacheRead` should be > 0 (system prompt above the model's minimum cacheable prefix, e.g. 1,024 tokens for Sonnet). On LM Studio `cacheRead` may stay 0 if the server does not report it; record input tokens and timings instead. The structural guarantee (byte-identical system prompts across turns) is already covered by `RuntimeBuilderContextTest`.
+- **Live cache check (E5):** two consecutive turns on Anthropic with `SOPHI_USAGE_LOG` set; turn 2 `cacheRead` should be > 0 (system prompt above the model's minimum cacheable prefix, e.g. 1,024 tokens for Sonnet). On LM Studio `cacheRead` may stay 0 if the server does not report it; record input tokens and timings instead. The structural guarantee (byte-identical system prompts across turns) is already covered by `RuntimeBuilderContextTest`. Also compare `cacheRead` from one non-streaming and one streaming call on the same prompt and record whether they agree (streaming takes the cache figures from `message_delta`, which some models or API versions may omit).
 
 ## Metrics per run
 
