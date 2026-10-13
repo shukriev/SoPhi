@@ -99,7 +99,7 @@ class OpenAICompatProviderTest : FunSpec({
         genTokens: Int = 4,
         finishReason: String = "stop"
     ): ChatResponse {
-        val usage = mockk<Usage> {
+        val usage = mockk<Usage>(relaxed = true) {
             every { this@mockk.promptTokens } returns promptTokens
             every { this@mockk.completionTokens } returns genTokens
         }

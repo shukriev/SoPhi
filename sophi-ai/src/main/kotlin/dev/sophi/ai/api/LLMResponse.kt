@@ -1,6 +1,6 @@
 package dev.sophi.ai.api
 
-data class TokenUsage(val inputTokens: Int, val outputTokens: Int)
+data class TokenUsage(val inputTokens: Int, val outputTokens: Int, val cacheReadTokens: Int = 0)
 
 data class ToolCall(val id: String, val name: String, val argumentsJson: String)
 

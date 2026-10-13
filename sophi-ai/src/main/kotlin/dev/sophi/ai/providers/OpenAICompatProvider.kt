@@ -86,7 +86,10 @@ class OpenAICompatProvider(
                     // that chunk carries no choices — so this must live outside the loop above.
                     chunk.usage().orElse(null)?.let { u ->
                         trySend(StreamEvent.Usage(
-                            TokenUsage(u.promptTokens().toInt(), u.completionTokens().toInt())
+                            TokenUsage(
+                                u.promptTokens().toInt(), u.completionTokens().toInt(),
+                                u.promptTokensDetails().flatMap { it.cachedTokens() }.map { it.toInt() }.orElse(0)
+                            )
                         ))
                     }
                 }

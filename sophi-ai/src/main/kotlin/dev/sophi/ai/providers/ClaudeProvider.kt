@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.reactive.asFlow
 import kotlinx.coroutines.withContext
+import org.springframework.ai.anthropic.AnthropicCacheOptions
+import org.springframework.ai.anthropic.AnthropicCacheStrategy
 import org.springframework.ai.anthropic.AnthropicChatModel
 import org.springframework.ai.anthropic.AnthropicChatOptions
 import org.springframework.ai.chat.messages.SystemMessage
@@ -37,19 +39,21 @@ class ClaudeProvider(
         // correct even if a chunk ever reports only its own delta.
         var inputTokens = 0
         var outputTokens = 0
+        var cacheRead = 0
         chatModel.stream(request.toPrompt()).asFlow().collect { response ->
             val text = response.result?.output?.text
             if (!text.isNullOrEmpty()) emit(StreamEvent.Content(text))
             val chunkUsage = response.metadata?.usage
             inputTokens = maxOf(inputTokens, chunkUsage?.promptTokens ?: 0)
             outputTokens = maxOf(outputTokens, chunkUsage?.completionTokens ?: 0)
+            cacheRead = maxOf(cacheRead, chunkUsage?.cacheReadInputTokens?.toInt() ?: 0)
         }
         if (inputTokens > 0 || outputTokens > 0) {
-            emit(StreamEvent.Usage(TokenUsage(inputTokens, outputTokens)))
+            emit(StreamEvent.Usage(TokenUsage(inputTokens, outputTokens, cacheRead)))
         }
     }.catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }
 
-    private fun CompletionRequest.toPrompt(): Prompt {
+    internal fun CompletionRequest.toPrompt(): Prompt {
         val springMessages = buildList {
             systemPrompt?.let { add(SystemMessage(it)) }
             addAll(messages.map { it.toSpring() })
@@ -58,6 +62,7 @@ class ClaudeProvider(
             .model(model)
             .maxTokens(maxTokens)
             .temperature(temperature)
+            .cacheOptions(AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_AND_TOOLS).build())
             .toolCallbacks(tools.map { SophiToolCallback(it) })
             .build()
         return Prompt(springMessages, options)

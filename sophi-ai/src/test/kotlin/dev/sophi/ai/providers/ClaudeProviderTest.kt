@@ -30,7 +30,7 @@ class ClaudeProviderTest : FunSpec({
         genTokens: Int = 5,
         finishReason: String = "end_turn"
     ): ChatResponse {
-        val usage = mockk<Usage> {
+        val usage = mockk<Usage>(relaxed = true) {
             every { this@mockk.promptTokens } returns promptTokens
             every { this@mockk.completionTokens } returns genTokens
         }
@@ -55,7 +55,7 @@ class ClaudeProviderTest : FunSpec({
     }
 
     fun streamChunk(text: String?, promptTokens: Int = 0, completionTokens: Int = 0): ChatResponse {
-        val chunkUsage = mockk<Usage> {
+        val chunkUsage = mockk<Usage>(relaxed = true) {
             every { this@mockk.promptTokens } returns promptTokens
             every { this@mockk.completionTokens } returns completionTokens
         }
@@ -111,7 +111,7 @@ class ClaudeProviderTest : FunSpec({
             every { name() } returns "search"
             every { arguments() } returns """{"q":"kotlin"}"""
         }
-        val usage = mockk<Usage> {
+        val usage = mockk<Usage>(relaxed = true) {
             every { promptTokens } returns 20
             every { completionTokens } returns 0
         }

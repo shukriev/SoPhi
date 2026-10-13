@@ -10,7 +10,8 @@ internal fun ChatResponse.toLLMResponse(): LLMResponse {
         ?: return LLMResponse.Error("null output from model")
     val usage = TokenUsage(
         inputTokens = metadata.usage.promptTokens ?: 0,
-        outputTokens = metadata.usage.completionTokens ?: 0
+        outputTokens = metadata.usage.completionTokens ?: 0,
+        cacheReadTokens = metadata.usage.cacheReadInputTokens?.toInt() ?: 0
     )
     return if (output.toolCalls.isNotEmpty()) {
         LLMResponse.ToolUse(

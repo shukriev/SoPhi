@@ -179,7 +179,9 @@ class AgentLoop(
      */
     private val contextWindowTokens: Int,
     /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
-    private val compactionThreshold: Double = 0.8
+    private val compactionThreshold: Double = 0.8,
+    /** Called once per model request with that request's usage; failures never reach the loop. */
+    private val onUsage: (TokenUsage) -> Unit = {}
 ) {
     /** Scaled to [contextWindowTokens] so no single tool result can claim more than
      *  [MAX_TOOL_RESULT_FRACTION_OF_WINDOW] of whatever window this loop's model actually has. */
@@ -268,7 +270,7 @@ class AgentLoop(
             temperature = 0.3
         )
         return when (val response = provider.complete(request)) {
-            is LLMResponse.Text -> response.content
+            is LLMResponse.Text -> response.content.also { runCatching { onUsage(response.usage) } }
             // A failed summarisation must not abort the turn — degrade to a truncated transcript.
             else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
         }
@@ -372,6 +374,7 @@ class AgentLoop(
                 }
             }
 
+            roundUsage?.let { u -> runCatching { onUsage(u) } }
             val toolCalls = pendingToolCalls
             if (toolCalls == null) {
                 // A round with no tool calls AND no text isn't an answer — it's the model stopping
