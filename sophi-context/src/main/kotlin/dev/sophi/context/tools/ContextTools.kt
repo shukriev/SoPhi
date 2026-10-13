@@ -57,7 +57,7 @@ private class SearchContextTool(private val engine: ContextEngine, private val p
     private suspend fun run(argumentsJson: String): String {
         val projects = inScope(engine, project) ?: return ContextEngine.NOT_READY
         val args = runCatching { json.decodeFromString<SearchArgs>(argumentsJson) }.getOrNull() ?: return "invalid arguments"
-        if (projects.isEmpty()) return "No indexed project for this chat — pick one with the project chip, or run `sophi context add <dir>`."
+        if (projects.isEmpty()) return "No indexed project for this session — run `sophi context add <dir>`, or pick a folder with the project chip in the companion."
         val hits = engine.search(args.query, projects.map { it.id }, args.limit.coerceIn(1, 20)) ?: return ContextEngine.NOT_READY
         val note = indexingNote(projects)
         if (hits.isEmpty()) return note ?: "No matches — try other words, or grep"
@@ -128,7 +128,7 @@ private class ProjectMapTool(private val engine: ContextEngine, private val proj
 
     private suspend fun run(argumentsJson: String): String {
         val projects = inScope(engine, project) ?: return ContextEngine.NOT_READY
-        val project = projects.firstOrNull() ?: return "No indexed project for this chat — pick one with the project chip, or run `sophi context add <dir>`."
+        val project = projects.firstOrNull() ?: return "No indexed project for this session — run `sophi context add <dir>`, or pick a folder with the project chip in the companion."
         val args = runCatching { json.decodeFromString<MapArgs>(argumentsJson) }.getOrNull() ?: MapArgs()
         val map = ProjectMap.render(project, engine.fileSummariesOrNull(project.id) ?: return ContextEngine.NOT_READY, args.path)
         return (indexingNote(projects)?.plus("\n") ?: "") + map

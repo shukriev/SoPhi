@@ -98,7 +98,7 @@ class ContextGlobalCommand : CliktCommand(name = "global", help = "Search a proj
     override fun run() = withEngine(::echo) { ContextGlobal(it, target, state == "on") { m -> echo(m) }.run() }
 }
 
-class ContextResetCommand : CliktCommand(name = "reset", help = "Delete the context index (it is rebuilt from your files)") {
+class ContextResetCommand : CliktCommand(name = "reset", help = "Move the context index aside (context.corrupt-<time> under ~/.sophi/db) and rebuild it from your files") {
     override fun run() = ContextReset(ContextEngine.defaultRoot()) { m -> echo(m) }.run()
 }
 
