@@ -36,3 +36,12 @@ Variants tried (nameBoost : perDirectory : priors : k1 : b — queries hit@10 / 
 The no-priors baseline lands at 0.94 / 0.79 rather than the bake-off's 0.90 / 0.80: the repos have changed since the bake-off (files added, symlinks and secret files now skipped), so exact reproduction is not expected.
 
 Reproduce: `sophi context eval --project SoPhi=<path> --project sophi-companion=<path> --queries evals/context/<set>.tsv`.
+
+## Hint gate (offline E1)
+
+Pre-registered selection rule (written before any grid was run):
+
+- Grid: minScore in {0, 2, 4, 6, 8, 10, 12, 15} x minRatio in {1.0, 1.1, 1.25, 1.5, 2.0}; gate = HintGate(minTerms 3, minScore, minRatio) on the top-3 hits.
+- A fired hint is correct if any of its (up to 3) files matches an expected substring. coverage = fired / n; precision = correct / fired (1.0 when nothing fired).
+- Select the point with the highest coverage among those with precision >= 0.80 on queries.tsv AND precision >= 0.70 on commits.tsv. Ties: higher precision on commits.tsv.
+- Coverage for the selection is read from queries.tsv. If no point qualifies, the gate stays closed by default (hint mode default becomes `off`). The rule is not loosened and the queries are not edited.
