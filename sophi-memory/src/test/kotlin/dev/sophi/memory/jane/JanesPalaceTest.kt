@@ -188,4 +188,17 @@ class JanesPalaceTest : FunSpec({
         palace.openCommitments(now).map { it.id } shouldBe listOf(fresh.id)
         palace.close()
     }
+
+    // A model that answers nothing usable (e.g. it spent its budget thinking) was only a console
+    // warning; with telemetry on it is now visible in encoder.jsonl.
+    test("an encoder that returns nothing usable leaves an encoder_no_verdict telemetry line") {
+        val llm = io.mockk.mockk<dev.sophi.ai.api.LLMProvider>()
+        io.mockk.coEvery { llm.complete(any()) } returns dev.sophi.ai.api.LLMResponse.Text("", dev.sophi.ai.api.TokenUsage(1, 1))
+        val home = tempdir().toPath()
+        val palace = JanesPalace(JanesPalaceConfig(home = home, sessionModel = "m", encoderTelemetry = true), llm, FakeEmbeddingProvider(), "fake")
+        runBlocking { palace.observe(TurnObservation("ambient", "Ivan owns the FTP migration", "", 1_000L, ambient = true)) }
+        palace.close()
+        val log = home.resolve("encoder.jsonl").toFile()
+        (log.exists() && log.readText().contains("\"outcome\":\"encoder_no_verdict\"")) shouldBe true
+    }
 })

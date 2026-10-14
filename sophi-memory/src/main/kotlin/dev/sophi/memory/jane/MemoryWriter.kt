@@ -104,6 +104,10 @@ class MemoryWriter(
         return memory
     }
 
+    /** The encoder gave no usable verdict: the call failed, the reply was empty (e.g. a thinking model
+     *  spent its whole budget), or it wasn't valid JSON. Otherwise this turn is invisible in telemetry. */
+    internal fun logEncoderNoVerdict(turn: TurnObservation) = logCandidate(turn, "encoder_no_verdict", null, null)
+
     internal suspend fun write(turn: TurnObservation, verdict: EncoderVerdict): List<Memory> {
         val stored = mutableListOf<Memory>()
         val all = store.memories()

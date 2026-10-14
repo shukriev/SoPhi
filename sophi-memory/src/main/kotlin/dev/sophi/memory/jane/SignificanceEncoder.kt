@@ -53,13 +53,18 @@ class SignificanceEncoder(
     private val json = Json { ignoreUnknownKeys = true }
 
     internal suspend fun encode(turn: TurnObservation, recent: List<Memory>): EncoderVerdict? {
-        var text = completeText(buildPrompt(turn, recent))
-        if (text == null) {
+        val first = completeReply(buildPrompt(turn, recent))
+        if (first == null) {
             onWarning("memory: encoder call failed — this turn was not evaluated for memory")
             return null
         }
-        parse(text)?.let { return it }
-        text = completeText("Respond with ONLY the JSON object, no prose.\n\n" + buildPrompt(turn, recent))
+        parse(first.content)?.let { return it }
+        // Nothing before the token limit: the identical retry would run out again.
+        if (first.content.isBlank() && first.stopReason == "length") {
+            onWarning("memory: encoder hit its ${config.encoderMaxTokens}-token limit with no answer — this turn was not evaluated for memory")
+            return null
+        }
+        val text = completeText("Respond with ONLY the JSON object, no prose.\n\n" + buildPrompt(turn, recent))
         if (text == null) {
             onWarning("memory: encoder call failed on retry — this turn was not evaluated for memory")
             return null
@@ -144,7 +149,10 @@ class SignificanceEncoder(
         val trimmed = text.trim()
         // The prompt tells the model to "Emit [] for trivial exchanges" — models sometimes take that
         // literally instead of wrapping it as {"memories":[],"profile":[]}. Both mean the same thing.
-        if (trimmed.isEmpty() || trimmed == "[]") return EncoderVerdict()
+        // An empty reply is no answer (a thinking model can spend its whole budget reasoning), not
+        // "nothing to store": returning null makes encode() retry, then report it.
+        if (trimmed.isEmpty()) return null
+        if (trimmed == "[]") return EncoderVerdict()
         val start = text.indexOf('{'); val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) return null
         return runCatching {
@@ -152,7 +160,9 @@ class SignificanceEncoder(
         }.getOrNull()
     }
 
-    private suspend fun completeText(prompt: String): String? =
+    private suspend fun completeText(prompt: String): String? = completeReply(prompt)?.content
+
+    private suspend fun completeReply(prompt: String): LLMResponse.Text? =
         when (val r = runCatching {
             provider.complete(CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
@@ -162,7 +172,7 @@ class SignificanceEncoder(
                 // reasoning models otherwise burn the whole token budget "thinking" and never emit JSON.
                 reasoningEffort = "none"))
         }.getOrNull()) {
-            is LLMResponse.Text -> r.content
+            is LLMResponse.Text -> r
             else -> null
         }
 }

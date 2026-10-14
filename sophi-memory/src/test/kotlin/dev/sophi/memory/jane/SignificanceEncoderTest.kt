@@ -251,4 +251,25 @@ class SignificanceEncoderTest : FunSpec({
         enc.buildPrompt(ambient, emptyList()) shouldNotContain "Emit []"
         enc.buildPrompt(turn, emptyList()) shouldContain "Emit []"
     }
+
+    test("an empty reply is no answer; a literal [] is nothing to store") {
+        val enc = SignificanceEncoder(mockk(), cfg)
+        enc.parse("") shouldBe null
+        enc.parse("   ") shouldBe null
+        enc.parse("[]")!!.memories shouldBe emptyList()
+    }
+
+    // Review: a reply cut off at the token limit with no content would run out again on the identical
+    // retry — two slow calls per chunk for nothing.
+    test("an empty reply cut off at the token limit is not retried; an empty normal reply is") {
+        val cut = mockk<LLMProvider>()
+        coEvery { cut.complete(any()) } returns LLMResponse.Text("", TokenUsage(1, 1), stopReason = "length")
+        SignificanceEncoder(cut, cfg).encode(turn, emptyList()) shouldBe null
+        io.mockk.coVerify(exactly = 1) { cut.complete(any()) }
+
+        val blank = mockk<LLMProvider>()
+        coEvery { blank.complete(any()) } returns LLMResponse.Text("", TokenUsage(1, 1), stopReason = "stop")
+        SignificanceEncoder(blank, cfg).encode(turn, emptyList()) shouldBe null
+        io.mockk.coVerify(exactly = 2) { blank.complete(any()) }
+    }
 })
