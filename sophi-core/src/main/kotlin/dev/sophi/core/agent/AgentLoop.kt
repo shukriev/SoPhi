@@ -179,7 +179,9 @@ class AgentLoop(
      */
     private val contextWindowTokens: Int,
     /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
-    private val compactionThreshold: Double = 0.8
+    private val compactionThreshold: Double = 0.8,
+    /** Called once per model request with that request's usage and kind ("turn" | "summarise"); failures never reach the loop. */
+    private val onUsage: (TokenUsage, String) -> Unit = { _, _ -> }
 ) {
     /** Scaled to [contextWindowTokens] so no single tool result can claim more than
      *  [MAX_TOOL_RESULT_FRACTION_OF_WINDOW] of whatever window this loop's model actually has. */
@@ -268,7 +270,7 @@ class AgentLoop(
             temperature = 0.3
         )
         return when (val response = provider.complete(request)) {
-            is LLMResponse.Text -> response.content
+            is LLMResponse.Text -> response.content.also { runCatching { onUsage(response.usage, "summarise") } }
             // A failed summarisation must not abort the turn — degrade to a truncated transcript.
             else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
         }
@@ -278,18 +280,20 @@ class AgentLoop(
         session: AgentSession,
         userInput: String,
         config: AgentConfig,
+        turnPreamble: String? = null,
         onEvent: suspend (TurnEvent) -> Unit = {}
-    ): AgentSession = streamTurn(session, userInput, config, onEvent)
+    ): AgentSession = streamTurn(session, userInput, config, turnPreamble, onEvent)
 
     suspend fun streamTurn(
         session: AgentSession,
         userInput: String,
         config: AgentConfig,
+        turnPreamble: String? = null,
         onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
         val turn = TurnProgress()
         return try {
-            runTurn(session, userInput, config, onEvent, turn)
+            runTurn(session, userInput, config, onEvent, turn, turnPreamble)
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
             throw e
@@ -323,9 +327,13 @@ class AgentLoop(
         config: AgentConfig,
         onEvent: suspend (TurnEvent) -> Unit,
         turn: TurnProgress,
+        turnPreamble: String? = null,
     ): AgentSession {
         val messages = PromptBuilder.build(session.branch()).toMutableList()
-        messages.add(Message(MessageRole.USER, userInput))
+        // Volatile context (hints, recall) rides on this turn's request only: prefixed to the user
+        // message so the system prompt and all of history stay a byte-stable, cacheable prefix.
+        // Never persisted — every session.append below stores the raw userInput.
+        messages.add(Message(MessageRole.USER, turnPreamble?.let { "$it\n\n$userInput" } ?: userInput))
         // Everything from here on is this turn's own accumulated rounds — the only region
         // mid-loop compaction is ever allowed to touch. The prior-session prefix in front of it
         // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
@@ -366,6 +374,7 @@ class AgentLoop(
                 }
             }
 
+            roundUsage?.let { u -> runCatching { onUsage(u, "turn") } }
             val toolCalls = pendingToolCalls
             if (toolCalls == null) {
                 // A round with no tool calls AND no text isn't an answer — it's the model stopping

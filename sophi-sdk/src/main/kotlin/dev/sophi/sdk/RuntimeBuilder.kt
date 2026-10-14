@@ -1,5 +1,15 @@
 package dev.sophi.sdk
 
+import dev.sophi.context.ContextBudget
+import dev.sophi.context.ContextEngine
+import dev.sophi.context.HintGate
+import dev.sophi.context.HintPlugin
+import dev.sophi.context.Orientation
+import dev.sophi.context.ProjectOf
+import dev.sophi.context.normalizeKnob
+import dev.sophi.context.OrientationPlugin
+import dev.sophi.context.ContextPlugin
+import dev.sophi.context.tools.contextTools
 import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.probeEmbeddingProvider
@@ -41,6 +51,15 @@ import java.nio.file.Path
 
 class RuntimeBuilder {
     var provider: LLMProvider? = null
+    /** Opt-in JSONL usage log (numbers only, never content): input = all prompt tokens, cacheRead = the part served from cache. Internal experiment knob. */
+    var usageLogPath: Path? = System.getenv("SOPHI_USAGE_LOG")?.let(Path::of)
+    /** Internal experiment knobs (SOPHI_CONTEXT_HINT, SOPHI_CONTEXT_ORIENTATION); tests override. */
+    var contextKnobs: Map<String, String> = System.getenv()
+    /** Case-insensitive knob lookup; an unset or unknown value falls back to [default]. */
+    private fun knob(name: String, default: String, vararg others: String): String =
+        normalizeKnob(contextKnobs[name], default, *others)
+    /** Global instructions file for the orientation section; null = none. */
+    var contextGlobalInstructions: Path? = Orientation.defaultGlobal()
     var model: String = "claude-sonnet-4-5"
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
@@ -64,6 +83,7 @@ class RuntimeBuilder {
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
+    private var contextConfig: Triple<ContextEngine, ProjectOf, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
     private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
@@ -72,6 +92,14 @@ class RuntimeBuilder {
     private var configVersionRef: Pair<String, VersionStore>? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
+    /**
+     * Gives the agent the context index (ADR-041): search_context, read_context, project_map, and
+     * a rescan after it edits files. [project] returns the session's bound project id (null = unbound: only global projects are searched, no orientation).
+     * With [owned] the runtime closes [engine] on [SophiRuntime.close].
+     */
+    fun context(engine: ContextEngine, owned: Boolean = true, project: ProjectOf): RuntimeBuilder =
+        apply { contextConfig = Triple(engine, project, owned) }
+
     fun plugin(p: SophiPlugin): RuntimeBuilder = apply { plugins.add(p) }
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
     fun grants(names: Set<String>): RuntimeBuilder = apply { grants = names }
@@ -181,6 +209,14 @@ class RuntimeBuilder {
             store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
         }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
+        contextConfig?.let { (engine, project, _) ->
+            contextTools(engine, project).forEach { registry.register(it) }
+            plugins.add(ContextPlugin(engine, project))
+            val budget = ContextBudget(window)
+            plugins.add(OrientationPlugin(engine, project, budget, knob("SOPHI_CONTEXT_ORIENTATION", "both", "instructions", "map", "off"),
+                globalInstructions = contextGlobalInstructions))
+            plugins.add(HintPlugin(engine, project, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
+        }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
             registry.register(SkillTool(loadSkills, topK = harnessConfig?.topKSkills))
@@ -210,7 +246,14 @@ class RuntimeBuilder {
             p, registry, sm,
             confirmationPolicy = confirmationPolicy, grants = grants,
             loopGuard = loopGuardPolicy,
-            contextWindowTokens = window
+            contextWindowTokens = window,
+            onUsage = usageLogPath?.let { path ->
+                { u: dev.sophi.ai.api.TokenUsage, kind: String ->
+                    val line = """{"ts":${System.currentTimeMillis()},"model":${Json.encodeToString(model)},"kind":"$kind","input":${u.inputTokens},"output":${u.outputTokens},"cacheRead":${u.cacheReadTokens}}"""
+                    path.parent?.let { java.nio.file.Files.createDirectories(it) }
+                    java.nio.file.Files.writeString(path, line + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
+                }
+            } ?: { _, _ -> }
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
@@ -312,7 +355,7 @@ class RuntimeBuilder {
         val schedulesDir = scheduleDir ?: Path.of(System.getProperty("user.home"), ".sophi", "schedule")
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
-            skillsDir, memoryPlugin, agentDefinitions, schedulesDir
+            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first
         )
     }
 }

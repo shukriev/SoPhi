@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Context engine, session scope and management surface (ADR-041, M3): a session searches its own project plus every project marked global, and is oriented on its own project only; `sophi context global <id|dir> on|off` (and `list` shows `global`); `ContextEngine.status()` (role, per-project info, disk size), `setGlobal`, `unavailableReason` and scan progress; `IndexReset` is now a library call in `sophi-context` so apps can reset the index
+- Context orientation: global and project instruction files (`AGENTS.md`, `CLAUDE.md`, `.sophi/instructions.md`) framed as project conventions plus a compact project map in the system prompt, within a token budget; and a gated per-turn context hint of up to 3 file pointers when a message clearly matches the indexed project (ADR-041, M2)
+- `sophi-context`: a lexical context index over your projects — `search_context`, `read_context` and `project_map` tools and `sophi context add|list|remove|reset|eval`; the working directory is registered automatically only inside a git repo (or a folder with an instruction file), never `$HOME` or `/`; retrieval scored by `sophi context eval` (ADR-041)
+- `sophi-store`: the `ArcadeHost` library for one ArcadeDB store shared across processes — the first to lock `~/.sophi/db/host.lock` hosts a loopback server, others attach remotely and take over if the host exits (CLI/companion wiring comes in M1); full-text and vector-index primitives that work the same embedded and remote (ADR-041)
 - `sophi-hub`: local WebSocket hub letting `sophi-companion` monitor and remote-control running `sophi-cli` sessions — live status, streamed tokens, and confirmation prompts, plus sending messages into a session or answering its confirmation prompts from the companion (ADR-023)
 - Interactive `/goal [--check "<command>"] <task>` command: explicit multi-step planning
   (`PlanRunner`) in a live chat session, with a plan preview, live per-step progress, and
@@ -20,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can undo it within the grace period. The default stays permanent (ADR-036)
 
 ### Changed
+- **Breaking (SDK):** `RuntimeBuilder.context(engine, owned, project)` now takes `project: ProjectOf` — a function from session id to project id (or null) — instead of `scope: () -> List<String>`; callers must pass a lambda (ADR-041, M3)
+- Memory, lesson and site-skill recall now ride on the current turn's user message (a `<context>` block in the request only, never persisted) instead of the system prompt, so the system prompt is stable across turns (ADR-041)
+- Anthropic prompt caching is enabled on every request (system prompt and tools); token usage counts all prompt tokens and reports cache reads; opt-in `SOPHI_USAGE_LOG` writes a numbers-only JSONL (ADR-041)
 - `PlanRunner`'s progress stream is now one seam: `PlanProgressEvent` gained `PlanReady`,
   `StepAttempt` and `Escalating`, `StepFinished`/`StepStarted` carry the plan version, and
   `Replanned` carries the replacement `Plan` rather than only its id. The separate raw

@@ -102,3 +102,11 @@ no such release) so a process that's done with memory frees the lock for the nex
    `List<CausalEdge>` filtered in Kotlin on every `edges()` call had no actual traversal;
    ArcadeDB models it as what it always conceptually was — a graph. This is a genuine
    capability upgrade the migration enables, not merely a storage-format change.
+
+**Addendum (2026-10-12): remote vector search does work.** Finding 1 above was a parsing quirk, not a
+missing feature. In 26.5.1 the SQL parser reads the bare `vector.neighbors(...)` as a method call on an
+identifier named `vector`; the same function called as `vectorNeighbors(...)` or `` `vector.neighbors`(...) ``
+works, embedded and through `RemoteDatabase` (vectors must be sent as `List<Float>`). Verified in the
+context-engine spike and pinned by `ArcadeServerFactsTest`. The embedded-only decision for Jane's Palace
+stands for now; ADR-041 builds the shared-server design this ADR had to revert, and Jane's Palace moves
+onto it in a later milestone.

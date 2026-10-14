@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.extensions.AgentHook
 import dev.sophi.extensions.ContextContributor
+import dev.sophi.extensions.Placement
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.skills.SkillRegistry
 
@@ -17,6 +18,7 @@ import dev.sophi.skills.SkillRegistry
 class SiteSkillRecallPlugin(
     private val registrySupplier: () -> SkillRegistry
 ) : SophiPlugin, ContextContributor {
+    override val placement = Placement.VOLATILE
 
     override val name = "site-skill-recall"
 

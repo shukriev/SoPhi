@@ -67,7 +67,7 @@ private fun chunk(
         .build()
 }
 
-private fun usageChunk(promptTokens: Long, completionTokens: Long): ChatCompletionChunk =
+private fun usageChunk(promptTokens: Long, completionTokens: Long, cached: Long? = null): ChatCompletionChunk =
     ChatCompletionChunk.builder()
         .id("chunk-usage").model("m").created(0L)
         // OpenAI's usage-bearing chunk carries no choices at all — this mirrors the real shape.
@@ -77,6 +77,7 @@ private fun usageChunk(promptTokens: Long, completionTokens: Long): ChatCompleti
                 .promptTokens(promptTokens)
                 .completionTokens(completionTokens)
                 .totalTokens(promptTokens + completionTokens)
+                .apply { cached?.let { promptTokensDetails(CompletionUsage.PromptTokensDetails.builder().cachedTokens(it).build()) } }
                 .build()
         )
         .build()
@@ -99,7 +100,7 @@ class OpenAICompatProviderTest : FunSpec({
         genTokens: Int = 4,
         finishReason: String = "stop"
     ): ChatResponse {
-        val usage = mockk<Usage> {
+        val usage = mockk<Usage>(relaxed = true) {
             every { this@mockk.promptTokens } returns promptTokens
             every { this@mockk.completionTokens } returns genTokens
         }
@@ -252,6 +253,15 @@ class OpenAICompatProviderTest : FunSpec({
             StreamEvent.Finish("stop"),
             StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
         )
+    }
+
+    test("stream() maps promptTokensDetails.cachedTokens to cacheReadTokens, input unchanged") {
+        stubStreaming(listOf(chunk(finished = true), usageChunk(120L, 30L, cached = 100L)))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "qwen3.5:9b")
+
+        val events = runBlocking { provider.stream(req).toList() }
+
+        events.last() shouldBe StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30, cacheReadTokens = 100))
     }
 
     test("stream() asks the server for usage via streamOptions.includeUsage") {

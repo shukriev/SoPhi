@@ -4,6 +4,7 @@ import dev.sophi.extensions.AgentHook
 import dev.sophi.extensions.ContextContributor
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
+import dev.sophi.extensions.Placement
 import dev.sophi.extensions.SophiPlugin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,8 @@ class MemoryPlugin(
     val technique: MemoryTechnique,
     private val clock: () -> Long = System::currentTimeMillis
 ) : SophiPlugin, ContextContributor {
+    override val placement = Placement.VOLATILE
+
     override val name = "memory"
 
     private val encodeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

@@ -59,11 +59,11 @@ class TuiEngineTest : FunSpec({
     test("a turn driven through the migrated stack persists the assistant reply to the session") {
         val dir = tempdir().toPath()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("hello!"))
-        val cli = buildCliRuntime(
+        val cli = autoClose(buildCliRuntime(
             opts = optionsFor(dir), provider = provider,
             terminal = com.github.ajalt.mordant.terminal.Terminal(),
             input = ScriptedInputSource(emptyList())
-        )
+        ))
         val input = ScriptedInputSource(listOf("hi", "exit"))
         val controller = TurnController(cli.runtime, input, LiveRegion(StringBuilder()) { 80 }) {}
         TuiEngine(controller, slashHandler, input).run(cli.session)
@@ -80,11 +80,11 @@ class TuiEngineTest : FunSpec({
             input.signalEsc()
             delay(Long.MAX_VALUE)
         }
-        val cli = buildCliRuntime(
+        val cli = autoClose(buildCliRuntime(
             opts = optionsFor(dir), provider = provider,
             terminal = com.github.ajalt.mordant.terminal.Terminal(),
             input = ScriptedInputSource(emptyList())
-        )
+        ))
         val rendered = mutableListOf<String>()
         val controller = TurnController(cli.runtime, input, LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
 

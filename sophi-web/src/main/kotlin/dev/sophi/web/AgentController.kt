@@ -87,7 +87,7 @@ class AgentController(
             return ResponseEntity.notFound().build()
         }
         val updated = try {
-            agentLoop.turn(session, req.input, configWithContext(id, req.input), pluginRegistry.turnEventBridge(id))
+            agentLoop.turn(session, req.input, configWithContext(id, req.input), onEvent = pluginRegistry.turnEventBridge(id))
         } catch (e: Exception) {
             // Learning must never break responses: dispatch is best-effort, error still propagates.
             runCatching { pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(id, error = e)) }

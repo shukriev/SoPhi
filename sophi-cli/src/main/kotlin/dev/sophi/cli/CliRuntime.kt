@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.calendar.tools.buildCalendarProvider
 import dev.sophi.calendar.tools.calendarTools
+import dev.sophi.context.ContextEngine
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
 import dev.sophi.core.agent.plan.PlanLog
@@ -43,6 +44,10 @@ data class CliOptions(
     val mcpConfigPath: String,
     /** Overridable so tests don't write to the real ~/.sophi/learning. */
     val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
+    /** Overridable so tests don't open the real ~/.sophi/db. */
+    val contextRoot: Path = ContextEngine.defaultRoot(),
+    /** Tests turn this off: no index host (ArcadeDB keeps a JVM shutdown hook per server) and no indexing of the repo they run in. */
+    val startContext: Boolean = true,
     val braveApiKey: String? = null,
     val autoMode: Boolean = false,
     val godMode: Boolean = false,
@@ -71,8 +76,12 @@ class CliRuntime(
     val planLog: PlanLog,
     val calendarProvider: CalendarProvider,
     val session: AgentSession,
-    val hubClient: HubClient?
-)
+    val hubClient: HubClient?,
+    private val contextEngine: ContextEngine
+) : AutoCloseable {
+    /** Stops the context index host (tests; the CLI process exits instead). */
+    override fun close() = contextEngine.close()
+}
 
 /**
  * Builds the whole agent runtime for an interactive `sophi` session.
@@ -130,7 +139,13 @@ internal suspend fun buildCliRuntime(
 
     val mcpConfigPath = Path.of(opts.mcpConfigPath)
 
-    val runtime = Sophi.runtime {
+    val contextEngine = ContextEngine(opts.contextRoot).let { if (opts.startContext) it.start() else it }
+    val cwd = Path.of("").toAbsolutePath()
+    // Background: registration needs the store, which opens asynchronously — never delay startup.
+    Thread({ if (opts.startContext && contextEngine.awaitReady(5_000)) registerCwd(contextEngine, cwd, onWarning) }, "sophi-context-register")
+        .apply { isDaemon = true }.start()
+
+    val runtime = try { Sophi.runtime {
         this.provider = provider
         model = opts.model
         maxTokens = opts.maxTokens
@@ -141,6 +156,7 @@ internal suspend fun buildCliRuntime(
         systemPrompt = opts.systemPrompt
         toolRegistry(registry)
         builtinTools(root = Path.of("").toAbsolutePath(), braveApiKey = opts.braveApiKey)
+        context(contextEngine) { _ -> contextEngine.projectContaining(cwd)?.id }
         agentsDir(agentsDir, onWarning)
         subagentDelegation()
         goalDecomposition(Path.of(opts.plansDir))
@@ -163,7 +179,7 @@ internal suspend fun buildCliRuntime(
                 memory(embModel, embBase, opts.apiKey, opts.embeddingDimensions, onWarning)
             }
         }
-    }
+    } } catch (e: Throwable) { contextEngine.close(); throw e }
     val currentSession = (opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
         ?: runtime.sessionManager.create()).also { session = it }
     hubClient = if (opts.noRemote) null else HubClient(opts.hubPort, currentSession.id)
@@ -184,6 +200,7 @@ internal suspend fun buildCliRuntime(
         planLog = planLog,
         calendarProvider = calendarProvider,
         session = currentSession,
-        hubClient = hubClient
+        hubClient = hubClient,
+        contextEngine = contextEngine
     )
 }

@@ -45,10 +45,28 @@
                     <groupId>org.graalvm.sdk</groupId>
                     <artifactId>*</artifactId>
                 </exclusion>
-                <exclusion>
-                    <groupId>org.apache.lucene</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Shared store across processes (ADR-041): the elected host embeds an ArcadeDB server on
+             127.0.0.1, other processes use RemoteDatabase. Same GraalVM exclusions as the engine. -->
+        <dependency>
+            <groupId>com.arcadedb</groupId>
+            <artifactId>arcadedb-server</artifactId>
+            <version>26.5.1</version>
+            <exclusions>
+                <exclusion><groupId>org.graalvm.polyglot</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.graalvm.js</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.graalvm.sdk</groupId><artifactId>*</artifactId></exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>com.arcadedb</groupId>
+            <artifactId>arcadedb-network</artifactId>
+            <version>26.5.1</version>
+            <exclusions>
+                <exclusion><groupId>org.graalvm.polyglot</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.graalvm.js</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.graalvm.sdk</groupId><artifactId>*</artifactId></exclusion>
             </exclusions>
         </dependency>
         <dependency>
