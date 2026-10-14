@@ -169,4 +169,16 @@ class SessionEvaluatorTest : FunSpec({
         negative.pairedWith shouldBe positive.id
         positive.pairedWith shouldBe negative.id
     }
+
+    // A thinking model (bonsai on LM Studio) spends the evaluator's budget reasoning and returns nothing.
+    test("the evaluator asks for no reasoning") {
+        val home = tempdir().toPath()
+        val provider = mockk<LLMProvider>()
+        val captured = slot<dev.sophi.ai.api.CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns LLMResponse.Text(verdict, TokenUsage(1, 1))
+        val eval = SessionEvaluator(provider, LessonStore(JsonlLog(home.resolve("lessons.jsonl"))),
+            JsonlLog(home.resolve("session-outcomes.jsonl")), LearningConfig(home = home, scope = "/p", sessionModel = "test-model"))
+        kotlinx.coroutines.runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        captured.captured.reasoningEffort shouldBe "none"
+    }
 })

@@ -175,4 +175,13 @@ class ContextCompactorTest : FunSpec({
 
         result.parentSessionId shouldBe "parent-1"
     }
+
+    // A thinking model (bonsai on LM Studio) spends a 512-token budget reasoning and returns nothing.
+    test("compact() asks the summary call for no reasoning") {
+        val captured = slot<dev.sophi.ai.api.CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns LLMResponse.Text("Summary.", TokenUsage(1, 1))
+        val s = session(EntryRole.USER to "a", EntryRole.ASSISTANT to "b", EntryRole.USER to "c", EntryRole.ASSISTANT to "d")
+        compactor.compact(s, config, keepRecentCount = 2)
+        captured.captured.reasoningEffort shouldBe "none"
+    }
 })

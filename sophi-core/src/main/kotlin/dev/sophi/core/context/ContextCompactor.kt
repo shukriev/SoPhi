@@ -38,6 +38,8 @@ class ContextCompactor(private val provider: LLMProvider) {
             ),
             model = config.model,
             maxTokens = 512,
+            // A thinking model would spend the 512-token budget reasoning and return no summary.
+            reasoningEffort = "none",
             temperature = 0.3
         )
 
