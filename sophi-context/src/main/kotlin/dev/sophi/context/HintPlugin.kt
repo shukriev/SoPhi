@@ -12,9 +12,14 @@ private val IDENTIFIER = Regex(
 /** True if the raw message names a code identifier or file (camelCase, snake_case, file.ext). */
 fun hasIdentifier(message: String): Boolean = IDENTIFIER.containsMatchIn(message)
 
-/** Confidence gate for the per-turn hint; defaults are calibrated by the M2 eval. */
+/**
+ * Confidence gate for the per-turn hint. minScore 10 from the M2 offline grid; minRatio 1.25 from the live-E1
+ * negatives (evals/context/RESULTS.md, "Live E1/E5"): at 1.0 the gate fired on 6 of 10 chit-chat messages, at
+ * 1.25 on none. The ratio is tightened rather than the score floor because BM25 scores grow with corpus size
+ * and the top1/top2 ratio does not.
+ */
 data class HintGate(val minTerms: Int = 3, val minScore: Double = DEFAULT_MIN_SCORE, val minRatio: Double = DEFAULT_MIN_RATIO) {
-    companion object { const val DEFAULT_MIN_SCORE = 10.0; const val DEFAULT_MIN_RATIO = 1.0 }
+    companion object { const val DEFAULT_MIN_SCORE = 10.0; const val DEFAULT_MIN_RATIO = 1.25 }
 
     fun fires(message: String, hits: List<SearchHit>): Boolean =
         Tokenizer.tokens(message).toSet().size >= minTerms && hits.isNotEmpty() && hits[0].score >= minScore &&

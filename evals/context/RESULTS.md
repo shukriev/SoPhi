@@ -160,6 +160,63 @@ Trace of the rule: qualifying needs precision >= 0.80 on queries.tsv and >= 0.70
 
 Limits: the grid's score range (0-15) sat below the real top-1 distribution (median 27-30), so minScore <= 10 barely filters and minRatio 1.0 always passes; the chosen gate is effectively "at least 3 content terms and top score >= 10". Both query sets contain only real questions, with no chit-chat or off-topic negatives, so offline E1 cannot measure false fires. Roughly 1 in 6 (queries.tsv) to 1 in 4 (commits.tsv) fired hints point at a wrong file. The live E1 (deferred to the end of the work) decides whether the hint helps, and should include negative messages.
 
-## Pending live runs
+## Live E1/E5 (small local model, 2026-10-14)
 
-The live E1 (hint) and E5 (orientation) runs and the live prompt-cache check are deferred to the end of the work (no provider was reachable when M2 landed). Procedure: `evals/context/EXPERIMENTS.md`. Hint gate calibration: "Hint gate results (E1, offline)" above.
+Setup: `sophi-cli` at b5a34f8 (merged M0–M3), model `prism-ml/bonsai-27b` on LM Studio (32k context), runner
+`sophi-arena/context_qa` (arena commit a9a0471). 23 repo-QA questions over a frozen SoPhi snapshot: the
+SoPhi-only queries of `queries.tsv`, asked as "find the file(s) that answer it, end with FILES:"; success = the
+final answer names a labelled file. The index is built once (692 files, 12 s) and copied into each run's fresh
+home; `evals/context/` is removed from the snapshot so answers can't be looked up. One run per question per
+config, configs interleaved per question; 138 runs, 4 h, 2 timeouts (600 s), no backend errors. The frontier
+model half was not run (the user chose the local model only) and the live cache check needs Anthropic
+(LM Studio reports no cached tokens: `cacheRead` 0 throughout).
+
+Pass rule (fixed before running, spec §9): a variant beats its baseline if success rises, or total tokens fall
+>= 10% without success falling. E1 baseline A (hint off), E5 baseline D (orientation off).
+
+| Config | Hint | Orientation | Success | Total tokens | Median tokens | Median s | Tool calls |
+|---|---|---|---|---|---|---|---|
+| A | off | both | 21/23 | 1,047,250 | 30,426 | 94.8 | 119 |
+| B | always | both | 21/23 | 919,791 | 33,597 | 90.5 | 110 |
+| C | gated (10 / 1.0) | both | 23/23 | 1,175,157 | 25,460 | 74.0 | 129 |
+| D | off | off | 22/23 | 1,205,568 | 39,032 | 95.3 | 138 |
+| E | off | instructions | 21/23 | 980,903 | 34,144 | 84.3 | 125 |
+| F | off | map | 21/23 | 1,185,106 | 35,675 | 87.5 | 135 |
+
+Verdicts by the rule: E1 — B beats A (tokens −12%), C beats A (success). E5 — E, F and A do not beat D (each
+one success lower, although A uses 13% and E 19% fewer total tokens; A beats D on per-question tokens in 15 of
+23 questions).
+
+Reading: success is at the ceiling (21–23/23) and the 9 failures cluster on two questions (the site-replay ADR
+and the antlr/pom version conflict), so 1–2 success differences are within single-run noise; this set is too
+easy to separate configs on success. The gated hint had the best success, median tokens and median time, but a
+single 191k-token run makes its total the second highest. Orientation lowers typical token use without a
+measurable success effect. Conclusion for defaults: keep orientation `both` and hint `gated`.
+
+### Hint false fires (E1 negatives)
+
+10 chit-chat / off-topic messages (`sophi-arena/context_qa/negatives.tsv`) against the same SoPhi index,
+`sophi context eval --hint-grid` (the gate is deterministic over a fixed index, so this equals the live fire
+rate). Top-1 scores: min 6.32, median 10.95, p90 20.45 — chit-chat reaches the score floor.
+
+| Gate (minScore / minRatio) | Negatives fired | queries.tsv coverage / precision | commits.tsv coverage / precision |
+|---|---|---|---|
+| 10 / 1.0 (M2 default) | 6/10 | 1.000 / 0.839 | 0.981 / 0.735 |
+| 10 / 1.1 | 3/10 | 0.839 / 0.846 | 0.733 / 0.767 |
+| 12 / 1.1 | 1/10 | 0.839 / 0.846 | 0.725 / 0.775 |
+| 15 / 1.0 | 1/10 | 0.968 / 0.833 | 0.868 / 0.768 |
+| **10 / 1.25 (new default)** | **0/10** | 0.516 / 1.000 | 0.574 / 0.784 |
+
+On the 23 live questions (SoPhi only) the gate at 10 / 1.25 fires on 12 and every fired hint names a right file
+(at 10 / 1.0 it fires on 23 with precision 0.826).
+
+Decision: `HintGate.DEFAULT_MIN_RATIO` 1.0 → 1.25, minScore stays 10. Rule for this change: no false fires on
+the negatives, tightening the scale-free top1/top2 ratio rather than the score floor — BM25 scores grow with
+corpus size (see the Limits above), so a higher floor (15 / 1.0 has more coverage here) would be tuned to
+SoPhi's size. Cost: about half the real questions get no hint (they still have `search_context`). The live run
+above used the old gate (10 / 1.0); the new default is calibrated offline, not re-run live.
+
+## Still pending
+
+Frontier-model E1/E5 and the live Anthropic cache check (procedure: `evals/context/EXPERIMENTS.md`); a harder
+task set if success differences matter.

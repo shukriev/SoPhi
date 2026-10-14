@@ -1,6 +1,6 @@
 # Context engine — live experiment procedure (E1 hint, E5 orientation)
 
-Status: **pending**. The offline numbers are in `RESULTS.md`. The live runs, and the live prompt-cache check, were deferred to the end of the work (no provider was reachable when M2 landed). Nothing below has been run. Every run spends model tokens, so each needs the user's go-ahead first.
+Status: **small local model done** (bonsai-27b, 2026-10-14, results in `RESULTS.md` → "Live E1/E5"); the frontier-model runs and the live Anthropic cache check are still pending. Runner: `sophi-arena/context_qa`. Every run spends model tokens, so each needs the user's go-ahead first.
 
 ## Knobs
 

@@ -29,6 +29,10 @@ class ContextToolsTest : FunSpec({
         Files.writeString(r.resolve(".gitignore"), ".env\n")
         val id = (e.register(r, auto = true) as RegisterResult.Registered).project.id
         eventually { e.search("compactor", listOf(id))?.isNotEmpty() == true }
+        // search() queues a rescan while lastScanAt is still null (hits land per file, lastScanAt at the end),
+        // so wait for the first scan to finish and any queued rescan to drain before a test writes new files.
+        eventually { e.projectsOrNull()!!.first { it.id == id }.lastScanAt != null }
+        Thread.sleep(500)
         return Triple(e, id, r)
     }
     fun tool(e: ContextEngine, id: String, name: String) = contextTools(e) { id }.first { it.name == name }

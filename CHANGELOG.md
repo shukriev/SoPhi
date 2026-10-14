@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Context hint gate: the top-1/top-2 ratio threshold rises from 1.0 to 1.25 — live E1 negatives showed the old gate firing on 6 of 10 chit-chat messages against the SoPhi index, the new one on none; live E1/E5 results on a small local model recorded in `evals/context/RESULTS.md` (ADR-041)
+
 ### Added
 - Context engine, session scope and management surface (ADR-041, M3): a session searches its own project plus every project marked global, and is oriented on its own project only; `sophi context global <id|dir> on|off` (and `list` shows `global`); `ContextEngine.status()` (role, per-project info, disk size), `setGlobal`, `unavailableReason` and scan progress; `IndexReset` is now a library call in `sophi-context` so apps can reset the index
 - Context orientation: global and project instruction files (`AGENTS.md`, `CLAUDE.md`, `.sophi/instructions.md`) framed as project conventions plus a compact project map in the system prompt, within a token budget; and a gated per-turn context hint of up to 3 file pointers when a message clearly matches the indexed project (ADR-041, M2)

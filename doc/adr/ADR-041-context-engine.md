@@ -1,7 +1,7 @@
 # ADR-041: Context engine on a shared, lock-elected ArcadeDB store
 
 **Date:** 2026-10-12
-**Status:** Accepted — M0–M3 implemented; live E1/E5 and the live cache check pending
+**Status:** Accepted — M0–M3 implemented; live E1/E5 run on a small local model (hint gate ratio raised to 1.25, see RESULTS.md); frontier-model runs and the live cache check pending
 
 ## Context
 
@@ -71,9 +71,10 @@ addendum).
    the first turn waits at most 1 s for the engine. The hint (VOLATILE) is at most 3 lines of
    `path:line — label — summary`, no file content beyond a one-line summary or snippet head, repo-derived text sanitised (`‹ ›`), budget
    min(1% of window, 300) tokens, and fires only with >= 3 content terms and top score >= 10 (plus
-   ratio 1.0, or an identifier in the message). Gate values come from the offline E1 grid
-   (`evals/context/RESULTS.md`, "Hint gate results"): queries.tsv coverage 1.000 / precision 0.839,
-   commits.tsv 0.981 / 0.735. Offline limits: no negative messages, and the absolute floor does not fire
+   top1/top2 ratio >= 1.25, or an identifier in the message). minScore comes from the offline E1 grid
+   (`evals/context/RESULTS.md`, "Hint gate results"); the ratio was 1.0 until the live E1 negatives showed it
+   firing on 6 of 10 chit-chat messages and was raised to 1.25 (none fire; queries.tsv coverage 0.516 /
+   precision 1.000, commits.tsv 0.574 / 0.784 — RESULTS.md, "Live E1/E5"). Limit: the absolute floor does not fire
    on tiny repos. Knobs: `SOPHI_CONTEXT_HINT`, `SOPHI_CONTEXT_ORIENTATION`, `SOPHI_USAGE_LOG`.
    Pending: live E1/E5 and the live cache check (`evals/context/EXPERIMENTS.md`), deferred to the end
    of the work.
