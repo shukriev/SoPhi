@@ -144,7 +144,10 @@ in "entryIndex" and "retryOf" — do not invent indices.""")
             provider.complete(CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
                 model = config.evaluatorModel ?: config.sessionModel ?: return null,
-                maxTokens = config.evaluatorMaxTokens, temperature = 0.0))
+                maxTokens = config.evaluatorMaxTokens, temperature = 0.0,
+                // A structured verdict, not a task that needs chain-of-thought: a thinking model
+                // would otherwise spend the whole budget reasoning and return nothing.
+                reasoningEffort = "none"))
         }.getOrNull()) {
             is LLMResponse.Text -> r.content
             else -> null
