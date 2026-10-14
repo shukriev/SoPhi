@@ -272,4 +272,13 @@ class SignificanceEncoderTest : FunSpec({
         SignificanceEncoder(blank, cfg).encode(turn, emptyList()) shouldBe null
         io.mockk.coVerify(exactly = 2) { blank.complete(any()) }
     }
+
+    test("the encoder call is tagged as the encoder judgment") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns
+            LLMResponse.Text("""{"memories":[],"profile":[]}""", TokenUsage(1, 1))
+        SignificanceEncoder(provider, cfg).encode(turn, emptyList())
+        captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.ENCODER
+    }
 })

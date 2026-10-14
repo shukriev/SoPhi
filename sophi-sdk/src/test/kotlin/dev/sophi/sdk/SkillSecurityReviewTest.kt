@@ -64,5 +64,6 @@ class SkillSecurityReviewTest : FunSpec({
         val p = ScriptedProvider("""{"safe": true, "reasons": []}""")
         runBlocking { SkillSecurityReview(p, "m", timeoutMs = 1_000, maxTokens = 16_384).review("x", "x") }
         p.requests.single().maxTokens shouldBe 16_384
+        p.requests.single().judgment shouldBe dev.sophi.ai.system1.Judgments.SKILL_SECURITY
     }
 })

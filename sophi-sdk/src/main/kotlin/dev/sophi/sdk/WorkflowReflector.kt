@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -42,6 +43,7 @@ class WorkflowReflector(
                 provider.complete(CompletionRequest(
                     messages = listOf(Message(MessageRole.USER, prompt(turn, existing))),
                     model = model, maxTokens = maxTokens, temperature = 0.0,
+                    judgment = Judgments.WORKFLOW_REFLECTOR,
                 ))
             }
         } catch (e: Exception) { return null }

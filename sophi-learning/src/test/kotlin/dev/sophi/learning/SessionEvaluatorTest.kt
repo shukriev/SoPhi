@@ -180,5 +180,6 @@ class SessionEvaluatorTest : FunSpec({
             JsonlLog(home.resolve("session-outcomes.jsonl")), LearningConfig(home = home, scope = "/p", sessionModel = "test-model"))
         kotlinx.coroutines.runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
         captured.captured.reasoningEffort shouldBe "none"
+        captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.EVALUATOR
     }
 })

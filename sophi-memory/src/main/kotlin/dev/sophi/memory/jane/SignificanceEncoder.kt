@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import dev.sophi.memory.TurnObservation
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -170,7 +171,8 @@ class SignificanceEncoder(
                 maxTokens = config.encoderMaxTokens, temperature = 0.0,
                 // This is structured extraction, not a task that benefits from chain-of-thought;
                 // reasoning models otherwise burn the whole token budget "thinking" and never emit JSON.
-                reasoningEffort = "none"))
+                reasoningEffort = "none",
+                judgment = Judgments.ENCODER))
         }.getOrNull()) {
             is LLMResponse.Text -> r
             else -> null

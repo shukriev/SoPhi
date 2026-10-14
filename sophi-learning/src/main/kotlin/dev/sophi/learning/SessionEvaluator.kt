@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import dev.sophi.core.session.SessionEntry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -147,7 +148,8 @@ in "entryIndex" and "retryOf" — do not invent indices.""")
                 maxTokens = config.evaluatorMaxTokens, temperature = 0.0,
                 // A structured verdict, not a task that needs chain-of-thought: a thinking model
                 // would otherwise spend the whole budget reasoning and return nothing.
-                reasoningEffort = "none"))
+                reasoningEffort = "none",
+                judgment = Judgments.EVALUATOR))
         }.getOrNull()) {
             is LLMResponse.Text -> r.content
             else -> null
