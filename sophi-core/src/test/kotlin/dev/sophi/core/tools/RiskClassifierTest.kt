@@ -141,4 +141,12 @@ class RiskClassifierTest : FunSpec({
         }
         result shouldBe RuleVerdict.LOW_RISK
     }
+
+    test("the classifier call is tagged as the risk judgment") {
+        val provider = mockk<LLMProvider>()
+        val captured = slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns LLMResponse.Text("LOW_RISK", TokenUsage(10, 1))
+        runBlocking { LlmRiskClassifier(provider, model = "test-model").classify("bash", "d", RiskLevel.DESTRUCTIVE, "{}") }
+        captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.RISK
+    }
 })

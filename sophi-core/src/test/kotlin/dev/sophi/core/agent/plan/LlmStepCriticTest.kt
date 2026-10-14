@@ -70,4 +70,12 @@ class LlmStepCriticTest : FunSpec({
         val result = runBlocking { critic.judge(step, "done") }
         result shouldBe 1.0
     }
+
+    test("the critic call is tagged as the step-critic judgment") {
+        val provider = mockk<LLMProvider>()
+        val captured = io.mockk.slot<dev.sophi.ai.api.CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns LLMResponse.Text("0.85", TokenUsage(10, 1))
+        runBlocking { LlmStepCritic(provider, model = "test-model").judge(step, "done") }
+        captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.STEP_CRITIC
+    }
 })

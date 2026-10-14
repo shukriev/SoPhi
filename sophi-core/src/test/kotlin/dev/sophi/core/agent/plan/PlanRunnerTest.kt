@@ -82,6 +82,7 @@ class PlanRunnerTest : FunSpec({
         val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
 
         outcome.finalStatus shouldBe PlanFinalStatus.Met
+        io.mockk.coVerify { provider.complete(match { it.judgment == dev.sophi.ai.system1.Judgments.GOAL_JUDGE }) }
     }
 
     // The default shellRunner waits without a timeout, so a stop-condition command that reads stdin
