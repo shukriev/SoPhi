@@ -42,6 +42,10 @@ class RuntimeBuilderContextTest : FunSpec({
         val id = (e.register(r, auto = true) as RegisterResult.Registered).project.id
         val end = System.currentTimeMillis() + 10_000
         while (e.fileSummariesOrNull(id).orEmpty().size < 6) { check(System.currentTimeMillis() < end) { "timed out" }; Thread.sleep(50) }
+        // Summaries land per file but lastScanAt only at the end of the scan, and orientation's cache key includes
+        // it: wait for the scan to finish (and any rescan a search queued meanwhile) so both turns see one key.
+        while (e.projectsOrNull()!!.first { it.id == id }.lastScanAt == null) { check(System.currentTimeMillis() < end) { "timed out" }; Thread.sleep(50) }
+        Thread.sleep(500)
         return e to id
     }
 
