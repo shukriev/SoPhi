@@ -51,7 +51,7 @@ class SophiRuntime internal constructor(
      */
     val learningPlugin: LearningPlugin? = null,
     private val toolRegistry: ToolRegistry = ToolRegistry(),
-    private val provider: LLMProvider? = null,
+    internal val provider: LLMProvider? = null,
     private val contextWindowTokens: Int = 0,
     private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
     val memoryPlugin: MemoryPlugin? = null,

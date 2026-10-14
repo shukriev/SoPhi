@@ -30,6 +30,7 @@ import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
+import dev.sophi.learning.system1FromHome
 import dev.sophi.mcp.McpClientManager
 import dev.sophi.mcp.config.McpConfigLoader
 import dev.sophi.memory.MemoryPlugin
@@ -73,6 +74,7 @@ class RuntimeBuilder {
     private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
     private var grants: Set<String> = emptySet()
     private var mcpConfigPath: Path? = null
+    private var system1Config: Pair<Path, (String) -> Unit>? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var providedRegistry: ToolRegistry? = null
     private var loopGuardPolicy: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
@@ -118,6 +120,12 @@ class RuntimeBuilder {
     fun learning(config: LearningConfig, embeddingProvider: EmbeddingProvider? = null): RuntimeBuilder =
         apply { learningConfig = config; learningEmbeddingProvider = embeddingProvider }
     fun schedule(dir: Path): RuntimeBuilder = apply { scheduleDir = dir }
+
+    /** Wraps the provider with the System-1 tier from `[home]/system1.json` (ADR-042); no file, no change. */
+    fun system1(
+        home: Path = Path.of(System.getProperty("user.home"), ".sophi"),
+        onWarning: (String) -> Unit = { System.err.println(it) }
+    ): RuntimeBuilder = apply { system1Config = home to onWarning }
 
     /**
      * Loads AgentDefinitions from [dir] (created if missing) for this runtime's scheduleEngine()
@@ -197,6 +205,7 @@ class RuntimeBuilder {
 
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
+            .let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
         val window = requireNotNull(contextWindowTokens) {
             "contextWindowTokens must be set before calling build() — pass the total context " +
                 "window (in tokens) of the model you configured"
