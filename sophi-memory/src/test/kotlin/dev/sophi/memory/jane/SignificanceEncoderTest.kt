@@ -251,4 +251,11 @@ class SignificanceEncoderTest : FunSpec({
         enc.buildPrompt(ambient, emptyList()) shouldNotContain "Emit []"
         enc.buildPrompt(turn, emptyList()) shouldContain "Emit []"
     }
+
+    test("an empty reply is no answer; a literal [] is nothing to store") {
+        val enc = SignificanceEncoder(mockk(), cfg)
+        enc.parse("") shouldBe null
+        enc.parse("   ") shouldBe null
+        enc.parse("[]")!!.memories shouldBe emptyList()
+    }
 })

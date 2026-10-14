@@ -144,7 +144,10 @@ class SignificanceEncoder(
         val trimmed = text.trim()
         // The prompt tells the model to "Emit [] for trivial exchanges" — models sometimes take that
         // literally instead of wrapping it as {"memories":[],"profile":[]}. Both mean the same thing.
-        if (trimmed.isEmpty() || trimmed == "[]") return EncoderVerdict()
+        // An empty reply is no answer (a thinking model can spend its whole budget reasoning), not
+        // "nothing to store": returning null makes encode() retry, then report it.
+        if (trimmed.isEmpty()) return null
+        if (trimmed == "[]") return EncoderVerdict()
         val start = text.indexOf('{'); val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) return null
         return runCatching {

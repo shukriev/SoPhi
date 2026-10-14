@@ -54,7 +54,7 @@ class JanesPalace(
         val w = writer ?: return
         val recent = store.memories().values.filter { it.active }
             .sortedByDescending { it.createdAt }.take(config.recentWindow)
-        val verdict = e.encode(turn, recent) ?: return
+        val verdict = e.encode(turn, recent) ?: run { w.logEncoderEmpty(turn); return }
         if (turn.ambient) {
             meetingScores.addLast(turn.nowMs to (verdict.meeting ?: 0.0).coerceIn(0.0, 1.0))
             while (meetingScores.size > 200) meetingScores.pollFirst()
