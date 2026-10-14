@@ -33,6 +33,9 @@ data first.
 
 - Off by default; shipping it changes no behaviour.
 - `SHADOW` doubles judgment compute on the S1 machine; `shadowSampleRate` bounds it.
+- In `SYSTEM1`, a hung S1 spends its `timeoutSeconds` (default 20) before the S2 fallback starts, inside
+  the caller's own budget (the step and plan critics allow 30 s and fail open). Keep `timeoutSeconds` well
+  under the caller's budget, or a slow S1 turns into a lost judgment rather than an S2 answer.
 - `AUTO` mode (confidence-thresholded escalation) and typed `Judgment<I, O>` are deferred to the
   measurement sub-project — no calibration data exists yet.
 - The trained model's weights are out of scope here and stay closed initially; this repo holds
