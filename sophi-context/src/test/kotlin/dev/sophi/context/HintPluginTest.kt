@@ -125,4 +125,12 @@ class HintPluginTest : FunSpec({
         f.hint("which port does the hub server listen on", mode = " Off ").shouldBeNull()
         f.hint("which port does the hub server listen on", mode = "Gated").shouldNotBeNull()
     }
+
+    test("the default gate needs a clear top hit: a near tie (ratio < 1.25) stays quiet, a clear lead fires") {
+        // Live E1 negatives: chit-chat scored >= 10 against SoPhi but with near-tied top hits (RESULTS.md, "Live E1/E5").
+        fun hits(top: Double, second: Double) = listOf(top, second).map { SearchHit("p", "a.kt", 1, 1, null, "source", it, "") }
+        val chat = "can you recommend a good book about the history of rome"
+        HintGate().fires(chat, hits(12.0, 11.0)) shouldBe false
+        HintGate().fires(chat, hits(15.0, 11.0)) shouldBe true
+    }
 })
