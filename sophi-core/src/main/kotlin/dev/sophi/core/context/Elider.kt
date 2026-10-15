@@ -13,7 +13,7 @@ object Elider {
             i >= from && messages[i].role == MessageRole.ASSISTANT && messages[i].toolCalls != null
         }
         if (rounds.size <= keepRecentRounds) return 0
-        val cut = rounds[rounds.size - keepRecentRounds]
+        val cut = if (keepRecentRounds <= 0) messages.size else rounds[rounds.size - keepRecentRounds]
         val calls = messages.flatMap { it.toolCalls.orEmpty() }.associateBy { it.id }
         var count = 0
         for (i in from until cut) {
