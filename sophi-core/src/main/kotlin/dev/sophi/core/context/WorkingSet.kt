@@ -12,11 +12,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 data class FileTouch(val path: String, val reads: Int, val writes: Int, val lastAction: String)
-data class CommandRun(val command: String, val exitCode: Int)
+/** exitCode null = unknown (no result, stopped by the user, or output truncated past the marker). */
+data class CommandRun(val command: String, val exitCode: Int?)
 data class ToolError(val tool: String, val message: String)
 
 private val lenient = Json { ignoreUnknownKeys = true }
-private val exitRe = Regex("Command exited with code (\\d+)\\s*$")
+private val exitRe = Regex("Command exited with code (\\d+)")
+private const val STOPPED = "Stopped by the user before this finished."
 private const val LINE_MAX = 160
 
 /** Path / pattern / query / command of a tool call, or null when the arguments don't parse or hold none. */
@@ -41,7 +43,7 @@ data class WorkingSet(
         "${it.path} — read ${it.reads}, written ${it.writes}, last: ${it.lastAction}"
     }
 
-    fun commandsSection(): String = section(commands.takeLast(20)) { "${it.command} → exit ${it.exitCode}" }
+    fun commandsSection(): String = section(commands.takeLast(20)) { "${it.command} → exit ${it.exitCode ?: "unknown"}" }
 
     fun errorsSection(): String = section(errors.takeLast(10)) { "${it.tool}: ${it.message.lineSequence().first()}" }
 
@@ -73,6 +75,13 @@ data class WorkingSet(
             return build(calls, results)
         }
 
+        // BashTool prints the marker only on non-zero, so a truncated tail can't tell success from failure.
+        private fun exitCode(result: String?): Int? {
+            if (result == null || result.startsWith(STOPPED)) return null
+            exitRe.findAll(result).lastOrNull()?.let { return it.groupValues[1].toIntOrNull() }
+            return if (result.trimEnd().endsWith("... output truncated")) null else 0
+        }
+
         private fun build(calls: List<ToolCall>, results: Map<String, String>): WorkingSet {
             // LinkedHashMap, re-inserted on every touch: iteration order = least to most recently touched.
             val files = LinkedHashMap<String, FileTouch>()
@@ -91,7 +100,7 @@ data class WorkingSet(
                         else old.copy(writes = old.writes + 1, lastAction = action)
                     }
                     "grep", "glob", "search_context" -> searches += arg
-                    "bash" -> commands += CommandRun(arg, result?.let { exitRe.find(it)?.groupValues?.get(1)?.toIntOrNull() } ?: 0)
+                    "bash" -> commands += CommandRun(arg, exitCode(result))
                 }
             }
             return WorkingSet(files.values.toList(), searches, commands, errors)

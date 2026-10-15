@@ -58,4 +58,21 @@ class WorkingSetTest : FunSpec({
         ws.files shouldBe emptyList()
         ws.commandsSection() shouldBe "(none)"
     }
+
+    fun bashRun(result: String?): CommandRun {
+        val s = AgentSession(id = "b")
+        s.append(EntryRole.ASSISTANT, "", mapOf("toolCalls" to "[${call("1", "bash", """{"command":"make"}""")}]"))
+        if (result != null) s.append(EntryRole.TOOL_RESULT, result, mapOf("toolCallId" to "1"))
+        return WorkingSet.fromEntries(s.branch()).commands.single()
+    }
+
+    test("exit code survives the repeat note; unknown when stopped, truncated past the marker, or missing") {
+        bashRun("boom\nCommand exited with code 1\n\n[Note: you have now made this exact call twice]").exitCode shouldBe 1
+        val cut = bashRun("lots of output\n... output truncated")
+        cut.exitCode shouldBe null
+        WorkingSet(emptyList(), emptyList(), listOf(cut), emptyList()).commandsSection() shouldContain "make → exit unknown"
+        bashRun("Stopped by the user before this finished.").exitCode shouldBe null
+        bashRun(null).exitCode shouldBe null
+        bashRun("fine").exitCode shouldBe 0
+    }
 })
