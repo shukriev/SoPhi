@@ -1,6 +1,6 @@
 # Context engine — live experiment procedure (E1 hint, E5 orientation)
 
-Status: **small local model done** (bonsai-27b, 2026-10-14, results in `RESULTS.md` → "Live E1/E5"); the frontier-model runs and the live Anthropic cache check are still pending. Runner: `sophi-arena/context_qa`. Every run spends model tokens, so each needs the user's go-ahead first.
+Status: **small local model done** (bonsai-27b, 2026-10-14 for E1/E5, 2026-10-15 for E4; results in `RESULTS.md` → "Live E1/E5", "E4 compaction"); the frontier-model runs and the live Anthropic cache check are still pending. Runner: `sophi-arena/context_qa`. Every run spends model tokens, so each needs the user's go-ahead first.
 
 ## Knobs
 
@@ -10,7 +10,8 @@ Environment variables, read once when the runtime is built; internal, not user s
 |---|---|
 | `SOPHI_CONTEXT_HINT` | `gated`, `always`, `off` |
 | `SOPHI_CONTEXT_ORIENTATION` | `both`, `instructions`, `map`, `off` |
-| `SOPHI_USAGE_LOG` | path of a JSONL usage log (unset = none); one line per `turn` / `summarise` call: input tokens (all prompt tokens, including cache read/write), `cacheRead`, output, model, wall-clock `ts` (latency only from `ts` deltas) |
+| `SOPHI_COMPACTION` | `structured`, `elide`, `generic` |
+| `SOPHI_USAGE_LOG` | path of a JSONL usage log (unset = none); one line per `turn` / `summarise` / `elide` call: input tokens (all prompt tokens, including cache read/write), `cacheRead`, output, model, wall-clock `ts` (latency only from `ts` deltas) |
 
 ## Runs
 
@@ -18,6 +19,7 @@ Run each variant on the same task set, in a registered project, with a fresh `HO
 
 - **E1 — hint:** `SOPHI_CONTEXT_HINT` = `off` / `always` / `gated`, orientation at its default.
 - **E5 — orientation:** `SOPHI_CONTEXT_ORIENTATION` = `off` / `instructions` / `map` / `both`, hint `off` so the effect is isolated.
+- **E4 — compaction:** `SOPHI_COMPACTION` = `generic` / `elide` / `structured`, runner `sophi-arena/context_qa` set `compaction` with a small window (16k) so turns compact. Status: **done on bonsai-27b (2026-10-15)**, results in `RESULTS.md` -> "E4 compaction"; the structured summary path was not exercised (the summariser never ran for `elide`/`structured`), so a longer-task run is still open; no frontier-model run.
 - **Live cache check (E5):** two consecutive turns on Anthropic with `SOPHI_USAGE_LOG` set; turn 2 `cacheRead` should be > 0 (system prompt above the model's minimum cacheable prefix, e.g. 1,024 tokens for Sonnet). On LM Studio `cacheRead` may stay 0 if the server does not report it; record input tokens and timings instead. The structural guarantee (byte-identical system prompts across turns) is already covered by `RuntimeBuilderContextTest`. Also compare `cacheRead` from one non-streaming and one streaming call on the same prompt and record whether they agree (streaming takes the cache figures from `message_delta`, which some models or API versions may omit).
 
 ## Metrics per run

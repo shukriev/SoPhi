@@ -1,7 +1,7 @@
 # ADR-041: Context engine on a shared, lock-elected ArcadeDB store
 
 **Date:** 2026-10-12
-**Status:** Accepted — M0–M3 implemented; live E1/E5 run on a small local model (hint gate ratio raised to 1.25, see RESULTS.md); frontier-model runs and the live cache check pending
+**Status:** Accepted — M0–M4 implemented; frontier-model runs and the live cache check pending
 
 ## Context
 
@@ -99,6 +99,41 @@ addendum).
    (`~/.sophi/companion/project-suggestions.json`) offers the notes vault, the workspace and CLI folders seen
    twice; nothing is indexed without a click. Pending: live E1/E5 and the live cache check, as above; the
    M3 companion UI has not been run end to end by this record.
+
+9. **M4 — session memory and compaction (`sophi-core`).** Compaction is rebuilt from four parts. `WorkingSet`
+   is a pure function over persisted tool rounds (ADR-009): files read/written, searches, bash commands with
+   exit codes (unknown when the output was stopped or truncated) and tool errors, so it needs no store, is never
+   stale and is free on resume; `merge` joins an earlier set with a newer one. `Elider` replaces tool results
+   older than the last 2 rounds (`COMPACTION_KEEP_RECENT_ROUNDS`) with `[elided: <tool> <key arg>, <N> lines — re-read
+   if needed]` — no LLM call, call/result pairing intact — and `elideLargest` stubs the largest results at or after
+   the turn start, the newest round included and file-reading tools first, until a target is met; compaction aims
+   at 3/4 of the trigger (headroom, so the next round does not trip it again). Results the model has not seen
+   yet get a "too large to show at once; re-read a smaller part or narrow the request" stub. `Summariser` makes the
+   one LLM call (`reasoningEffort = "none"`) with a `CompactionMode`: `GENERIC` (the old free-text summary),
+   `ELIDE` (generic summary, but elision first) or `STRUCTURED` (Goal, Decisions & findings, Files touched,
+   Commands & outcomes, Errors & attempts, Open items; the LLM writes Goal, Decisions, Errors and Open items, code
+   adds the exact file/command/error sections from the `WorkingSet`; budget 3% of the window clamped to 400–2,000
+   tokens). A blank or failing summariser degrades to a capped truncated transcript, with the exact sections kept.
+   In `ELIDE` and `STRUCTURED`, `AgentLoop.compactInPlace` elides first, summarises only if still over, and when
+   there are too few rounds to cut (or a summary still leaves the context over) stubs the largest results instead
+   of ending the turn with `ContextExhausted`; `GENERIC` keeps the old behaviour.
+   **Template-safe placement.** A summary is never a non-leading SYSTEM message (some chat templates reject it).
+   Mid-turn it is appended to the current turn's user message after a marker and replaced, not stacked, on a second
+   compaction (the earlier summary is fed back into the new one). Cross-turn it is a leading USER ("Summary of the
+   conversation so far: …") and ASSISTANT ("Understood — continuing from that summary.") pair carrying
+   `_compacted` and `_workingSet` metadata; the next cross-turn compaction decodes that `_workingSet` and merges
+   it with the rounds it now drops, so exact facts survive repeated compactions, and the kept tail always opens on a
+   USER entry. Cross-turn compaction runs automatically at the end of a turn in every runtime built by
+   `RuntimeBuilder`. The knob `SOPHI_COMPACTION` = `structured` (default) | `elide` |
+   `generic`, normalised like the other knobs; internal. `SOPHI_USAGE_LOG` kinds are now `turn`, `summarise`
+   and `elide` (`AgentLoop` reports an elision as a zero-token `elide` usage event).
+   **E4 outcome** (RESULTS.md, "E4 compaction"): bonsai-27b on LM Studio, window 16k, 5 two-question prompts, one
+   run each, three configs interleaved. Generic 3/5 (2 turns ended with `ContextExhausted` on an oversized
+   parallel round), elide 5/5, structured 5/5; elide and structured both beat generic on success. Total tokens
+   157,549 / 177,031 / 253,809, but the summariser never ran for elide or structured (elision alone sufficed), so
+   they ran the same path and the gap is one long run. The default stays `structured`. E4 showed that elision and
+   the oversized-round handling work; it did not exercise the structured summary live, so structured against
+   generic summaries is unsettled until a longer-task run. Single runs, one small model, n=5.
 
 ## Reasons
 
