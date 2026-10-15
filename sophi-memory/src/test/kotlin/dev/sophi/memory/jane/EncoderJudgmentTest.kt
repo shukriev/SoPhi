@@ -1,9 +1,13 @@
 package dev.sophi.memory.jane
 
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.system1.Judgments
 import dev.sophi.memory.TurnObservation
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.mockk
 import java.nio.file.Files
 import java.nio.file.Path
@@ -35,5 +39,67 @@ class EncoderJudgmentTest : FunSpec({
 
     test("the production encoder prompt is pinned (ambient, no recent memories)") {
         golden("encoder-ambient.txt", encoder.buildPrompt(goldenAmbient, emptyList()))
+    }
+
+    val chatInput = """{"turn":{"userInput":"Mila's violin moved to Tuesdays.","assistantReply":"Updated."},
+        "recent":[{"id":"mem_d1","room":"ENTITIES","text":"The user's daughter Mila has violin lessons on Thursdays"}]}"""
+
+    test("render returns the production prompt with production settings") {
+        val req = EncoderJudgment.render(chatInput, "small")
+        req.messages.single().content shouldBe Files.readString(Path.of("src/test/resources/golden/encoder-chat.txt"))
+        req.model shouldBe "small"
+        req.judgment shouldBe Judgments.ENCODER
+        req.reasoningEffort shouldBe "none"
+        req.temperature shouldBe 0.0
+        req.maxTokens shouldBe 1024
+    }
+
+    test("render of an ambient input matches the ambient golden") {
+        val req = EncoderJudgment.render("""{"turn":{"userInput":"so at my company I lead five data engineers","ambient":true}}""", "m")
+        req.messages.single().content shouldBe Files.readString(Path.of("src/test/resources/golden/encoder-ambient.txt"))
+    }
+
+    test("render rejects input without a turn") {
+        shouldThrow<Exception> { EncoderJudgment.render("{}", "m") }
+    }
+
+    test("parse: a valid object becomes canonical JSON with defaults filled in") {
+        val out = EncoderJudgment.parse("""{"memories":[{"text":"The user has a dog","room":"ENTITIES"}]}""")!!
+        out shouldContain "\"commitment\":false"
+        out shouldContain "\"sensitivity\":\"PERSONAL\""
+        out shouldContain "\"provenance\":null"
+    }
+
+    test("parse: a bare [] is an empty verdict") {
+        EncoderJudgment.parse("[]") shouldBe """{"memories":[],"profile":[],"meeting":null}"""
+    }
+
+    test("parse: an object without memories has an empty memories list") {
+        EncoderJudgment.parse("""{"profile":[]}""")!! shouldContain "\"memories\":[]"
+    }
+
+    // Review Focus 2
+    test("parse: a reply in a code fence with prose around it parses as production does") {
+        val fence = "`".repeat(3)
+        EncoderJudgment.parse("Here you go:\n${fence}json\n{\"memories\":[],\"meeting\":0.2}\n$fence")!! shouldContain "\"meeting\":0.2"
+    }
+
+    test("parse: empty, prose and wrong-typed replies are rejected") {
+        EncoderJudgment.parse("").shouldBeNull()
+        EncoderJudgment.parse("not json at all").shouldBeNull()
+        EncoderJudgment.parse("""{"memories": 5}""").shouldBeNull()
+    }
+
+    test("SignificanceEncoder still sends the production request") {
+        val provider = mockk<LLMProvider>()
+        val captured = io.mockk.slot<dev.sophi.ai.api.CompletionRequest>()
+        io.mockk.coEvery { provider.complete(capture(captured)) } returns
+            dev.sophi.ai.api.LLMResponse.Text("[]", dev.sophi.ai.api.TokenUsage(1, 1))
+        kotlinx.coroutines.runBlocking {
+            SignificanceEncoder(provider, JanesPalaceConfig(sessionModel = "m", encoderMaxTokens = 2048)).encode(goldenChat, listOf(goldenRecent))
+        }
+        captured.captured.maxTokens shouldBe 2048
+        captured.captured.judgment shouldBe Judgments.ENCODER
+        captured.captured.messages.single().content shouldBe Files.readString(Path.of("src/test/resources/golden/encoder-chat.txt"))
     }
 })
