@@ -5,8 +5,15 @@ private val patterns = listOf(
     Regex("""\b(?:\d[ -]?){13,19}\b"""),
     // Long bare digit runs (government IDs, account numbers): 7+ digits.
     Regex("""\b\d{7,}\b"""),
-    // Secret-keyword assignments: password/api key/token/secret followed by a value.
-    Regex("""(?i)\b(password|passcode|api[_ ]?key|secret|token)\b\s*(is|:|=)\s*\S+""")
+    // Secret-keyword assignments in English, Bulgarian and German: the keyword, up to 40 characters of the same
+    // sentence ("for the wifi", "на картата ми", "für das WLAN"), a connector, then the value. "Password manager"
+    // is a fact, not a credential. (?U): Cyrillic word boundaries.
+    // ponytail: keyword-before-value only; add the reverse order ("lipa2024 is my password") if it shows up.
+    Regex(
+        """(?iU)\b(password|passcode|passphrase|pin|api[_ ]?key|secret|token|паролата|парола|пин|passwort|kennwort|geheimzahl)\b""" +
+            """(?![\s-]*(manager|мениджър|менажер))[^.!?\n]{0,40}?\b(is|are|was|е|са|ist|lautet)\b\s*\S+""" +
+            """|(?iU)\b(password|passcode|api[_ ]?key|secret|token)\b\s*[:=]\s*\S+"""
+    )
 )
 
 /**

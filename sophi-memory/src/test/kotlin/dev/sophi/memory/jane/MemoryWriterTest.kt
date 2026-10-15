@@ -443,4 +443,17 @@ class MemoryWriterTest : FunSpec({
         again.id shouldBe first.id
         again.createdAt shouldBe 5_000L
     }
+
+    test("profile values are redacted before they reach the profile") {
+        val store = PalaceStore(tempdir().toPath())
+        val profile = UserProfile(store)
+        val writer = MemoryWriter(store, profile, embeddings, "fake", JanesPalaceConfig())
+
+        writer.write(turn, EncoderVerdict(
+            memories = listOf(vm("The user uses Bitwarden", emph = 0.8, aff = 0.9)),
+            profile = listOf(VerdictProfile(path = "accounts.wifi", value = "the wifi password is tigerLily88"))
+        ))
+
+        profile.all().getValue("accounts.wifi").value shouldNotContain "tigerLily88"
+    }
 })
