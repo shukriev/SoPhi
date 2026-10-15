@@ -14,6 +14,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 import io.mockk.slot
 import dev.sophi.core.context.CompactionMode
@@ -46,14 +47,16 @@ class AgentLoopTest : FunSpec({
         grants: Set<String> = emptySet(),
         loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE,
         contextWindowTokens: Int = TEST_CONTEXT_WINDOW,
-        compaction: CompactionMode = CompactionMode.GENERIC
+        compaction: CompactionMode = CompactionMode.GENERIC,
+        onUsage: (TokenUsage, String) -> Unit = { _, _ -> }
     ): AgentLoop = AgentLoop(
         provider, toolRegistry, sessionManager,
         confirmationPolicy = confirmationPolicy,
         grants = grants,
         loopGuard = loopGuard,
         contextWindowTokens = contextWindowTokens,
-        compaction = compaction
+        compaction = compaction,
+        onUsage = onUsage
     )
 
     beforeTest {
@@ -1208,14 +1211,18 @@ class AgentLoopTest : FunSpec({
         override val name = "big"
         override val description = "Returns a lot"
         override val parametersJson = "{}"
-        override suspend fun execute(argumentsJson: String) = "y".repeat(4_000)
+        override suspend fun execute(argumentsJson: String) =
+            "y".repeat(Regex(""""n":(\d+)""").find(argumentsJson)?.groupValues?.get(1)?.toInt() ?: 4_000)
     }
 
     test("structured mode survives one oversized parallel round") {
         val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
         oversizedRoundScript(captured)
-        val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.STRUCTURED)
+        val kinds = mutableListOf<String>()
+        val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.STRUCTURED,
+            onUsage = { _, k -> kinds.add(k) })
             .turn(AgentSession(id = "s1"), "go", config)
+        kinds.contains("elide") shouldBe true
         result.branch().last().content shouldBe "all done"
         val second = captured[1].messages
         second.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL }.any { it.content.startsWith(Elider.PREFIX) } shouldBe true
@@ -1228,5 +1235,55 @@ class AgentLoopTest : FunSpec({
         val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.GENERIC)
             .turn(AgentSession(id = "s1"), "go", config)
         result.branch().last().content shouldContain "[Stopped early: context budget exhausted"
+    }
+
+    fun bigRound(captured: MutableList<dev.sophi.ai.api.CompletionRequest>, tag: String, n: Int, size: Int, usage: Int) = LLMResponse.ToolUse(
+        calls = (1..n).map { dev.sophi.ai.api.ToolCall("$tag$it", "big", """{"i":$it,"n":$size,"t":"$tag"}""") },
+        usage = TokenUsage(usage, 0)
+    ).toStreamFlow()
+
+    test("structured mode: an oversized round, then two sizeable results, ends with the answer (no thrashing)") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            captured.add(firstArg())
+            when (captured.size) {
+                1 -> bigRound(captured, "a", 8, 4_000, 8_000)
+                2 -> bigRound(captured, "b", 2, 4_000, 10_000)
+                else -> LLMResponse.Text("all done", TokenUsage(1_000, 5)).toStreamFlow()
+            }
+        }
+        every { sessionManager.save(any()) } just Runs
+        val kinds = mutableListOf<String>()
+        val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.STRUCTURED,
+            onUsage = { _, k -> kinds.add(k) }).turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        result.branch().last().content shouldBe "all done"
+        result.branch().last().content shouldNotContain "[Stopped early:"
+        kinds.contains("elide") shouldBe true
+        assertTemplateSafe(captured.last().messages)
+    }
+
+    test("structured mode: still over after summarising stubs the largest remaining results too, and the turn continues") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            captured.add(firstArg())
+            when (captured.size) {
+                1 -> bigRound(captured, "a", 1, 300, 1_000)
+                2 -> bigRound(captured, "b", 4, 4_000, 1_000)
+                3 -> bigRound(captured, "c", 4, 4_000, 10_000)
+                else -> LLMResponse.Text("all done", TokenUsage(1_000, 5)).toStreamFlow()
+            }
+        }
+        every { sessionManager.save(any()) } just Runs
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("## Goal\nx", TokenUsage(1, 1))
+        val kinds = mutableListOf<String>()
+        val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.STRUCTURED,
+            onUsage = { _, k -> kinds.add(k) }).turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        result.branch().last().content shouldBe "all done"
+        coVerify(exactly = 1) { provider.complete(any()) }
+        kinds.contains("summarise") shouldBe true
+        kinds.contains("elide") shouldBe true
+        val last = captured.last().messages
+        last.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL }.any { it.content.startsWith(Elider.PREFIX) } shouldBe true
+        assertTemplateSafe(last)
     }
 })

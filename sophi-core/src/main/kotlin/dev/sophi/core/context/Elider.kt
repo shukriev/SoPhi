@@ -27,17 +27,25 @@ object Elider {
         return count
     }
 
-    /** Stubs the largest TOOL results at or after [from] (the newest round included) until [charsToSave] are saved. Returns chars saved. */
+    private val FILE_TOOLS = setOf("read_file", "read_context", "grep", "glob", "search_context")
+
+    /**
+     * Stubs the largest TOOL results at or after [from] (the newest round included) until [charsToSave] are saved,
+     * file-reading tools first. Results the model hasn't seen yet (after the last tool-call message) get a "too large" stub.
+     * Returns chars saved.
+     */
     fun elideLargest(messages: MutableList<Message>, from: Int, charsToSave: Int): Int {
         val calls = messages.flatMap { it.toolCalls.orEmpty() }.associateBy { it.id }
+        val lastRound = messages.indexOfLast { it.role == MessageRole.ASSISTANT && it.toolCalls != null }
         var saved = 0
-        val bySize = (from until messages.size)
+        val order = (from until messages.size)
             .filter { messages[it].role == MessageRole.TOOL && !messages[it].content.startsWith(PREFIX) }
-            .sortedByDescending { messages[it].content.length }
-        for (i in bySize) {
+            .sortedWith(compareBy<Int> { if ((messages[it].toolName ?: calls[messages[it].toolCallId]?.name) in FILE_TOOLS) 0 else 1 }
+                .thenByDescending { messages[it].content.length })
+        for (i in order) {
             if (saved >= charsToSave) break
             val m = messages[i]
-            val stub = stubFor(m, calls) ?: continue
+            val stub = stubFor(m, calls, unseen = i > lastRound) ?: continue
             saved += m.content.length - stub.length
             messages[i] = m.copy(content = stub)
         }
@@ -45,11 +53,12 @@ object Elider {
     }
 
     /** The stub for a TOOL message, or null when it would not be shorter than the result. */
-    private fun stubFor(m: Message, calls: Map<String, ToolCall>): String? {
+    private fun stubFor(m: Message, calls: Map<String, ToolCall>, unseen: Boolean = false): String? {
         val call = calls[m.toolCallId]
         val name = m.toolName ?: call?.name ?: "tool"
         val arg = call?.let { keyArg(name, it.argumentsJson) }?.take(80)?.let { " $it" } ?: ""
-        val stub = "$PREFIX$name$arg, ${m.content.lines().size} lines — re-read if needed]"
+        val tail = if (unseen) "too large to show at once; re-read a smaller part or narrow the request]" else "re-read if needed]"
+        val stub = "$PREFIX$name$arg, ${m.content.lines().size} lines — $tail"
         return stub.takeIf { it.length < m.content.length }
     }
 }

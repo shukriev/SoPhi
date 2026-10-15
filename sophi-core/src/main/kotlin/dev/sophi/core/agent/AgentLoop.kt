@@ -270,7 +270,6 @@ class AgentLoop(
 
         val cutIndex = roundBoundaries[roundBoundaries.size - keepRecentRounds]
         val toCompact = messages.subList(turnStartIndex, cutIndex).toList()
-        if (toCompact.isEmpty()) return elideLargestRelief(messages, turnStartIndex, projected, triggerTokens)
 
         // The user message may already carry an earlier summary after the turn's own text: feed it
         // back in and replace it, so repeated compactions merge instead of stacking.
@@ -290,14 +289,19 @@ class AgentLoop(
         }
         messages.subList(turnStartIndex, cutIndex).clear()
         messages[turnStartIndex - 1] = userMessage.copy(content = turnUserContent + SUMMARY_MARKER + summary)
+        // Still over after the summary: stub the largest remaining results too (the summarise already counts).
+        val afterSummary = projected - (toCompact.sumOf { it.content.length } - summary.length) / CHARS_PER_TOKEN_ESTIMATE
+        if (afterSummary >= triggerTokens) elideLargestRelief(messages, turnStartIndex, afterSummary, triggerTokens)
         return true
     }
 
     /** Elide modes: when whole rounds can't be cut, stub the largest results (newest round too) instead of giving up. */
     private fun elideLargestRelief(messages: MutableList<Message>, from: Int, projected: Int, triggerTokens: Int): Boolean {
         if (!compaction.elides) return false
-        val needed = (projected - triggerTokens) * CHARS_PER_TOKEN_ESTIMATE + 1
-        if (Elider.elideLargest(messages, from, needed) < needed) return false
+        // Aim well under the trigger, or the next round pushes it over again and the turn thrashes.
+        val needed = (projected - triggerTokens * 3 / 4) * CHARS_PER_TOKEN_ESTIMATE
+        val saved = Elider.elideLargest(messages, from, needed)
+        if (projected - saved / CHARS_PER_TOKEN_ESTIMATE >= triggerTokens) return false
         runCatching { onUsage(TokenUsage(0, 0), "elide") }
         return true
     }

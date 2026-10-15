@@ -92,7 +92,23 @@ class EliderTest : FunSpec({
         m2[3].content.length shouldBe 200
         saved2 shouldBe 8000 - m2[2].content.length - m2[4].content.length
         // already-stubbed messages are skipped
-        Elider.elideLargest(m2, 1, 0) shouldBe 0
+        val stubA = m2[2].content
+        val stubC = m2[4].content
+        val before = m2[3].content.length
+        val rest = Elider.elideLargest(m2, 1, 1_000_000)  // only the 200-char one is left to stub
+        m2[2].content shouldBe stubA
+        m2[4].content shouldBe stubC
+        rest shouldBe before - m2[3].content.length
+        m2[3].content.startsWith(Elider.PREFIX) shouldBe true
         m2[2].toolCallId shouldBe "a"
+    }
+
+    test("elideLargest prefers file tools first, and the newest round gets the too-large stub") {
+        val m = (listOf(Message(MessageRole.USER, "q")) +
+            round("1", "bash", """{"command":"ls"}""", "x".repeat(9000)) +
+            round("2", "read_file", """{"path":"a"}""", "y".repeat(2000))).toMutableList()
+        Elider.elideLargest(m, 1, 1)
+        m[4].content shouldBe "[elided: read_file a, 1 lines — too large to show at once; re-read a smaller part or narrow the request]"
+        m[2].content.length shouldBe 9000
     }
 })
