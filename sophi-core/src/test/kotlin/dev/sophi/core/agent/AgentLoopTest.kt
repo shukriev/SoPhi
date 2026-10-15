@@ -14,6 +14,11 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
+import io.mockk.slot
+import dev.sophi.core.context.CompactionMode
+import dev.sophi.core.context.Elider
+import dev.sophi.core.context.assertTemplateSafe
 import io.mockk.Runs
 import io.mockk.clearMocks
 import io.mockk.coEvery
@@ -40,13 +45,15 @@ class AgentLoopTest : FunSpec({
             dev.sophi.core.tools.ConfirmationPolicy.ALLOW_ALL,
         grants: Set<String> = emptySet(),
         loopGuard: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE,
-        contextWindowTokens: Int = TEST_CONTEXT_WINDOW
+        contextWindowTokens: Int = TEST_CONTEXT_WINDOW,
+        compaction: CompactionMode = CompactionMode.GENERIC
     ): AgentLoop = AgentLoop(
         provider, toolRegistry, sessionManager,
         confirmationPolicy = confirmationPolicy,
         grants = grants,
         loopGuard = loopGuard,
-        contextWindowTokens = contextWindowTokens
+        contextWindowTokens = contextWindowTokens,
+        compaction = compaction
     )
 
     beforeTest {
@@ -966,14 +973,70 @@ class AgentLoopTest : FunSpec({
 
         // Exactly one summarisation call happened.
         coVerify(exactly = 1) { provider.complete(any()) }
-        // The 4th request replaced round 1 with a SYSTEM summary and kept the 2 most recent rounds.
+        // The 4th request folded round 1 into the user message and kept the 2 most recent rounds.
         val fourth = capturedRequests[3].messages
-        fourth shouldHaveSize 6
+        fourth shouldHaveSize 5
         fourth[0].role shouldBe dev.sophi.ai.api.MessageRole.USER
-        fourth[1].role shouldBe dev.sophi.ai.api.MessageRole.SYSTEM
-        fourth[1].content shouldContain "Earlier steps this turn, summarised:"
-        fourth[1].content shouldContain "r1 looked at the config"
-        coVerify { provider.complete(match { it.judgment == dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE }) }
+        fourth[0].content shouldContain "[Earlier steps this turn, summarised]"
+        fourth[0].content shouldContain "r1 looked at the config"
+        assertTemplateSafe(fourth)
+    }
+
+    fun scripted(captured: MutableList<dev.sophi.ai.api.CompletionRequest>, vararg inputs: Int) {
+        every { provider.stream(any()) } answers {
+            captured.add(firstArg())
+            inputs.getOrNull(captured.size - 1)?.let { toolRound("c${captured.size}", it) }
+                ?: LLMResponse.Text("done", TokenUsage(1_000, 5)).toStreamFlow()
+        }
+        every { sessionManager.save(any()) } just Runs
+    }
+
+    test("structured mode elides first: the first trigger stubs old results without an LLM call") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        scripted(captured, 1_000, 1_000, 90_000)
+        newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        coVerify(exactly = 0) { provider.complete(any()) }
+        val fourth = captured[3].messages
+        fourth.first { it.role == dev.sophi.ai.api.MessageRole.TOOL }.content shouldStartWith Elider.PREFIX
+        assertTemplateSafe(fourth)
+    }
+
+    test("when nothing is left to elide the summary goes on the turn's user message, never as a SYSTEM message") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        scripted(captured, 1_000, 1_000, 90_000)
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("r1 looked at the config", TokenUsage(1, 1))
+        newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.GENERIC)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        val fourth = captured[3].messages
+        fourth[0].role shouldBe dev.sophi.ai.api.MessageRole.USER
+        fourth[0].content shouldContain "go\n\n[Earlier steps this turn, summarised]\nr1 looked at the config"
+        assertTemplateSafe(fourth)
+    }
+
+    test("a second mid-turn compaction replaces the first summary block and keeps its text in the summariser input") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        // trigger, relief, then trigger again with enough rounds to cut
+        scripted(captured, 1_000, 1_000, 90_000, 1_000, 1_000, 90_000)
+        val summaries = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        coEvery { provider.complete(capture(summaries)) } answers { LLMResponse.Text("summary ${summaries.size}", TokenUsage(1, 1)) }
+        newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.GENERIC)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        summaries shouldHaveSize 2
+        summaries[1].messages.last().content shouldStartWith "PREVIOUS SUMMARY:\nsummary 1"
+        val last = captured.last().messages[0].content
+        Regex.escape("[Earlier steps this turn, summarised]").toRegex().findAll(last).count() shouldBe 1
+        last shouldContain "summary 2"
+    }
+
+    test("the mid-turn summariser asks for no reasoning") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        scripted(captured, 1_000, 1_000, 90_000)
+        val req = slot<dev.sophi.ai.api.CompletionRequest>()
+        coEvery { provider.complete(capture(req)) } returns LLMResponse.Text("s", TokenUsage(1, 1))
+        newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.GENERIC)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        req.captured.reasoningEffort shouldBe "none"
     }
 
     test("compaction never orphans a TOOL result from its ASSISTANT tool-call message") {

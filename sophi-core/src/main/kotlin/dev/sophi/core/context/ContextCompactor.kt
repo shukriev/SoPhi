@@ -1,18 +1,22 @@
 package dev.sophi.core.context
 
-import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
-import dev.sophi.ai.api.LLMResponse
-import dev.sophi.ai.api.Message
-import dev.sophi.ai.api.MessageRole
-import dev.sophi.ai.system1.Judgments
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 import java.util.UUID
 
-class ContextCompactor(private val provider: LLMProvider) {
+class ContextCompactor(
+    private val provider: LLMProvider,
+    private val summariser: Summariser = Summariser(provider, CompactionMode.STRUCTURED, 32_000)
+) {
+
+    /** Replayed size against half the window, or too many replayed entries; non-replayed tool rounds never count. */
+    fun needsCompaction(session: AgentSession, config: AgentConfig, windowTokens: Int): Boolean {
+        val replayable = session.branch().filter { it.metadata["replay"] != "false" }
+        return replayable.sumOf { it.content.length } / 4 > windowTokens * 0.5 || replayable.size > config.maxBranchLength
+    }
 
     suspend fun compact(
         session: AgentSession,
@@ -21,55 +25,54 @@ class ContextCompactor(private val provider: LLMProvider) {
     ): AgentSession {
         val entries = session.branch()
         // replay=false entries (e.g. persisted tool rounds) are inert for prompting; keep them in
-        // the DAG but exclude them from both the summary input and the keep/compact split so the
-        // summary never leaks raw tool output and keepRecentCount counts real conversation entries.
+        // the DAG but exclude them from the transcript and the keep/compact split so the summary
+        // never leaks raw tool output and keepRecentCount counts real conversation entries.
         val replayable = entries.filter { it.metadata["replay"] != "false" }
         if (replayable.size <= keepRecentCount) return session
 
-        val toCompact = replayable.dropLast(keepRecentCount)
-        val toKeep = replayable.takeLast(keepRecentCount)
+        // The kept tail must open on a USER entry (the summary pair ends on ASSISTANT, and a strict
+        // template rejects a leading ASSISTANT or USER, USER), so the cut moves back to one.
+        var cut = replayable.size - keepRecentCount
+        while (cut > 0 && replayable[cut].role != EntryRole.USER) cut--
+        if (cut <= 0) return session
 
-        val summaryPrompt = toCompact.joinToString("\n") { entry ->
-            "${entry.role.name}: ${entry.content}"
-        }
-        val summaryRequest = CompletionRequest(
-            messages = listOf(
-                Message(MessageRole.SYSTEM, "Summarise the following conversation concisely, preserving key facts and decisions."),
-                Message(MessageRole.USER, summaryPrompt)
-            ),
-            model = config.model,
-            maxTokens = 512,
-            // A thinking model would spend the 512-token budget reasoning and return no summary.
-            reasoningEffort = "none",
-            temperature = 0.3,
-            judgment = Judgments.COMPACTOR
-        )
+        val toCompact = replayable.subList(0, cut)
+        val toKeep = replayable.subList(cut, replayable.size)
+        val firstKeptId = toKeep.first().id
 
-        val summary = when (val response = provider.complete(summaryRequest)) {
-            is LLMResponse.Text -> response.content
-            else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
-        }
+        val transcript = toCompact.joinToString("\n") { entry -> "${entry.role.name}: ${entry.content}" }
+        // The WorkingSet reads the persisted tool rounds too, so exact files/commands survive the cut.
+        val workingSet = WorkingSet.fromEntries(entries.takeWhile { it.id != firstKeptId })
+        val summary = summariser.summarise(transcript, workingSet, config.model)
 
-        // Replace only the compacted prefix of the active branch: the summary becomes a new
+        // Replace only the compacted prefix of the active branch: the summary pair becomes a new
         // root and the first kept entry is re-parented onto it. Entries on other branches
         // (and the compacted prefix itself) stay in the DAG untouched.
+        val now = System.currentTimeMillis()
         val summaryEntry = SessionEntry(
             id = UUID.randomUUID().toString(),
             parentId = null,
-            role = EntryRole.SYSTEM,
-            content = "Previous conversation summary:\n$summary",
-            timestamp = System.currentTimeMillis(),
+            role = EntryRole.USER,
+            content = "Summary of the conversation so far:\n$summary",
+            timestamp = now,
             metadata = mapOf("_compacted" to "true")
         )
-        val firstKeptId = toKeep.first().id
+        val ackEntry = SessionEntry(
+            id = UUID.randomUUID().toString(),
+            parentId = summaryEntry.id,
+            role = EntryRole.ASSISTANT,
+            content = "Understood — continuing from that summary.",
+            timestamp = now,
+            metadata = mapOf("_compacted" to "true")
+        )
         val rewritten = session.entries.map { entry ->
-            if (entry.id == firstKeptId) entry.copy(parentId = summaryEntry.id) else entry
+            if (entry.id == firstKeptId) entry.copy(parentId = ackEntry.id) else entry
         }
         return AgentSession(
             id = session.id,
             title = session.title,
             parentSessionId = session.parentSessionId,
-            initialEntries = listOf(summaryEntry) + rewritten,
+            initialEntries = listOf(summaryEntry, ackEntry) + rewritten,
             initialTipId = session.tip?.id
         )
     }
