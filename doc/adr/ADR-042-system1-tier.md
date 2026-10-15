@@ -40,3 +40,13 @@ data first.
   measurement sub-project — no calibration data exists yet.
 - The trained model's weights are out of scope here and stay closed initially; this repo holds
   only the open framework.
+
+## Addendum (2026-10-15): the judgment-spec seam
+
+Evaluating and training a System-1 model needs the exact production prompt and parser outside the JVM,
+without a second copy that drifts. `JudgmentSpec` (`sophi-ai`) exposes each judgment as
+`render(inputJson, model) -> CompletionRequest` and `parse(reply) -> canonical JSON | null`. The module that
+owns the judgment implements it and routes production through the same code (`EncoderJudgment` is
+first). `sophi system1 render|parse` exposes the specs as JSONL on stdin/stdout for the local-only
+`sophi-model` harness. Specs for the other judgments are added as their seed sets exist. The typed
+`Judgment<I, O>` planned for `AUTO` mode can extend this interface.
