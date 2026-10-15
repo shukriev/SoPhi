@@ -247,7 +247,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             }
         }
 
-        val compactor = ContextCompactor(provider)
+        val compactor = ContextCompactor(provider, dev.sophi.core.context.Summariser(provider, cli.runtime.compactionMode, contextWindowTokens))
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(

@@ -26,7 +26,7 @@ internal class RecordingStreamProvider : LLMProvider {
     val requests = mutableListOf<CompletionRequest>()
     var toolRoundFirst = false
     override val name = "recording"
-    override suspend fun complete(request: CompletionRequest) = LLMResponse.Text("ok", usage = TokenUsage(0, 0))
+    override suspend fun complete(request: CompletionRequest) = LLMResponse.Text("summary", usage = TokenUsage(0, 0))
     override fun stream(request: CompletionRequest): Flow<StreamEvent> {
         requests += request
         return if (toolRoundFirst && requests.size == 1)

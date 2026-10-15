@@ -57,7 +57,9 @@ class SophiRuntime internal constructor(
     val memoryPlugin: MemoryPlugin? = null,
     internal val agentDefinitions: List<AgentDefinition> = emptyList(),
     private val schedulesDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
-    private val contextEngine: ContextEngine? = null
+    private val contextEngine: ContextEngine? = null,
+    /** Public so the CLI's /compact uses the same mode as the loop. */
+    val compactionMode: dev.sophi.core.context.CompactionMode = dev.sophi.core.context.CompactionMode.STRUCTURED
 ) {
     private val skillInstaller = SkillInstaller()
     private val proposalStore get() = ProposalStore(schedulesDir.resolve("proposals.jsonl"))
