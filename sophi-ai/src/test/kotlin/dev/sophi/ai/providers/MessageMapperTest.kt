@@ -7,7 +7,8 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import org.springframework.ai.chat.messages.SystemMessage
 
-// Both ClaudeProvider and OpenAICompatProvider convert through toSpring(), so this covers both (spec 7.3).
+// Compacted message shapes carry no SYSTEM role, so toSpring() (Claude path) yields no SystemMessage.
+// OpenAICompat streaming maps through toRawMessageParam, not toSpring(), so it is not covered here.
 class MessageMapperTest : FunSpec({
     fun check(input: List<Message>) {
         val out = input.map { it.toSpring() }

@@ -253,7 +253,7 @@ and the oversized-round handling against today's compactor. It did not exercise 
 this model and these prompts the summariser was never needed. A longer-task run, where summaries must be
 written, would settle structured against generic summaries.
 
-Limits: the E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only. Single runs, one small local model (bonsai only), n=5 prompts, so 2 successes of difference is a small
+Limits: the E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only. Single runs, one small local model (bonsai only), n=5 prompts, of which 2 never compacted in any config, so the decision rests on 3 informative prompts (2 decisive): effective n=3, and 2 successes of difference is a small
 sample; no frontier model.
 
 ## Still pending

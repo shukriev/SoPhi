@@ -216,6 +216,8 @@ class ContextCompactorTest : FunSpec({
         manager.save(out)
         val reloaded = manager.load(out.id)!!
         PromptBuilder.build(reloaded.branch()) shouldBe PromptBuilder.build(out.branch())
+        reloaded.branch()[0].metadata["_workingSet"] shouldBe out.branch()[0].metadata["_workingSet"]
+        (reloaded.branch()[0].metadata["_workingSet"] != null) shouldBe true
     }
 
     test("no USER entry in the kept tail: the session is returned unchanged") {
@@ -262,7 +264,6 @@ class ContextCompactorTest : FunSpec({
         s.append(EntryRole.ASSISTANT, "a5")
         val first = compactor.compact(s, config, keepRecentCount = 6)
         first.branch()[0].content shouldContain "Old.kt"
-        first.branch().drop(2).forEach { it.role.name.isNotEmpty() shouldBe true }
         first.append(EntryRole.USER, "u6"); first.append(EntryRole.ASSISTANT, "a6")
         first.append(EntryRole.USER, "u7"); first.append(EntryRole.ASSISTANT, "a7")
         val second = compactor.compact(first, config, keepRecentCount = 4)

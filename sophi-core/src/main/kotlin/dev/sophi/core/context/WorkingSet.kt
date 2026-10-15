@@ -60,8 +60,11 @@ data class WorkingSet(
             val old = merged.remove(f.path)
             merged[f.path] = if (old == null) f else f.copy(reads = old.reads + f.reads, writes = old.writes + f.writes)
         }
-        return WorkingSet(merged.values.toList(), searches + newer.searches, commands + newer.commands, errors + newer.errors)
+        return WorkingSet(merged.values.toList(), searches + newer.searches, commands + newer.commands, errors + newer.errors).capped()
     }
+
+    /** Bounded to what is rendered (searches are never rendered; kept as a short tail). */
+    internal fun capped() = WorkingSet(files.takeLast(30), searches.takeLast(20), commands.takeLast(20), errors.takeLast(10))
 
     private fun <T> section(items: List<T>, line: (T) -> String): String =
         if (items.isEmpty()) "(none)" else items.joinToString("\n") { line(it).take(LINE_MAX) }
@@ -106,7 +109,7 @@ data class WorkingSet(
             val errors = mutableListOf<ToolError>()
             for (c in calls) {
                 val result = results[c.id]
-                if (result != null && result.startsWith("Error: ")) errors += ToolError(c.name, result)
+                if (result != null && result.startsWith("Error: ")) errors += ToolError(c.name, result.lineSequence().first().take(LINE_MAX))
                 val arg = keyArg(c.name, c.argumentsJson) ?: continue
                 when (c.name) {
                     "read_file", "read_context", "write_file", "edit_file" -> {
@@ -119,7 +122,7 @@ data class WorkingSet(
                     "bash" -> commands += CommandRun(arg, exitCode(result))
                 }
             }
-            return WorkingSet(files.values.toList(), searches, commands, errors)
+            return WorkingSet(files.values.toList(), searches, commands, errors).capped()
         }
     }
 }

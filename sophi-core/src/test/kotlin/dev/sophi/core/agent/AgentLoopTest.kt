@@ -1006,6 +1006,18 @@ class AgentLoopTest : FunSpec({
         assertTemplateSafe(fourth)
     }
 
+    test("re-reading after a result was elided is not a repeat: no note, no loop-guard stop") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        scripted(captured, 1_000, 1_000, 79_800, 1_000, 1_000, 1_000, 1_000)  // 7 identical calls; elision at round 3
+        val result = newLoop(ToolRegistry().register(loopingTool()), compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        result.tip?.metadata?.get("stopReason") shouldBe null
+        result.branch().last().content shouldBe "done"
+        val last = captured.last().messages.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL && it.toolCallId in setOf("c4", "c5", "c6", "c7") }
+        last.size shouldBe 4
+        last.none { it.content.contains("you have now made this exact call") } shouldBe true
+    }
+
     test("structured mode summarises in the same compaction when elision does not bring relief") {
         val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
         scripted(captured, 1_000, 1_000, 90_000)

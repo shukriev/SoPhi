@@ -541,7 +541,12 @@ class AgentLoop(
             // Successful calls never trip the failure guard, so a model can repeat one forever without
             // learning anything new. Tell it on the 3rd identical call; the guard steps in at the 6th.
             val toolResults = toolOutcomes.map { o ->
-                val n = loopGuardState.countRepeat(o.call.name, o.call.argumentsJson)
+                // A re-read after the stub told it to is not a repeat.
+                val stubIds = messages.filter { it.role == MessageRole.TOOL && it.content.startsWith(Elider.PREFIX) }
+                    .mapNotNull { it.toolCallId }.toSet()
+                val afterStub = messages.any { m -> m.toolCalls.orEmpty().any {
+                    it.id in stubIds && it.name == o.call.name && it.argumentsJson.trim() == o.call.argumentsJson.trim() } }
+                val n = if (afterStub) 0 else loopGuardState.countRepeat(o.call.name, o.call.argumentsJson)
                 if (n < REPEAT_NOTE_THRESHOLD) o.message
                 else o.message.copy(content = o.message.content + "\n\n[Note: you have now made this exact call " +
                     "($n times, same arguments) in this task. Repeating it won't change the result — read what " +

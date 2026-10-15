@@ -9,6 +9,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
+private val lenientJson = Json { ignoreUnknownKeys = true }
+
 class ContextCompactor(
     private val provider: LLMProvider,
     private val summariser: Summariser = Summariser(provider, CompactionMode.STRUCTURED, 32_000)
@@ -55,7 +57,7 @@ class ContextCompactor(
         // The WorkingSet reads the persisted tool rounds too, so exact files/commands survive the cut.
         // A previous cross-turn summary carries its own WorkingSet (the rounds it covered are gone from the branch).
         val previous = entries.firstOrNull()?.takeIf { it.metadata["_compacted"] == "true" }
-            ?.metadata?.get("_workingSet")?.let { runCatching { Json.decodeFromString<WorkingSet>(it) }.getOrNull() }
+            ?.metadata?.get("_workingSet")?.let { runCatching { lenientJson.decodeFromString<WorkingSet>(it) }.getOrNull() }
         val fresh = WorkingSet.fromEntries(entries.takeWhile { it.id != firstKeptId })
         val workingSet = previous?.merge(fresh) ?: fresh
         val summary = summariser.summarise(transcript, workingSet, config.model, onUsage)

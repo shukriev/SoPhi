@@ -75,4 +75,24 @@ class WorkingSetTest : FunSpec({
         bashRun(null).exitCode shouldBe null
         bashRun("fine").exitCode shouldBe 0
     }
+
+    test("merging two large sets stays within the rendered caps, and errors keep only a short first line") {
+        fun big(tag: String) = WorkingSet(
+            files = (1..100).map { FileTouch("$tag$it", 1, 0, "read") },
+            searches = (1..100).map { "$tag$it" },
+            commands = (1..100).map { CommandRun("$tag$it", 0) },
+            errors = (1..100).map { ToolError("t", "$tag$it") }
+        )
+        val m = big("a").merge(big("b"))
+        m.files.size shouldBe 30
+        m.files.last().path shouldBe "b100"
+        m.searches.size shouldBe 20
+        m.commands.size shouldBe 20
+        m.errors.size shouldBe 10
+        val long = "Error: " + "x".repeat(500) + "\nsecond line"
+        val ws = WorkingSet.fromMessages(listOf(
+            Message(MessageRole.ASSISTANT, "", toolCalls = listOf(ToolCall("1", "read_file", """{"path":"a"}"""))),
+            Message(MessageRole.TOOL, long, toolCallId = "1", toolName = "read_file")))
+        ws.errors.single().message.length shouldBe 160
+    }
 })
