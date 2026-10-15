@@ -63,6 +63,7 @@ class WorkflowReflectorTest : FunSpec({
         val p = ScriptedProvider("""{"reusable": false}""")
         runBlocking { WorkflowReflector(p, "m", maxTokens = 16_384).reflect(turn, emptyList()) }
         p.requests.single().maxTokens shouldBe 16_384
+        p.requests.single().judgment shouldBe dev.sophi.ai.system1.Judgments.WORKFLOW_REFLECTOR
     }
 
     test("the turn sits inside a per-call random fence, so tool output can't forge prompt sections") {

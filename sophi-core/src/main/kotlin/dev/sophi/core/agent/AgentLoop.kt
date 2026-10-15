@@ -8,6 +8,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
+import dev.sophi.ai.system1.Judgments
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.prompt.PromptBuilder
 import dev.sophi.core.session.AgentSession
@@ -267,7 +268,8 @@ class AgentLoop(
             ),
             model = config.model,
             maxTokens = 512,
-            temperature = 0.3
+            temperature = 0.3,
+            judgment = Judgments.LOOP_SUMMARISE
         )
         return when (val response = provider.complete(request)) {
             is LLMResponse.Text -> response.content.also { runCatching { onUsage(response.usage, "summarise") } }

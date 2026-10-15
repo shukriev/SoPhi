@@ -973,6 +973,7 @@ class AgentLoopTest : FunSpec({
         fourth[1].role shouldBe dev.sophi.ai.api.MessageRole.SYSTEM
         fourth[1].content shouldContain "Earlier steps this turn, summarised:"
         fourth[1].content shouldContain "r1 looked at the config"
+        coVerify { provider.complete(match { it.judgment == dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE }) }
     }
 
     test("compaction never orphans a TOOL result from its ASSISTANT tool-call message") {

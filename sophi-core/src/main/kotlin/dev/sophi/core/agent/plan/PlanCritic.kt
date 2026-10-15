@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -57,7 +58,8 @@ class LlmPlanCritic(
                     ),
                     model = model,
                     maxTokens = maxTokens,
-                    temperature = 0.0
+                    temperature = 0.0,
+                    judgment = Judgments.PLAN_CRITIC
                 )
                 when (val response = provider.complete(request)) {
                     is LLMResponse.Text -> parseScore(response.content)

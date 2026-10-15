@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -40,7 +41,8 @@ class ContextCompactor(private val provider: LLMProvider) {
             maxTokens = 512,
             // A thinking model would spend the 512-token budget reasoning and return no summary.
             reasoningEffort = "none",
-            temperature = 0.3
+            temperature = 0.3,
+            judgment = Judgments.COMPACTOR
         )
 
         val summary = when (val response = provider.complete(summaryRequest)) {

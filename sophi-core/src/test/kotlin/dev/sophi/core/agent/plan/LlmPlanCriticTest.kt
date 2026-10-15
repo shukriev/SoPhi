@@ -88,4 +88,12 @@ class LlmPlanCriticTest : FunSpec({
         userText.contains("step s1 failed") shouldBe true
         userText.contains("retry the build with a clean cache") shouldBe true
     }
+
+    test("the critic call is tagged as the plan-critic judgment") {
+        val provider = mockk<LLMProvider>()
+        val captured = io.mockk.slot<CompletionRequest>()
+        coEvery { provider.complete(capture(captured)) } returns LLMResponse.Text("0.75", TokenUsage(10, 1))
+        runBlocking { LlmPlanCritic(provider, model = "test-model").score("goal", candidate, "reason") }
+        captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.PLAN_CRITIC
+    }
 })

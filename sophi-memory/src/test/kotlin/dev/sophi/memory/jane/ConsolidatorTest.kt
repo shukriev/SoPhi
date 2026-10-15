@@ -13,6 +13,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 
 private const val DAY = 24 * 3_600_000L
@@ -118,6 +119,7 @@ class ConsolidatorTest : FunSpec({
         (edges.any { it.fromId == summary.id && it.toId == "mem_3" }) shouldBe true
         // Interior node soft-deleted.
         (r.store.memories().getValue("mem_2").softDeletedAt != null) shouldBe true
+        coVerify { provider.complete(match { it.judgment == dev.sophi.ai.system1.Judgments.CONSOLIDATOR_CHAIN_SUMMARY }) }
     }
 
     test("compress keeps the thread when the summary comes back blank (thinking model cut off at length)") {
@@ -163,6 +165,7 @@ class ConsolidatorTest : FunSpec({
         val report = r.consolidator.run(nowMs = 1_000L)
 
         report.classified shouldBe 1
+        coVerify { provider.complete(match { it.judgment == dev.sophi.ai.system1.Judgments.CONSOLIDATOR_PATTERNS }) }
         r.store.memories().getValue("mem_repeated").actionablePattern shouldBe true
         r.store.memories().getValue("mem_onceoff").actionablePattern shouldBe false
     }

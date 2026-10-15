@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -49,6 +50,7 @@ class SkillSecurityReview(
                     messages = listOf(Message(MessageRole.USER,
                         "<<<$asked\n${userRequest.take(2_000)}\n$asked>>>\n\n<<<$fence\n$skillContent\n$fence>>>")),
                     model = model, maxTokens = maxTokens, temperature = 0.0, systemPrompt = prompt(fence, asked),
+                    judgment = Judgments.SKILL_SECURITY,
                 ))
             }
         } catch (e: Exception) {

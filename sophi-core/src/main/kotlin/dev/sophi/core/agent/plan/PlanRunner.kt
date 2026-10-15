@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
@@ -364,7 +365,8 @@ class PlanRunner(
                 // Thinking models spend their budget reasoning before the one-word answer: cut off,
                 // they return empty content, which reads as NO forever. 8 tokens always starved;
                 // live, bonsai-27b used 805 on one short output, so leave generous headroom.
-                model = judgeModel, maxTokens = 4096, temperature = 0.0
+                model = judgeModel, maxTokens = 4096, temperature = 0.0,
+                judgment = Judgments.GOAL_JUDGE
             )
         )
         return (response as? LLMResponse.Text)?.content?.trim()?.uppercase()?.startsWith("YES") ?: false

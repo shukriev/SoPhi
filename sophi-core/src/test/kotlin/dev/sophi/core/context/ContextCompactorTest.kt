@@ -183,5 +183,6 @@ class ContextCompactorTest : FunSpec({
         val s = session(EntryRole.USER to "a", EntryRole.ASSISTANT to "b", EntryRole.USER to "c", EntryRole.ASSISTANT to "d")
         compactor.compact(s, config, keepRecentCount = 2)
         captured.captured.reasoningEffort shouldBe "none"
+        captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.COMPACTOR
     }
 })

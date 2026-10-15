@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
+import dev.sophi.ai.system1.Judgments
 import dev.sophi.memory.ConsolidationReport
 import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.ProducedBy
@@ -85,7 +86,8 @@ class Consolidator(
         val ids = runCatching {
             val text = when (val r = llm.complete(CompletionRequest(
                 messages = listOf(Message(MessageRole.USER, prompt)),
-                model = model, maxTokens = 500, temperature = 0.0, reasoningEffort = "none"
+                model = model, maxTokens = 500, temperature = 0.0, reasoningEffort = "none",
+                judgment = Judgments.CONSOLIDATOR_PATTERNS
             ))) {
                 is LLMResponse.Text -> r.content
                 else -> return@runCatching emptyList<String>()
@@ -204,7 +206,8 @@ class Consolidator(
                     messages = listOf(Message(MessageRole.USER,
                         "Summarize this causal chain in ONE sentence preserving cause and effect:\n" +
                             members.joinToString(" -> ") { it.text })),
-                    model = model, maxTokens = 200, temperature = 0.0, reasoningEffort = "none"))) {
+                    model = model, maxTokens = 200, temperature = 0.0, reasoningEffort = "none",
+                    judgment = Judgments.CONSOLIDATOR_CHAIN_SUMMARY))) {
                     is LLMResponse.Text -> r.content.trim()
                     else -> null
                 }
