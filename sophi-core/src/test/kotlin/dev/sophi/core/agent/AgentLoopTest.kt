@@ -1192,4 +1192,41 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldBe "finished"
     }
+
+    fun oversizedRoundScript(captured: MutableList<dev.sophi.ai.api.CompletionRequest>) {
+        every { provider.stream(any()) } answers {
+            captured.add(firstArg())
+            if (captured.size == 1) LLMResponse.ToolUse(
+                calls = (1..8).map { dev.sophi.ai.api.ToolCall("c$it", "big", """{"i":$it}""") },
+                usage = TokenUsage(8_000, 0)
+            ).toStreamFlow()
+            else LLMResponse.Text("all done", TokenUsage(1_000, 5)).toStreamFlow()
+        }
+        every { sessionManager.save(any()) } just Runs
+    }
+    val bigTool = object : dev.sophi.core.tools.Tool {
+        override val name = "big"
+        override val description = "Returns a lot"
+        override val parametersJson = "{}"
+        override suspend fun execute(argumentsJson: String) = "y".repeat(4_000)
+    }
+
+    test("structured mode survives one oversized parallel round") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        oversizedRoundScript(captured)
+        val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config)
+        result.branch().last().content shouldBe "all done"
+        val second = captured[1].messages
+        second.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL }.any { it.content.startsWith(Elider.PREFIX) } shouldBe true
+        assertTemplateSafe(second)
+    }
+
+    test("generic mode still stops on one oversized round") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        oversizedRoundScript(captured)
+        val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.GENERIC)
+            .turn(AgentSession(id = "s1"), "go", config)
+        result.branch().last().content shouldContain "[Stopped early: context budget exhausted"
+    }
 })

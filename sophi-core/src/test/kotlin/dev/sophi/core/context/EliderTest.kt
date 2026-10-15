@@ -72,4 +72,27 @@ class EliderTest : FunSpec({
         Elider.elide(m, 0, 1) shouldBe 1
         m[1].content shouldBe "[elided: bash, 10 lines — re-read if needed]"
     }
+
+    test("elideLargest stubs the biggest results first, the newest round included, until enough is saved") {
+        fun msgs() = (listOf(Message(MessageRole.USER, "q"),
+            Message(MessageRole.ASSISTANT, "", toolCalls = listOf(ToolCall("a", "read_file", """{"path":"a"}"""), ToolCall("b", "read_file", """{"path":"b"}"""), ToolCall("c", "read_file", """{"path":"c"}"""))),
+            Message(MessageRole.TOOL, "x".repeat(5000), toolCallId = "a", toolName = "read_file"),
+            Message(MessageRole.TOOL, "x".repeat(200), toolCallId = "b", toolName = "read_file"),
+            Message(MessageRole.TOOL, "x".repeat(3000), toolCallId = "c", toolName = "read_file"))).toMutableList()
+        val m = msgs()
+        val saved = Elider.elideLargest(m, 1, 4000)
+        m[2].content.startsWith(Elider.PREFIX) shouldBe true
+        m[3].content.length shouldBe 200
+        m[4].content.length shouldBe 3000
+        saved shouldBe 5000 - m[2].content.length
+        val m2 = msgs()
+        val saved2 = Elider.elideLargest(m2, 1, 7000)
+        m2[2].content.startsWith(Elider.PREFIX) shouldBe true
+        m2[4].content.startsWith(Elider.PREFIX) shouldBe true
+        m2[3].content.length shouldBe 200
+        saved2 shouldBe 8000 - m2[2].content.length - m2[4].content.length
+        // already-stubbed messages are skipped
+        Elider.elideLargest(m2, 1, 0) shouldBe 0
+        m2[2].toolCallId shouldBe "a"
+    }
 })

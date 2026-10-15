@@ -254,21 +254,23 @@ class AgentLoop(
                     messages[i].role == MessageRole.ASSISTANT &&
                     messages[i].toolCalls != null
             }
-        if (roundBoundaries.size <= keepRecentRounds) return false
+        if (roundBoundaries.size <= keepRecentRounds) return elideLargestRelief(messages, turnStartIndex, projectedInputTokens, triggerTokens)
 
+        var projected = projectedInputTokens
         if (compaction.elides) {
             val before = toolChars(messages, turnStartIndex)
             if (Elider.elide(messages, turnStartIndex, keepRecentRounds) > 0) {
                 runCatching { onUsage(TokenUsage(0, 0), "elide") }
                 // Summarise only if still over: a stub can free little, and elision alone must not thrash.
                 val saved = before - toolChars(messages, turnStartIndex)
-                if (projectedInputTokens - saved / CHARS_PER_TOKEN_ESTIMATE < triggerTokens) return true
+                projected -= saved / CHARS_PER_TOKEN_ESTIMATE
+                if (projected < triggerTokens) return true
             }
         }
 
         val cutIndex = roundBoundaries[roundBoundaries.size - keepRecentRounds]
         val toCompact = messages.subList(turnStartIndex, cutIndex).toList()
-        if (toCompact.isEmpty()) return false
+        if (toCompact.isEmpty()) return elideLargestRelief(messages, turnStartIndex, projected, triggerTokens)
 
         // The user message may already carry an earlier summary after the turn's own text: feed it
         // back in and replace it, so repeated compactions merge instead of stacking.
@@ -288,6 +290,15 @@ class AgentLoop(
         }
         messages.subList(turnStartIndex, cutIndex).clear()
         messages[turnStartIndex - 1] = userMessage.copy(content = turnUserContent + SUMMARY_MARKER + summary)
+        return true
+    }
+
+    /** Elide modes: when whole rounds can't be cut, stub the largest results (newest round too) instead of giving up. */
+    private fun elideLargestRelief(messages: MutableList<Message>, from: Int, projected: Int, triggerTokens: Int): Boolean {
+        if (!compaction.elides) return false
+        val needed = (projected - triggerTokens) * CHARS_PER_TOKEN_ESTIMATE + 1
+        if (Elider.elideLargest(messages, from, needed) < needed) return false
+        runCatching { onUsage(TokenUsage(0, 0), "elide") }
         return true
     }
 
