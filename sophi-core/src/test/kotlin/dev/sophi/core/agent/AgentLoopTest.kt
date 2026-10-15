@@ -1248,7 +1248,9 @@ class AgentLoopTest : FunSpec({
             captured.add(firstArg())
             when (captured.size) {
                 1 -> bigRound(captured, "a", 8, 4_000, 8_000)
-                2 -> bigRound(captured, "b", 2, 4_000, 10_000)
+                // What round 1's compaction actually left in this request, so the test is sensitive to the relief target.
+                2 -> bigRound(captured, "b", 2, 4_000,
+                    8_000 + captured[1].messages.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL }.sumOf { it.content.length } / 4)
                 else -> LLMResponse.Text("all done", TokenUsage(1_000, 5)).toStreamFlow()
             }
         }
@@ -1285,5 +1287,25 @@ class AgentLoopTest : FunSpec({
         val last = captured.last().messages
         last.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL }.any { it.content.startsWith(Elider.PREFIX) } shouldBe true
         assertTemplateSafe(last)
+    }
+
+    test("structured mode: old-round elision that lands just under the trigger is topped up, so the next round does not thrash") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        fun toolTokens(i: Int) = captured[i].messages.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL }.sumOf { it.content.length } / 4
+        every { provider.stream(any()) } answers {
+            captured.add(firstArg())
+            when (captured.size) {
+                1 -> bigRound(captured, "a", 1, 12_000, 8_000)
+                2 -> bigRound(captured, "b", 1, 4_000, 8_000 + toolTokens(1))
+                3 -> bigRound(captured, "c", 1, 5_000, 8_000 + toolTokens(2))
+                4 -> bigRound(captured, "d", 3, 4_000, 8_000 + toolTokens(3))
+                else -> LLMResponse.Text("all done", TokenUsage(1_000, 5)).toStreamFlow()
+            }
+        }
+        every { sessionManager.save(any()) } just Runs
+        val result = newLoop(ToolRegistry().register(bigTool), contextWindowTokens = 16_384, compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        result.branch().last().content shouldBe "all done"
+        assertTemplateSafe(captured.last().messages)
     }
 })

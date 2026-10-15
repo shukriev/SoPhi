@@ -264,7 +264,11 @@ class AgentLoop(
                 // Summarise only if still over: a stub can free little, and elision alone must not thrash.
                 val saved = before - toolChars(messages, turnStartIndex)
                 projected -= saved / CHARS_PER_TOKEN_ESTIMATE
-                if (projected < triggerTokens) return true
+                if (projected < triggerTokens) {
+                    // Landing just under the trigger means the next round trips it again: top up toward 3/4.
+                    Elider.elideLargest(messages, turnStartIndex, (projected - triggerTokens * 3 / 4) * CHARS_PER_TOKEN_ESTIMATE)
+                    return true
+                }
             }
         }
 
