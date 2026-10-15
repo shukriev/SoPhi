@@ -4,6 +4,7 @@ import dev.sophi.core.context.CompactionMode
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import kotlinx.coroutines.runBlocking
 
@@ -23,13 +24,16 @@ class RuntimeBuilderCompactionTest : FunSpec({
     }
     test("a long conversation is compacted across turns in an SDK runtime") {
         val provider = RecordingStreamProvider()
+        val usageLog = tempdir().toPath().resolve("usage.jsonl")
         val runtime = RuntimeBuilder().apply {
             this.provider = provider; contextWindowTokens(4_000); sessionsDir = tempdir().toPath(); contextKnobs = emptyMap()
+            usageLogPath = usageLog
         }.build()
         val s = runBlocking { runtime.newSession() }
         repeat(3) { i -> runBlocking { runtime.streamTurn(s, "turn $i " + "x".repeat(3_000)) {} } }
         val branch = runtime.sessionManager.load(s).branch()
         branch.first().content shouldStartWith "Summary of the conversation so far:"
+        java.nio.file.Files.readString(usageLog) shouldContain "\"kind\":\"summarise\""
         runtime.close()
     }
 })

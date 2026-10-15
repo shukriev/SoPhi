@@ -35,7 +35,8 @@ class ContextCompactor(
     suspend fun compact(
         session: AgentSession,
         config: AgentConfig,
-        keepRecentCount: Int = 4
+        keepRecentCount: Int = 4,
+        onUsage: (dev.sophi.ai.api.TokenUsage) -> Unit = {}
     ): AgentSession {
         val entries = session.branch()
         // replay=false entries (e.g. persisted tool rounds) are inert for prompting; keep them in
@@ -57,7 +58,7 @@ class ContextCompactor(
             ?.metadata?.get("_workingSet")?.let { runCatching { Json.decodeFromString<WorkingSet>(it) }.getOrNull() }
         val fresh = WorkingSet.fromEntries(entries.takeWhile { it.id != firstKeptId })
         val workingSet = previous?.merge(fresh) ?: fresh
-        val summary = summariser.summarise(transcript, workingSet, config.model)
+        val summary = summariser.summarise(transcript, workingSet, config.model, onUsage)
 
         // Replace only the compacted prefix of the active branch: the summary pair becomes a new
         // root and the first kept entry is re-parented onto it. Entries on other branches

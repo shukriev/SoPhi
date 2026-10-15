@@ -430,7 +430,7 @@ class AgentLoop(
                 sessionManager.save(session)
 
                 return if (compactor != null && compactor.needsCompaction(session, config, contextWindowTokens)) {
-                    compactor.compact(session, config).also { sessionManager.save(it) }
+                    compactor.compact(session, config, onUsage = { runCatching { onUsage(it, "summarise") } }).also { sessionManager.save(it) }
                 } else {
                     session
                 }
