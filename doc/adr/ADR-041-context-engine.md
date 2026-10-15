@@ -133,7 +133,7 @@ addendum).
    157,549 / 177,031 / 253,809, but the summariser never ran for elide or structured (elision alone sufficed), so
    they ran the same path and the gap is one long run. The default stays `structured`. E4 showed that elision and
    the oversized-round handling work; it did not exercise the structured summary live, so structured against
-   generic summaries is unsettled until a longer-task run. Single runs, one small model, n=5.
+   generic summaries is unsettled until a longer-task run. Single runs, one small model, n=5. The E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only.
 
 ## Reasons
 

@@ -242,7 +242,7 @@ Findings:
   `Elider.elideLargest`: stub the largest results, the newest round included, down to 3/4 of the trigger. A result
   the model has not seen yet is stubbed as "too large to show at once; re-read a smaller part or narrow the request".
 - The summariser never ran for L or S: elision alone always brought relief. So L and S executed the same path, and
-  the token gap between them is one long S run (124k tokens, 15 calls), i.e. run variance, not a cost of the
+  the token gap between them is one long S run (125,945 tokens in all, 15 calls), i.e. run variance, not a cost of the
   structured summary.
 - Scoring fixes made during analysis: Kotlin literals (`3_000`, `50L`) and qualified names
   (`AnthropicCacheStrategy.SYSTEM_AND_TOOLS`) were wrongly rejected. 4 runs were rescored
@@ -253,7 +253,7 @@ and the oversized-round handling against today's compactor. It did not exercise 
 this model and these prompts the summariser was never needed. A longer-task run, where summaries must be
 written, would settle structured against generic summaries.
 
-Limits: single runs, one small local model (bonsai only), n=5 prompts, so 2 successes of difference is a small
+Limits: the E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only. Single runs, one small local model (bonsai only), n=5 prompts, so 2 successes of difference is a small
 sample; no frontier model.
 
 ## Still pending
