@@ -54,14 +54,14 @@ class Summariser(
             reasoningEffort = "none"
         )
         val text = try {
-            (provider.complete(request) as? LLMResponse.Text)?.also { runCatching { onUsage(it.usage) } }?.content
+            (provider.complete(request) as? LLMResponse.Text)?.also { runCatching { onUsage(it.usage) } }?.content?.takeIf { it.isNotBlank() }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
             null
         }
         // A failed summarisation must not abort the turn: degrade to the truncated transcript.
-        val body = text ?: transcript.lines().joinToString("; ") { it.take(80) }
+        val body = text ?: transcript.lines().joinToString("; ") { it.take(80) }.take(budgetTokens * 4)
         return if (structured) assemble(body, workingSet, fromLlm = text != null) else body
     }
 
@@ -80,9 +80,20 @@ class Summariser(
         ).joinToString("\n\n") { (h, t) -> "## $h\n$t" }
     }
 
-    /** Splits on `^## ` headings; text before the first heading is dropped. */
-    private fun parse(text: String): Map<String, String> =
-        Regex("(?m)^## ").split(text).drop(1).associate {
-            it.substringBefore('\n').trim() to it.substringAfter('\n', "").trim()
+    private val headingRe = Regex("""^#{2,3}\s*\**\s*(.+?)\s*\**\s*:?\s*$""")
+    private val known = listOf("Goal", "Decisions & findings", "Errors & attempts", "Open items")
+
+    /** Lenient split on `##`/`###` headings, case-insensitive; duplicates are joined, anything unmatched lands under Goal. */
+    private fun parse(text: String): Map<String, String> {
+        val out = linkedMapOf<String, StringBuilder>()
+        var cur = "Goal"
+        for (line in text.lines()) {
+            val name = headingRe.find(line.trim())?.groupValues?.get(1)?.let { h -> known.firstOrNull { it.equals(h, true) } }
+            if (name != null) cur = name else {
+                if (headingRe.matches(line.trim())) cur = "Goal"
+                out.getOrPut(cur) { StringBuilder() }.append(line).append('\n')
+            }
         }
+        return out.mapValues { it.value.toString().trim() }
+    }
 }
