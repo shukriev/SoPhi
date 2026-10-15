@@ -102,4 +102,33 @@ class EncoderJudgmentTest : FunSpec({
         captured.captured.judgment shouldBe Judgments.ENCODER
         captured.captured.messages.single().content shouldBe Files.readString(Path.of("src/test/resources/golden/encoder-chat.txt"))
     }
+
+    // Gemma 4 answers "profile": {} — a strict decode threw away the whole verdict, memories included.
+    test("parse: an empty-object profile keeps the memories") {
+        val v = parseEncoderVerdict("""{"memories":[{"text":"The user has a dog","room":"ENTITIES"}],"profile":{}}""")!!
+        v.memories.single().text shouldBe "The user has a dog"
+        v.profile shouldBe emptyList()
+    }
+
+    test("parse: a map profile becomes path/value entries") {
+        val v = parseEncoderVerdict("""{"memories":[],"profile":{"preferred_response_style":"bulleted","pets":2}}""")!!
+        v.profile shouldBe listOf(VerdictProfile("preferred_response_style", "bulleted"), VerdictProfile("pets", "2"))
+    }
+
+    test("parse: a profile of any other type is dropped, an array is kept as is") {
+        parseEncoderVerdict("""{"memories":[],"profile":"likes tea"}""")!!.profile shouldBe emptyList()
+        parseEncoderVerdict("""{"memories":[],"profile":[{"path":"a.b","value":"c","explicit":true}]}""")!!.profile shouldBe
+            listOf(VerdictProfile("a.b", "c", true))
+    }
+
+    test("parse: profile tolerance does not loosen memories") {
+        parseEncoderVerdict("""{"memories":{},"profile":{}}""").shouldBeNull()
+    }
+
+    test("the prompt asks for English memory text and defines the sensitivity levels") {
+        val prompt = encoder.buildPrompt(goldenChat, emptyList())
+        prompt shouldContain "always in English"
+        prompt shouldContain "PERSONAL is the default"
+        prompt shouldContain "RESTRICTED only when the user asks to keep it private"
+    }
 })

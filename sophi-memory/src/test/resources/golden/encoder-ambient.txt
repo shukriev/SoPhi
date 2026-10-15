@@ -45,7 +45,11 @@ Rules:
   user's life. Store nothing from it, however dramatic it sounds.
 - NEVER store credentials, passwords, payment card or government ID numbers.
 - Facts about third parties' health/legal matters: generalized form only.
-- 'RESTRICTED' only when the user says to keep it private.
+- sensitivity: PERSONAL is the default for facts about the user's own life and work; SENSITIVE for
+  health, legal, financial or intimate matters and any third party's private matters; PUBLIC for
+  widely known facts not about a person; RESTRICTED only when the user asks to keep it private.
+- text is always in English, even when the exchange is in another language. Write names and
+  places in Latin script as spoken (Виктор -> Viktor).
 - causedBy/supersedes may only reference ids listed below.
 - profile: stable user traits only (names, preferences, recurring patterns).
 

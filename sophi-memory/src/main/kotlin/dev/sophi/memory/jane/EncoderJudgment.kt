@@ -7,6 +7,12 @@ import dev.sophi.ai.system1.JudgmentSpec
 import dev.sophi.ai.system1.Judgments
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /** The encoder's input as evaluation and training see it: only the fields the prompt reads. */
 @Serializable
@@ -84,7 +90,11 @@ internal fun encoderPrompt(userInput: String, assistantReply: String, ambient: B
     }
     appendLine("- NEVER store credentials, passwords, payment card or government ID numbers.")
     appendLine("- Facts about third parties' health/legal matters: generalized form only.")
-    appendLine("- 'RESTRICTED' only when the user says to keep it private.")
+    appendLine("- sensitivity: PERSONAL is the default for facts about the user's own life and work; SENSITIVE for")
+    appendLine("  health, legal, financial or intimate matters and any third party's private matters; PUBLIC for")
+    appendLine("  widely known facts not about a person; RESTRICTED only when the user asks to keep it private.")
+    appendLine("- text is always in English, even when the exchange is in another language. Write names and")
+    appendLine("  places in Latin script as spoken (Виктор -> Viktor).")
     appendLine("- causedBy/supersedes may only reference ids listed below.")
     appendLine("- profile: stable user traits only (names, preferences, recurring patterns).")
     appendLine()
@@ -116,8 +126,23 @@ internal fun parseEncoderVerdict(text: String): EncoderVerdict? {
     val start = text.indexOf('{'); val end = text.lastIndexOf('}')
     if (start < 0 || end <= start) return null
     return runCatching {
-        lenientJson.decodeFromString(EncoderVerdict.serializer(), text.substring(start, end + 1))
+        val obj = lenientJson.parseToJsonElement(text.substring(start, end + 1)).jsonObject
+        lenientJson.decodeFromJsonElement(EncoderVerdict.serializer(), withListProfile(obj))
     }.getOrNull()
+}
+
+// Small models answer "profile": {} or a {trait: value} map instead of a list. Strict decoding of that one
+// field threw away the whole verdict, memories included, so only profile is normalised; the rest stays strict.
+private fun withListProfile(obj: JsonObject): JsonObject {
+    val profile = obj["profile"] ?: return obj
+    if (profile is JsonArray) return obj
+    val entries = (profile as? JsonObject)?.map { (path, value) ->
+        buildJsonObject {
+            put("path", path)
+            put("value", (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: value.toString())
+        }
+    } ?: emptyList()
+    return JsonObject(obj + ("profile" to JsonArray(entries)))
 }
 
 /** The encoder judgment (ADR-042 addendum): the one copy of its prompt, request and parser. */
