@@ -5,6 +5,8 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 class ContextCompactor(
@@ -12,10 +14,22 @@ class ContextCompactor(
     private val summariser: Summariser = Summariser(provider, CompactionMode.STRUCTURED, 32_000)
 ) {
 
-    /** Replayed size against half the window, or too many replayed entries; non-replayed tool rounds never count. */
-    fun needsCompaction(session: AgentSession, config: AgentConfig, windowTokens: Int): Boolean {
+    /**
+     * Replayed size against half the window, or too many replayed entries; non-replayed tool rounds
+     * never count. False whenever [compact] would be a no-op, so a turn never pays for a pointless call.
+     */
+    fun needsCompaction(session: AgentSession, config: AgentConfig, windowTokens: Int, keepRecentCount: Int = 4): Boolean {
         val replayable = session.branch().filter { it.metadata["replay"] != "false" }
+        if (cutIndex(replayable, keepRecentCount) <= 0) return false
         return replayable.sumOf { it.content.length } / 4 > windowTokens * 0.5 || replayable.size > config.maxBranchLength
+    }
+
+    /** Start of the kept tail, moved back to a USER entry (a strict template rejects a leading ASSISTANT); <= 0 = nothing to do. */
+    private fun cutIndex(replayable: List<SessionEntry>, keepRecentCount: Int): Int {
+        if (replayable.size <= keepRecentCount) return 0
+        var cut = replayable.size - keepRecentCount
+        while (cut > 0 && replayable[cut].role != EntryRole.USER) cut--
+        return cut
     }
 
     suspend fun compact(
@@ -28,12 +42,8 @@ class ContextCompactor(
         // the DAG but exclude them from the transcript and the keep/compact split so the summary
         // never leaks raw tool output and keepRecentCount counts real conversation entries.
         val replayable = entries.filter { it.metadata["replay"] != "false" }
-        if (replayable.size <= keepRecentCount) return session
-
-        // The kept tail must open on a USER entry (the summary pair ends on ASSISTANT, and a strict
-        // template rejects a leading ASSISTANT or USER, USER), so the cut moves back to one.
-        var cut = replayable.size - keepRecentCount
-        while (cut > 0 && replayable[cut].role != EntryRole.USER) cut--
+        // The kept tail must open on a USER entry: the summary pair ends on ASSISTANT.
+        val cut = cutIndex(replayable, keepRecentCount)
         if (cut <= 0) return session
 
         val toCompact = replayable.subList(0, cut)
@@ -42,7 +52,11 @@ class ContextCompactor(
 
         val transcript = toCompact.joinToString("\n") { entry -> "${entry.role.name}: ${entry.content}" }
         // The WorkingSet reads the persisted tool rounds too, so exact files/commands survive the cut.
-        val workingSet = WorkingSet.fromEntries(entries.takeWhile { it.id != firstKeptId })
+        // A previous cross-turn summary carries its own WorkingSet (the rounds it covered are gone from the branch).
+        val previous = entries.firstOrNull()?.takeIf { it.metadata["_compacted"] == "true" }
+            ?.metadata?.get("_workingSet")?.let { runCatching { Json.decodeFromString<WorkingSet>(it) }.getOrNull() }
+        val fresh = WorkingSet.fromEntries(entries.takeWhile { it.id != firstKeptId })
+        val workingSet = previous?.merge(fresh) ?: fresh
         val summary = summariser.summarise(transcript, workingSet, config.model)
 
         // Replace only the compacted prefix of the active branch: the summary pair becomes a new
@@ -55,7 +69,7 @@ class ContextCompactor(
             role = EntryRole.USER,
             content = "Summary of the conversation so far:\n$summary",
             timestamp = now,
-            metadata = mapOf("_compacted" to "true")
+            metadata = mapOf("_compacted" to "true", "_workingSet" to Json.encodeToString(workingSet))
         )
         val ackEntry = SessionEntry(
             id = UUID.randomUUID().toString(),

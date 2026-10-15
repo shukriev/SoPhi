@@ -22,7 +22,10 @@ object Elider {
             val call = calls[m.toolCallId]
             val name = m.toolName ?: call?.name ?: "tool"
             val arg = call?.let { keyArg(name, it.argumentsJson) }?.take(80)?.let { " $it" } ?: ""
-            messages[i] = m.copy(content = "$PREFIX$name$arg, ${m.content.lines().size} lines — re-read if needed]")
+            val stub = "$PREFIX$name$arg, ${m.content.lines().size} lines — re-read if needed]"
+            // A stub longer than a short result would grow the context.
+            if (stub.length >= m.content.length) continue
+            messages[i] = m.copy(content = stub)
             count++
         }
         return count

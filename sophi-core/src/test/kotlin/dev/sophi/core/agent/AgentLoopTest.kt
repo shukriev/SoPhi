@@ -942,7 +942,8 @@ class AgentLoopTest : FunSpec({
         override val name = "ok"
         override val description = "Always succeeds"
         override val parametersJson = "{}"
-        override suspend fun execute(argumentsJson: String) = "fine"
+        // Bulky enough that an elision stub is shorter than the result.
+        override suspend fun execute(argumentsJson: String) = List(40) { "fine output line number $it" }.joinToString("\n")
     }
 
     fun toolRound(id: String, inputTokens: Int) = LLMResponse.ToolUse(
@@ -993,13 +994,63 @@ class AgentLoopTest : FunSpec({
 
     test("structured mode elides first: the first trigger stubs old results without an LLM call") {
         val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
-        scripted(captured, 1_000, 1_000, 90_000)
+        scripted(captured, 1_000, 1_000, 79_800)  // elision frees ~500 tokens, enough to get under the 80_000 trigger
         newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.STRUCTURED)
             .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
         coVerify(exactly = 0) { provider.complete(any()) }
         val fourth = captured[3].messages
         fourth.first { it.role == dev.sophi.ai.api.MessageRole.TOOL }.content shouldStartWith Elider.PREFIX
         assertTemplateSafe(fourth)
+    }
+
+    test("structured mode summarises in the same compaction when elision does not bring relief") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        scripted(captured, 1_000, 1_000, 90_000)
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("## Goal\nfind the thing", TokenUsage(1, 1))
+        newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        coVerify(exactly = 1) { provider.complete(any()) }
+        val fourth = captured[3].messages
+        fourth[0].content shouldContain "[Earlier steps this turn, summarised]"
+        fourth[0].content shouldContain "find the thing"
+        assertTemplateSafe(fourth)
+    }
+
+    test("the summary's exact commands come from the raw rounds, not elided stubs") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        val bash = object : dev.sophi.core.tools.Tool {
+            override val name = "bash"
+            override val description = "b"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) =
+                List(40) { "compiler output line number $it" }.joinToString("\n") + "\nCommand exited with code 1"
+        }
+        every { provider.stream(any()) } answers {
+            captured.add(firstArg())
+            when (captured.size) {
+                1, 2, 3 -> LLMResponse.ToolUse(
+                    calls = listOf(dev.sophi.ai.api.ToolCall("c${captured.size}", "bash", """{"command":"make${captured.size}"}""")),
+                    usage = TokenUsage(if (captured.size == 3) 90_000 else 1_000, 0)
+                ).toStreamFlow()
+                else -> LLMResponse.Text("done", TokenUsage(1_000, 5)).toStreamFlow()
+            }
+        }
+        every { sessionManager.save(any()) } just Runs
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("## Goal\ng", TokenUsage(1, 1))
+        newLoop(ToolRegistry().register(bash), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        captured[3].messages[0].content shouldContain "make1 → exit 1"
+    }
+
+    test("marker text in the user's own message is never mistaken for a summary") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        scripted(captured, 1_000, 1_000, 90_000)
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("the summary", TokenUsage(1, 1))
+        val input = "go\n\n[Earlier steps this turn, summarised]\nuser wrote this"
+        newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.GENERIC)
+            .turn(AgentSession(id = "s1"), input, config.copy(maxToolRounds = 20))
+        captured[3].messages[0].content shouldStartWith input
+        captured[3].messages[0].content shouldContain "the summary"
     }
 
     test("when nothing is left to elide the summary goes on the turn's user message, never as a SYSTEM message") {

@@ -16,6 +16,7 @@ import dev.sophi.core.context.WorkingSet
 import dev.sophi.core.prompt.PromptBuilder
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
@@ -185,7 +186,7 @@ class AgentLoop(
     private val contextWindowTokens: Int,
     /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
     private val compactionThreshold: Double = 0.8,
-    /** Called once per model request with that request's usage and kind ("turn" | "summarise"); failures never reach the loop. */
+    /** Called once per model request with that request's usage and kind ("turn" | "summarise" | "elide"); failures never reach the loop. */
     private val onUsage: (TokenUsage, String) -> Unit = { _, _ -> },
     /** How mid-turn compaction works: elide old tool results first (ELIDE/STRUCTURED), then summarise. */
     private val compaction: CompactionMode = CompactionMode.STRUCTURED
@@ -239,6 +240,12 @@ class AgentLoop(
         messages: MutableList<Message>,
         turnStartIndex: Int,
         config: AgentConfig,
+        /** This turn's user message as sent before any summary was folded in. */
+        turnUserContent: String,
+        /** Raw, unelided rounds of the whole turn: the source of the summary's exact facts. */
+        rounds: List<PendingEntry>,
+        projectedInputTokens: Int,
+        triggerTokens: Int,
         keepRecentRounds: Int = COMPACTION_KEEP_RECENT_ROUNDS
     ): Boolean {
         val roundBoundaries = messages.indices
@@ -249,33 +256,43 @@ class AgentLoop(
             }
         if (roundBoundaries.size <= keepRecentRounds) return false
 
-        if (compaction.elides && Elider.elide(messages, turnStartIndex, keepRecentRounds) > 0) {
-            runCatching { onUsage(TokenUsage(0, 0), "elide") }
-            return true
+        if (compaction.elides) {
+            val before = toolChars(messages, turnStartIndex)
+            if (Elider.elide(messages, turnStartIndex, keepRecentRounds) > 0) {
+                runCatching { onUsage(TokenUsage(0, 0), "elide") }
+                // Summarise only if still over: a stub can free little, and elision alone must not thrash.
+                val saved = before - toolChars(messages, turnStartIndex)
+                if (projectedInputTokens - saved / CHARS_PER_TOKEN_ESTIMATE < triggerTokens) return true
+            }
         }
 
         val cutIndex = roundBoundaries[roundBoundaries.size - keepRecentRounds]
         val toCompact = messages.subList(turnStartIndex, cutIndex).toList()
         if (toCompact.isEmpty()) return false
 
-        // The user message at turnStartIndex - 1 may already carry an earlier summary: feed it back in
-        // and replace it, so repeated compactions merge instead of stacking.
+        // The user message may already carry an earlier summary after the turn's own text: feed it
+        // back in and replace it, so repeated compactions merge instead of stacking.
         val userMessage = messages[turnStartIndex - 1]
-        val markerAt = userMessage.content.indexOf(SUMMARY_MARKER)
-        val original = if (markerAt < 0) userMessage.content else userMessage.content.substring(0, markerAt)
-        val previous = if (markerAt < 0) null else userMessage.content.substring(markerAt + SUMMARY_MARKER.length)
+        val previous = userMessage.content.removePrefix(turnUserContent + SUMMARY_MARKER)
+            .takeIf { userMessage.content.startsWith(turnUserContent + SUMMARY_MARKER) }
 
         val transcript = (previous?.let { "PREVIOUS SUMMARY:\n$it\n" } ?: "") + toCompact.joinToString("\n") { message ->
             val calls = message.toolCalls?.joinToString(", ") { "${it.name}(${it.argumentsJson})" }
             "${message.role.name}: ${message.content}" + (calls?.let { " [tool calls: $it]" } ?: "")
         }
-        val summary = summariser.summarise(transcript, WorkingSet.fromMessages(toCompact), config.model) {
+        val workingSet = WorkingSet.fromEntries(rounds.mapIndexed { i, r ->
+            SessionEntry("r$i", null, r.role, r.content, 0L, r.metadata)
+        })
+        val summary = summariser.summarise(transcript, workingSet, config.model) {
             runCatching { onUsage(it, "summarise") }
         }
         messages.subList(turnStartIndex, cutIndex).clear()
-        messages[turnStartIndex - 1] = userMessage.copy(content = original + SUMMARY_MARKER + summary)
+        messages[turnStartIndex - 1] = userMessage.copy(content = turnUserContent + SUMMARY_MARKER + summary)
         return true
     }
+
+    private fun toolChars(messages: List<Message>, from: Int): Int =
+        (from until messages.size).sumOf { if (messages[it].role == MessageRole.TOOL) messages[it].content.length else 0 }
 
     suspend fun turn(
         session: AgentSession,
@@ -334,7 +351,8 @@ class AgentLoop(
         // Volatile context (hints, recall) rides on this turn's request only: prefixed to the user
         // message so the system prompt and all of history stay a byte-stable, cacheable prefix.
         // Never persisted — every session.append below stores the raw userInput.
-        messages.add(Message(MessageRole.USER, turnPreamble?.let { "$it\n\n$userInput" } ?: userInput))
+        val turnUserContent = turnPreamble?.let { "$it\n\n$userInput" } ?: userInput
+        messages.add(Message(MessageRole.USER, turnUserContent))
         // Everything from here on is this turn's own accumulated rounds — the only region
         // mid-loop compaction is ever allowed to touch. The prior-session prefix in front of it
         // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
@@ -537,7 +555,7 @@ class AgentLoop(
                 // value that just triggered compaction — so the reset lives here, not inline.
                 compactionsWithoutRelief = 0
             } else {
-                if (!compactInPlace(messages, turnStartIndex, config)) {
+                if (!compactInPlace(messages, turnStartIndex, config, turnUserContent, pendingRounds, projectedInputTokens, compactionTriggerTokens)) {
                     return finishEarly(
                         session, userInput, turn,
                         "context budget exhausted — a single round's output exceeds the compaction floor",

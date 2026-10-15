@@ -5,15 +5,19 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+@Serializable
 data class FileTouch(val path: String, val reads: Int, val writes: Int, val lastAction: String)
 /** exitCode null = unknown (no result, stopped by the user, or output truncated past the marker). */
+@Serializable
 data class CommandRun(val command: String, val exitCode: Int?)
+@Serializable
 data class ToolError(val tool: String, val message: String)
 
 private val lenient = Json { ignoreUnknownKeys = true }
@@ -33,6 +37,7 @@ internal fun keyArg(toolName: String, argumentsJson: String): String? = runCatch
 }.getOrNull()
 
 /** What a session actually did, derived from its tool rounds (pure; never stale, free on resume). */
+@Serializable
 data class WorkingSet(
     val files: List<FileTouch>,
     val searches: List<String>,
@@ -46,6 +51,17 @@ data class WorkingSet(
     fun commandsSection(): String = section(commands.takeLast(20)) { "${it.command} → exit ${it.exitCode ?: "unknown"}" }
 
     fun errorsSection(): String = section(errors.takeLast(10)) { "${it.tool}: ${it.message.lineSequence().first()}" }
+
+    /** This set followed by [newer]: files merged by path (counts summed, newer lastAction), the rest appended. */
+    fun merge(newer: WorkingSet): WorkingSet {
+        val merged = LinkedHashMap<String, FileTouch>()
+        files.forEach { merged[it.path] = it }
+        for (f in newer.files) {
+            val old = merged.remove(f.path)
+            merged[f.path] = if (old == null) f else f.copy(reads = old.reads + f.reads, writes = old.writes + f.writes)
+        }
+        return WorkingSet(merged.values.toList(), searches + newer.searches, commands + newer.commands, errors + newer.errors)
+    }
 
     private fun <T> section(items: List<T>, line: (T) -> String): String =
         if (items.isEmpty()) "(none)" else items.joinToString("\n") { line(it).take(LINE_MAX) }

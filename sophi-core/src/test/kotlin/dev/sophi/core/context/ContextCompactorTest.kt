@@ -7,6 +7,7 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -211,12 +212,10 @@ class ContextCompactorTest : FunSpec({
         val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
             EntryRole.USER to "u3", EntryRole.ASSISTANT to "a3")
         val out = compactor.compact(s, config, keepRecentCount = 3)
-        val dir = java.nio.file.Files.createTempDirectory("sophi-compact-test")
-        val manager = FileSessionManager(dir)
+        val manager = FileSessionManager(tempdir().toPath())
         manager.save(out)
         val reloaded = manager.load(out.id)!!
         PromptBuilder.build(reloaded.branch()) shouldBe PromptBuilder.build(out.branch())
-        dir.toFile().deleteRecursively()
     }
 
     test("no USER entry in the kept tail: the session is returned unchanged") {
@@ -225,9 +224,49 @@ class ContextCompactorTest : FunSpec({
         coVerify(exactly = 0) { provider.complete(any()) }
     }
 
-    test("needsCompaction: by replayed size against half the window, or by entry count") {
-        val big = session(EntryRole.USER to "x".repeat(70_000), EntryRole.ASSISTANT to "y")
+    test("needsCompaction: by replayed size against half the window") {
+        val big = session(EntryRole.USER to "x".repeat(70_000), EntryRole.ASSISTANT to "y", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3", EntryRole.ASSISTANT to "a3")
         compactor.needsCompaction(big, config, windowTokens = 32_000) shouldBe true
         compactor.needsCompaction(session(EntryRole.USER to "hi"), config, 32_000) shouldBe false
+    }
+
+    test("needsCompaction: by replayed entry count") {
+        val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3", EntryRole.ASSISTANT to "a3")
+        compactor.needsCompaction(s, config.copy(maxBranchLength = 5), 32_000) shouldBe true
+        compactor.needsCompaction(s, config.copy(maxBranchLength = 6), 32_000) shouldBe false
+    }
+
+    test("needsCompaction ignores replay=false entries, and is false when compact would be a no-op") {
+        val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3")
+        s.append(EntryRole.TOOL_RESULT, "z".repeat(200_000), mapOf("replay" to "false"))
+        compactor.needsCompaction(s, config, 32_000) shouldBe false
+        // over the size bar but nothing before the kept tail to summarise
+        val short = session(EntryRole.USER to "x".repeat(70_000), EntryRole.ASSISTANT to "y")
+        compactor.needsCompaction(short, config, 32_000) shouldBe false
+    }
+
+    test("a second cross-turn compaction keeps files and commands touched only before the first") {
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("s", TokenUsage(1, 1))
+        val s = AgentSession(id = "s-ws")
+        s.append(EntryRole.USER, "u1")
+        s.append(EntryRole.ASSISTANT, "", mapOf("replay" to "false", "toolCalls" to
+            """[{"id":"1","name":"read_file","argumentsJson":"{\"path\":\"Old.kt\"}"},{"id":"2","name":"bash","argumentsJson":"{\"command\":\"mvn old\"}"}]"""))
+        s.append(EntryRole.TOOL_RESULT, "x", mapOf("replay" to "false", "toolCallId" to "1", "toolName" to "read_file"))
+        s.append(EntryRole.TOOL_RESULT, "y", mapOf("replay" to "false", "toolCallId" to "2", "toolName" to "bash"))
+        listOf("a1" to "u2", "a2" to "u3", "a3" to "u4", "a4" to "u5").forEach { (a, u) ->
+            s.append(EntryRole.ASSISTANT, a); s.append(EntryRole.USER, u)
+        }
+        s.append(EntryRole.ASSISTANT, "a5")
+        val first = compactor.compact(s, config, keepRecentCount = 6)
+        first.branch()[0].content shouldContain "Old.kt"
+        first.branch().drop(2).forEach { it.role.name.isNotEmpty() shouldBe true }
+        first.append(EntryRole.USER, "u6"); first.append(EntryRole.ASSISTANT, "a6")
+        first.append(EntryRole.USER, "u7"); first.append(EntryRole.ASSISTANT, "a7")
+        val second = compactor.compact(first, config, keepRecentCount = 4)
+        second.branch()[0].content shouldContain "Old.kt"
+        second.branch()[0].content shouldContain "mvn old → exit 0"
     }
 })
