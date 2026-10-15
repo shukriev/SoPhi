@@ -54,4 +54,13 @@ class System1BatchTest : FunSpec({
     test("an unknown judgment is a usage error naming the known ones") {
         shouldThrow<UsageError> { System1Batch {}.render("nope", "m", emptySequence()) }.message!! shouldContain "encoder"
     }
+
+    // A bare `java -jar … system1 render` under LANG=C used the platform charset and wrote Cyrillic as "?".
+    test("stdin and stdout are UTF-8 whatever the platform charset") {
+        val bytes = java.io.ByteArrayOutputStream()
+        val line = """{"id":"bg","input":{"turn":{"userInput":"Мила und Grüße"}}}"""
+        System1Batch(echo = utf8Writer(bytes))
+            .render("encoder", "m", utf8Lines(java.io.ByteArrayInputStream(line.toByteArray(Charsets.UTF_8))))
+        bytes.toString(Charsets.UTF_8) shouldContain "USER: Мила und Grüße"
+    }
 })

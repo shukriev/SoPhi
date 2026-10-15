@@ -71,6 +71,15 @@ private fun CompletionRequest.toJson() = buildJsonObject {
     put("judgment", judgment)
 }
 
+// UTF-8 on both pipes regardless of the platform charset: under LANG=C a redirected JVM stdout wrote Cyrillic as "?".
+internal fun utf8Lines(input: java.io.InputStream = System.`in`): Sequence<String> =
+    input.bufferedReader(Charsets.UTF_8).lineSequence()
+
+internal fun utf8Writer(output: java.io.OutputStream = java.io.FileOutputStream(java.io.FileDescriptor.out)): (String) -> Unit {
+    val out = java.io.PrintStream(output, true, Charsets.UTF_8)
+    return { out.println(it) }
+}
+
 class System1Command : CliktCommand(name = "system1", help = "Render and parse System-1 judgments for evaluation (ADR-042)") {
     override fun run() = Unit
 }
@@ -78,10 +87,10 @@ class System1Command : CliktCommand(name = "system1", help = "Render and parse S
 class System1RenderCommand : CliktCommand(name = "render", help = "stdin {id,input} JSONL -> stdout {id,request} JSONL") {
     private val judgment by option("--judgment").required()
     private val model by option("--model").default("system1")
-    override fun run() = System1Batch { echo(it) }.render(judgment, model, generateSequence { readlnOrNull() })
+    override fun run() = System1Batch(echo = utf8Writer()).render(judgment, model, utf8Lines())
 }
 
 class System1ParseCommand : CliktCommand(name = "parse", help = "stdin {id,reply} JSONL -> stdout {id,output} JSONL") {
     private val judgment by option("--judgment").required()
-    override fun run() = System1Batch { echo(it) }.parse(judgment, generateSequence { readlnOrNull() })
+    override fun run() = System1Batch(echo = utf8Writer()).parse(judgment, utf8Lines())
 }
