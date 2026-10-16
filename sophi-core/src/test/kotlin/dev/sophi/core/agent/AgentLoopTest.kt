@@ -1015,7 +1015,20 @@ class AgentLoopTest : FunSpec({
         result.branch().last().content shouldBe "done"
         val last = captured.last().messages.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL && it.toolCallId in setOf("c4", "c5", "c6", "c7") }
         last.size shouldBe 4
-        last.none { it.content.contains("you have now made this exact call") } shouldBe true
+        // The elision forgives the count: the re-reads count 1, 2, 3 again, so the note lands on the third.
+        last.map { it.content.contains("you have now made this exact call") } shouldBe listOf(false, false, true, true)
+    }
+
+    test("a genuine loop after an elision is still caught: note on the 3rd repeat, stop at the 6th") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        scripted(captured, 1_000, 1_000, 79_800, *IntArray(12) { 1_000 })  // one elision at round 3, then identical calls forever
+        val result = newLoop(ToolRegistry().register(loopingTool()), compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
+        captured.size shouldBe 9  // c1..c9: the 6th post-stub call is c9, then the guard stops the turn
+        val note = "you have now made this exact call"
+        val post = captured.last().messages.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL && it.toolCallId in setOf("c4", "c5", "c6", "c7", "c8") }
+        post.map { it.content.contains(note) } shouldBe listOf(false, false, true, true, true)
     }
 
     test("structured mode summarises in the same compaction when elision does not bring relief") {

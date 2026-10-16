@@ -108,9 +108,16 @@ private class LoopGuardState(private val maxToolRounds: Int) {
     private val repeatCounts = mutableMapOf<String, Int>()
     private var repeatedTooOften: Pair<String, Int>? = null
 
+    private fun repeatKey(name: String, argumentsJson: String) = name + "\u0000" + argumentsJson.trim()
+
+    /** An elided result invites one re-read: restart that call's count so only a real loop afterwards trips the guard. */
+    fun forgive(name: String, argumentsJson: String) {
+        repeatCounts.remove(repeatKey(name, argumentsJson))
+    }
+
     /** Counts this call among identical ones (same tool, same arguments) this turn; returns the count. */
     fun countRepeat(name: String, argumentsJson: String): Int {
-        val key = name + "\u0000" + argumentsJson.trim()
+        val key = repeatKey(name, argumentsJson)
         val n = (repeatCounts[key] ?: 0) + 1
         repeatCounts[key] = n
         if (n >= LOOP_GUARD_REPEAT_THRESHOLD) {
@@ -236,6 +243,10 @@ class AgentLoop(
      * (ASSISTANT+toolCalls, then its TOOL results), so a cut can never split a tool call from its
      * results.
      */
+    private fun stubbedToolCallIds(messages: List<Message>): Set<String> =
+        messages.filter { it.role == MessageRole.TOOL && it.content.startsWith(Elider.PREFIX) }
+            .mapNotNull { it.toolCallId }.toSet()
+
     private suspend fun compactInPlace(
         messages: MutableList<Message>,
         turnStartIndex: Int,
@@ -541,12 +552,7 @@ class AgentLoop(
             // Successful calls never trip the failure guard, so a model can repeat one forever without
             // learning anything new. Tell it on the 3rd identical call; the guard steps in at the 6th.
             val toolResults = toolOutcomes.map { o ->
-                // A re-read after the stub told it to is not a repeat.
-                val stubIds = messages.filter { it.role == MessageRole.TOOL && it.content.startsWith(Elider.PREFIX) }
-                    .mapNotNull { it.toolCallId }.toSet()
-                val afterStub = messages.any { m -> m.toolCalls.orEmpty().any {
-                    it.id in stubIds && it.name == o.call.name && it.argumentsJson.trim() == o.call.argumentsJson.trim() } }
-                val n = if (afterStub) 0 else loopGuardState.countRepeat(o.call.name, o.call.argumentsJson)
+                val n = loopGuardState.countRepeat(o.call.name, o.call.argumentsJson)
                 if (n < REPEAT_NOTE_THRESHOLD) o.message
                 else o.message.copy(content = o.message.content + "\n\n[Note: you have now made this exact call " +
                     "($n times, same arguments) in this task. Repeating it won't change the result — read what " +
@@ -579,7 +585,13 @@ class AgentLoop(
                 // value that just triggered compaction — so the reset lives here, not inline.
                 compactionsWithoutRelief = 0
             } else {
-                if (!compactInPlace(messages, turnStartIndex, config, turnUserContent, pendingRounds, projectedInputTokens, compactionTriggerTokens)) {
+                val stubbedBefore = stubbedToolCallIds(messages)
+                val compacted = compactInPlace(messages, turnStartIndex, config, turnUserContent, pendingRounds, projectedInputTokens, compactionTriggerTokens)
+                (stubbedToolCallIds(messages) - stubbedBefore).forEach { id ->
+                    messages.firstNotNullOfOrNull { m -> m.toolCalls?.firstOrNull { it.id == id } }
+                        ?.let { loopGuardState.forgive(it.name, it.argumentsJson) }
+                }
+                if (!compacted) {
                     return finishEarly(
                         session, userInput, turn,
                         "context budget exhausted — a single round's output exceeds the compaction floor",
