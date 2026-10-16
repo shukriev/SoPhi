@@ -79,6 +79,12 @@ class RuntimeBuilder {
     private var providedRegistry: ToolRegistry? = null
     private var loopGuardPolicy: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
     private var learningConfig: LearningConfig? = null
+    private var autoTitles: ((String, String) -> Unit)? = null
+
+    /** Names untitled sessions after their first turn with one short model call (see SessionTitlePlugin).
+     *  [onTitled] is told when a title is set, e.g. to refresh a session list. */
+    fun autoTitleSessions(onTitled: (sessionId: String, title: String) -> Unit = { _, _ -> }): RuntimeBuilder =
+        apply { autoTitles = onTitled }
     private var learningEmbeddingProvider: EmbeddingProvider? = null
     private var scheduleDir: Path? = null
     private var contextWindowTokens: Int? = null
@@ -267,6 +273,7 @@ class RuntimeBuilder {
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
             .also { pluginRegistry.register(it) }
+        autoTitles?.let { onTitled -> pluginRegistry.register(SessionTitlePlugin(p, model, sm, onTitled)) }
 
         val learningPlugin = effectiveLearningConfig?.let { cfg ->
             LearningPlugin(cfg.copy(sessionModel = agentConfig.model), model = agentConfig.model, provider = p,
