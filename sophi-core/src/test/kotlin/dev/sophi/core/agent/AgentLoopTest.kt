@@ -1031,6 +1031,16 @@ class AgentLoopTest : FunSpec({
         post.map { it.content.contains(note) } shouldBe listOf(false, false, true, true, true)
     }
 
+    test("a call elided every few rounds is still stopped by the loop guard at its 12th call") {
+        val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        // an elision at every 3rd round; forgiveness alone would cycle the count 1-2-3 forever
+        scripted(captured, *IntArray(40) { if (it % 3 == 2) 79_800 else 1_000 })
+        val result = newLoop(ToolRegistry().register(loopingTool()), compaction = CompactionMode.STRUCTURED)
+            .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 30))
+        result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
+        captured.size shouldBe 12
+    }
+
     test("structured mode summarises in the same compaction when elision does not bring relief") {
         val captured = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
         scripted(captured, 1_000, 1_000, 90_000)

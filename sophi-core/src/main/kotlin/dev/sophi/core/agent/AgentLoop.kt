@@ -106,6 +106,7 @@ private class LoopGuardState(private val maxToolRounds: Int) {
     private var searchesBeyondScope = 0
     private var roundBudgetWarned = false
     private val repeatCounts = mutableMapOf<String, Int>()
+    private val totalCounts = mutableMapOf<String, Int>() // never forgiven: a call elided again and again still adds up
     private var repeatedTooOften: Pair<String, Int>? = null
 
     private fun repeatKey(name: String, argumentsJson: String) = name + "\u0000" + argumentsJson.trim()
@@ -120,10 +121,15 @@ private class LoopGuardState(private val maxToolRounds: Int) {
         val key = repeatKey(name, argumentsJson)
         val n = (repeatCounts[key] ?: 0) + 1
         repeatCounts[key] = n
+        val total = (totalCounts[key] ?: 0) + 1
+        totalCounts[key] = total
         if (n >= LOOP_GUARD_REPEAT_THRESHOLD) {
             repeatedTooOften = name to n
             repeatCounts[key] = 0 // a policy that says "continue" isn't asked again until 6 more
+        } else if (total >= 2 * LOOP_GUARD_REPEAT_THRESHOLD) {
+            repeatedTooOften = name to total
         }
+        if (total >= 2 * LOOP_GUARD_REPEAT_THRESHOLD) totalCounts[key] = 0
         return n
     }
 
@@ -231,6 +237,10 @@ class AgentLoop(
         return session
     }
 
+    private fun stubbedToolCallIds(messages: List<Message>): Set<String> =
+        messages.filter { it.role == MessageRole.TOOL && it.content.startsWith(Elider.PREFIX) }
+            .mapNotNull { it.toolCallId }.toSet()
+
     /**
      * Relieves context pressure from this turn's own rounds, leaving the prior-session prefix and the
      * most recent [keepRecentRounds] rounds untouched. First elides old tool results (no LLM call,
@@ -243,10 +253,6 @@ class AgentLoop(
      * (ASSISTANT+toolCalls, then its TOOL results), so a cut can never split a tool call from its
      * results.
      */
-    private fun stubbedToolCallIds(messages: List<Message>): Set<String> =
-        messages.filter { it.role == MessageRole.TOOL && it.content.startsWith(Elider.PREFIX) }
-            .mapNotNull { it.toolCallId }.toSet()
-
     private suspend fun compactInPlace(
         messages: MutableList<Message>,
         turnStartIndex: Int,
