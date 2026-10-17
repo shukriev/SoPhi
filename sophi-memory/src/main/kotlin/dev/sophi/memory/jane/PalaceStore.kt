@@ -4,20 +4,19 @@ import dev.sophi.memory.store.JsonlLog
 import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import dev.sophi.store.arcade.Scored
+import dev.sophi.store.arcade.vectorOf
 import java.nio.file.Files
 import java.nio.file.Path
+
+private const val VEC = "MemoryVec"
 
 /**
  * Memory/CausalEdge/ProfileAttribute/RecallRecord live in ArcadeDB (graph + document + vector);
  * audit/last-recall/consolidation-marker stay plain files (spec §4: they don't need query
  * capability, and an independent audit trail survives a corrupted database).
  *
- * Embedded-only: ArcadeDB locks its database directory to one process, so only one Sophi
- * process (CLI or sophi-web) should touch a given [home] at a time. A remote-client/server
- * split was considered (spec §2) but dropped — ArcadeDB 26.5.1's remote client has no path
- * to vector search (`vector.neighbors(...)` doesn't work in SQL, and the LSMVectorIndex Java
- * API it's replaced with here is embedded-only), so a remote client couldn't do the one thing
- * this migration is for. Revisit only if concurrent CLI+web usage becomes a real workflow.
+ * Vectors live in `MemoryVec` (one per memory, inserted with the vector). The database is embedded at [home] or,
+ * for the default home, `memory` on the shared server (ADR-041 M6, see [shared]). The plain files always stay in [home].
  */
 class PalaceStore(
     private val home: Path,
@@ -28,17 +27,20 @@ class PalaceStore(
      *  independently readable, not interleaved with write-gate telemetry. */
     private val encoderLog = JsonlLog(home.resolve("encoder.jsonl"))
 
+    @Volatile private var vecIndexReady = false   // declared before init: it runs in textual order
+
     init {
         db.ensureSchema(
-            vertexTypes = listOf("Memory"),
+            vertexTypes = listOf("Memory", VEC),
             edgeTypes = listOf("CausalEdge"),
             documentTypes = listOf("ProfileAttribute", "RecallRecord")
         )
+        adoptInlineVectors()
     }
 
     fun upsertMemory(m: Memory) = db.upsertVertex("Memory", m.id, m.toProperties())
     fun memories(): Map<String, Memory> = db.queryVertices("Memory").associate { it.memoryId() to it.toMemory() }
-    fun deleteMemory(id: String) = db.deleteVertex("Memory", id)
+    fun deleteMemory(id: String) { db.deleteVertex(VEC, id); db.deleteVertex("Memory", id) }
 
     fun upsertEdge(e: CausalEdge) = db.upsertEdge("CausalEdge", "Memory", e.fromId, e.toId, e.toProperties())
     fun edges(): List<CausalEdge> = db.edges("CausalEdge").map { it.toCausalEdge() }.filter { !it.removed }
@@ -52,13 +54,35 @@ class PalaceStore(
 
     fun putEmbedding(id: String, model: String, vector: FloatArray) {
         db.upsertVertex("Memory", id, mapOf("embeddingModel" to model))
-        db.putVector("Memory", id, "embedding", vector)
+        putVec(id, vector)
     }
     fun embeddings(): Map<String, FloatArray> =
-        db.queryVertices("Memory").mapNotNull { v -> (v["embedding"] as? FloatArray)?.let { v.memoryId() to it } }.toMap()
+        db.queryVertices(VEC).mapNotNull { v -> vectorOf(v["embedding"])?.let { v.memoryId() to it } }.toMap()
     fun embeddingModel(): String? = db.queryVertices("Memory").mapNotNull { it["embeddingModel"] as? String }.lastOrNull()
-    fun vectorFor(id: String): FloatArray? = db.getVertex("Memory", id)?.get("embedding") as? FloatArray
-    fun nearest(vector: FloatArray, k: Int): List<Scored> = db.nearestVectors("Memory", "embedding", vector, k)
+    fun vectorFor(id: String): FloatArray? = db.getVertex(VEC, id)?.let { vectorOf(it["embedding"]) }
+    fun nearest(vector: FloatArray, k: Int): List<Scored> = db.nearestVectors(VEC, "embedding", vector, k)
+
+    /** One MemoryVec per memory, inserted with its vector: an insert is indexed on the embedded and the remote
+     *  store alike (an UPDATE isn't). Delete+insert in one transaction, so a replay after failover is harmless. */
+    private fun putVec(id: String, vector: FloatArray) {
+        if (!vecIndexReady) { db.ensureVectorIndex(VEC, "embedding", vector.size); vecIndexReady = true }
+        db.transaction { db.deleteVertex(VEC, id); db.insertVertex(VEC, id, mapOf("embedding" to vector)) }
+    }
+
+    /**
+     * Palaces written before M6 kept each vector on its Memory vertex: move it into a MemoryVec, once.
+     * The inline copy is removed only once a MemoryVec for that memory reads back, so a crash at any point
+     * loses nothing and the next open finishes the job. An existing MemoryVec wins: nothing writes inline
+     * vectors any more, so it is the same vector or a newer one.
+     */
+    private fun adoptInlineVectors() {
+        db.query("SELECT id, embedding FROM Memory WHERE embedding IS NOT NULL").forEach { row ->
+            val id = row["id"] as String
+            val inline = vectorOf(row["embedding"]) ?: return@forEach
+            if (vectorFor(id) == null) putVec(id, inline)
+            if (vectorFor(id) != null) db.command("UPDATE Memory REMOVE embedding WHERE id = ?", id)
+        }
+    }
 
     fun logRecall(r: RecallRecord) =
         db.upsertDocument("RecallRecord", "${r.ts}_${r.memoryId}_${r.sessionId}", r.toProperties())
@@ -94,7 +118,7 @@ class PalaceStore(
     fun close() = db.close()
 
     fun wipe() {
-        db.deleteAll("Memory"); db.deleteAll("CausalEdge")
+        db.deleteAll(VEC); db.deleteAll("Memory"); db.deleteAll("CausalEdge")
         db.deleteAll("ProfileAttribute"); db.deleteAll("RecallRecord")
         Files.deleteIfExists(home.resolve("last-recall.txt"))
         Files.deleteIfExists(home.resolve("consolidation.marker"))
