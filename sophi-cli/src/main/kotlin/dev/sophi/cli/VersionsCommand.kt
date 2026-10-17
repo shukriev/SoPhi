@@ -80,7 +80,7 @@ class VersionsListCommand : CliktCommand(name = "list", help = "List recorded ve
 
     override fun run() {
         val artifactType = parseType(type)
-        openStore { VersioningStores.versionStore(versionStoreHomeFor(artifactType, project)) }.use {
+        openVersionStore(versionStoreHomeFor(artifactType, project)).use {
             VersionsList(it, artifactType, id) { line -> echo(line) }.run()
         }
     }
@@ -94,7 +94,7 @@ class VersionsShowCommand : CliktCommand(name = "show", help = "Show a specific 
 
     override fun run() {
         val artifactType = parseType(type)
-        openStore { VersioningStores.versionStore(versionStoreHomeFor(artifactType, project)) }.use {
+        openVersionStore(versionStoreHomeFor(artifactType, project)).use {
             VersionsShow(it, versionId) { line -> echo(line) }.run()
         }
     }
@@ -113,7 +113,7 @@ class VersionsRevertCommand : CliktCommand(
 
     override fun run() {
         val artifactType = parseType(type)
-        openStore { VersioningStores.versionStore(versionStoreHomeFor(artifactType, project)) }.use {
+        openVersionStore(versionStoreHomeFor(artifactType, project)).use {
             VersionsRevert(it, artifactType, id, versionId) { line -> echo(line) }.run()
         }
     }

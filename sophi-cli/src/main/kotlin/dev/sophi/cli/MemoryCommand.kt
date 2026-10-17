@@ -34,7 +34,7 @@ class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control S
 }
 
 private fun consolidationHistoryHome(): Path =
-    Path.of(System.getProperty("user.home"), ".sophi", "memory", "consolidations.jsonl")
+    JanesPalaceConfig.DEFAULT_HOME.resolve("consolidations.jsonl")
 
 private fun memoryVersioningHome(): Path =
     VersioningStores.DEFAULT_MEMORY_VERSIONS_HOME
@@ -239,7 +239,7 @@ class MemoryRestore : CliktCommand(name = "restore", help = "Undo a soft-delete 
 class MemoryReset : CliktCommand(name = "reset", help = "Wipe ALL memory — irreversible") {
     private val yes: Boolean by option("--yes").flag()
     override fun run() = runBlocking {
-        echo("This wipes ~/.sophi/memory entirely — every memory, thread, and profile attribute.")
+        echo("This wipes ${JanesPalaceConfig.DEFAULT_HOME} entirely — every memory, thread, and profile attribute.")
         if (!yes) {
             echo("Type RESET to confirm: ", trailingNewline = false)
             if (readLine()?.trim() != "RESET") return@runBlocking echo("Aborted.")

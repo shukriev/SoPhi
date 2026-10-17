@@ -29,8 +29,13 @@ private const val TOURNAMENT_CONTEXT_WINDOW = 100_000
 internal val defaultVersioningHome: Path = VersioningStores.DEFAULT_VERSIONING_HOME
 
 /** Opening a shared store can fail (e.g. an older Sophi still holds the legacy dir): one clear line, non-zero exit, no stack trace. */
+/** Seam so tests can make the shared store fail to open; production always uses [VersioningStores]. */
+internal var versionStoreFactory: (Path) -> VersionStore = { VersioningStores.versionStore(it) }
+
+internal fun openVersionStore(home: Path): VersionStore = openStore { versionStoreFactory(home) }
+
 internal fun <T> openStore(block: () -> T): T =
-    try { block() } catch (e: IllegalStateException) { throw CliktError("Cannot open the shared store: ${e.message}") }
+    try { block() } catch (e: IllegalStateException) { throw CliktError("Cannot open the shared store: ${e.message ?: e.javaClass.simpleName}") }
 
 class TournamentRun(
     private val incumbentVersionId: String,
@@ -149,7 +154,7 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
 
     override fun run() {
         val home = Path.of(versioningHomeStr)
-        openStore { VersioningStores.versionStore(home) }.use { versionStore ->
+        openVersionStore(home).use { versionStore ->
             val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
                 ?: run { echo("No config version found for 'default' — nothing to run a tournament against."); return }
             val cases = loadEvalCases(Path.of(evalsDirStr))
@@ -171,7 +176,7 @@ class TournamentPromoteCommand : CliktCommand(name = "promote", help = "Promote 
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
     override fun run() {
-        openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { versionStore ->
+        openVersionStore(Path.of(versioningHomeStr)).use { versionStore ->
             TournamentPromote(versionStore, versionId, confirm = {
                 echo("Promote $versionId to the active config? [y/N] ", trailingNewline = false)
                 readlnOrNull()?.trim()?.equals("y", ignoreCase = true) == true
@@ -183,7 +188,7 @@ class TournamentPromoteCommand : CliktCommand(name = "promote", help = "Promote 
 class TournamentStatusCommand : CliktCommand(name = "status", help = "Show tournament probation counters") {
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
-    override fun run() = openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { TournamentStatusReport(it) { line -> echo(line) }.run() }
+    override fun run() = openVersionStore(Path.of(versioningHomeStr)).use { TournamentStatusReport(it) { line -> echo(line) }.run() }
 }
 
 class TournamentCommand : CliktCommand(name = "tournament", help = "Propose, test, and promote config mutations") {
@@ -194,7 +199,7 @@ class ConfigActivateCommand : CliktCommand(name = "activate", help = "Instantly 
     private val versionId: String by argument()
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
-    override fun run() = openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { ConfigActivate(it, versionId) { line -> echo(line) }.run() }
+    override fun run() = openVersionStore(Path.of(versioningHomeStr)).use { ConfigActivate(it, versionId) { line -> echo(line) }.run() }
 }
 
 class ConfigCommand : CliktCommand(name = "config", help = "Inspect and switch the active harness config") {
@@ -208,5 +213,5 @@ class ConfigSeedCommand : CliktCommand(
 ) {
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
-    override fun run() = openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { ConfigSeed(it) { line -> echo(line) }.run() }
+    override fun run() = openVersionStore(Path.of(versioningHomeStr)).use { ConfigSeed(it) { line -> echo(line) }.run() }
 }
