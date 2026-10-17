@@ -138,7 +138,13 @@ object LegacyMigration {
 
 /** Opens [database] on the shared server at [root], adopting `<legacyHome>/arcadedb` the first time (host only). */
 object SharedStore {
-    /** Throws IllegalStateException (one-line message) when legacy data can't be adopted this run; IncompatibleHostException on schema mismatch. */
+    /**
+     * Throws IllegalStateException (one-line message) when legacy data can't be adopted this run; IncompatibleHostException on schema mismatch.
+     *
+     * Every opener of a [database] that has a legacy home must pass the same non-null [legacyHome]: the migration's
+     * safety depends on it. An opener passing null skips both the host's migration and the client's refusal to run
+     * over unmigrated data, so it could start an empty store and write into it before the legacy data moves.
+     */
     fun open(root: Path, database: String, schemaVersion: Int, legacyHome: Path? = null, layout: LegacyLayout = LegacyLayout()): FailoverArcadeStore {
         val lease = SharedArcadeHost.acquire(root)
         val store = try { FailoverArcadeStore(lease, database, schemaVersion) } catch (e: Throwable) { lease.close(); throw e }

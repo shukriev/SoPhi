@@ -29,7 +29,7 @@ class JanesPalace(
     onWarning: (String) -> Unit = {},
     versionStore: VersionStore? = null
 ) : MemoryTechnique {
-    private val store = PalaceStore(config.home)
+    private val store = config.sharedRoot?.let { PalaceStore.shared(config.home, it) } ?: PalaceStore(config.home)
     private val profile = UserProfile(store)
     private val walker = embeddingProvider?.let { PalaceWalker(store, profile, it, config) }
     private val encoder = llmProvider?.let { SignificanceEncoder(it, config, onWarning) }

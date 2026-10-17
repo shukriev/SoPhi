@@ -1,12 +1,13 @@
 package dev.sophi.memory.jane
 
+import dev.sophi.store.arcade.ArcadeHost
 import java.nio.file.Path
 
 private const val HOUR = 3_600_000L
 private const val DAY = 24 * HOUR
 
 data class JanesPalaceConfig(
-    val home: Path = Path.of(System.getProperty("user.home"), ".sophi", "memory"),
+    val home: Path = DEFAULT_HOME,
     val halfLifeMs: Map<Room, Long> = mapOf(
         Room.EPISODES to 72 * HOUR,
         Room.TASKS to 7 * DAY,
@@ -82,9 +83,17 @@ data class JanesPalaceConfig(
      *  the threshold rejects currently leaves no trace anywhere. Off by default: the log holds
      *  candidate text that was deliberately NOT stored, which for an ambient turn can be a
      *  bystander's words. */
-    val encoderTelemetry: Boolean = false
+    val encoderTelemetry: Boolean = false,
+    /** The shared server root when the palace lives there (ADR-041 M6); null = embedded at [home]. */
+    val sharedRoot: Path? = null
 ) {
     companion object {
+        val DEFAULT_HOME: Path = Path.of(System.getProperty("user.home"), ".sophi", "memory")
+
+        /** Only the default home moves to the shared store (ADR-041 M6); any other home stays embedded. */
+        fun sharedRootFor(home: Path): Path? =
+            ArcadeHost.defaultRoot().takeIf { home.toAbsolutePath().normalize() == DEFAULT_HOME.toAbsolutePath().normalize() }
+
         /** Only the literal string "false" disables purging -- unset, empty, or a typo all
          *  preserve today's default-on behavior. Deliberately the inverse of
          *  SOPHI_ORCHESTRATOR_ENABLED's fail-toward-off: that switch guards a brand-new

@@ -3,7 +3,9 @@ package dev.sophi.memory.jane
 import dev.sophi.memory.store.JsonlLog
 import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.EmbeddedArcadeStore
+import dev.sophi.store.arcade.LegacyLayout
 import dev.sophi.store.arcade.Scored
+import dev.sophi.store.arcade.SharedStore
 import dev.sophi.store.arcade.vectorOf
 import java.nio.file.Files
 import java.nio.file.Path
@@ -73,13 +75,14 @@ class PalaceStore(
      * Palaces written before M6 kept each vector on its Memory vertex: move it into a MemoryVec, once.
      * The inline copy is removed only once a MemoryVec for that memory reads back, so a crash at any point
      * loses nothing and the next open finishes the job. An existing MemoryVec wins: nothing writes inline
-     * vectors any more, so it is the same vector or a newer one.
+     * vectors any more, so it is the same vector or a newer one. Losing the insert to a concurrent adopter is fine.
      */
     private fun adoptInlineVectors() {
         db.query("SELECT id, embedding FROM Memory WHERE embedding IS NOT NULL").forEach { row ->
             val id = row["id"] as String
             val inline = vectorOf(row["embedding"]) ?: return@forEach
-            if (vectorFor(id) == null) putVec(id, inline)
+            // A concurrent adopter (another process starting at the same time) may win the insert: its vector is ours.
+            if (vectorFor(id) == null) try { putVec(id, inline) } catch (e: Exception) { if (vectorFor(id) == null) throw e }
             if (vectorFor(id) != null) db.command("UPDATE Memory REMOVE embedding WHERE id = ?", id)
         }
     }
@@ -124,6 +127,24 @@ class PalaceStore(
         Files.deleteIfExists(home.resolve("consolidation.marker"))
         Files.deleteIfExists(home.resolve("audit.jsonl"))
         Files.deleteIfExists(home.resolve("encoder.jsonl"))
+    }
+
+    companion object {
+        const val DATABASE = "memory"
+        const val SCHEMA_VERSION = 1
+        /** What a pre-M6 embedded palace holds, for the one-time move onto the shared store. */
+        val LEGACY_LAYOUT = LegacyLayout(
+            vertexTypes = listOf("Memory"), edgeTypes = mapOf("CausalEdge" to "Memory"),
+            documentTypes = listOf("ProfileAttribute", "RecallRecord")
+        )
+
+        /** The palace as `memory` on the shared server at [root]; its plain files stay in [home]. The host moves
+         *  `home/arcadedb` over the first time (inline vectors are then adopted by init). Every opener passes the
+         *  same [home] as legacyHome (see [SharedStore.open]). */
+        fun shared(home: Path, root: Path): PalaceStore {
+            val db = SharedStore.open(root, DATABASE, SCHEMA_VERSION, legacyHome = home, layout = LEGACY_LAYOUT)
+            return try { PalaceStore(home, db) } catch (e: Throwable) { db.close(); throw e }
+        }
     }
 
     private fun Map<String, Any?>.memoryId(): String = get("id") as String

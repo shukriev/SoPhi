@@ -1,5 +1,6 @@
 package dev.sophi.memory.jane
 
+import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import dev.sophi.store.arcade.LocalArcadeServer
 import dev.sophi.store.arcade.RemoteArcadeStore
@@ -237,6 +238,40 @@ class PalaceStoreTest : FunSpec({
                 s.nearest(floatArrayOf(0f, 1f), 1).map { it.id } shouldBe listOf("old")
                 s.vectorFor("old")!!.toList() shouldBe listOf(0f, 1f)
                 s.embeddings().keys shouldBe setOf("old", "new")
+                remote.getVertex("Memory", "old")!!["embedding"] shouldBe null   // the inline copy is gone
+                s.putEmbedding("new", "m", floatArrayOf(0.6f, 0.8f))           // a remote re-embed
+                s.nearest(floatArrayOf(0.6f, 0.8f), 3).map { it.id }.count { it == "new" } shouldBe 1
+                s.nearest(floatArrayOf(0.6f, 0.8f), 1).map { it.id } shouldBe listOf("new")
+                s.vectorFor("new")!!.toList() shouldBe listOf(0.6f, 0.8f)
+            }
+        }
+    }
+
+    // Two processes starting at once both adopt the same inline vector. The other one commits its MemoryVec first,
+    // so every attempt of ours (ArcadeDB retries a duplicate key a few times) hits the unique id. That must not fail
+    // the PalaceStore constructor: the vector is there, which is all adoption needs.
+    test("a concurrent adopter that wins the MemoryVec insert does not fail the open") {
+        LocalArcadeServer.start(tempdir().toPath()).use { srv ->
+            srv.database("memory")
+            RemoteArcadeStore.connect(srv.port, "memory", srv.password).use { remote ->
+                RemoteArcadeStore.connect(srv.port, "memory", srv.password).use { other ->
+                    remote.ensureSchema(vertexTypes = listOf("Memory"))
+                    remote.upsertVertex("Memory", "m1", mapOf("embeddingModel" to "m", "embedding" to floatArrayOf(0f, 1f)))
+                    var raced = 0
+                    val racing = object : ArcadeStore by remote {
+                        override fun insertVertex(type: String, id: String, properties: Map<String, Any?>) {
+                            if (type != "MemoryVec") return remote.insertVertex(type, id, properties)
+                            raced++
+                            if (other.getVertex(type, id) == null) other.insertVertex(type, id, properties)
+                            other.insertVertex(type, id, properties)   // the real duplicate-key error
+                        }
+                    }
+                    val s = PalaceStore(tempdir().toPath(), racing)
+                    (raced > 0) shouldBe true
+                    s.vectorFor("m1")!!.toList() shouldBe listOf(0f, 1f)
+                    s.nearest(floatArrayOf(0f, 1f), 3).map { it.id } shouldBe listOf("m1")
+                    remote.getVertex("Memory", "m1")!!["embedding"] shouldBe null
+                }
             }
         }
     }
