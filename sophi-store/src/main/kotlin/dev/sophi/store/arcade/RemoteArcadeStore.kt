@@ -28,12 +28,16 @@ class RemoteArcadeStore(private val remote: RemoteDatabase) : SqlArcadeStore(rem
     override fun upsertEdge(type: String, vertexType: String, fromId: String, toId: String, properties: Map<String, Any?>) =
         synchronized(remote) { super.upsertEdge(type, vertexType, fromId, toId, properties) }
 
-    override fun nearestVectors(vertexType: String, property: String, query: FloatArray, k: Int): List<Scored> =
+    override fun nearestVectors(vertexType: String, property: String, query: FloatArray, k: Int): List<Scored> = synchronized(remote) {
+        val index = "$vertexType[$property]"
+        // Same as embedded: no index yet (nothing embedded so far) means no neighbours, not an error.
+        if (this.query("SELECT name FROM schema:indexes").none { it["name"] == index }) return@synchronized emptyList()
         // `this.` because the `query` parameter (the vector) shadows the method.
-        synchronized(remote) { this.query("SELECT expand(vectorNeighbors('$vertexType[$property]', ?, $k))", query).map { row ->
+        this.query("SELECT expand(vectorNeighbors('$index', ?, $k))", query).map { row ->
             // The contract is cosine distance (lower = closer), same as EmbeddedArcadeStore: pass SQL's value through.
             Scored(row["id"] as String, (row["distance"] as Number).toDouble())
-        } }
+        }
+    }
 
     override fun <T> transaction(block: () -> T): T = synchronized(remote) { super.transaction(block) }
 

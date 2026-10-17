@@ -74,6 +74,30 @@ abstract class ArcadeStoreContract(open: (Path) -> ArcadeStore) : FunSpec({
         (nearest[0].score < nearest[1].score) shouldBe true
     }
 
+    test("nearestVectors without a vector index is empty") {
+        store().nearestVectors("Thing", "emb", floatArrayOf(1f, 0f, 0f), 3) shouldBe emptyList()
+    }
+
+    test("a vector read back through getVertex or queryVertices converts with vectorOf") {
+        val s = store()
+        s.ensureVectorIndex("Thing", "emb", dimensions = 3)
+        s.insertVertex("Thing", "a", mapOf("emb" to floatArrayOf(0.25f, -1.5f, 3.0f)))
+        vectorOf(s.getVertex("Thing", "a")!!["emb"])!!.toList() shouldBe listOf(0.25f, -1.5f, 3.0f)
+        vectorOf(s.queryVertices("Thing").single()["emb"])!!.toList() shouldBe listOf(0.25f, -1.5f, 3.0f)
+        vectorOf(null) shouldBe null
+    }
+
+    test("a deleted vector record is no longer returned; a re-insert under the same id is") {
+        val s = store()
+        s.ensureVectorIndex("Thing", "emb", dimensions = 3)
+        s.insertVertex("Thing", "a", mapOf("emb" to floatArrayOf(1f, 0f, 0f)))
+        s.insertVertex("Thing", "b", mapOf("emb" to floatArrayOf(0f, 1f, 0f)))
+        s.deleteVertex("Thing", "a")
+        s.nearestVectors("Thing", "emb", floatArrayOf(1f, 0f, 0f), 2).map { it.id } shouldBe listOf("b")
+        s.insertVertex("Thing", "a", mapOf("emb" to floatArrayOf(0f, 0f, 1f)))
+        s.nearestVectors("Thing", "emb", floatArrayOf(0f, 0f, 1f), 1).map { it.id } shouldBe listOf("a")
+    }
+
     test("ids survive a query round-trip") {
         val s = store()
         listOf("x", "y").forEach { s.insertVertex("Thing", it, mapOf("name" to it)) }
