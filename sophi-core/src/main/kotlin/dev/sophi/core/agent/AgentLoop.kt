@@ -204,7 +204,7 @@ class AgentLoop(
     /** How mid-turn compaction works: elide old tool results first (ELIDE/STRUCTURED), then summarise. */
     private val compaction: CompactionMode = CompactionMode.STRUCTURED
 ) {
-    private val summariser = Summariser(provider, compaction, contextWindowTokens)
+    private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
     /** Scaled to [contextWindowTokens] so no single tool result can claim more than
      *  [MAX_TOOL_RESULT_FRACTION_OF_WINDOW] of whatever window this loop's model actually has. */

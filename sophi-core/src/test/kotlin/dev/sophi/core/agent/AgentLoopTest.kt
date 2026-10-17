@@ -1126,6 +1126,7 @@ class AgentLoopTest : FunSpec({
         newLoop(ToolRegistry().register(loopingTool()), loopGuard = LoopGuardPolicy.ALWAYS_CONTINUE, compaction = CompactionMode.GENERIC)
             .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
         req.captured.reasoningEffort shouldBe "none"
+        req.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE
     }
 
     test("compaction never orphans a TOOL result from its ASSISTANT tool-call message") {

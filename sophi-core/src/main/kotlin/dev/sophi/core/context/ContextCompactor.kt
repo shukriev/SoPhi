@@ -13,7 +13,7 @@ private val lenientJson = Json { ignoreUnknownKeys = true }
 
 class ContextCompactor(
     private val provider: LLMProvider,
-    private val summariser: Summariser = Summariser(provider, CompactionMode.STRUCTURED, 32_000)
+    private val summariser: Summariser = Summariser(provider, CompactionMode.STRUCTURED, 32_000, dev.sophi.ai.system1.Judgments.COMPACTOR)
 ) {
 
     /**

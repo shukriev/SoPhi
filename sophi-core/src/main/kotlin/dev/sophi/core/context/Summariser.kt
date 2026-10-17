@@ -31,7 +31,9 @@ private const val NOT_STATED = "(not stated)"
 class Summariser(
     private val provider: LLMProvider,
     val mode: CompactionMode = CompactionMode.STRUCTURED,
-    private val windowTokens: Int
+    private val windowTokens: Int,
+    /** The System-1 judgment tag (ADR-042) of this call site: COMPACTOR across turns, LOOP_SUMMARISE mid-turn. */
+    private val judgment: String? = null
 ) {
     val budgetTokens: Int =
         if (mode == CompactionMode.STRUCTURED) (windowTokens * 0.03).toInt().coerceIn(400, 2_000) else 512
@@ -51,7 +53,8 @@ class Summariser(
             model = model,
             maxTokens = budgetTokens,
             temperature = 0.3,
-            reasoningEffort = "none"
+            reasoningEffort = "none",
+            judgment = judgment
         )
         val text = try {
             (provider.complete(request) as? LLMResponse.Text)?.also { runCatching { onUsage(it.usage) } }?.content?.takeIf { it.isNotBlank() }

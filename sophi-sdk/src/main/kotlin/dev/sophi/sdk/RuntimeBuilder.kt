@@ -267,7 +267,7 @@ class RuntimeBuilder {
         }
         val loop = AgentLoop(
             p, registry, sm,
-            compactor = ContextCompactor(p, Summariser(p, compactionMode, window)), compaction = compactionMode,
+            compactor = ContextCompactor(p, Summariser(p, compactionMode, window, dev.sophi.ai.system1.Judgments.COMPACTOR)), compaction = compactionMode,
             confirmationPolicy = confirmationPolicy, grants = grants,
             loopGuard = loopGuardPolicy,
             contextWindowTokens = window,
