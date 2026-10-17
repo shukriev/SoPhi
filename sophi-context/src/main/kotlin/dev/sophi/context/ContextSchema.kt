@@ -4,7 +4,7 @@ import dev.sophi.store.arcade.ArcadeStore
 
 data class Meta(val schemaVersion: Int, val tokenizerVersion: Int, val chunkCount: Long, val totalLen: Long)
 
-/** Document types of the `context` database (spec §5.1; vertices/edges arrive with M5). */
+/** Types of the `context` database (spec §5.1). The graph is documents, not vertices/edges (ADR-041 §10): it is a rebuildable cache. */
 object ContextSchema {
     const val PROJECT = "Project"
     const val FILE = "File"
@@ -12,12 +12,17 @@ object ContextSchema {
     const val TERM = "TermStat"
     const val META = "ContextMeta"
     const val REQUEST = "IndexRequest"
+    const val SYMBOL = "Symbol"
+    const val RELATION = "Relation"
+    const val CHUNKVEC = "ChunkVec"
     private const val META_ID = "meta"
 
     fun ensure(store: ArcadeStore) {
-        store.ensureSchema(documentTypes = listOf(PROJECT, FILE, CHUNK, TERM, META, REQUEST))
+        store.ensureSchema(vertexTypes = listOf(CHUNKVEC), documentTypes = listOf(PROJECT, FILE, CHUNK, TERM, META, REQUEST, SYMBOL, RELATION))
         store.ensureFullTextIndex(CHUNK, "toks")
-        listOf(CHUNK to "fileId", CHUNK to "projectId", FILE to "projectId").forEach { (t, p) ->
+        listOf(CHUNK to "fileId", CHUNK to "projectId", CHUNK to "chunkHash", FILE to "projectId",
+            SYMBOL to "name", SYMBOL to "lname", SYMBOL to "projectId", SYMBOL to "fileId",
+            RELATION to "fromFileId", RELATION to "toFileId", RELATION to "projectId").forEach { (t, p) ->
             store.command("CREATE PROPERTY $t.$p IF NOT EXISTS STRING")
             store.command("CREATE INDEX IF NOT EXISTS ON $t ($p) NOTUNIQUE")
         }

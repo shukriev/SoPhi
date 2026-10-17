@@ -160,4 +160,18 @@ class IndexerTest : FunSpec({
         val r = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()
         r["scanned"].shouldBeNull(); r["scanTotal"].shouldBeNull()
     }
+
+    test("rebuildIfStale on a schema bump drops symbols and relations and marks relations dirty") {
+        val (s, ix, _) = setup()
+        ix.rebuildIfStale(1)
+        s.upsertDocument(ContextSchema.SYMBOL, "p1:a.kt@1", mapOf("projectId" to "p1", "name" to "A"))
+        s.upsertDocument(ContextSchema.RELATION, "r1", mapOf("projectId" to "p1", "kind" to "IMPORTS"))
+        s.command("UPDATE Project SET relationsAt = 1 WHERE id = ?", "p1")
+        ix.rebuildIfStale(2)
+        s.documents(ContextSchema.SYMBOL) shouldBe emptyList()
+        s.documents(ContextSchema.RELATION) shouldBe emptyList()
+        s.query("SELECT relationsAt FROM Project WHERE id = ?", "p1").single()["relationsAt"].shouldBeNull()
+        ContextSchema.meta(s)!!.schemaVersion shouldBe 2
+        ContextEngine.SCHEMA_VERSION shouldBe 2
+    }
 })

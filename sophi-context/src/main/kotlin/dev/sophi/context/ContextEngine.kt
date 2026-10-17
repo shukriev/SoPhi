@@ -27,7 +27,7 @@ class ContextEngine(
 ) : AutoCloseable {
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val NOT_READY = "index not ready — use grep/glob/read"
         const val DATABASE = "context"
         fun defaultRoot(): Path = Path.of(System.getProperty("user.home"), ".sophi", "db")

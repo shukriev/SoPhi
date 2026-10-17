@@ -22,14 +22,15 @@ class Indexer(
     private val cancelled: () -> Boolean = { false },
     private val progressEvery: Int = 250
 ) {
+    /** ChunkVec is content-addressed (id = chunk hash) and deliberately kept: vectors stay valid across a rebuild. */
     fun rebuildIfStale(schemaVersion: Int) {
         val m = ContextSchema.meta(store)
         if (m != null && m.schemaVersion == schemaVersion && m.tokenizerVersion == Tokenizer.VERSION) return
         store.transaction {
-            listOf(ContextSchema.FILE, ContextSchema.CHUNK, ContextSchema.TERM).forEach { store.deleteAll(it) }
+            listOf(ContextSchema.FILE, ContextSchema.CHUNK, ContextSchema.TERM, ContextSchema.SYMBOL, ContextSchema.RELATION).forEach { store.deleteAll(it) }
             ContextSchema.putMeta(store, Meta(schemaVersion, Tokenizer.VERSION, 0, 0))
-            // so searches re-request scans right away
-            store.command("UPDATE ${ContextSchema.PROJECT} SET lastScanAt = null")
+            // so searches re-request scans right away, and the first scan rebuilds relations
+            store.command("UPDATE ${ContextSchema.PROJECT} SET lastScanAt = null, relationsAt = null")
         }
     }
 

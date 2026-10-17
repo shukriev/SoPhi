@@ -1,7 +1,7 @@
 # ADR-041: Context engine on a shared, lock-elected ArcadeDB store
 
 **Date:** 2026-10-12
-**Status:** Accepted — M0–M4 implemented; frontier-model runs and the live cache check pending
+**Status:** Accepted — M0–M4 implemented; M5 in progress; frontier-model runs and the live cache check pending
 
 ## Context
 
@@ -134,6 +134,28 @@ addendum).
    they ran the same path and the gap is one long run. The default stays `structured`. E4 showed that elision and
    the oversized-round handling work; it did not exercise the structured summary live, so structured against
    generic summaries is unsettled until a longer-task run. Single runs, one small model, n=5 prompts of which 2 never compacted in any config (effective n=3, 2 decisive). The E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only.
+
+10. **M5 — graph and semantics (rulings; outcomes recorded when E2/E3 are run).** The graph is two
+    *document* types, not vertices and edges (a deviation from spec §5.1): `Symbol {projectId, fileId, path,
+    role, name, lname, kind, line}` and `Relation {projectId, fromFileId, toFileId, fromPath, toPath, kind
+    IMPORTS|LINKS|TESTS}`, indexed on name/lname/projectId/fileId and fromFileId/toFileId/projectId. The context
+    database is a rebuildable cache and File/Chunk are already documents; a lookup by indexed id is all
+    `find_symbol` and `related` need, with no traversal. Spec §5.1's `Symbol.qualifiedName`/`signature` and the
+    CONTAINS/MENTIONS edges are dropped in M5 (YAGNI; added when a tool needs them). `SCHEMA_VERSION` 2 makes
+    every host rebuild.
+    Extraction is regex (declarations from the existing patterns; imports per family; markdown
+    `[[wikilinks]]` and relative `.md` links); resolution happens in the indexer, two-phase: a file's own edges in
+    its transaction, and the whole project's after any add/remove (`Project.relationsAt` null = dirty), so a new
+    file satisfies imports in files that did not change. Qualified names resolve by path suffix
+    (`a.b.C` → `…/a/b/C.kt|.java`), relative imports by path, wikilinks by note name, TESTS by naming convention
+    (FooTest/FooSpec, foo.test.ts, test_foo.py, foo_test.go); anything else is dropped. Embeddings are one
+    `ChunkVec {id = chunkHash, emb}` vertex per distinct chunk, inserted once with its vector, embedded by the
+    host in the background only when `SOPHI_CONTEXT_EMBED` names a model; the base URL must be loopback in
+    M5 (a per-project "allow sending content to a remote provider" switch, spec §5.4, is deferred). Retrieval
+    fuses BM25 with the 50 nearest chunk vectors by RRF (k = 60); any vector failure is lexical-only.
+    Summaries are an indexing input: heuristic summary words or an LLM summary are added to a file's first
+    chunk. Each of `find_symbol`/`related` (`SOPHI_CONTEXT_TOOLS`), embeddings and summaries is on by default
+    only if E2 (offline) or E3 (live) justified it — see the outcome below.
 
 ## Reasons
 
