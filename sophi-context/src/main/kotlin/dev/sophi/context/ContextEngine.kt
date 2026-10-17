@@ -144,11 +144,22 @@ class ContextEngine(
     fun requestScan(projectId: String) { withStoreOrNull { requestScan(it, projectId) } }
 
     fun search(query: String, projectIds: List<String>, limit: Int = 8): List<SearchHit>? = withStoreOrNull { s ->
+        requestStaleScans(s, projectIds)
+        Retriever(s).search(query, projectIds, limit)
+    }
+
+    private fun requestStaleScans(s: ArcadeStore, projectIds: List<String>) {
         val now = System.currentTimeMillis()
         projects(s).filter { it.id in projectIds && (it.lastScanAt == null || now - it.lastScanAt > scanInterval) }
             .forEach { requestScan(s, it.id) }
-        Retriever(s).search(query, projectIds, limit)
     }
+
+    fun findSymbol(name: String, projectIds: List<String>, limit: Int = 10): List<SymbolHit>? = withStoreOrNull { s ->
+        requestStaleScans(s, projectIds)
+        Graph(s).findSymbol(name, projectIds, limit)
+    }
+
+    fun related(projectId: String, path: String): RelatedFiles? = withStoreOrNull { Graph(it).related(projectId, path) }
 
     fun fileIndexed(projectId: String, relPath: String): Boolean = fileIndexedOrNull(projectId, relPath) ?: false
 

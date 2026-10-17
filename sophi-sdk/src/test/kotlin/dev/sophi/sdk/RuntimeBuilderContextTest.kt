@@ -15,8 +15,10 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 
+private val CONTEXT_TOOLS = setOf("search_context", "read_context", "project_map", "find_symbol", "related")
+
 class RuntimeBuilderContextTest : FunSpec({
-    test("context(...) registers the three context tools") {
+    test("context(...) registers the five context tools") {
         val engine = ContextEngine(tempdir().toPath(), GitProbe.none)
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
@@ -24,8 +26,19 @@ class RuntimeBuilderContextTest : FunSpec({
             sessionsDir = tempdir().toPath()
             context(engine) { _ -> null }
         }.build()
-        runtime.toolNames() shouldContainAll listOf("search_context", "read_context", "project_map")
+        runtime.toolNames() shouldContainAll listOf("search_context", "read_context", "project_map", "find_symbol", "related")
         runtime.close()
+    }
+
+    test("SOPHI_CONTEXT_TOOLS=core registers search and read only; none registers no context tool") {
+        fun names(v: String) = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>(); contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
+            contextKnobs = mapOf("SOPHI_CONTEXT_TOOLS" to v)
+            context(ContextEngine(tempdir().toPath(), GitProbe.none)) { _ -> null }
+        }.build().let { r -> r.toolNames().also { r.close() } }
+        names("CORE").filter { it in CONTEXT_TOOLS }.toSet() shouldBe setOf("search_context", "read_context")
+        names("none").filter { it in CONTEXT_TOOLS } shouldBe emptyList()
+        names("bogus").filter { it in CONTEXT_TOOLS }.size shouldBe 5
     }
 
     fun indexed(): Pair<ContextEngine, String> {
