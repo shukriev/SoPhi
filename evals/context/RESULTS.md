@@ -297,8 +297,8 @@ Deltas in MRR against bm25 (queries / commits / docs) and verdicts by the pass r
 | Variant | dMRR queries | dMRR commits | dMRR docs | p95 < 150 on every set | Verdict |
 |---|---|---|---|---|---|
 | +heuristic | 0.00 | 0.00 | 0.00 | yes (re-run) | stays off (no set improves by 0.03) |
-| +llm | +0.01 | 0.00 | +0.07 | yes | ships on (docs +0.07, queries not down) |
-| +embeddings | -0.06 (first) / -0.02 (re-run) | -0.02 / -0.03 | +0.07 / +0.06 | yes (re-run 76 ms) | stays off (queries MRR drops > 0.01) |
+| +llm | +0.01 | 0.00 | +0.07 | yes | passes the rule (docs +0.07, queries not down); default stays off, production path not built |
+| +embeddings | -0.06 (first) / -0.02 (re-run) | -0.02 / -0.03 | +0.07 / +0.06 | yes (re-run 76 ms) | inconclusive, stays off (fails the rule, but every run hit the vector-index fallback and runs differ) |
 
 Examples (from the `miss:` lines, which also carry ranks: rN with N <= 10 is a hit at rank N, MISS means not in the top 10):
 - heuristic: almost no movement. One commits query, "Feat/agent thinking indicator (#16)", went from hit to MISS (commits hit@10 .83 to .82); other changes only swapped which wrong file ranked first for already-missed queries ("Tool approval fix"). Queries and docs: identical hits.
@@ -309,7 +309,7 @@ Baseline drift against M1 (queries 0.80, commits 0.64): bm25 now 0.76 and 0.62. 
 
 Limits: one corpus; the eval .tsv files (queries/commits/docs.tsv) are in the index and appear as top hits for several queries (e.g. wrong-file hits for queries and commits), which depresses all variants; the llm variant only re-ranks files already in the lexical top 10 (by design, mirrors production), so it cannot raise hit@10 above bm25's reach; embedding results are for one model (nomic v1.5, 768 dims) and the fallback vector path noted above; first-pass latencies were contaminated by concurrent load, re-runs are the clean figures; the docs set has the title-overlap bias noted above, and the llm docs gain (+0.07 MRR) comes from 37 queries, so roughly 3 queries moved.
 
-Decision: llm summaries ship on per the pre-registered rule; heuristic summaries and embeddings RRF stay off. Caveat: the llm variant's cost is offline summarisation time (about 55 minutes of bonsai wall time across the three sets here), and its commits and queries gains are nil, so the case rests on docs alone.
+Decision: heuristic summaries stay off (no set moves). LLM summaries pass the pre-registered rule, but the case rests on docs alone (+0.07 MRR, about 3 of 37 queries; commits and queries gains are nil), the cost was about 55 minutes of bonsai wall time offline, and the production path (lazy summarising at query time) does not exist, so the default stays off and a follow-up plan builds that path. Embeddings are recorded as inconclusive and stay off: every run logged SEVERE `LSMVectorIndex FALLBACK: Built 0 active vector IDs`, and runs were not reproducible (queries MRR 0.70 vs 0.74). Follow-up: verify that ChunkVec neighbours do not come from a degraded path, then re-test. Two more findings: with vectors on there is no distance floor, so "No matches" never appears; and the eval `.tsv` files are indexed (follow-up: exclude `evals/` from indexing).
 
 ## E3 tool surface (small local model, 2026-10-17)
 
@@ -327,7 +327,7 @@ Paired pass rule vs T (n=23, no void runs):
 
 Findings: bonsai never called `find_symbol` or `related` in any of 23 T runs (0 calls); it used only `search_context` (25) and `read_context` (6). K used `search_context` 34 times. No tool errors in any transcript, and N called no context tool. These questions are file-locating, so the graph tools had nothing to add; a symbol/relationship task set would be needed to test them.
 
-Verdict: by the fixed rule K beats `all` on this model, so the graph tools do not earn a place for a small local model on this set, and `core` is the better default for that tier. `none` loses. The margin is one question, so keep `all` for frontier tiers until a harder set says otherwise.
+Verdict: by the fixed rule K nominally beats `all` on this model (a tie in substance: one T timeout, +8% tokens). `core` is fine for a small local model, but the default stays `all`: there is no tier detection, frontier models are untested, and `find_symbol`/`related` were never called, so this set cannot judge them. `none` loses. Follow-up: a symbol/relationship question set, and a frontier-tier run.
 
 ## Still pending
 
