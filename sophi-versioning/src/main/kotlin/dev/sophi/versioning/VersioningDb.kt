@@ -28,9 +28,11 @@ object VersioningStores {
     const val SCHEMA_VERSION = 1
     val LEGACY_LAYOUT = LegacyLayout(vertexTypes = listOf("Version", "Scorecard"), edgeTypes = mapOf("MUTATED_FROM" to "Version"))
     private val sophi: Path = Path.of(System.getProperty("user.home"), ".sophi")
+    val DEFAULT_VERSIONING_HOME: Path = sophi.resolve("versioning")
+    val DEFAULT_MEMORY_VERSIONS_HOME: Path = sophi.resolve("memory").resolve(".versions")
     val DEFAULT_SHARED: Map<Path, String> = mapOf(
-        sophi.resolve("versioning") to "versioning",
-        sophi.resolve("memory").resolve(".versions") to "memory-versions"
+        DEFAULT_VERSIONING_HOME to "versioning",
+        DEFAULT_MEMORY_VERSIONS_HOME to "memory-versions"
     )
 
     fun db(home: Path, sharedRoot: Path = ArcadeHost.defaultRoot(), shared: Map<Path, String> = DEFAULT_SHARED): VersioningDb {

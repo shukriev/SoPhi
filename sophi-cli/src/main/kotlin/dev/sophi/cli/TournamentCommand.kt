@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
@@ -19,12 +20,17 @@ import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.ProducedBy
 import dev.sophi.versioning.ScorecardStore
 import dev.sophi.versioning.VersionStore
+import dev.sophi.versioning.VersioningStores
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
 private const val TOURNAMENT_CONTEXT_WINDOW = 100_000
 
-internal val defaultVersioningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "versioning")
+internal val defaultVersioningHome: Path = VersioningStores.DEFAULT_VERSIONING_HOME
+
+/** Opening a shared store can fail (e.g. an older Sophi still holds the legacy dir): one clear line, non-zero exit, no stack trace. */
+internal fun <T> openStore(block: () -> T): T =
+    try { block() } catch (e: IllegalStateException) { throw CliktError("Cannot open the shared store: ${e.message}") }
 
 class TournamentRun(
     private val incumbentVersionId: String,
@@ -142,17 +148,21 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
     override fun run() {
-        val versionStore = VersionStore(Path.of(versioningHomeStr))
-        val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
-            ?: run { echo("No config version found for 'default' — nothing to run a tournament against."); return }
-        val cases = loadEvalCases(Path.of(evalsDirStr))
-        val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
-        TournamentRun(
-            incumbentVersionId = incumbentVersionId, versionStore = versionStore,
-            scorecardStore = ScorecardStore(Path.of(versioningHomeStr)), cases = cases, provider = provider,
-            registry = ToolRegistry(), sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
-            contextWindowTokens = TOURNAMENT_CONTEXT_WINDOW, model = model, runsPerConfig = budget
-        ) { echo(it) }.run()
+        val home = Path.of(versioningHomeStr)
+        openStore { VersioningStores.versionStore(home) }.use { versionStore ->
+            val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
+                ?: run { echo("No config version found for 'default' — nothing to run a tournament against."); return }
+            val cases = loadEvalCases(Path.of(evalsDirStr))
+            val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+            openStore { VersioningStores.scorecardStore(home) }.use { scorecardStore ->
+                TournamentRun(
+                    incumbentVersionId = incumbentVersionId, versionStore = versionStore,
+                    scorecardStore = scorecardStore, cases = cases, provider = provider,
+                    registry = ToolRegistry(), sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
+                    contextWindowTokens = TOURNAMENT_CONTEXT_WINDOW, model = model, runsPerConfig = budget
+                ) { echo(it) }.run()
+            }
+        }
     }
 }
 
@@ -161,18 +171,19 @@ class TournamentPromoteCommand : CliktCommand(name = "promote", help = "Promote 
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
     override fun run() {
-        val versionStore = VersionStore(Path.of(versioningHomeStr))
-        TournamentPromote(versionStore, versionId, confirm = {
-            echo("Promote $versionId to the active config? [y/N] ", trailingNewline = false)
-            readlnOrNull()?.trim()?.equals("y", ignoreCase = true) == true
-        }) { echo(it) }.run()
+        openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { versionStore ->
+            TournamentPromote(versionStore, versionId, confirm = {
+                echo("Promote $versionId to the active config? [y/N] ", trailingNewline = false)
+                readlnOrNull()?.trim()?.equals("y", ignoreCase = true) == true
+            }) { echo(it) }.run()
+        }
     }
 }
 
 class TournamentStatusCommand : CliktCommand(name = "status", help = "Show tournament probation counters") {
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
-    override fun run() = TournamentStatusReport(VersionStore(Path.of(versioningHomeStr))) { echo(it) }.run()
+    override fun run() = openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { TournamentStatusReport(it) { line -> echo(line) }.run() }
 }
 
 class TournamentCommand : CliktCommand(name = "tournament", help = "Propose, test, and promote config mutations") {
@@ -183,7 +194,7 @@ class ConfigActivateCommand : CliktCommand(name = "activate", help = "Instantly 
     private val versionId: String by argument()
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
-    override fun run() = ConfigActivate(VersionStore(Path.of(versioningHomeStr)), versionId) { echo(it) }.run()
+    override fun run() = openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { ConfigActivate(it, versionId) { line -> echo(line) }.run() }
 }
 
 class ConfigCommand : CliktCommand(name = "config", help = "Inspect and switch the active harness config") {
@@ -197,5 +208,5 @@ class ConfigSeedCommand : CliktCommand(
 ) {
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
-    override fun run() = ConfigSeed(VersionStore(Path.of(versioningHomeStr))) { echo(it) }.run()
+    override fun run() = openStore { VersioningStores.versionStore(Path.of(versioningHomeStr)) }.use { ConfigSeed(it) { line -> echo(line) }.run() }
 }

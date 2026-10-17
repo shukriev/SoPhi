@@ -11,7 +11,7 @@ import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.VersioningStores
 import java.nio.file.Path
 
-private val defaultVersioningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "versioning")
+private val defaultVersioningHome: Path = VersioningStores.DEFAULT_VERSIONING_HOME
 
 /**
  * Lets a scheduled Goal-mode task run `sophi tournament run` and reflect on the result in its own
