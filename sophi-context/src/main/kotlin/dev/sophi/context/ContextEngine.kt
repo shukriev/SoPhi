@@ -4,6 +4,7 @@ import dev.sophi.store.arcade.ArcadeHost
 import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.IncompatibleHostException
 import dev.sophi.store.arcade.Role
+import dev.sophi.store.arcade.SharedArcadeHost
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
@@ -14,8 +15,8 @@ import java.util.concurrent.TimeUnit
 data class IndexStatus(val ready: Boolean, val reason: String?, val role: String?, val projects: List<ProjectInfo>, val diskBytes: Long)
 
 /**
- * The context index shared by every Sophi process (spec §4). Opens the M0 [ArcadeHost] in the
- * background so no turn waits on election; any process may *request* a scan, only the elected
+ * The context index shared by every Sophi process (spec §4). Leases the process-wide [SharedArcadeHost]
+ * (the `context` database next to memory and versioning) in the background so no turn waits on election; any process may *request* a scan, only the elected
  * host *runs* one, on a single writer thread — so TermStat/ContextMeta updates never race.
  * Every failure degrades to "not ready" for callers: the engine never breaks a turn.
  */
@@ -31,10 +32,15 @@ class ContextEngine(
         const val SCHEMA_VERSION = 2
         const val NOT_READY = "index not ready — use grep/glob/read"
         const val DATABASE = "context"
-        fun defaultRoot(): Path = Path.of(System.getProperty("user.home"), ".sophi", "db")
+        fun defaultRoot(): Path = ArcadeHost.defaultRoot()
+        // ponytail: one writer per root per process — two engines on one root in one JVM share a host and would
+        // both drain IndexRequests; a lock map is enough since that only happens in tests and settings rebuilds.
+        private val writers = java.util.concurrent.ConcurrentHashMap<Path, Any>()
     }
 
+    @Volatile private var lease: SharedArcadeHost.Lease? = null
     @Volatile private var host: ArcadeHost? = null
+    private val writerLock: Any = writers.computeIfAbsent(root.toAbsolutePath().normalize()) { Any() }
     @Volatile private var closed = false
     @Volatile private var lastError = 0L
     private val opened = CountDownLatch(1)
@@ -53,10 +59,14 @@ class ContextEngine(
     fun start(): ContextEngine {
         Thread({
             try {
-                val h = ArcadeHost.open(root, DATABASE, SCHEMA_VERSION, engineVersion = "sophi-context/$SCHEMA_VERSION")
-                h.withStore { ContextSchema.ensure(it) }
-                host = h
-                if (closed) { host = null; h.close() }
+                val l = SharedArcadeHost.acquire(root, engineVersion = "sophi-context/$SCHEMA_VERSION")
+                var registered = false
+                try {
+                    l.host.register(DATABASE, SCHEMA_VERSION); registered = true
+                    l.host.withStore(DATABASE) { ContextSchema.ensure(it) }
+                } catch (e: Exception) { if (registered) l.host.unregister(DATABASE); l.close(); throw e }
+                synchronized(this) { lease = l; host = l.host }   // paired with release()
+                if (closed) release()
             } catch (e: IncompatibleHostException) {
                 unavailableReason = "another Sophi version is using the index — update this app or the CLI"
                 System.err.println("context: ${e.message} — update this Sophi to use the shared index")
@@ -73,7 +83,7 @@ class ContextEngine(
 
     fun <T> withStoreOrNull(block: (ArcadeStore) -> T): T? {
         val h = host ?: return null
-        return try { h.withStore(block) } catch (e: InterruptedException) {
+        return try { h.withStore(DATABASE, block) } catch (e: InterruptedException) {
             Thread.currentThread().interrupt(); null
         } catch (e: Exception) {
             val now = System.currentTimeMillis()
@@ -190,8 +200,16 @@ class ContextEngine(
         closed = true
         writer.shutdown()   // let an in-flight scan finish its file: Indexer polls `closed`
         runCatching { writer.awaitTermination(10, TimeUnit.SECONDS) }
-        val h = host; host = null
-        h?.let { runCatching { it.close() } }
+        release()
+    }
+
+    /** Idempotent: the lease and its one registration are dropped once, whoever (close or the open thread) gets here first. */
+    @Synchronized
+    private fun release() {
+        val l = lease ?: return
+        lease = null; host = null
+        runCatching { l.host.unregister(DATABASE) }
+        l.close()
     }
 
     private fun requestScan(s: ArcadeStore, projectId: String) =
@@ -208,7 +226,7 @@ class ContextEngine(
     private fun drain() {
         val h = host ?: return
         if (h.role != Role.HOST) { hostTermPrepared = false; embedPrepared = false; embedIdleUntil = 0; return }
-        h.withStore { s ->
+        synchronized(writerLock) { h.withStore(DATABASE) { s ->
             val indexer = Indexer(s, git, cancelled = { closed })
             if (!hostTermPrepared) { indexer.rebuildIfStale(SCHEMA_VERSION); hostTermPrepared = true }
             s.documents(ContextSchema.REQUEST).sortedBy { (it["requestedAt"] as Number?)?.toLong() ?: 0L }.forEach { req ->
@@ -230,6 +248,6 @@ class ContextEngine(
                     System.err.println("context: embedding paused for 60 s (${ex.message})")
                 }
             }
-        }
+        } }
     }
 }

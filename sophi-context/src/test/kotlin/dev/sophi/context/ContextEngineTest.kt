@@ -43,13 +43,14 @@ class ContextEngineTest : FunSpec({
         e.search("compactor", listOf(p.id))!!.first().path shouldBe "src/Compactor.kt"
     }
 
-    test("client registration is indexed by the host") {
+    test("a second engine in the same process shares the host and sees the first's registration") {
         val db = tempdir().toPath()
         val host = engine(db)
         val client = engine(db)
         val r = repo(); r.write("README.md", "# Widget\n\nThe widget explainer.\n")
         val p = (client.register(r, auto = true) as RegisterResult.Registered).project
         eventually { client.search("widget explainer", listOf(p.id))?.isNotEmpty() == true }
+        host.status().role shouldBe "host"; client.status().role shouldBe "host"
         host.projects().map { it.id } shouldBe listOf(p.id)
     }
 
