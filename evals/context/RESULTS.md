@@ -266,7 +266,49 @@ Model server: LAN machine 192.168.0.108:1234 (embeddings reached through a loopb
 Pass rule (fixed before running): a variant ships on if its MRR improves by >= 0.03 on commits.tsv or docs.tsv, queries.tsv MRR does not
 drop by > 0.01, and p95 latency stays < 150 ms on every set.
 
-RESULTS_E2_PLACEHOLDER
+Order of runs: bm25, heuristic, embeddings, llm per set, queries then commits then docs (one pass); the first-pass p50/p95 were taken while
+bonsai was summarising on the same machine/other jobs, so the five variants whose first-pass p95 landed within 30% of 150 ms (105-195 ms: bm25
+queries 134, bm25 commits 156, heuristic commits 153.5, embeddings queries 116.6, embeddings commits 129.4) were re-run alone (R9b). Both runs are shown.
+The CLI prints no separate index time; "wall" is the whole run (JVM start, indexing both repos, summaries or embeddings, all queries).
+Docs-set note: about 7 of the 37 docs.tsv queries share title words with their gold doc, so docs numbers flatter lexical retrieval somewhat.
+
+| Variant | Set | hit@1 | hit@5 | hit@10 | MRR | p50 ms | p95 ms (run 1 / re-run) | wall |
+|---|---|---|---|---|---|---|---|---|
+| bm25 | queries (31) | 0.68 | 0.87 | 0.97 | 0.76 | 27.8 / 13.6 | 134.0 / 24.1 | 17 s |
+| bm25 | commits (258) | 0.52 | 0.74 | 0.83 | 0.62 | 32.1 / 14.1 | 156.0 / 22.8 | 76 s |
+| bm25 | docs (37) | 0.46 | 0.76 | 0.84 | 0.58 | 15.4 | 37.6 | 12 s |
+| +heuristic | queries | 0.68 | 0.87 | 0.97 | 0.76 | 25.2 | 78.5 | 19 s |
+| +heuristic | commits | 0.52 | 0.74 | 0.82 | 0.62 | 32.8 / 15.8 | 153.5 / 25.6 | 83 s |
+| +heuristic | docs | 0.46 | 0.76 | 0.84 | 0.58 | 15.5 | 31.6 | 13 s |
+| +llm | queries | 0.68 | 0.90 | 0.97 | 0.77 | 26.5 | 90.1 | 1180 s (192 files summarised) |
+| +llm | commits | 0.51 | 0.75 | 0.83 | 0.62 | 15.6 | 26.1 | 1940 s (cache ~599 files by then, cumulative) |
+| +llm | docs | 0.54 | 0.78 | 0.81 | 0.65 | 13.5 | 21.6 | 128 s (cache warm, a few new files) |
+| +embeddings | queries | 0.55 / 0.58 | 0.90 / 0.94 | 0.90 / 0.94 | 0.70 / 0.74 | 62.6 / 52.9 | 116.6 / 65.9 | 85 s |
+| +embeddings | commits | 0.49 / 0.49 | 0.73 / 0.72 | 0.79 / 0.79 | 0.60 / 0.59 | 69.2 / 59.3 | 129.4 / 76.4 | 163 s |
+| +embeddings | docs | 0.46 / 0.46 | 0.89 / 0.89 | 0.97 / 0.97 | 0.65 / 0.64 | 62.7 / 60.9 | 103.3 / 74.4 | 82 s |
+
+The llm variant's wall time is dominated by bonsai calls (about 10-13 files/min on the LAN server); total files summarised across the three sets: about 599 (cache line count).
+Embedding runs are not exactly reproducible: the queries-set MRR was 0.70 and then 0.74 on re-run (the vector index logs a FALLBACK "Built 0 active vector IDs from in-memory vectorIndex"
+on every embed run, so neighbours come from the fallback path). Either figure fails the rule below.
+
+Deltas in MRR against bm25 (queries / commits / docs) and verdicts by the pass rule:
+
+| Variant | dMRR queries | dMRR commits | dMRR docs | p95 < 150 on every set | Verdict |
+|---|---|---|---|---|---|
+| +heuristic | 0.00 | 0.00 | 0.00 | yes (re-run) | stays off (no set improves by 0.03) |
+| +llm | +0.01 | 0.00 | +0.07 | yes | ships on (docs +0.07, queries not down) |
+| +embeddings | -0.06 (first) / -0.02 (re-run) | -0.02 / -0.03 | +0.07 / +0.06 | yes (re-run 76 ms) | stays off (queries MRR drops > 0.01) |
+
+Examples (from the `miss:` lines; MISS means not in the top 10):
+- heuristic: no query moved between hit and miss on any set; only the rank of already-missed items shifted. On commits it swapped two misses ("Feat/agent thinking indicator (#16)" newly missed, "Tool approval fix" still missed with a different file).
+- llm: docs: "reviewing a skill before the agent may save it", "why the build uses a parent POM rather than Gradle" and "how thumbs up and thumbs down feedback changes later behaviour" were rank 7-10 under bm25 and "thumbs up/down" is now a hard MISS in one case while the other two moved into the top 5 (hit@1 0.46 to 0.54, hit@10 0.84 to 0.81). Commits: "connect to configured MCP servers and register their tools" now finds McpClientManager.kt (was AgentConfiguration.kt); "durability review follow-ups (#102)" fixed; "add stream error handling, tools TODO comments, and stream tests" newly missed. Queries: "summarise older conversation when the history gets too long" fixed.
+- embeddings: docs: fixes "how the main agent hands work to a specialised helper agent", "warning the user before a trip about something they always forget", "where the model interface lives so the core can call providers without Spring" (hit@10 0.84 to 0.97). Queries: fixes "how do I change the port the hub listens on" and "gate that decides whether a new skill may be written" but newly misses "a stopped turn is replayed as a note instead of the marker" and (first run) one base-system-prompt query. Commits: fixes e.g. "add banner, badges, and tagline to header" but hit@10 falls 0.83 to 0.79.
+
+Baseline drift against M1 (queries 0.80, commits 0.64): bm25 now 0.76 and 0.62. The repos changed since M1 (new files, including the eval tsv files themselves, which the index contains and which show up as wrong-file hits); schema v2 does not change ranking.
+
+Limits: one corpus; the llm variant only re-ranks files already in the lexical top 10 (by design, mirrors production), so it cannot raise hit@10 above bm25's reach; embedding results are for one model (nomic v1.5, 768 dims) and the fallback vector path noted above; first-pass latencies were contaminated by concurrent load, re-runs are the clean figures; the docs set has the title-overlap bias noted above, and the llm docs gain (+0.07 MRR) comes from 37 queries, so roughly 3 queries moved.
+
+Decision: llm summaries ship on per the pre-registered rule; heuristic summaries and embeddings RRF stay off. Caveat: the llm variant's cost is offline summarisation time (about 3 hours of bonsai for the full corpus here), and its commits and queries gains are nil, so the case rests on docs alone.
 
 ## Still pending
 
