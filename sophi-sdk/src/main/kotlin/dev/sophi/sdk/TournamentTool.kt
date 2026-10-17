@@ -6,9 +6,9 @@ import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.store.arcade.ArcadeHost
 import dev.sophi.versioning.ArtifactType
-import dev.sophi.versioning.ScorecardStore
-import dev.sophi.versioning.VersionStore
+import dev.sophi.versioning.VersioningStores
 import java.nio.file.Path
 
 private val defaultVersioningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "versioning")
@@ -30,7 +30,9 @@ class TournamentTool(
     sessionsDir: Path,
     private val versioningHome: Path = defaultVersioningHome,
     private val evalsDir: Path = Path.of("evals"),
-    private val runsPerConfig: Int = 3
+    private val runsPerConfig: Int = 3,
+    private val sharedRoot: Path = ArcadeHost.defaultRoot(),
+    private val shared: Map<Path, String> = VersioningStores.DEFAULT_SHARED
 ) : Tool {
     private val sessionManager = FileSessionManager(sessionsDir)
 
@@ -45,29 +47,34 @@ class TournamentTool(
     override fun riskLevel(argumentsJson: String) = RiskLevel.SAFE
 
     override suspend fun execute(argumentsJson: String): String {
-        val versionStore = VersionStore(versioningHome)
-        val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
-            ?: return "No config version found for 'default' — run `sophi config seed` first."
-        val cases = loadEvalCases(evalsDir)
-        if (cases.isEmpty()) return "No eval cases found in $evalsDir — nothing to score a tournament against."
+        val versionStore = runCatching { VersioningStores.versionStore(versioningHome, sharedRoot, shared) }
+            .getOrElse { return "versioning unavailable: ${it.message}" }
+        val scorecardStore = runCatching { VersioningStores.scorecardStore(versioningHome, sharedRoot, shared) }
+            .getOrElse { versionStore.close(); return "versioning unavailable: ${it.message}" }
+        try {
+            val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
+                ?: return "No config version found for 'default' — run `sophi config seed` first."
+            val cases = loadEvalCases(evalsDir)
+            if (cases.isEmpty()) return "No eval cases found in $evalsDir — nothing to score a tournament against."
 
-        val outcome = runCatching {
-            runTournament(
-                incumbentVersionId = incumbentVersionId,
-                versionStore = versionStore,
-                scorecardStore = ScorecardStore(versioningHome),
-                cases = cases,
-                provider = provider,
-                registry = ToolRegistry(),
-                sessionManager = sessionManager,
-                contextWindowTokens = contextWindowTokens,
-                model = model,
-                unaddressedFailureModes = emptyList(),
-                toolStats = emptyMap(),
-                runsPerConfig = runsPerConfig
-            )
-        }.getOrElse { e -> return e.message ?: "tournament run failed" }
+            val outcome = runCatching {
+                runTournament(
+                    incumbentVersionId = incumbentVersionId,
+                    versionStore = versionStore,
+                    scorecardStore = scorecardStore,
+                    cases = cases,
+                    provider = provider,
+                    registry = ToolRegistry(),
+                    sessionManager = sessionManager,
+                    contextWindowTokens = contextWindowTokens,
+                    model = model,
+                    unaddressedFailureModes = emptyList(),
+                    toolStats = emptyMap(),
+                    runsPerConfig = runsPerConfig
+                )
+            }.getOrElse { e -> return e.message ?: "tournament run failed" }
 
-        return format(outcome)
+            return format(outcome)
+        } finally { versionStore.close(); scorecardStore.close() }
     }
 }

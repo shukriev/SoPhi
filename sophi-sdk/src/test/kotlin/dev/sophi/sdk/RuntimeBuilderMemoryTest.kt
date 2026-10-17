@@ -3,6 +3,7 @@ package dev.sophi.sdk
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.store.arcade.EmbeddedArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
@@ -10,6 +11,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import kotlin.io.path.createTempDirectory
@@ -174,11 +176,9 @@ class RuntimeBuilderMemoryTest : FunSpec({
     }
 
     test("memory() with a database that fails to open disables memory and fires onWarning instead of crashing") {
-        // Reproduces the "Error on creating new database instance" bug: ArcadeDB locks its
-        // database directory to one process, so a second Sophi process (CLI, another companion
-        // instance) pointed at the same memoryHome throws when this opens it. A plain file where
-        // a directory is expected reproduces any such open failure deterministically, without
-        // needing a second process actually holding the lock.
+        // Two processes no longer conflict over memory (they share one server, ADR-041 M6), but an
+        // open can still fail (migration locked, corrupt data). A plain file where a directory is
+        // expected reproduces any such open failure deterministically.
         val warnings = mutableListOf<String>()
         val blockedHome = createTempDirectory("sophi-sdk-memory-home-test").resolve("blocked-by-a-file")
         blockedHome.writeText("not a directory")
@@ -197,6 +197,33 @@ class RuntimeBuilderMemoryTest : FunSpec({
         rt.memoryPlugin.shouldBeNull()
         rt.config.systemPrompt shouldBe DefaultPrompt.BASE
         warnings.single() shouldContain "memory: disabled — couldn't open the memory database"
+        warnings.single() shouldNotContain "only one process"
+    }
+
+    test("memory() on a shared root whose legacy data can't move disables memory and fires onWarning instead of crashing") {
+        // An older Sophi still holding the unmigrated embedded dir makes PalaceStore.shared throw IllegalStateException.
+        val warnings = mutableListOf<String>()
+        val home = createTempDirectory("sophi-sdk-memory-home-test")
+        EmbeddedArcadeStore.open(home).use { old ->
+            old.ensureSchema(vertexTypes = listOf("Memory"))
+            val builder = RuntimeBuilder()
+            builder.provider = stubProvider()
+            builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+            builder.memoryHome = home
+            builder.memorySharedRoot = createTempDirectory("sophi-sdk-memory-root-test")
+            val rt = builder
+                .contextWindowTokens(TEST_CONTEXT_WINDOW)
+                .memory(
+                    embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                    onWarning = { warnings.add(it) }, embeddingProvider = StubEmbeddingProvider(shouldFail = false)
+                )
+                .build()
+            try {
+                rt.memoryPlugin.shouldBeNull()
+                warnings.single() shouldContain "memory: disabled — couldn't open the memory database at $home"
+                warnings.single() shouldContain "an older Sophi may still be running"
+            } finally { rt.close() }
+        }
     }
 
     test("close() closes the memory plugin without throwing") {

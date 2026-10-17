@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.store.arcade.EmbeddedArcadeStore
 import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.ProducedBy
 import dev.sophi.versioning.VersionStore
@@ -48,5 +49,25 @@ class TournamentToolTest : FunSpec({
         val result = kotlinx.coroutines.runBlocking { tool.execute("{}") }
 
         result shouldContain "No eval cases found"
+    }
+
+    test("execute() reports versioning unavailable instead of throwing when the shared store can't open") {
+        // An older Sophi still holding the unmigrated embedded dir makes VersioningStores throw IllegalStateException.
+        val versioningHome = createTempDirectory("tournament-tool-test-versioning")
+        EmbeddedArcadeStore.open(versioningHome).use { old ->
+            old.ensureSchema(vertexTypes = listOf("Version"))
+            val tool = TournamentTool(
+                provider = mockk<LLMProvider>(), model = "m", contextWindowTokens = 100_000,
+                sessionsDir = createTempDirectory("tournament-tool-test-sessions"),
+                versioningHome = versioningHome,
+                sharedRoot = createTempDirectory("tournament-tool-test-root"),
+                shared = mapOf(versioningHome to "versioning")
+            )
+
+            val result = kotlinx.coroutines.runBlocking { tool.execute("{}") }
+
+            result shouldContain "versioning unavailable:"
+            result shouldContain "an older Sophi may still be running"
+        }
     }
 })
