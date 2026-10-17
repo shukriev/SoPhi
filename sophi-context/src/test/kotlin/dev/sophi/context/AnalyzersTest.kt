@@ -76,4 +76,34 @@ class AnalyzersTest : FunSpec({
         Analyzers.analyze("E.java", Role.SOURCE, "java", "@Entity public class E {}").chunks.map { it.label } shouldContainExactly listOf("E")
         Analyzers.analyze("settings.gradle.kts", Role.CONFIG, "kotlin", "includeBuild(\"../x\")\ninclude(\n\":a\",\n\":b\"\n)").modules shouldContainExactly listOf("a", "b")
     }
+
+    test("declarations become symbols with kind and 1-based line") {
+        val src = "package a\n\nimport b.c.D\n\n/** Doc. */\ndata class Foo(val x: Int)\n\nfun bar() = 1\nval type = 2\n"
+        val a = Analyzers.analyze("a/Foo.kt", Role.SOURCE, "kotlin", src)
+        a.symbols shouldContainExactly listOf(SymbolDraft("Foo", "class", 6), SymbolDraft("bar", "fun", 8), SymbolDraft("type", "val", 9))
+        a.imports shouldContainExactly listOf("b.c.D")
+        Analyzers.analyze("x.go", Role.SOURCE, "go", "package x\n\nfunc (s *S) Run() {}\ntype S struct{}\n").symbols shouldContainExactly
+            listOf(SymbolDraft("Run", "func", 3), SymbolDraft("S", "type", 4))
+        Analyzers.analyze("README.md", Role.DOC, "markdown", "# T\n\ntext\n").symbols shouldBe emptyList()
+    }
+
+    test("imports per family; wildcards dropped, external packages kept raw for the resolver") {
+        Analyzers.analyze("A.java", Role.SOURCE, "java", "import java.util.List;\nimport static a.b.C.d;\nimport a.b.*;\nclass A {}\n").imports shouldContainExactly
+            listOf("java.util.List", "a.b.C.d")
+        Analyzers.analyze("a.ts", Role.SOURCE, "typescript",
+            "import { x } from './x'\nimport type { Y } from \"../y/y\"\nimport './side'\nconst z = require('./z')\nexport * from './w'\n").imports shouldContainExactly
+            listOf("./x", "../y/y", "./side", "./z", "./w")
+        Analyzers.analyze("p/m.py", Role.SOURCE, "python", "import os, a.b as c\nfrom .sib import f\nfrom . import u, v\nfrom pkg.mod import g\n").imports shouldContainExactly
+            listOf("os", "a.b", ".sib", ".u", ".v", "pkg.mod")
+        Analyzers.analyze("m.go", Role.SOURCE, "go", "package m\n\nimport \"fmt\"\nimport (\n\t\"ex.com/r/pkg/util\"\n\tal \"ex.com/r/pkg/log\"\n)\n").imports shouldContainExactly
+            listOf("fmt", "ex.com/r/pkg/util", "ex.com/r/pkg/log")
+        Analyzers.analyze("src/main.rs", Role.SOURCE, "rust", "use crate::net::server;\npub use crate::util::{a, b};\nuse std::io;\n").imports shouldContainExactly
+            listOf("crate::net::server", "crate::util", "std::io")
+    }
+
+    test("markdown: wikilinks and relative .md links, never URLs or non-markdown targets") {
+        val md = "# T\n\nSee [[Other Note]] and [[folder/Deep|alias]] and [[H#sec]].\n[a](../doc/x.md#part) [b](https://e.com/y.md) [c](img.png) [d](./z.md)\n"
+        Analyzers.analyze("notes/t.md", Role.DOC, "markdown", md).links shouldContainExactly
+            listOf("[[Other Note]]", "[[folder/Deep]]", "[[H]]", "../doc/x.md", "./z.md")
+    }
 })
