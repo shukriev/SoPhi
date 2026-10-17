@@ -7,6 +7,9 @@ import java.security.MessageDigest
 
 data class ScanStats(val added: Int, val changed: Int, val removed: Int, val unchanged: Int, val partial: Boolean)
 
+/** What gets indexed beyond file text (E2 variants; defaults = the shipped engine). */
+data class IndexOptions(val summaryTokens: Boolean = false)
+
 /**
  * Brings one project's index in line with its files (spec §5.2). Host-only and single-threaded by
  * contract (ContextEngine runs every call on its one writer thread): TermStat/ContextMeta are
@@ -20,7 +23,8 @@ class Indexer(
     private val maxFiles: Int = ProjectFiles.MAX_FILES,
     private val analyze: (String, Role, String, String) -> Analysis = Analyzers::analyze,
     private val cancelled: () -> Boolean = { false },
-    private val progressEvery: Int = 250
+    private val progressEvery: Int = 250,
+    private val options: IndexOptions = IndexOptions()
 ) {
     /** ChunkVec is content-addressed (id = chunk hash) and deliberately kept: vectors stay valid across a rebuild. */
     fun rebuildIfStale(schemaVersion: Int) {
@@ -110,7 +114,10 @@ class Indexer(
     private fun replaceFile(projectId: String, f: FileEntry, text: String, hash: String, paths: Relations.PathIndex) {
         val fileId = ContextSchema.fileId(projectId, f.relPath)
         val analysis = analyze(f.relPath, f.role, f.lang, text)
-        val drafts = analysis.chunks.map { c -> c to Tokenizer.indexText(f.relPath, listOfNotNull(c.label, c.text).joinToString("\n")) }
+        val drafts = analysis.chunks.mapIndexed { i, c ->
+            val summary = analysis.summary.takeIf { i == 0 && options.summaryTokens }
+            c to Tokenizer.indexText(f.relPath, listOfNotNull(summary, c.label, c.text).joinToString("\n"))
+        }
         store.transaction {
             val (oldTerms, oldCount, oldLen) = deleteChunks(fileId)
             val newTerms = HashMap<String, Int>()
@@ -183,6 +190,19 @@ class Indexer(
         old.forEach { r -> (r["toks"] as String).split(' ').filter { it.isNotEmpty() }.toSet().forEach { terms.merge(it, 1, Int::plus) } }
         if (old.isNotEmpty()) store.command("DELETE FROM ${ContextSchema.CHUNK} WHERE fileId = ?", fileId)
         return Triple(terms, old.size, old.sumOf { (it["len"] as Number).toLong() })
+    }
+
+    /** Puts [summary]'s words into the file's first chunk (replacing any earlier summary) and records it; writer thread only. */
+    fun applySummary(fileId: String, summary: String, summaryHash: String) = store.transaction {
+        val id = ContextSchema.chunkId(fileId, 0)
+        val c = store.query("SELECT path, label, text, toks FROM ${ContextSchema.CHUNK} WHERE id = ?", id).firstOrNull() ?: return@transaction
+        val old = (c["toks"] as String).split(' ').filter { it.isNotEmpty() }
+        val toks = Tokenizer.indexText(c["path"] as String, listOfNotNull(summary, c["label"] as String?, c["text"] as String).joinToString("\n"))
+        val new = toks.split(' ').filter { it.isNotEmpty() }
+        applyDf(old.toSet().associateWith { 1 }, new.toSet().associateWith { 1 })
+        bumpMeta(0, (new.size - old.size).toLong())
+        store.command("UPDATE ${ContextSchema.CHUNK} SET toks = ?, len = ? WHERE id = ?", toks, new.size, id)
+        store.command("UPDATE ${ContextSchema.FILE} SET summary = ?, summaryHash = ? WHERE id = ?", summary, summaryHash, fileId)
     }
 
     // ponytail: one read + one upsert per distinct term per changed file; initial indexing of a

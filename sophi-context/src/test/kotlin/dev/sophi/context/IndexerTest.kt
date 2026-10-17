@@ -4,6 +4,8 @@ import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -20,6 +22,37 @@ class IndexerTest : FunSpec({
     }
     fun Path.write(rel: String, text: String) = resolve(rel).also { Files.createDirectories(it.parent); Files.writeString(it, text) }
     fun df(s: ArcadeStore, term: String) = (s.query("SELECT df FROM TermStat WHERE id = ?", term).firstOrNull()?.get("df") as Number?)?.toInt() ?: 0
+
+    fun stem(w: String) = Tokenizer.tokens(w).single()
+
+    test("heuristic summary words reach the first chunk only when IndexOptions.summaryTokens is on") {
+        val src = "package a\n\nimport b.C\n\n/** Listens for remote sessions. */\nclass Hub\n"
+        fun firstToks(on: Boolean): String {
+            val (s, ix, root) = setup(mk = { Indexer(it, GitProbe.none, options = IndexOptions(summaryTokens = on)) })
+            root.write("src/Hub.kt", src)
+            ix.scan("p1")
+            return s.query("SELECT toks FROM Chunk WHERE id = ?", ContextSchema.chunkId(ContextSchema.fileId("p1", "src/Hub.kt"), 0)).single()["toks"] as String
+        }
+        firstToks(true).split(' ') shouldContain stem("listens")
+        firstToks(false).split(' ') shouldNotContain stem("listens")
+    }
+
+    test("applySummary adds an LLM summary's words to the first chunk, replaces an earlier one, keeps df and meta exact") {
+        val (s, ix, root) = setup()
+        root.write("src/Hub.kt", "class Hub {\n fun start() = 1\n}\n")
+        ix.scan("p1")
+        val fid = ContextSchema.fileId("p1", "src/Hub.kt")
+        ix.applySummary(fid, "Accepts remote control sessions from the terminal.", "h1")
+        s.fullText("Chunk", "toks", stem("terminal"), listOf("path"), 10).map { it["path"] } shouldBe listOf("src/Hub.kt")
+        df(s, stem("terminal")) shouldBe 1
+        ix.applySummary(fid, "Serves the dashboard.", "h2")
+        df(s, stem("terminal")) shouldBe 0
+        df(s, stem("dashboard")) shouldBe 1
+        s.query("SELECT summary, summaryHash FROM File WHERE id = ?", fid).single().let {
+            it["summary"] shouldBe "Serves the dashboard."; it["summaryHash"] shouldBe "h2"
+        }
+        ContextSchema.meta(s)!!.totalLen shouldBe (s.query("SELECT sum(len) AS n FROM Chunk").single()["n"] as Number).toLong()
+    }
 
     test("first scan indexes chunks, file records and document frequencies") {
         val (s, ix, root) = setup()
