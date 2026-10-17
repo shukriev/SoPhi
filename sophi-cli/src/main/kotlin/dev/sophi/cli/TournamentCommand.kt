@@ -28,12 +28,13 @@ private const val TOURNAMENT_CONTEXT_WINDOW = 100_000
 
 internal val defaultVersioningHome: Path = VersioningStores.DEFAULT_VERSIONING_HOME
 
-/** Opening a shared store can fail (e.g. an older Sophi still holds the legacy dir): one clear line, non-zero exit, no stack trace. */
 /** Seam so tests can make the shared store fail to open; production always uses [VersioningStores]. */
+@Volatile
 internal var versionStoreFactory: (Path) -> VersionStore = { VersioningStores.versionStore(it) }
 
 internal fun openVersionStore(home: Path): VersionStore = openStore { versionStoreFactory(home) }
 
+/** Opening a shared store can fail (e.g. an older Sophi still holds the legacy dir): one clear line, non-zero exit, no stack trace. */
 internal fun <T> openStore(block: () -> T): T =
     try { block() } catch (e: IllegalStateException) { throw CliktError("Cannot open the shared store: ${e.message ?: e.javaClass.simpleName}") }
 
