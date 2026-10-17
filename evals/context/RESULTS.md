@@ -311,6 +311,24 @@ Limits: one corpus; the eval .tsv files (queries/commits/docs.tsv) are in the in
 
 Decision: llm summaries ship on per the pre-registered rule; heuristic summaries and embeddings RRF stay off. Caveat: the llm variant's cost is offline summarisation time (about 55 minutes of bonsai wall time across the three sets here), and its commits and queries gains are nil, so the case rests on docs alone.
 
+## E3 tool surface (small local model, 2026-10-17)
+
+`prism-ml/bonsai-27b` on LM Studio, jar from `caaaa05` (schema 2), 23 FILES-answer questions x 3 configs, shipped hint/orientation defaults (`gated`, `both`), isolated home per run. Success = any gold path in the answer. Sweep: `sophi-arena/runs/context-qa/20261017-215957`.
+
+config | tools | n | success | total tokens | tool calls | find_symbol+related calls | median first read | timed out
+---|---|---|---|---|---|---|---|---
+T | all (5) | 23 | 21 | 1003192 | 117 | 0 | 2 | 1
+K | core (2) | 23 | 22 | 1084995 | 134 | 0 | 2 | 0
+N | none | 23 | 20 | 1482558 | 149 | 0 | 2 | 0
+
+Paired pass rule vs T (n=23, no void runs):
+- K vs T: beats baseline (success 22 vs 21). The single extra success is a question where T timed out (600 s); tokens are +8%. Treat as a tie, not evidence that fewer tools help.
+- N vs T: does not beat baseline (success 20 vs 21, tokens +48%). The context tools help: without them the model needs more grep/read calls.
+
+Findings: bonsai never called `find_symbol` or `related` in any of 23 T runs (0 calls); it used only `search_context` (25) and `read_context` (6). K used `search_context` 34 times. No tool errors in any transcript, and N called no context tool. These questions are file-locating, so the graph tools had nothing to add; a symbol/relationship task set would be needed to test them.
+
+Verdict: by the fixed rule K beats `all` on this model, so the graph tools do not earn a place for a small local model on this set, and `core` is the better default for that tier. `none` loses. The margin is one question, so keep `all` for frontier tiers until a harder set says otherwise.
+
 ## Still pending
 
 Frontier-model E1/E5, a longer-task E4 that exercises the summary, and the live Anthropic cache check (procedure: `evals/context/EXPERIMENTS.md`); a harder
