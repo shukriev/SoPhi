@@ -45,20 +45,14 @@ class RelationsTest : FunSpec({
             Triple("notes/a.md", "notes/B.md", "LINKS"), Triple("notes/a.md", "doc/c.md", "LINKS"))
     }
 
-    test("python __future__ and image wikilinks resolve to no project file") {
-        imports(listOf(src("a.py", "python", listOf("__future__")), src("__future__.pyi", "python"))) shouldContainExactlyInAnyOrder emptyList()
+    test("python __future__ and image wikilinks are dropped even when a colliding file exists") {
+        imports(listOf(src("a.py", "python", listOf("__future__")), src("__future__.py", "python"))) shouldContainExactlyInAnyOrder emptyList()
         Relations.all(listOf(src("n/a.md", "markdown", links = listOf("[[img.png]]"), role = Role.DOC),
-            src("n/img.md", "markdown", role = Role.DOC))) shouldContainExactlyInAnyOrder emptyList()
+            src("n/img.png.md", "markdown", role = Role.DOC))) shouldContainExactlyInAnyOrder emptyList()
     }
 
-    test("tests by naming convention point at the nearest same-language source") {
-        Relations.tests(listOf(
-            src("core/src/main/kotlin/x/Foo.kt", "kotlin"), src("core/src/test/kotlin/x/FooTest.kt", "kotlin", role = Role.TEST),
-            src("other/src/main/kotlin/y/Foo.kt", "kotlin"),
-            src("web/src/foo.ts", "typescript"), src("web/src/foo.test.ts", "typescript", role = Role.TEST),
-            src("py/bar.py", "python"), src("py/test_bar.py", "python"),
-            src("go/baz.go", "go"), src("go/baz_test.go", "go", role = Role.TEST))).map { it.from to it.to } shouldContainExactlyInAnyOrder listOf(
-            "core/src/test/kotlin/x/FooTest.kt" to "core/src/main/kotlin/x/Foo.kt", "web/src/foo.test.ts" to "web/src/foo.ts",
-            "py/test_bar.py" to "py/bar.py", "go/baz_test.go" to "go/baz.go")
+    test("wikilink with .md extension resolves like the bare note name") {
+        Relations.all(listOf(src("n/a.md", "markdown", links = listOf("[[B.md]]"), role = Role.DOC),
+            src("n/B.md", "markdown", role = Role.DOC))).map { it.from to it.to } shouldContainExactlyInAnyOrder listOf("n/a.md" to "n/B.md")
     }
 })

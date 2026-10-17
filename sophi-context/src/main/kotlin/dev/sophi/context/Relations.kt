@@ -30,6 +30,8 @@ object Relations {
         Regex("""^(.+)_test\.(?:py|go)$""")
     )
 
+    private val ASSET_EXT = Regex("""\.(?:png|jpe?g|gif|svg|webp|pdf)$""", RegexOption.IGNORE_CASE)
+
     fun all(files: List<Source>): List<Edge> {
         val index = PathIndex(files.map { it.path })
         return files.flatMap { outgoing(it, index) } + tests(files)
@@ -60,7 +62,7 @@ object Relations {
             "typescript", "javascript" -> if (!raw.startsWith(".")) null else normalize(dir, raw)?.let { base ->
                 exact(listOf(base) + listOf("ts", "tsx", "js", "jsx", "mjs").map { "$base.$it" } + listOf("ts", "tsx", "js").map { "$base/index.$it" })
             }
-            "python" -> if (raw.startsWith(".")) {
+            "python" -> if (raw.substringBefore('.') == "__future__") null else if (raw.startsWith(".")) {
                 val dots = raw.takeWhile { it == '.' }.length
                 var base = dir
                 repeat(dots - 1) { base = base.substringBeforeLast('/', "") }
@@ -82,7 +84,9 @@ object Relations {
     }
 
     private fun resolveLink(f: Source, raw: String, index: PathIndex): String? =
-        if (raw.startsWith("[[")) closest(f.path, index.stem(raw.removeSurrounding("[[", "]]").substringAfterLast('/').trim()))
+        if (raw.startsWith("[[")) raw.removeSurrounding("[[", "]]").substringAfterLast('/').trim().let { name ->
+            if (ASSET_EXT.containsMatchIn(name)) null else closest(f.path, index.stem(name.removeSuffix(".md")))
+        }
         else normalize(f.path.substringBeforeLast('/', ""), raw.replace("%20", " "))?.takeIf { it in index.all }
 
     /** [rel] joined onto [dir], `.`/`..` collapsed; null if it climbs above the project root. A leading `/` is root-relative. */
