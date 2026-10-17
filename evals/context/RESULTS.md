@@ -256,6 +256,18 @@ written, would settle structured against generic summaries.
 Limits: the E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only. Single runs, one small local model (bonsai only), n=5 prompts, of which 2 never compacted in any config, so the decision rests on 3 informative prompts (2 decisive): effective n=3, and 2 successes of difference is a small
 sample; no frontier model.
 
+## E2 vocabulary gap (offline, 2026-10-17)
+
+Corpus: SoPhi main checkout @ ab24bd4 and sophi-companion @ 679d278, indexed into a temp store per run. Sets: queries.tsv (31),
+commits.tsv (258), docs.tsv (37, new). Variants: bm25 (today), +heuristic (`--summaries heuristic`), +llm (`--summaries llm`,
+bonsai-27b, summaries for files in some query's lexical top 10, cached by content hash), +embeddings (`--embed text-embedding-nomic-embed-text-v1.5`, 768 dims, RRF k 60, 50 neighbours).
+Model server: LAN machine 192.168.0.108:1234 (embeddings reached through a loopback TCP forward, the eval refuses non-loopback embed URLs).
+
+Pass rule (fixed before running): a variant ships on if its MRR improves by >= 0.03 on commits.tsv or docs.tsv, queries.tsv MRR does not
+drop by > 0.01, and p95 latency stays < 150 ms on every set.
+
+RESULTS_E2_PLACEHOLDER
+
 ## Still pending
 
 Frontier-model E1/E5, a longer-task E4 that exercises the summary, and the live Anthropic cache check (procedure: `evals/context/EXPERIMENTS.md`); a harder
