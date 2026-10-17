@@ -2,7 +2,12 @@ package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.core.UsageError
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.types.int
+import dev.sophi.ai.providers.buildProviderFromType
+import java.time.Duration
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
@@ -106,10 +111,24 @@ class ContextEvalCommand : CliktCommand(name = "eval", help = "Measure retrieval
     private val projectSpecs by option("--project", help = "NAME=PATH, repeatable").multiple(required = true)
     private val queries by option("--queries").required()
     private val hintGrid by option("--hint-grid", help = "Sweep the hint gate (minScore x minRatio) instead of scoring retrieval").flag()
+    private val summaries by option("--summaries", help = "none | heuristic (file summary words in the first chunk) | llm (LLM summaries of files in some query's lexical top 10)")
+        .choice("none", "heuristic", "llm").default("none")
+    private val llmUrl by option("--llm-url", help = "OpenAI-compatible endpoint for --summaries llm").default("http://localhost:1234/v1")
+    private val llmModel by option("--llm-model").default("prism-ml/bonsai-27b")
+    private val summaryCache by option("--summary-cache", help = "TSV cache of LLM summaries keyed by content hash").default("evals/context/summary-cache.tsv")
+    private val embed by option("--embed", help = "Embedding model: fuse vector neighbours with BM25 (RRF)")
+    private val embedUrl by option("--embed-url").default(dev.sophi.context.ChunkEmbedder.DEFAULT_URL)
+    private val embedDims by option("--embed-dims").int().default(768)
     override fun run() {
         val projects = projectSpecs.associate { it.substringBefore('=') to Path.of(it.substringAfter('=')) }
-        val eval = dev.sophi.context.ContextEval(projects)
+        val embedder = embed?.let { m -> dev.sophi.context.ChunkEmbedder.create(embedUrl, m, embedDims, log = { echo(it) }) ?: throw UsageError("--embed-url must be a loopback address") }
+        val llm = if (summaries != "llm") null else dev.sophi.context.LlmSummaries(
+            dev.sophi.context.FileSummariser(buildProviderFromType("openai-compat", null, llmUrl, llmModel, requestTimeout = Duration.ofSeconds(180)), llmModel),
+            Path.of(summaryCache))
+        val eval = dev.sophi.context.ContextEval(projects, options = dev.sophi.context.IndexOptions(summaryTokens = summaries == "heuristic"),
+            embedder = embedder, summaries = llm)
         val qs = dev.sophi.context.ContextEval.load(Path.of(queries))
+        echo("variant: summaries=$summaries embed=${embed ?: "off"}")
         if (!hintGrid) { echo(eval.run(qs).toString()); return }
         val (grid, tops) = eval.hintAnalysis(qs, listOf(0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 15.0), listOf(1.0, 1.1, 1.25, 1.5, 2.0))
         val t = tops.sorted()

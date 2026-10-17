@@ -1,0 +1,38 @@
+# docs/notes query set (E2): questions about the SoPhi and companion docs, worded the way a person asks (not the titles). projects: SoPhi, sophi-companion
+why did we write our own agent loop instead of adopting the JetBrains framework	ADR-001
+which library talks to Claude, GPT and Ollama for us	ADR-002
+why the build uses a parent POM rather than Gradle	ADR-003
+where the model interface lives so the core can call providers without Spring	ADR-004
+how conversation history is stored so it can branch and survive a crash	ADR-005
+why tools take and return plain JSON strings	ADR-006
+how the main agent hands work to a specialised helper agent	ADR-007
+how learning observes every tool call without touching the agent loop	ADR-008
+why tool calls are saved in the transcript but not resent to the model	ADR-009
+why lessons are judged once at the end of a session with no vector database	ADR-010
+how thumbs up and thumbs down feedback changes later behaviour	ADR-011
+exporting past sessions as fine-tuning datasets	ADR-012
+how remembered facts about the user reach each turn	ADR-013
+recurring background jobs and goal-driven retries with nobody watching	ADR-014
+reading and writing events in the macOS calendar	ADR-015,TESTING_CALENDAR.md
+letting low-risk shell commands run without asking	ADR-017
+breaking a big goal into ordered steps and replanning when one fails	ADR-018,ADR-020
+handing an implementation task off to Claude Code	ADR-019
+getting better at operating a website over repeated visits	ADR-021,docs/skills/browsing-sites.md
+a tray app that embeds the agent runtime in the same process	ADR-022,sophi-companion/README.md
+watching a terminal session live from the desktop app and steering it	ADR-023
+comparing several candidate continuations before replanning	ADR-024
+why memory moved from JSONL files onto a graph database	ADR-026
+the agent proposing improvements to itself from its own history	ADR-027,ADR-032
+why the desktop app registers the same tools as the terminal client	ADR-028
+reviewing a skill before the agent may save it	ADR-030
+warning the user before a trip about something they always forget	ADR-033
+turning overheard speech into memories and reminders	ADR-034
+keeping track of promises the user made and following up on them	ADR-035
+why the speech model stays loaded instead of reloading for every clip	ADR-040,ADR-039
+sending small judgments like risk checks to a faster model	ADR-042
+how two processes share one search index by taking a lock	ADR-041
+rules for a breaking change and who approves it	GOVERNANCE.md
+how to format the changelog entry in a pull request	CONTRIBUTING.md
+signing and notarising the desktop app before a release	sophi-companion/docs/RELEASE-GUIDE.md,sophi-companion/README.md
+module dependency rules that must never be broken	.sophi/skills/sophi-architecture.md,doc/Architecture.md
+how to A/B test a prescription in the use-case playbook	evals/playbook/README.md
