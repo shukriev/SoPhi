@@ -43,6 +43,13 @@ class Indexer(
             return ScanStats(0, 0, 0, 0, false)
         }
         val listing = ProjectFiles.list(root, git, maxFiles)
+        val paths = Relations.PathIndex(listing.files.map { it.relPath })
+        var relationsDirty = project["relationsAt"] == null
+        fun markDirty() {   // before the first add/remove, so a crash mid-scan still leaves relations due for a rebuild
+            if (relationsDirty) return
+            store.command("UPDATE ${ContextSchema.PROJECT} SET relationsAt = null WHERE id = ?", projectId)
+            relationsDirty = true
+        }
         val known = store.query("SELECT id, path, size, mtime, contentHash FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId)
             .associateBy { it["path"] as String }
         store.command("UPDATE ${ContextSchema.PROJECT} SET scanned = 0, scanTotal = ? WHERE id = ?", listing.files.size, projectId)
@@ -60,7 +67,8 @@ class Indexer(
                     store.command("UPDATE ${ContextSchema.FILE} SET mtime = ?, size = ? WHERE id = ?", f.mtime, f.size, old["id"])
                     unchanged++
                 } else {
-                    replaceFile(projectId, f, String(bytes, Charsets.UTF_8), hash)
+                    if (old == null) markDirty()
+                    replaceFile(projectId, f, String(bytes, Charsets.UTF_8), hash, paths)
                     if (old == null) added++ else changed++
                 }
             } catch (e: InterruptedException) { Thread.currentThread().interrupt(); throw e
@@ -70,10 +78,16 @@ class Indexer(
         val present = listing.files.mapTo(HashSet()) { it.relPath }
         val gone = if (listing.partial) emptyList() else known.keys.filter { it !in present }
         var removedOk = 0
+        if (gone.isNotEmpty()) markDirty()
         for (rel in gone) {
             if (cancelled()) { clearProgress(projectId); return ScanStats(added, changed, removedOk, unchanged, listing.partial) }
             runCatching { removeFile(ContextSchema.fileId(projectId, rel)) }
                 .onFailure { System.err.println("context: skipped removal of $rel: ${it.message}") }.onSuccess { removedOk++ }
+        }
+        if (relationsDirty) {
+            if (cancelled()) { clearProgress(projectId); return ScanStats(added, changed, removedOk, unchanged, listing.partial) }
+            rebuildRelations(projectId)
+            if (cancelled()) { clearProgress(projectId); return ScanStats(added, changed, removedOk, unchanged, listing.partial) }
         }
         val modules = listing.files.filter { !it.relPath.contains('/') && (it.relPath == "pom.xml" || it.relPath.startsWith("settings.gradle")) }
             .flatMap { f -> runCatching { Analyzers.analyze(f.relPath, f.role, f.lang, Files.readString(root.resolve(f.relPath))).modules }.getOrDefault(emptyList()) }
@@ -88,10 +102,12 @@ class Indexer(
 
     fun dropProject(projectId: String) {
         store.query("SELECT id FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId).forEach { removeFile(it["id"] as String) }
+        store.command("DELETE FROM ${ContextSchema.SYMBOL} WHERE projectId = ?", projectId)
+        store.command("DELETE FROM ${ContextSchema.RELATION} WHERE projectId = ?", projectId)
         store.deleteDocument(ContextSchema.PROJECT, projectId)
     }
 
-    private fun replaceFile(projectId: String, f: FileEntry, text: String, hash: String) {
+    private fun replaceFile(projectId: String, f: FileEntry, text: String, hash: String, paths: Relations.PathIndex) {
         val fileId = ContextSchema.fileId(projectId, f.relPath)
         val analysis = analyze(f.relPath, f.role, f.lang, text)
         val drafts = analysis.chunks.map { c -> c to Tokenizer.indexText(f.relPath, listOfNotNull(c.label, c.text).joinToString("\n")) }
@@ -110,9 +126,19 @@ class Indexer(
             }
             applyDf(oldTerms, newTerms)
             bumpMeta(drafts.size - oldCount, newLen - oldLen)
+            store.command("DELETE FROM ${ContextSchema.SYMBOL} WHERE fileId = ?", fileId)
+            analysis.symbols.forEach { sym ->
+                store.upsertDocument(ContextSchema.SYMBOL, "$fileId@${sym.line}", mapOf(
+                    "projectId" to projectId, "fileId" to fileId, "path" to f.relPath, "role" to f.role.name,
+                    "name" to sym.name, "lname" to sym.name.lowercase(), "kind" to sym.kind, "line" to sym.line))
+            }
+            store.command("DELETE FROM ${ContextSchema.RELATION} WHERE fromFileId = ? AND kind <> ?", fileId, Relations.TESTS)
+            Relations.outgoing(Relations.Source(f.relPath, f.lang, f.role, analysis.imports, analysis.links), paths)
+                .forEach { putRelation(projectId, it) }
             store.upsertDocument(ContextSchema.FILE, fileId, mapOf(
                 "projectId" to projectId, "path" to f.relPath, "lang" to f.lang, "role" to f.role.name,
-                "size" to f.size, "mtime" to f.mtime, "contentHash" to hash, "summary" to analysis.summary))
+                "size" to f.size, "mtime" to f.mtime, "contentHash" to hash, "summary" to analysis.summary,
+                "imports" to analysis.imports, "links" to analysis.links))
         }
     }
 
@@ -120,8 +146,35 @@ class Indexer(
         val (oldTerms, oldCount, oldLen) = deleteChunks(fileId)
         applyDf(oldTerms, emptyMap())
         bumpMeta(-oldCount, -oldLen)
+        store.command("DELETE FROM ${ContextSchema.SYMBOL} WHERE fileId = ?", fileId)
+        store.command("DELETE FROM ${ContextSchema.RELATION} WHERE fromFileId = ?", fileId)
+        store.command("DELETE FROM ${ContextSchema.RELATION} WHERE toFileId = ?", fileId)
         store.deleteDocument(ContextSchema.FILE, fileId)
     }
+
+    /** Phase two (ADR-041 §10): after adds/removes, every edge of the project is re-derived from the stored raw imports/links. */
+    private fun rebuildRelations(projectId: String) {
+        val files = store.query("SELECT path, lang, role, imports, links FROM ${ContextSchema.FILE} WHERE projectId = ?", projectId).map { r ->
+            Relations.Source(r["path"] as String, r["lang"] as String, Role.valueOf(r["role"] as String), strings(r["imports"]), strings(r["links"]))
+        }
+        val edges = Relations.all(files)
+        store.command("DELETE FROM ${ContextSchema.RELATION} WHERE projectId = ?", projectId)
+        // ponytail: one upsert per edge, 500 per transaction; batch INSERTs if E7 shows a large repo's rebuild dominates the scan.
+        for (batch in edges.chunked(500)) {
+            if (cancelled()) return   // relationsAt stays null: the next scan rebuilds
+            store.transaction { batch.forEach { putRelation(projectId, it) } }
+        }
+        store.command("UPDATE ${ContextSchema.PROJECT} SET relationsAt = ? WHERE id = ?", now(), projectId)
+    }
+
+    private fun putRelation(projectId: String, e: Relations.Edge) {
+        val from = ContextSchema.fileId(projectId, e.from)
+        store.upsertDocument(ContextSchema.RELATION, "$from>${e.kind}>${e.to}", mapOf(
+            "projectId" to projectId, "fromFileId" to from, "toFileId" to ContextSchema.fileId(projectId, e.to),
+            "fromPath" to e.from, "toPath" to e.to, "kind" to e.kind))
+    }
+
+    private fun strings(v: Any?): List<String> = (v as List<*>?)?.map { it.toString() } ?: emptyList()
 
     /** Deletes a file's chunks; returns (per-term chunk counts, chunk count, total token length) they contributed. */
     private fun deleteChunks(fileId: String): Triple<Map<String, Int>, Int, Long> {
