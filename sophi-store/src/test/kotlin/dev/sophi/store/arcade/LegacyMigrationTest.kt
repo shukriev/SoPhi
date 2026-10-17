@@ -45,10 +45,11 @@ class LegacyMigrationTest : FunSpec({
         t.queryVertices("Thing").size shouldBe 2
     }
 
-    test("a partial copy without a marker is cleared and redone; the SophiSchema marker survives") {
+    test("a crash mid-copy (MigrationInProgress present) is cleared and redone; the SophiSchema marker survives") {
         val home = legacyHome()
         val t = autoClose(FailoverArcadeStore(SharedArcadeHost.acquire(tempdir().toPath()), "mem", 7))
-        t.ensureSchema(vertexTypes = listOf("Thing"), documentTypes = listOf("Note"))
+        t.ensureSchema(vertexTypes = listOf("Thing"), documentTypes = listOf("Note", LegacyMigration.IN_PROGRESS))
+        t.upsertDocument(LegacyMigration.IN_PROGRESS, "legacy", mapOf("at" to 1L))   // what a killed copy leaves behind
         t.upsertVertex("Thing", "stale", mapOf("name" to "half-copied"))
         t.documents("SophiSchema").single()["version"] shouldBe 7
         // Even a layout that names the schema marker must not clear, count or copy it.
@@ -56,6 +57,56 @@ class LegacyMigrationTest : FunSpec({
         LegacyMigration.run(t, home, greedy) shouldBe LegacyMigration.Result.Migrated(mapOf("Thing" to 2, "Note" to 1, "Link" to 1))
         t.queryVertices("Thing").map { it["id"] }.toSet() shouldBe setOf("a", "b")
         t.documents("SophiSchema").single()["version"] shouldBe 7
+        t.documents(LegacyMigration.IN_PROGRESS) shouldBe emptyList()
+        LegacyMigration.isMarked(t) shouldBe true
+    }
+
+    test("a non-empty unmarked target is never cleared: TargetNotEmpty, legacy dir untouched") {
+        val home = legacyHome(); val t = target()
+        t.ensureSchema(vertexTypes = listOf("Thing"))
+        t.upsertVertex("Thing", "live", mapOf("name" to "kept"))
+        LegacyMigration.run(t, home, layout) shouldBe LegacyMigration.Result.TargetNotEmpty
+        t.queryVertices("Thing").map { it["id"] } shouldBe listOf("live")
+        LegacyMigration.isMarked(t) shouldBe false
+        Files.isDirectory(home.resolve("arcadedb")) shouldBe true
+        moved(home) shouldBe false
+    }
+
+    test("a rename-aside that collides with an existing aside dir is logged, not thrown") {
+        val home = legacyHome(); val t = target()
+        LegacyMigration.run(t, home, layout, now = { 42 }).shouldBeInstanceOf<LegacyMigration.Result.Migrated>()
+        Files.isDirectory(home.resolve("arcadedb.migrated-42")) shouldBe true
+        seedLegacy(home)   // a stray dir; moving it to arcadedb.migrated-42 again must fail softly
+        LegacyMigration.run(t, home, layout, now = { 42 }) shouldBe LegacyMigration.Result.AlreadyMigrated
+        Files.isDirectory(home.resolve("arcadedb")) shouldBe true
+        t.queryVertices("Thing").size shouldBe 2
+    }
+
+    test("a locked stray dir is left in place this run") {
+        val home = tempdir().toPath(); val t = target()
+        LegacyMigration.run(t, home, layout) shouldBe LegacyMigration.Result.NothingToMigrate
+        seedLegacy(home)
+        EmbeddedArcadeStore.open(home).use {   // an older Sophi is still using it
+            LegacyMigration.run(t, home, layout) shouldBe LegacyMigration.Result.AlreadyMigrated
+            Files.isDirectory(home.resolve("arcadedb")) shouldBe true
+            moved(home) shouldBe false
+        }
+    }
+
+    test("the marker records edges skipped for a missing endpoint") {
+        val home = tempdir().toPath()
+        EmbeddedArcadeStore.open(home).use { db ->
+            db.ensureSchema(vertexTypes = listOf("Thing"), edgeTypes = listOf("Link"))
+            listOf("a", "b", "c").forEach { db.upsertVertex("Thing", it, emptyMap()) }
+            db.upsertEdge("Link", "Thing", "a", "b", emptyMap())
+            db.upsertEdge("Link", "Thing", "a", "c", emptyMap())
+            db.command("UPDATE Link SET toId = 'ghost' WHERE toId = 'c'")   // an endpoint id that no vertex has
+        }
+        val t = target()
+        LegacyMigration.run(t, home, layout) shouldBe
+            LegacyMigration.Result.Migrated(mapOf("Thing" to 3, "Link" to 1), skipped = mapOf("Link" to 1))
+        t.edges("Link").single()["toId"] shouldBe "b"
+        t.documents(LegacyMigration.MARKER).single()["skipped"] shouldBe "Link=1"
     }
 
     test("a locked source leaves everything in place") {
@@ -90,6 +141,24 @@ class LegacyMigrationTest : FunSpec({
         SharedStore.open(root, "mem", 1, legacyHome = home, layout = layout).use { s ->
             s.role shouldBe Role.HOST
             s.queryVertices("Thing").size shouldBe 2
+        }
+        moved(home) shouldBe true
+    }
+
+    test("SharedStore: a client with no legacy dir marks the db; a later stray dir reaching the host keeps the client's rows") {
+        val home = tempdir().toPath(); val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "other").use {
+            SharedStore.open(root, "mem", 1, legacyHome = home, layout = layout).use { s ->
+                s.role shouldBe Role.CLIENT
+                LegacyMigration.isMarked(s) shouldBe true
+                s.ensureSchema(vertexTypes = listOf("Thing"))
+                s.upsertVertex("Thing", "live", mapOf("name" to "client-written"))
+            }
+        }
+        seedLegacy(home)
+        SharedStore.open(root, "mem", 1, legacyHome = home, layout = layout).use { s ->
+            s.role shouldBe Role.HOST
+            s.queryVertices("Thing").map { it["id"] } shouldBe listOf("live")
         }
         moved(home) shouldBe true
     }
