@@ -13,6 +13,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.time.Duration
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 
@@ -52,6 +53,9 @@ class ArcadeHost private constructor(
 
     companion object {
         private const val POLL_MILLIS = 50L
+        private const val SCHEMA_TYPE = "SophiSchema"
+        private const val SCHEMA_ID = "schema"
+        private val DATABASE_NAME = Regex("[A-Za-z0-9_-]+")
         private const val PRE_M6_SENTINEL = -1
 
         fun defaultRoot(): Path = Path.of(System.getProperty("user.home"), ".sophi", "db")
@@ -77,6 +81,7 @@ class ArcadeHost private constructor(
      */
     @Synchronized
     fun register(database: String, schemaVersion: Int) {
+        require(DATABASE_NAME.matches(database)) { "database name must match [A-Za-z0-9_-]+: '$database'" }
         schemas[database]?.let { require(it == schemaVersion) { "$database already registered at schema $it" } }
         // The host may have registered this database after we attached: check the current host.json first.
         if (role == Role.CLIENT) (liveHostJson() ?: hostInfo)?.let { checkSchema(database, schemaVersion, it) }
@@ -115,7 +120,11 @@ class ArcadeHost private constructor(
                     } else {
                         if (role == Role.HOST) throw e // a host's own error is genuine
                         val info = liveHostJson()
-                        if (info != null && runCatching { info.getInt("port") }.getOrNull() == connectedPort) throw e
+                        if (info != null && runCatching { info.getInt("port") }.getOrNull() == connectedPort) {
+                            // The host is alive: drop our connection so the next call reconnects (e.g. after a detach).
+                            stores.remove(database)?.let { runCatching { it.close() } }
+                            throw e
+                        }
                         elect()
                     }
                     storeFor(database)
@@ -147,7 +156,29 @@ class ArcadeHost private constructor(
             if (!elected) elect()
             val store = if (role == Role.HOST) EmbeddedArcadeStore(server!!.database(database))
                 else hostInfo!!.let { checkSchema(database, version, it); connectRemote(it.getInt("port"), database) }
+            try { checkMarker(database, version, store) }
+            catch (e: Throwable) { if (role == Role.CLIENT) runCatching { store.close() }; throw e }
             store.also { stores[database] = it }
+        }
+    }
+
+    /**
+     * The schema version stored in the database itself, so a mismatch is caught whoever registered first
+     * (host.json only knows what the host registered). Absent → ours is written; newer → refused; older →
+     * only the host may upgrade it, a client is refused.
+     */
+    private fun checkMarker(database: String, mine: Int, store: ArcadeStore) {
+        store.ensureSchema(documentTypes = listOf(SCHEMA_TYPE))
+        val stored = store.documents(SCHEMA_TYPE).firstOrNull()?.get("version")?.let { (it as Number).toInt() }
+        // ponytail: two first users can both see "absent" and the last write wins; a CAS would close that gap.
+        when {
+            stored == mine -> {}
+            stored == null || (stored < mine && role == Role.HOST) ->
+                store.upsertDocument(SCHEMA_TYPE, SCHEMA_ID, mapOf("version" to mine))
+            else -> throw IncompatibleHostException(
+                "$database at $root holds schema $stored; this build uses schema $mine" +
+                    if (stored < mine) " and only the host may upgrade it" else ""
+            )
         }
     }
 
@@ -177,9 +208,12 @@ class ArcadeHost private constructor(
         val auth = Base64.getEncoder().encodeToString("${LocalArcadeServer.USER}:$password".toByteArray())
         val request = HttpRequest.newBuilder(URI("http://127.0.0.1:$port/api/v1/server"))
             .header("Authorization", "Basic $auth").header("Content-Type", "application/json")
+            .timeout(Duration.ofSeconds(120))
             .POST(HttpRequest.BodyPublishers.ofString(JSONObject().put("command", "open database $database").toString()))
             .build()
-        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+        // Runs under this object's monitor: bounded so a stuck host can never hang every caller.
+        val response = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).build()
+            .use { it.send(request, HttpResponse.BodyHandlers.ofString()) }
         check(response.statusCode() == 200) { "host could not open $database: ${response.statusCode()} ${response.body()}" }
     }
 

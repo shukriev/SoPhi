@@ -256,4 +256,70 @@ class ArcadeHostTest : FunSpec({
             }
         }
     }
+
+    test("a client registers a database first at a higher version; the host's lower register is refused on use") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "old").use { host ->
+            ArcadeHost.open(root, engineVersion = "newer").use { client ->
+                client.register("db", 2)
+                client.withStore("db") { it.ensureSchema(documentTypes = listOf("Note")) }
+            }
+            host.register("db", 1)
+            shouldThrow<IncompatibleHostException> { host.withStore("db") { it.documents("Note") } }
+        }
+    }
+
+    test("two clients at different versions of a database the host never registers: the second is refused") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("other", 1)
+            ArcadeHost.open(root, engineVersion = "a").use { a ->
+                ArcadeHost.open(root, engineVersion = "b").use { b ->
+                    a.register("db", 1); a.withStore("db") { it.ensureSchema(documentTypes = listOf("Note")) }
+                    b.register("db", 2)
+                    shouldThrow<IncompatibleHostException> { b.withStore("db") { it.documents("Note") } }
+                    a.withStore("db") { it.documents("Note") } shouldBe emptyList()
+                }
+            }
+        }
+    }
+
+    test("the host may upgrade a database's schema 1 -> 2") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "v1").use { h ->
+            h.register("db", 1); h.withStore("db") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "k", emptyMap()) }
+        }
+        ArcadeHost.open(root, engineVersion = "v2").use { h ->
+            h.register("db", 2)
+            h.withStore("db") { it.documents("Note").size } shouldBe 1
+        }
+        ArcadeHost.open(root, engineVersion = "v1-again").use { h ->
+            h.register("db", 1)
+            shouldThrow<IncompatibleHostException> { h.withStore("db") { it.documents("Note") } }
+        }
+    }
+
+    test("after the host detaches a database and moves its directory, the client recovers on its next call") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("ctx", 1)
+            host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "x", emptyMap()) }
+            ArcadeHost.open(root, engineVersion = "test").use { client ->
+                client.register("ctx", 1)
+                client.withStore("ctx") { s -> s.documents("Note").size } shouldBe 1
+                host.detach("ctx")
+                Files.move(root.resolve("databases").resolve("ctx"), root.resolve("ctx.aside"))
+                runCatching { client.withStore("ctx") { s -> s.documents("Note") } } // the stale connection may fail once
+                client.withStore("ctx") { s -> s.ensureSchema(documentTypes = listOf("Note")); s.documents("Note") } shouldBe emptyList()
+            }
+        }
+    }
+
+    test("register rejects database names outside [A-Za-z0-9_-]") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { h ->
+            listOf("", "../x", "a b", "a;drop").forEach { shouldThrow<IllegalArgumentException> { h.register(it, 1) } }
+            h.register("ok_name-1", 1)
+        }
+    }
 })
