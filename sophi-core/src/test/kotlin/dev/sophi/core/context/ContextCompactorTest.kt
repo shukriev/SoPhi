@@ -7,8 +7,13 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
+import dev.sophi.core.prompt.PromptBuilder
+import dev.sophi.core.session.FileSessionManager
 import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -56,9 +61,12 @@ class ContextCompactorTest : FunSpec({
         val result = compactor.compact(s, config, keepRecentCount = 2)
 
         coVerify(exactly = 1) { provider.complete(any()) }
-        result.branch().first().role shouldBe EntryRole.SYSTEM
-        result.branch().first().content shouldBe "Previous conversation summary:\nSummary text."
+        result.branch().first().role shouldBe EntryRole.USER
+        result.branch().first().content shouldStartWith "Summary of the conversation so far:\n"
+        result.branch().first().content shouldContain "Summary text."
         result.branch().first().metadata["_compacted"] shouldBe "true"
+        result.branch()[1].role shouldBe EntryRole.ASSISTANT
+        result.branch()[1].content shouldBe "Understood — continuing from that summary."
     }
 
     test("compact() preserves the most recent keepRecentCount entries after the summary") {
@@ -72,10 +80,10 @@ class ContextCompactorTest : FunSpec({
         )
         val result = compactor.compact(s, config, keepRecentCount = 2)
 
-        // 1 summary entry + 2 recent
-        result.branch() shouldHaveSize 3
-        result.branch()[1].content shouldBe "recent-1"
-        result.branch()[2].content shouldBe "recent-2"
+        // 2 summary entries + 2 recent
+        result.branch() shouldHaveSize 4
+        result.branch()[2].content shouldBe "recent-1"
+        result.branch()[3].content shouldBe "recent-2"
     }
 
     test("compact() returns new AgentSession with same id") {
@@ -115,8 +123,9 @@ class ContextCompactorTest : FunSpec({
 
         val result = compactor.compact(s, config, keepRecentCount = 2)
 
-        result.branch().map { it.content } shouldBe
-            listOf("Previous conversation summary:\nsummary", "main-2", "main-3")
+        result.branch().map { it.content }.drop(1) shouldBe
+            listOf("Understood — continuing from that summary.", "main-2", "main-3")
+        result.branch().first().content shouldStartWith "Summary of the conversation so far:\n"
         result.checkout(side.id)
         result.branch().map { it.content } shouldBe listOf("a", "side-answer")
     }
@@ -184,5 +193,81 @@ class ContextCompactorTest : FunSpec({
         compactor.compact(s, config, keepRecentCount = 2)
         captured.captured.reasoningEffort shouldBe "none"
         captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.COMPACTOR
+    }
+
+    test("cross-turn summary is a leading USER/ASSISTANT pair and the first kept entry is a USER entry") {
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("## Goal\ng\n## Decisions & findings\nd\n## Errors & attempts\n-\n## Open items\n-", TokenUsage(1, 1))
+        val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3", EntryRole.ASSISTANT to "a3")
+        val out = compactor.compact(s, config, keepRecentCount = 3)   // a raw cut would start at "a2" - must move back to "u2"
+        val b = out.branch()
+        b[0].role shouldBe EntryRole.USER; b[0].content shouldStartWith "Summary of the conversation so far:"
+        b[1].role shouldBe EntryRole.ASSISTANT
+        b[2].content shouldBe "u2"
+        assertTemplateSafe(PromptBuilder.build(b))
+    }
+
+    test("a compacted session survives save and reload with the same prompt") {
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+        val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3", EntryRole.ASSISTANT to "a3")
+        val out = compactor.compact(s, config, keepRecentCount = 3)
+        val manager = FileSessionManager(tempdir().toPath())
+        manager.save(out)
+        val reloaded = manager.load(out.id)!!
+        PromptBuilder.build(reloaded.branch()) shouldBe PromptBuilder.build(out.branch())
+        reloaded.branch()[0].metadata["_workingSet"] shouldBe out.branch()[0].metadata["_workingSet"]
+        (reloaded.branch()[0].metadata["_workingSet"] != null) shouldBe true
+    }
+
+    test("no USER entry in the kept tail: the session is returned unchanged") {
+        val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.ASSISTANT to "a2", EntryRole.ASSISTANT to "a3")
+        compactor.compact(s, config, keepRecentCount = 2) shouldBe s
+        coVerify(exactly = 0) { provider.complete(any()) }
+    }
+
+    test("needsCompaction: by replayed size against half the window") {
+        val big = session(EntryRole.USER to "x".repeat(70_000), EntryRole.ASSISTANT to "y", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3", EntryRole.ASSISTANT to "a3")
+        compactor.needsCompaction(big, config, windowTokens = 32_000) shouldBe true
+        compactor.needsCompaction(session(EntryRole.USER to "hi"), config, 32_000) shouldBe false
+    }
+
+    test("needsCompaction: by replayed entry count") {
+        val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3", EntryRole.ASSISTANT to "a3")
+        compactor.needsCompaction(s, config.copy(maxBranchLength = 5), 32_000) shouldBe true
+        compactor.needsCompaction(s, config.copy(maxBranchLength = 6), 32_000) shouldBe false
+    }
+
+    test("needsCompaction ignores replay=false entries, and is false when compact would be a no-op") {
+        val s = session(EntryRole.USER to "u1", EntryRole.ASSISTANT to "a1", EntryRole.USER to "u2", EntryRole.ASSISTANT to "a2",
+            EntryRole.USER to "u3")
+        s.append(EntryRole.TOOL_RESULT, "z".repeat(200_000), mapOf("replay" to "false"))
+        compactor.needsCompaction(s, config, 32_000) shouldBe false
+        // over the size bar but nothing before the kept tail to summarise
+        val short = session(EntryRole.USER to "x".repeat(70_000), EntryRole.ASSISTANT to "y")
+        compactor.needsCompaction(short, config, 32_000) shouldBe false
+    }
+
+    test("a second cross-turn compaction keeps files and commands touched only before the first") {
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("s", TokenUsage(1, 1))
+        val s = AgentSession(id = "s-ws")
+        s.append(EntryRole.USER, "u1")
+        s.append(EntryRole.ASSISTANT, "", mapOf("replay" to "false", "toolCalls" to
+            """[{"id":"1","name":"read_file","argumentsJson":"{\"path\":\"Old.kt\"}"},{"id":"2","name":"bash","argumentsJson":"{\"command\":\"mvn old\"}"}]"""))
+        s.append(EntryRole.TOOL_RESULT, "x", mapOf("replay" to "false", "toolCallId" to "1", "toolName" to "read_file"))
+        s.append(EntryRole.TOOL_RESULT, "y", mapOf("replay" to "false", "toolCallId" to "2", "toolName" to "bash"))
+        listOf("a1" to "u2", "a2" to "u3", "a3" to "u4", "a4" to "u5").forEach { (a, u) ->
+            s.append(EntryRole.ASSISTANT, a); s.append(EntryRole.USER, u)
+        }
+        s.append(EntryRole.ASSISTANT, "a5")
+        val first = compactor.compact(s, config, keepRecentCount = 6)
+        first.branch()[0].content shouldContain "Old.kt"
+        first.append(EntryRole.USER, "u6"); first.append(EntryRole.ASSISTANT, "a6")
+        first.append(EntryRole.USER, "u7"); first.append(EntryRole.ASSISTANT, "a7")
+        val second = compactor.compact(first, config, keepRecentCount = 4)
+        second.branch()[0].content shouldContain "Old.kt"
+        second.branch()[0].content shouldContain "mvn old → exit 0"
     }
 })

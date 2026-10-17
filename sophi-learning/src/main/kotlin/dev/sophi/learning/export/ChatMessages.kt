@@ -7,7 +7,7 @@ import kotlinx.serialization.json.*
 object ChatMessages {
     fun fromEntries(entries: List<SessionEntry>, systemPrompt: String?): JsonArray = buildJsonArray {
         systemPrompt?.let { add(buildJsonObject { put("role", "system"); put("content", it) }) }
-        entries.forEach { e ->
+        entries.filter { it.metadata["_compacted"] != "true" }.forEach { e ->
             when {
                 e.role == EntryRole.ASSISTANT && e.metadata.containsKey("toolCalls") -> add(buildJsonObject {
                     put("role", "assistant"); put("content", "")

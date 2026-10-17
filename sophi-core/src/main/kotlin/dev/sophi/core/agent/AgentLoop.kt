@@ -8,11 +8,15 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
-import dev.sophi.ai.system1.Judgments
+import dev.sophi.core.context.CompactionMode
 import dev.sophi.core.context.ContextCompactor
+import dev.sophi.core.context.Elider
+import dev.sophi.core.context.Summariser
+import dev.sophi.core.context.WorkingSet
 import dev.sophi.core.prompt.PromptBuilder
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
@@ -55,6 +59,7 @@ private const val REPEAT_NOTE_THRESHOLD = 3
 private const val LOOP_GUARD_REPEAT_THRESHOLD = 6
 /** Enough recent rounds for the model to stay coherent about what it was just doing. */
 private const val COMPACTION_KEEP_RECENT_ROUNDS = 2
+private const val SUMMARY_MARKER = "\n\n[Earlier steps this turn, summarised]\n"
 /**
  * Compacting twice in a row without dropping back under the threshold means summarisation itself
  * is no longer buying room — stop cleanly rather than loop on it. Mirrors Claude Code's own
@@ -101,17 +106,30 @@ private class LoopGuardState(private val maxToolRounds: Int) {
     private var searchesBeyondScope = 0
     private var roundBudgetWarned = false
     private val repeatCounts = mutableMapOf<String, Int>()
+    private val totalCounts = mutableMapOf<String, Int>() // never forgiven: a call elided again and again still adds up
     private var repeatedTooOften: Pair<String, Int>? = null
+
+    private fun repeatKey(name: String, argumentsJson: String) = name + "\u0000" + argumentsJson.trim()
+
+    /** An elided result invites one re-read: restart that call's count so only a real loop afterwards trips the guard. */
+    fun forgive(name: String, argumentsJson: String) {
+        repeatCounts.remove(repeatKey(name, argumentsJson))
+    }
 
     /** Counts this call among identical ones (same tool, same arguments) this turn; returns the count. */
     fun countRepeat(name: String, argumentsJson: String): Int {
-        val key = name + "\u0000" + argumentsJson.trim()
+        val key = repeatKey(name, argumentsJson)
         val n = (repeatCounts[key] ?: 0) + 1
         repeatCounts[key] = n
+        val total = (totalCounts[key] ?: 0) + 1
+        totalCounts[key] = total
         if (n >= LOOP_GUARD_REPEAT_THRESHOLD) {
             repeatedTooOften = name to n
             repeatCounts[key] = 0 // a policy that says "continue" isn't asked again until 6 more
+        } else if (total >= 2 * LOOP_GUARD_REPEAT_THRESHOLD) {
+            repeatedTooOften = name to total
         }
+        if (total >= 2 * LOOP_GUARD_REPEAT_THRESHOLD) totalCounts[key] = 0
         return n
     }
 
@@ -181,9 +199,13 @@ class AgentLoop(
     private val contextWindowTokens: Int,
     /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
     private val compactionThreshold: Double = 0.8,
-    /** Called once per model request with that request's usage and kind ("turn" | "summarise"); failures never reach the loop. */
-    private val onUsage: (TokenUsage, String) -> Unit = { _, _ -> }
+    /** Called once per model request with that request's usage and kind ("turn" | "summarise" | "elide"); failures never reach the loop. */
+    private val onUsage: (TokenUsage, String) -> Unit = { _, _ -> },
+    /** How mid-turn compaction works: elide old tool results first (ELIDE/STRUCTURED), then summarise. */
+    private val compaction: CompactionMode = CompactionMode.STRUCTURED
 ) {
+    private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
+
     /** Scaled to [contextWindowTokens] so no single tool result can claim more than
      *  [MAX_TOOL_RESULT_FRACTION_OF_WINDOW] of whatever window this loop's model actually has. */
     private fun truncateToolResult(result: String): String {
@@ -215,10 +237,17 @@ class AgentLoop(
         return session
     }
 
+    private fun stubbedToolCallIds(messages: List<Message>): Set<String> =
+        messages.filter { it.role == MessageRole.TOOL && it.content.startsWith(Elider.PREFIX) }
+            .mapNotNull { it.toolCallId }.toSet()
+
     /**
-     * Summarises this turn's older tool rounds in place, leaving the prior-session prefix and the
-     * most recent [keepRecentRounds] rounds untouched. Returns false when there is nothing left to
-     * compact (already at the floor) — the caller treats that as context exhaustion.
+     * Relieves context pressure from this turn's own rounds, leaving the prior-session prefix and the
+     * most recent [keepRecentRounds] rounds untouched. First elides old tool results (no LLM call,
+     * when the mode allows); only if nothing was left to elide does it summarise, folding the older
+     * rounds into the turn's user message (never a mid-list SYSTEM message, which strict chat
+     * templates reject). Returns false when there is nothing left to compact (already at the floor) —
+     * the caller treats that as context exhaustion.
      *
      * Only ever called between rounds, never mid-round, and rounds are only ever appended whole
      * (ASSISTANT+toolCalls, then its TOOL results), so a cut can never split a tool call from its
@@ -228,6 +257,12 @@ class AgentLoop(
         messages: MutableList<Message>,
         turnStartIndex: Int,
         config: AgentConfig,
+        /** This turn's user message as sent before any summary was folded in. */
+        turnUserContent: String,
+        /** Raw, unelided rounds of the whole turn: the source of the summary's exact facts. */
+        rounds: List<PendingEntry>,
+        projectedInputTokens: Int,
+        triggerTokens: Int,
         keepRecentRounds: Int = COMPACTION_KEEP_RECENT_ROUNDS
     ): Boolean {
         val roundBoundaries = messages.indices
@@ -236,47 +271,64 @@ class AgentLoop(
                     messages[i].role == MessageRole.ASSISTANT &&
                     messages[i].toolCalls != null
             }
-        if (roundBoundaries.size <= keepRecentRounds) return false
+        if (roundBoundaries.size <= keepRecentRounds) return elideLargestRelief(messages, turnStartIndex, projectedInputTokens, triggerTokens)
+
+        var projected = projectedInputTokens
+        if (compaction.elides) {
+            val before = toolChars(messages, turnStartIndex)
+            if (Elider.elide(messages, turnStartIndex, keepRecentRounds) > 0) {
+                runCatching { onUsage(TokenUsage(0, 0), "elide") }
+                // Summarise only if still over: a stub can free little, and elision alone must not thrash.
+                val saved = before - toolChars(messages, turnStartIndex)
+                projected -= saved / CHARS_PER_TOKEN_ESTIMATE
+                if (projected < triggerTokens) {
+                    // Landing just under the trigger means the next round trips it again: top up toward 3/4.
+                    Elider.elideLargest(messages, turnStartIndex, (projected - triggerTokens * 3 / 4) * CHARS_PER_TOKEN_ESTIMATE)
+                    return true
+                }
+            }
+        }
 
         val cutIndex = roundBoundaries[roundBoundaries.size - keepRecentRounds]
         val toCompact = messages.subList(turnStartIndex, cutIndex).toList()
-        if (toCompact.isEmpty()) return false
 
-        val summary = summarise(toCompact, config)
-        messages.subList(turnStartIndex, cutIndex).clear()
-        messages.add(
-            turnStartIndex,
-            Message(MessageRole.SYSTEM, "Earlier steps this turn, summarised:\n$summary")
-        )
-        return true
-    }
+        // The user message may already carry an earlier summary after the turn's own text: feed it
+        // back in and replace it, so repeated compactions merge instead of stacking.
+        val userMessage = messages[turnStartIndex - 1]
+        val previous = userMessage.content.removePrefix(turnUserContent + SUMMARY_MARKER)
+            .takeIf { userMessage.content.startsWith(turnUserContent + SUMMARY_MARKER) }
 
-    /** One provider.complete() call, same prompt shape ContextCompactor uses for cross-turn work. */
-    private suspend fun summarise(toCompact: List<Message>, config: AgentConfig): String {
-        val transcript = toCompact.joinToString("\n") { message ->
+        val transcript = (previous?.let { "PREVIOUS SUMMARY:\n$it\n" } ?: "") + toCompact.joinToString("\n") { message ->
             val calls = message.toolCalls?.joinToString(", ") { "${it.name}(${it.argumentsJson})" }
             "${message.role.name}: ${message.content}" + (calls?.let { " [tool calls: $it]" } ?: "")
         }
-        val request = CompletionRequest(
-            messages = listOf(
-                Message(
-                    MessageRole.SYSTEM,
-                    "Summarise the following steps of an agent's work concisely, preserving key " +
-                        "facts, findings and decisions. Do not invent anything."
-                ),
-                Message(MessageRole.USER, transcript)
-            ),
-            model = config.model,
-            maxTokens = 512,
-            temperature = 0.3,
-            judgment = Judgments.LOOP_SUMMARISE
-        )
-        return when (val response = provider.complete(request)) {
-            is LLMResponse.Text -> response.content.also { runCatching { onUsage(response.usage, "summarise") } }
-            // A failed summarisation must not abort the turn — degrade to a truncated transcript.
-            else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
+        val workingSet = WorkingSet.fromEntries(rounds.mapIndexed { i, r ->
+            SessionEntry("r$i", null, r.role, r.content, 0L, r.metadata)
+        })
+        val summary = summariser.summarise(transcript, workingSet, config.model) {
+            runCatching { onUsage(it, "summarise") }
         }
+        messages.subList(turnStartIndex, cutIndex).clear()
+        messages[turnStartIndex - 1] = userMessage.copy(content = turnUserContent + SUMMARY_MARKER + summary)
+        // Still over after the summary: stub the largest remaining results too (the summarise already counts).
+        val afterSummary = projected - (toCompact.sumOf { it.content.length } - summary.length) / CHARS_PER_TOKEN_ESTIMATE
+        if (afterSummary >= triggerTokens) elideLargestRelief(messages, turnStartIndex, afterSummary, triggerTokens)
+        return true
     }
+
+    /** Elide modes: when whole rounds can't be cut, stub the largest results (newest round too) instead of giving up. */
+    private fun elideLargestRelief(messages: MutableList<Message>, from: Int, projected: Int, triggerTokens: Int): Boolean {
+        if (!compaction.elides) return false
+        // Aim well under the trigger, or the next round pushes it over again and the turn thrashes.
+        val needed = (projected - triggerTokens * 3 / 4) * CHARS_PER_TOKEN_ESTIMATE
+        val saved = Elider.elideLargest(messages, from, needed)
+        if (projected - saved / CHARS_PER_TOKEN_ESTIMATE >= triggerTokens) return false
+        runCatching { onUsage(TokenUsage(0, 0), "elide") }
+        return true
+    }
+
+    private fun toolChars(messages: List<Message>, from: Int): Int =
+        (from until messages.size).sumOf { if (messages[it].role == MessageRole.TOOL) messages[it].content.length else 0 }
 
     suspend fun turn(
         session: AgentSession,
@@ -335,7 +387,8 @@ class AgentLoop(
         // Volatile context (hints, recall) rides on this turn's request only: prefixed to the user
         // message so the system prompt and all of history stay a byte-stable, cacheable prefix.
         // Never persisted — every session.append below stores the raw userInput.
-        messages.add(Message(MessageRole.USER, turnPreamble?.let { "$it\n\n$userInput" } ?: userInput))
+        val turnUserContent = turnPreamble?.let { "$it\n\n$userInput" } ?: userInput
+        messages.add(Message(MessageRole.USER, turnUserContent))
         // Everything from here on is this turn's own accumulated rounds — the only region
         // mid-loop compaction is ever allowed to touch. The prior-session prefix in front of it
         // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
@@ -412,8 +465,8 @@ class AgentLoop(
                 session.append(EntryRole.ASSISTANT, contentBuf.toString())
                 sessionManager.save(session)
 
-                return if (compactor != null && session.branch().size > config.maxBranchLength) {
-                    compactor.compact(session, config).also { sessionManager.save(it) }
+                return if (compactor != null && compactor.needsCompaction(session, config, contextWindowTokens)) {
+                    compactor.compact(session, config, onUsage = { runCatching { onUsage(it, "summarise") } }).also { sessionManager.save(it) }
                 } else {
                     session
                 }
@@ -538,7 +591,13 @@ class AgentLoop(
                 // value that just triggered compaction — so the reset lives here, not inline.
                 compactionsWithoutRelief = 0
             } else {
-                if (!compactInPlace(messages, turnStartIndex, config)) {
+                val stubbedBefore = stubbedToolCallIds(messages)
+                val compacted = compactInPlace(messages, turnStartIndex, config, turnUserContent, pendingRounds, projectedInputTokens, compactionTriggerTokens)
+                (stubbedToolCallIds(messages) - stubbedBefore).forEach { id ->
+                    messages.firstNotNullOfOrNull { m -> m.toolCalls?.firstOrNull { it.id == id } }
+                        ?.let { loopGuardState.forgive(it.name, it.argumentsJson) }
+                }
+                if (!compacted) {
                     return finishEarly(
                         session, userInput, turn,
                         "context budget exhausted — a single round's output exceeds the compaction floor",

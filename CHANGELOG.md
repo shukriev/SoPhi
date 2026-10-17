@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Compaction summaries are no longer SYSTEM messages: mid-turn they are appended to the turn's user message, cross-turn they are a leading USER/ASSISTANT pair, so strict chat templates accept them (ADR-041, M4)
+- Compaction elides old tool output before summarising (no LLM call when that is enough), and an oversized parallel round of tool results is stubbed instead of ending the turn with `ContextExhausted` in the `elide` and `structured` modes; E4 on a small local model in `evals/context/RESULTS.md`
 - Context hint gate: the top-1/top-2 ratio threshold rises from 1.0 to 1.25 — live E1 negatives showed the old gate firing on 6 of 10 chit-chat messages against the SoPhi index, the new one on none; live E1/E5 results on a small local model recorded in `evals/context/RESULTS.md` (ADR-041)
 
 ### Added
+- Automatic cross-turn compaction in every SDK runtime, structured summaries (Goal, Decisions & findings, Files touched, Commands & outcomes, Errors & attempts, Open items — the file and command lists computed from the real tool calls, not the model's memory), and the internal `SOPHI_COMPACTION` knob: `structured` (default) | `elide` | `generic` (ADR-041, M4)
 - Context engine, session scope and management surface (ADR-041, M3): a session searches its own project plus every project marked global, and is oriented on its own project only; `sophi context global <id|dir> on|off` (and `list` shows `global`); `ContextEngine.status()` (role, per-project info, disk size), `setGlobal`, `unavailableReason` and scan progress; `IndexReset` is now a library call in `sophi-context` so apps can reset the index
 - Context orientation: global and project instruction files (`AGENTS.md`, `CLAUDE.md`, `.sophi/instructions.md`) framed as project conventions plus a compact project map in the system prompt, within a token budget; and a gated per-turn context hint of up to 3 file pointers when a message clearly matches the indexed project (ADR-041, M2)
 - `sophi-context`: a lexical context index over your projects — `search_context`, `read_context` and `project_map` tools and `sophi context add|list|remove|reset|eval`; the working directory is registered automatically only inside a git repo (or a folder with an instruction file), never `$HOME` or `/`; retrieval scored by `sophi context eval` (ADR-041)

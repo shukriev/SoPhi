@@ -216,7 +216,47 @@ corpus size (see the Limits above), so a higher floor (15 / 1.0 has more coverag
 SoPhi's size. Cost: about half the real questions get no hint (they still have `search_context`). The live run
 above used the old gate (10 / 1.0); the new default is calibrated offline, not re-run live.
 
+## E4 compaction (small local model, 2026-10-15)
+
+Setup: `sophi-cli` at a3637a7, model `prism-ml/bonsai-27b` on LM Studio, window 16,384, max tokens 4,096, runner
+`sophi-arena/context_qa` (branch feat/context-qa, fa5e44e), run `runs/context-qa/20261015-213726`. 5 prompts, each
+pairing two of the planned 10 repo questions: the 10 single questions finished in about 3 rounds and never
+compacted, so the pairs make turns long enough to. One run per prompt per config, configs interleaved. Success =
+the answer holds the labelled values (rescored, see below).
+
+Pass rule (fixed before running, paired n=5): a variant beats G if success rises, or total tokens fall >= 10%
+without success falling.
+
+| Config | Compactor (`SOPHI_COMPACTION`) | Success | Total tokens | Median tokens | Summarise | Elide | Early stops |
+|---|---|---|---|---|---|---|---|
+| G | generic (today's compactor) | 3/5 | 157,549 | 21,320 | 1 | 0 | 2 (ContextExhausted, no answer) |
+| L | elide | 5/5 | 177,031 | 32,065 | 0 | 3 | 0 |
+| S | structured (default) | 5/5 | 253,809 | 32,341 | 0 | 3 | 0 |
+
+Verdicts: L beats G (success 5/5 vs 3/5); S beats G (success 5/5 vs 3/5). G's totals are lower only because two
+of its runs stopped after 1 to 2 calls.
+
+Findings:
+- bonsai issues 8-10 parallel reads in one round. At 16k that round alone overflowed the compaction trigger, and
+  the old compactor, which could only cut whole older rounds, had to end the turn. This drove the elide modes'
+  `Elider.elideLargest`: stub the largest results, the newest round included, down to 3/4 of the trigger. A result
+  the model has not seen yet is stubbed as "too large to show at once; re-read a smaller part or narrow the request".
+- The summariser never ran for L or S: elision alone always brought relief. So L and S executed the same path, and
+  the token gap between them is one long S run (125,945 tokens in all, 15 calls), i.e. run variance, not a cost of the
+  structured summary.
+- Scoring fixes made during analysis: Kotlin literals (`3_000`, `50L`) and qualified names
+  (`AnthropicCacheStrategy.SYSTEM_AND_TOOLS`) were wrongly rejected. 4 runs were rescored
+  (`results.rescored.jsonl`), each verified by reading the answer.
+
+Decision: the default stays `structured` (`SOPHI_COMPACTION`, no code change to defaults). E4 validated elision
+and the oversized-round handling against today's compactor. It did not exercise the structured summary live: with
+this model and these prompts the summariser was never needed. A longer-task run, where summaries must be
+written, would settle structured against generic summaries.
+
+Limits: the E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only. Single runs, one small local model (bonsai only), n=5 prompts, of which 2 never compacted in any config, so the decision rests on 3 informative prompts (2 decisive): effective n=3, and 2 successes of difference is a small
+sample; no frontier model.
+
 ## Still pending
 
-Frontier-model E1/E5 and the live Anthropic cache check (procedure: `evals/context/EXPERIMENTS.md`); a harder
+Frontier-model E1/E5, a longer-task E4 that exercises the summary, and the live Anthropic cache check (procedure: `evals/context/EXPERIMENTS.md`); a harder
 task set if success differences matter.

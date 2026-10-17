@@ -1,75 +1,95 @@
 package dev.sophi.core.context
 
-import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
-import dev.sophi.ai.api.LLMResponse
-import dev.sophi.ai.api.Message
-import dev.sophi.ai.api.MessageRole
-import dev.sophi.ai.system1.Judgments
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
-class ContextCompactor(private val provider: LLMProvider) {
+private val lenientJson = Json { ignoreUnknownKeys = true }
+
+class ContextCompactor(
+    private val provider: LLMProvider,
+    private val summariser: Summariser = Summariser(provider, CompactionMode.STRUCTURED, 32_000, dev.sophi.ai.system1.Judgments.COMPACTOR)
+) {
+
+    /**
+     * Replayed size against half the window, or too many replayed entries; non-replayed tool rounds
+     * never count. False whenever [compact] would be a no-op, so a turn never pays for a pointless call.
+     */
+    fun needsCompaction(session: AgentSession, config: AgentConfig, windowTokens: Int, keepRecentCount: Int = 4): Boolean {
+        val replayable = session.branch().filter { it.metadata["replay"] != "false" }
+        if (cutIndex(replayable, keepRecentCount) <= 0) return false
+        return replayable.sumOf { it.content.length } / 4 > windowTokens * 0.5 || replayable.size > config.maxBranchLength
+    }
+
+    /** Start of the kept tail, moved back to a USER entry (a strict template rejects a leading ASSISTANT); <= 0 = nothing to do. */
+    private fun cutIndex(replayable: List<SessionEntry>, keepRecentCount: Int): Int {
+        if (replayable.size <= keepRecentCount) return 0
+        var cut = replayable.size - keepRecentCount
+        while (cut > 0 && replayable[cut].role != EntryRole.USER) cut--
+        return cut
+    }
 
     suspend fun compact(
         session: AgentSession,
         config: AgentConfig,
-        keepRecentCount: Int = 4
+        keepRecentCount: Int = 4,
+        onUsage: (dev.sophi.ai.api.TokenUsage) -> Unit = {}
     ): AgentSession {
         val entries = session.branch()
         // replay=false entries (e.g. persisted tool rounds) are inert for prompting; keep them in
-        // the DAG but exclude them from both the summary input and the keep/compact split so the
-        // summary never leaks raw tool output and keepRecentCount counts real conversation entries.
+        // the DAG but exclude them from the transcript and the keep/compact split so the summary
+        // never leaks raw tool output and keepRecentCount counts real conversation entries.
         val replayable = entries.filter { it.metadata["replay"] != "false" }
-        if (replayable.size <= keepRecentCount) return session
+        // The kept tail must open on a USER entry: the summary pair ends on ASSISTANT.
+        val cut = cutIndex(replayable, keepRecentCount)
+        if (cut <= 0) return session
 
-        val toCompact = replayable.dropLast(keepRecentCount)
-        val toKeep = replayable.takeLast(keepRecentCount)
+        val toCompact = replayable.subList(0, cut)
+        val toKeep = replayable.subList(cut, replayable.size)
+        val firstKeptId = toKeep.first().id
 
-        val summaryPrompt = toCompact.joinToString("\n") { entry ->
-            "${entry.role.name}: ${entry.content}"
-        }
-        val summaryRequest = CompletionRequest(
-            messages = listOf(
-                Message(MessageRole.SYSTEM, "Summarise the following conversation concisely, preserving key facts and decisions."),
-                Message(MessageRole.USER, summaryPrompt)
-            ),
-            model = config.model,
-            maxTokens = 512,
-            // A thinking model would spend the 512-token budget reasoning and return no summary.
-            reasoningEffort = "none",
-            temperature = 0.3,
-            judgment = Judgments.COMPACTOR
-        )
+        val transcript = toCompact.joinToString("\n") { entry -> "${entry.role.name}: ${entry.content}" }
+        // The WorkingSet reads the persisted tool rounds too, so exact files/commands survive the cut.
+        // A previous cross-turn summary carries its own WorkingSet (the rounds it covered are gone from the branch).
+        val previous = entries.firstOrNull()?.takeIf { it.metadata["_compacted"] == "true" }
+            ?.metadata?.get("_workingSet")?.let { runCatching { lenientJson.decodeFromString<WorkingSet>(it) }.getOrNull() }
+        val fresh = WorkingSet.fromEntries(entries.takeWhile { it.id != firstKeptId })
+        val workingSet = previous?.merge(fresh) ?: fresh
+        val summary = summariser.summarise(transcript, workingSet, config.model, onUsage)
 
-        val summary = when (val response = provider.complete(summaryRequest)) {
-            is LLMResponse.Text -> response.content
-            else -> toCompact.joinToString("; ") { "${it.role.name}: ${it.content.take(80)}" }
-        }
-
-        // Replace only the compacted prefix of the active branch: the summary becomes a new
+        // Replace only the compacted prefix of the active branch: the summary pair becomes a new
         // root and the first kept entry is re-parented onto it. Entries on other branches
         // (and the compacted prefix itself) stay in the DAG untouched.
+        val now = System.currentTimeMillis()
         val summaryEntry = SessionEntry(
             id = UUID.randomUUID().toString(),
             parentId = null,
-            role = EntryRole.SYSTEM,
-            content = "Previous conversation summary:\n$summary",
-            timestamp = System.currentTimeMillis(),
+            role = EntryRole.USER,
+            content = "Summary of the conversation so far:\n$summary",
+            timestamp = now,
+            metadata = mapOf("_compacted" to "true", "_workingSet" to Json.encodeToString(workingSet))
+        )
+        val ackEntry = SessionEntry(
+            id = UUID.randomUUID().toString(),
+            parentId = summaryEntry.id,
+            role = EntryRole.ASSISTANT,
+            content = "Understood — continuing from that summary.",
+            timestamp = now,
             metadata = mapOf("_compacted" to "true")
         )
-        val firstKeptId = toKeep.first().id
         val rewritten = session.entries.map { entry ->
-            if (entry.id == firstKeptId) entry.copy(parentId = summaryEntry.id) else entry
+            if (entry.id == firstKeptId) entry.copy(parentId = ackEntry.id) else entry
         }
         return AgentSession(
             id = session.id,
             title = session.title,
             parentSessionId = session.parentSessionId,
-            initialEntries = listOf(summaryEntry) + rewritten,
+            initialEntries = listOf(summaryEntry, ackEntry) + rewritten,
             initialTipId = session.tip?.id
         )
     }

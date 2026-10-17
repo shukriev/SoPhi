@@ -1,5 +1,8 @@
 package dev.sophi.sdk
 
+import dev.sophi.core.context.CompactionMode
+import dev.sophi.core.context.ContextCompactor
+import dev.sophi.core.context.Summariser
 import dev.sophi.context.ContextBudget
 import dev.sophi.context.ContextEngine
 import dev.sophi.context.HintGate
@@ -257,8 +260,14 @@ class RuntimeBuilder {
             systemPrompt = harnessConfig?.systemPrompt ?: systemPrompt
         )
         val effectiveLearningConfig = harnessConfig?.let { hc -> learningConfig?.copy(maxRecalledLessons = hc.maxRecalledLessons) } ?: learningConfig
+        val compactionMode = when (knob("SOPHI_COMPACTION", "structured", "elide", "generic")) {
+            "elide" -> CompactionMode.ELIDE
+            "generic" -> CompactionMode.GENERIC
+            else -> CompactionMode.STRUCTURED
+        }
         val loop = AgentLoop(
             p, registry, sm,
+            compactor = ContextCompactor(p, Summariser(p, compactionMode, window, dev.sophi.ai.system1.Judgments.COMPACTOR)), compaction = compactionMode,
             confirmationPolicy = confirmationPolicy, grants = grants,
             loopGuard = loopGuardPolicy,
             contextWindowTokens = window,
@@ -371,7 +380,7 @@ class RuntimeBuilder {
         val schedulesDir = scheduleDir ?: Path.of(System.getProperty("user.home"), ".sophi", "schedule")
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
-            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first
+            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode
         )
     }
 }

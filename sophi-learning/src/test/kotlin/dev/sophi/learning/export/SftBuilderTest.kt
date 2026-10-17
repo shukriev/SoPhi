@@ -29,6 +29,15 @@ class SftBuilderTest : FunSpec({
         messages[4].jsonObject.getValue("content").jsonPrimitive.content shouldBe "done"
     }
 
+    test("compaction summary entries are not exported as training turns") {
+        val line = SftBuilder { it }.build(listOf(
+            e(EntryRole.USER, "Summary of the conversation so far:\nx", mapOf("_compacted" to "true")),
+            e(EntryRole.ASSISTANT, "Understood", mapOf("_compacted" to "true")),
+            e(EntryRole.USER, "hi"), e(EntryRole.ASSISTANT, "hello")), systemPrompt = null)
+        val messages = Json.parseToJsonElement(line).jsonObject.getValue("messages").jsonArray
+        messages.map { it.jsonObject.getValue("content").jsonPrimitive.content } shouldBe listOf("hi", "hello")
+    }
+
     test("legacy session without tool rounds or snapshot: conversation-only, no system message") {
         val line = SftBuilder { it }.build(listOf(
             e(EntryRole.USER, "hi"), e(EntryRole.ASSISTANT, "hello")), systemPrompt = null)
