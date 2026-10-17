@@ -53,7 +53,7 @@ class ArcadeHost private constructor(
 
     companion object {
         private const val POLL_MILLIS = 50L
-        private const val SCHEMA_TYPE = "SophiSchema"
+        internal const val SCHEMA_TYPE = "SophiSchema"
         private const val SCHEMA_ID = "schema"
         private val DATABASE_NAME = Regex("[A-Za-z0-9_-]+")
         private const val PRE_M6_SENTINEL = -1
