@@ -138,6 +138,10 @@ object LegacyMigration {
 
 /** Opens [database] on the shared server at [root], adopting `<legacyHome>/arcadedb` the first time (host only). */
 object SharedStore {
+    /** True when [a] and [b] are the same directory however spelled (symlink, case on a case-insensitive disk); a path that doesn't exist yet compares absolute+normalized. */
+    fun samePath(a: Path, b: Path): Boolean = canonical(a) == canonical(b)
+    private fun canonical(p: Path): Path = runCatching { p.toRealPath() }.getOrElse { p.toAbsolutePath().normalize() }
+
     /**
      * Throws IllegalStateException (one-line message) when legacy data can't be adopted this run; IncompatibleHostException on schema mismatch.
      *
