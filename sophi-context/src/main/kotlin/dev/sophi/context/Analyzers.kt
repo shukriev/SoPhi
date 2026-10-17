@@ -44,8 +44,9 @@ object Analyzers {
     private fun kindOf(m: MatchResult): String =
         WORD.findAll(m.value.removeSuffix(m.groupValues[1])).map { it.value }.lastOrNull { it in KINDS } ?: "declaration"
 
-    private val JVM_IMPORT = Regex("""^import\s+(?:static\s+)?([A-Za-z_][\w.]*?)(\.\*)?\s*(?:\bas\s+\w+)?\s*;?\s*$""")
+    private val JVM_IMPORT = Regex("""^import\s+(?:static\s+)?([A-Za-z_][\w.]*?)(\.\*)?\s*(?:\bas\s+\w+)?\s*;?\s*(?://.*)?$""")
     private val JS_FROM = Regex("""(?:^|[\s;])(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]""")
+    private val JS_CLOSE = Regex("""^\s*\}\s*from\s*['"]([^'"]+)['"]""")   // last line of a multi-line import/export { … } from
     private val JS_BARE = Regex("""^\s*import\s*['"]([^'"]+)['"]""")
     private val JS_REQUIRE = Regex("""\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)""")
     private val PY_IMPORT = Regex("""^import\s+(.+)$""")
@@ -64,7 +65,7 @@ object Analyzers {
     // ponytail: line regexes, so a multi-line Python `from x import (\n a,\n b)` yields only `x`; a parser waits for an experiment.
     private fun imports(lang: String, lines: List<String>): List<String> = when (lang) {
         "kotlin", "java" -> lines.mapNotNull { l -> JVM_IMPORT.find(l.trim())?.takeIf { it.groupValues[2].isEmpty() }?.groupValues?.get(1) }
-        "typescript", "javascript" -> lines.flatMap { l -> listOf(JS_FROM, JS_BARE, JS_REQUIRE).flatMap { r -> r.findAll(l).map { it.groupValues[1] } } }
+        "typescript", "javascript" -> lines.flatMap { l -> listOf(JS_FROM, JS_CLOSE, JS_BARE, JS_REQUIRE).flatMap { r -> r.findAll(l).map { it.groupValues[1] } } }
         "python" -> lines.flatMap { l ->
             PY_FROM.find(l)?.let { m ->
                 val mod = m.groupValues[1]

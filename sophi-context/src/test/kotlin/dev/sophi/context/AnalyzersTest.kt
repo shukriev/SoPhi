@@ -106,4 +106,10 @@ class AnalyzersTest : FunSpec({
         Analyzers.analyze("notes/t.md", Role.DOC, "markdown", md).links shouldContainExactly
             listOf("[[Other Note]]", "[[folder/Deep]]", "[[H]]", "../doc/x.md", "./z.md")
     }
+
+    test("imports: multi-line TS import and export-from, trailing comment on kotlin import") {
+        Analyzers.analyze("a.ts", Role.SOURCE, "typescript", "import {\n  a,\n  b,\n} from './x'\nexport {\n  c,\n} from \"./y\"\nexport { d } from './z'\n").imports shouldContainExactly
+            listOf("./x", "./y", "./z")
+        Analyzers.analyze("A.kt", Role.SOURCE, "kotlin", "import a.b.C // why\nimport a.b.D;  // also\n").imports shouldContainExactly listOf("a.b.C", "a.b.D")
+    }
 })
