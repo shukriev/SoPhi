@@ -164,7 +164,7 @@ private class FindSymbolTool(private val engine: ContextEngine, private val proj
         val name = args.name.trim()
         val defs = engine.findSymbol(name, ids) ?: return ContextEngine.NOT_READY
         val defFiles = defs.map { it.projectId to it.path }.toSet()
-        val mentions = (engine.search(name, ids, 10) ?: emptyList()).filter { (it.projectId to it.path) !in defFiles }.take(5)
+        val mentions = (engine.search(name, ids, 10, vectors = false) ?: emptyList()).filter { (it.projectId to it.path) !in defFiles }.take(5)
         val note = indexingNote(projects)
         if (defs.isEmpty() && mentions.isEmpty()) return (note?.plus("\n") ?: "") + "No definition or mention of $name — try search_context or grep"
         val names = projects.associate { it.id to it.name }

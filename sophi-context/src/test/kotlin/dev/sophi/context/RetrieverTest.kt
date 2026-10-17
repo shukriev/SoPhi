@@ -58,4 +58,29 @@ class RetrieverTest : FunSpec({
         r.search("the and of", listOf("p")) shouldBe emptyList()
         r.search("alpha", emptyList()) shouldBe emptyList()
     }
+
+    fun vectorStore(files: Map<String, String>) =
+        indexedStore(autoClose(EmbeddedArcadeStore.open(tempdir().toPath())), tempdir().toPath(), files, ChunkEmbedder(FakeEmbeddings(), "fake"))
+    val corpus = mapOf("cars/Garage.kt" to "class Garage { fun park(car: Car) {} }", "fruit/Bowl.kt" to "class Bowl { val banana = 1 }",
+        "misc/Storage.kt" to "class Storage { fun storage() = 1 }")
+
+    test("a query with no lexical match returns vector hits") {
+        val s = vectorStore(corpus)
+        Retriever(s).search("automobile", listOf("p")) shouldBe emptyList()
+        Retriever(s, queryVector = { ChunkEmbedder(FakeEmbeddings(), "fake").queryVector(it) }).search("automobile", listOf("p")).first().path shouldBe "cars/Garage.kt"
+    }
+
+    test("RRF adds the vector match next to the lexical one") {
+        val s = vectorStore(corpus)
+        Retriever(s).search("automobile storage", listOf("p")).map { it.path } shouldBe listOf("misc/Storage.kt")
+        val fused = Retriever(s, queryVector = { ChunkEmbedder(FakeEmbeddings(), "fake").queryVector(it) }).search("automobile storage", listOf("p")).map { it.path }
+        fused.take(2).toSet() shouldBe setOf("misc/Storage.kt", "cars/Garage.kt")
+    }
+
+    test("a failing query embedding gives exactly the lexical ranking") {
+        val s = vectorStore(corpus)
+        val lexical = Retriever(s).search("garage storage banana", listOf("p"))
+        Retriever(s, queryVector = { error("down") }).search("garage storage banana", listOf("p")) shouldBe lexical
+        Retriever(s, queryVector = { null }).search("garage storage banana", listOf("p")) shouldBe lexical
+    }
 })
