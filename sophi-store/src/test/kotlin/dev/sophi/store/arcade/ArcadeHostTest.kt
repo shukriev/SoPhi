@@ -139,4 +139,121 @@ class ArcadeHostTest : FunSpec({
             client.role shouldBe Role.HOST
         }
     }
+
+    test("one host serves several databases; a second instance reaches each by name") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("ctx", 1); host.register("mem", 1)
+            host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "c", mapOf("v" to 1)) }
+            host.withStore("mem") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "m", mapOf("v" to 2)) }
+            ArcadeHost.open(root, engineVersion = "test").use { client ->
+                client.role shouldBe Role.CLIENT
+                client.register("ctx", 1); client.register("mem", 1)
+                client.withStore("ctx") { s -> s.documents("Note").map { it["id"] } } shouldBe listOf("c")
+                client.withStore("mem") { s -> s.documents("Note").map { it["id"] } } shouldBe listOf("m")
+            }
+        }
+    }
+
+    test("host.json lists each schema and a sentinel schemaVersion that every pre-M6 client refuses") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("ctx", 1); host.register("mem", 1) // all registered schemas agree; the sentinel stays
+            val file = root.resolve("host.json")
+            val json = JSONObject(Files.readString(file))
+            json.getJSONObject("schemas").getInt("ctx") shouldBe 1
+            json.getJSONObject("schemas").getInt("mem") shouldBe 1
+            json.getInt("schemaVersion") shouldBe -1
+            // A pre-M6 client reads only schemaVersion: drop `schemas` and let the old-format check run.
+            json.remove("schemas")
+            Files.writeString(file, json.toString())
+            ArcadeHost.open(root, engineVersion = "m5").use { old ->
+                old.role shouldBe Role.CLIENT
+                shouldThrow<IncompatibleHostException> { old.register("ctx", 1) }
+            }
+        }
+    }
+
+    test("a client register checks a database the host registered after the client attached") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("ctx", 1)
+            ArcadeHost.open(root, engineVersion = "newer").use { client ->
+                client.role shouldBe Role.CLIENT
+                host.register("mem", 1)
+                shouldThrow<IncompatibleHostException> { client.register("mem", 2) }
+                client.register("ctx", 1)
+            }
+        }
+    }
+
+    test("a schema mismatch refuses only that database") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("ctx", 1); host.register("mem", 1)
+            host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "c", emptyMap()) }
+            ArcadeHost.open(root, engineVersion = "newer").use { client ->
+                shouldThrow<IncompatibleHostException> { client.register("mem", 2) }
+                client.register("ctx", 1)
+                client.withStore("ctx") { s -> s.documents("Note").size } shouldBe 1
+            }
+        }
+    }
+
+    test("an old-format host.json (one schemaVersion, no schemas) is checked against every database") {
+        val root = tempdir().toPath()
+        LocalArcadeServer.start(root).use { srv ->
+            externalLock(root).use { ch -> ch.lock().use {
+                Files.writeString(root.resolve("host.json"), JSONObject().put("pid", ProcessHandle.current().pid())
+                    .put("port", srv.port).put("engineVersion", "m5").put("schemaVersion", 1).toString())
+                ArcadeHost.open(root, engineVersion = "test").use { client ->
+                    client.role shouldBe Role.CLIENT
+                    client.register("context", 1)
+                    shouldThrow<IncompatibleHostException> { client.register("memory", 2) }
+                }
+            } }
+        }
+    }
+
+    test("users are counted; a detached database starts empty after its directory moves") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("ctx", 1); host.register("ctx", 1)
+            host.users("ctx") shouldBe 2
+            host.unregister("ctx"); host.unregister("ctx")
+            host.users("ctx") shouldBe 0
+            host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "x", emptyMap()) }
+            host.detach("ctx")
+            Files.move(root.resolve("databases").resolve("ctx"), root.resolve("ctx.aside"))
+            host.withStore("ctx") { s -> s.ensureSchema(documentTypes = listOf("Note")); s.documents("Note") } shouldBe emptyList()
+        }
+    }
+
+    test("a corrupt database does not stop the host serving another") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { h -> h.register("bad", 1); h.withStore("bad") { it.ensureSchema(documentTypes = listOf("Note")) } }
+        Files.walk(root.resolve("databases").resolve("bad")).use { s ->
+            s.filter { Files.isRegularFile(it) }.forEach { Files.write(it, ByteArray(4096) { i -> (i * 31 + 7).toByte() }) }
+        }
+        ArcadeHost.open(root, engineVersion = "test").use { h ->
+            h.register("good", 1)
+            h.withStore("good") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "ok", emptyMap()); it.documents("Note").size } shouldBe 1
+        }
+    }
+
+    test("a client reaches a database the current host has not opened, on disk or new") {
+        val root = tempdir().toPath()
+        ArcadeHost.open(root, engineVersion = "test").use { h ->
+            h.register("old", 1); h.withStore("old") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "kept", emptyMap()) }
+        }
+        ArcadeHost.open(root, engineVersion = "test").use { host ->
+            host.register("other", 1)
+            ArcadeHost.open(root, engineVersion = "test").use { client ->
+                client.register("old", 1)
+                client.withStore("old") { s -> s.documents("Note").map { it["id"] } } shouldBe listOf("kept")
+                client.register("fresh", 1)
+                client.withStore("fresh") { s -> s.ensureSchema(documentTypes = listOf("Note")); s.documents("Note") } shouldBe emptyList()
+            }
+        }
+    }
 })

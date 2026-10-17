@@ -77,11 +77,19 @@ class LocalArcadeServer private constructor(
             setValue(GlobalConfiguration.SERVER_HTTP_INCOMING_PORT, port.toString())
             setValue(GlobalConfiguration.SERVER_PLUGINS, "")
             setValue(GlobalConfiguration.SERVER_METRICS, false)
+            // Open each database on first use, so one corrupt database cannot stop the server serving the rest.
+            setValue(GlobalConfiguration.SERVER_DATABASE_LOADATSTARTUP, false)
         }
     }
 
     /** The named database, created on first use. Shares the server's open instance. */
     fun database(name: String): Database = server.getOrCreateDatabase(name)
+
+    /** Closes [name] if it is open so its directory can be moved; the next [database] call reopens or recreates it. */
+    fun closeDatabase(name: String) {
+        if (server.existsDatabase(name)) runCatching { server.getDatabase(name).wrappedDatabaseInstance.close() }
+        server.removeDatabase(name)
+    }
 
     override fun close() = server.stop()
 }
