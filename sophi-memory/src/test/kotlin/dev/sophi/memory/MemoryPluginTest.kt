@@ -15,8 +15,10 @@ private class ScriptedTechnique : MemoryTechnique {
     val observed = java.util.concurrent.CopyOnWriteArrayList<TurnObservation>()
     var recallAnswer: MemoryBlock? = null
     var throwOnObserve = false
+    var observeDelayMs = 0L
     override suspend fun recall(query: RecallQuery): MemoryBlock? = recallAnswer
     override suspend fun observe(turn: TurnObservation) {
+        kotlinx.coroutines.delay(observeDelayMs)
         if (throwOnObserve) error("encode kaput"); observed += turn
     }
     override suspend fun consolidate(nowMs: Long) = ConsolidationReport(0, 0, 0, 0, 0)
@@ -69,6 +71,25 @@ class MemoryPluginTest : FunSpec({
         hook.invoke(HookContext("s1", userInput = "u", assistantReply = "a"))
         plugin.drainEncodes()                                      // must not throw
         plugin.close()
+    }
+
+    test("close() lets an in-flight encode finish: the session's last turn is not lost") {
+        val t = ScriptedTechnique().apply { observeDelayMs = 300 }
+        val plugin = MemoryPlugin(t)
+        plugin.hooks().single { it.point == HookPoint.AFTER_TURN }
+            .invoke(HookContext("s1", userInput = "remember the passport", assistantReply = "noted"))
+        plugin.close()
+        t.observed.single().userInput shouldBe "remember the passport"
+    }
+
+    test("close() gives up on an encode that outlasts the drain timeout") {
+        val t = ScriptedTechnique().apply { observeDelayMs = 60_000 }
+        val plugin = MemoryPlugin(t, drainTimeoutMs = 100)
+        plugin.hooks().single { it.point == HookPoint.AFTER_TURN }
+            .invoke(HookContext("s1", userInput = "u", assistantReply = "a"))
+        val ms = kotlin.system.measureTimeMillis { plugin.close() }
+        (ms < 5_000) shouldBe true
+        t.observed.size shouldBe 0
     }
 
     test("palace() returns the technique when it is a JanesPalace") {

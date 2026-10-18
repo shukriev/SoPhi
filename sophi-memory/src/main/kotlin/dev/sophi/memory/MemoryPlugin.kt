@@ -12,6 +12,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -21,7 +23,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 class MemoryPlugin(
     val technique: MemoryTechnique,
-    private val clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis,
+    /** How long [close] waits for in-flight encodes before cancelling them. */
+    private val drainTimeoutMs: Long = 30_000
 ) : SophiPlugin, ContextContributor {
     override val placement = Placement.VOLATILE
 
@@ -63,13 +67,16 @@ class MemoryPlugin(
         else null
     }
 
-    /** Test hook: await all in-flight encodes. */
+    /** Awaits all in-flight encodes. */
     suspend fun drainEncodes() { inFlight.toList().forEach { it.join() } }
 
     /** The palace-specific read surface (browse/threads/profileView), or null for any other technique. */
     fun palace(): dev.sophi.memory.jane.JanesPalace? = technique as? dev.sophi.memory.jane.JanesPalace
 
+    /** Lets in-flight encodes finish (up to [drainTimeoutMs]) first: a session usually ends right after
+     *  its last turn, whose encode is still running, and cancelling it would lose that turn's memories. */
     fun close() {
+        runCatching { runBlocking { withTimeoutOrNull(drainTimeoutMs) { drainEncodes() } } }
         encodeScope.cancel()
         (technique as? dev.sophi.memory.jane.JanesPalace)?.close()
     }
