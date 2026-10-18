@@ -57,6 +57,7 @@ class ContextEngine(
     @Volatile var unavailableReason: String? = null; private set
 
     fun start(): ContextEngine {
+        check(lease == null) { "ContextEngine already started" }
         Thread({
             try {
                 val l = SharedArcadeHost.acquire(root, engineVersion = "sophi-context/$SCHEMA_VERSION")
@@ -226,7 +227,9 @@ class ContextEngine(
     private fun drain() {
         val h = host ?: return
         if (h.role != Role.HOST) { hostTermPrepared = false; embedPrepared = false; embedIdleUntil = 0; return }
-        synchronized(writerLock) { h.withStore(DATABASE) { s ->
+        synchronized(writerLock) {
+            if (closed || host !== h) return   // closed or released while waiting for the lock
+            h.withStore(DATABASE) { s ->
             val indexer = Indexer(s, git, cancelled = { closed })
             if (!hostTermPrepared) { indexer.rebuildIfStale(SCHEMA_VERSION); hostTermPrepared = true }
             s.documents(ContextSchema.REQUEST).sortedBy { (it["requestedAt"] as Number?)?.toLong() ?: 0L }.forEach { req ->

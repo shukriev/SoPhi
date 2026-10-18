@@ -73,8 +73,9 @@ Sophi is a Kotlin-native agent harness: the structural equivalent of Pi (earendi
 │  sophi-versioning  (versioned artifact history)              │
 │  Version/VersionStore (skills, lessons, configs,             │
 │  agent defs) + Scorecard/ScorecardStore, own leaf            │
-│  module over sophi-store, open-write-close for embedded homes; default homes on the shared server          │
-│  (no held-open lock across processes) -- ADR-029             │
+│  module over sophi-store, open-write-close ArcadeDB          │
+│  for embedded homes (no held-open lock across processes)     │
+│  -- ADR-029; default homes on the shared server -- ADR-041   │
 └──────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────┐
 │              sophi-learning  (observes via hooks)            │

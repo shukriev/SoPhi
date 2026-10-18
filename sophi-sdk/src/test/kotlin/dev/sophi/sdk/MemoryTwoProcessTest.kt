@@ -15,6 +15,7 @@ import kotlinx.serialization.json.long
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 /** Orthogonal vectors per topic, so two different memories never merge as near-duplicates. */
@@ -41,7 +42,7 @@ object MemoryProcessMain {
         ProcessHandle.current().parent().ifPresent { p -> p.onExit().thenRun { exitProcess(0) } }
         val (root, home, base) = args.map { Path.of(it) }
         val palace = sharedMemoryRuntime(root, home, base.resolve("child")).memoryPlugin!!.palace()!!
-        runBlocking { palace.rememberCommitment("buy milk", "child", System.currentTimeMillis()) }
+        checkNotNull(runBlocking { palace.rememberCommitment("buy milk", "child", System.currentTimeMillis()) }) { "child write failed" }
         Files.writeString(base.resolve("ready"), "ok")
         while (!Files.exists(base.resolve("go"))) Thread.sleep(50)
         val found = runBlocking { palace.search("buy milk", 5) }.joinToString("\n") { it.text }
@@ -80,6 +81,6 @@ class MemoryTwoProcessTest : FunSpec({
                 awaitFile(base.resolve("found"), 30_000, child)
                 Files.readAllLines(base.resolve("found")) shouldContainExactlyInAnyOrder listOf("buy milk", "call mum")
             } finally { rt.close() }
-        } finally { child.destroyForcibly() }
+        } finally { child.destroyForcibly(); child.waitFor(10, TimeUnit.SECONDS) }
     }
 })

@@ -236,10 +236,10 @@ class MemoryRestore : CliktCommand(name = "restore", help = "Undo a soft-delete 
     }
 }
 
-class MemoryReset : CliktCommand(name = "reset", help = "Wipe ALL memory — irreversible") {
+class MemoryReset : CliktCommand(name = "reset", help = "Wipe ALL memory — the shared memory every running Sophi app (CLI and companion) uses; irreversible") {
     private val yes: Boolean by option("--yes").flag()
     override fun run() = runBlocking {
-        echo("This wipes ${JanesPalaceConfig.DEFAULT_HOME} entirely — every memory, thread, and profile attribute.")
+        echo("This wipes ${JanesPalaceConfig.DEFAULT_HOME} entirely — every memory, thread, and profile attribute — for every running Sophi app (CLI and companion), which share it.")
         if (!yes) {
             echo("Type RESET to confirm: ", trailingNewline = false)
             if (readLine()?.trim() != "RESET") return@runBlocking echo("Aborted.")
