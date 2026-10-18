@@ -1,7 +1,7 @@
 # ADR-041: Context engine on a shared, lock-elected ArcadeDB store
 
 **Date:** 2026-10-12
-**Status:** Accepted — M0–M5 implemented; frontier-model runs, the live cache check, the LLM-summary production path and an embeddings re-test pending
+**Status:** Accepted — M0–M6 implemented (M6: manual check on the real install pending); frontier-model runs, the live cache check, the LLM-summary production path and an embeddings re-test pending
 
 ## Context
 
@@ -180,6 +180,18 @@ addendum).
     per-project remote switch stays deferred; the eval `.tsv` files are indexed and depress every variant
     (follow-up: exclude `evals/` from indexing).
 
+11. **M6 — shared server for memory and versioning.**
+    - **One host, several databases.** One `ArcadeHost` per root per process (`SharedArcadeHost` leases) serves `context`, `memory`, `memory-versions` and `versioning`. `register(database, version)` plus `host.json` `schemas` limit a mismatch to that database. `host.json` also carries the sentinel `schemaVersion: -1`, so every pre-M6 client refuses the host cleanly instead of attaching to `context` in the gap before the host has registered its other databases (Q1). An old-format `host.json` is checked against every database. A client re-reads `host.json` on `register`, so databases the host registers later are still checked (Q2).
+    - **In-database marker (Q10).** On the first use of a database in a process, a single `SophiSchema` document holds the schema version. Absent: written. Equal: fine. A stored version newer than the process's is refused for that database only. An older one may be upgraded only by the host (the owner rebuilds, e.g. the context cache); a client is refused. This catches CLI/companion version skew that the `host.json` pre-check misses.
+    - **Failover.** `FailoverArcadeStore` retries one call (or one transaction block) on the new host. Every memory/versioning write is an upsert, a delete, or delete+insert in one transaction, so a replay is safe.
+    - **Vectors.** Memory vectors live in `MemoryVec`, inserted together with the vector (the same pattern as `ChunkVec`), because a remote client cannot set a vector property afterwards. `PalaceStore` adopts inline `Memory.embedding` vectors into `MemoryVec` on the host, tolerating a concurrent adopter. Remote `nearestVectors` without an index returns empty, like embedded; a client with `SOPHI_CONTEXT_EMBED` set and no `ChunkVec` index now falls back to lexical instead of failing, at the cost of one `schema:indexes` round-trip per remote search.
+    - **One-time migration (Q11, Q3).** Host-only: copy, verify, write a marker, rename the old directory to `arcadedb.migrated-<ts>`; the old directory is never deleted. The marker field is `fromPath`. The target is cleared only if it is empty or holds a `MigrationInProgress` document this migration wrote before its first write. A non-empty target with neither is never touched: the result is `TargetNotEmpty`, nothing is renamed, memory proceeds on the live target and the legacy directory stays for the user. `TargetNotEmpty` never clears. A host or client that finds no legacy directory also writes the marker, so a later stray directory (an older build recreating `<home>/arcadedb`) is renamed aside, never copied over live data; a stray directory that is locked is skipped. A locked source, or a client that finds unmigrated data, disables the feature for that run with one line. The `SophiSchema` document is ignored by copy, verify and clear.
+    - **Only the default homes move (Q12).** A home counts as default when its `toRealPath()` equals the default's, so a symlinked or differently-cased spelling of `~/.sophi/memory` goes shared too instead of staying embedded and making memories look gone. Other homes (tests, `--memory-home`, the skills/lessons/agents `.versions` homes) stay embedded. Every opener of a default home passes the same non-null legacy home (`SharedStore.open`).
+    - **The daemon.** The scheduled daemon's memory stays embedded in `memory-scheduled` (the ADR-026 precedent). Its `run_tournament` reads the user's versioning through the shared host for the duration of a run, and `--memory-home ~/.sophi/memory` opts the daemon into the shared palace. This keeps invariant 4 true after M6.
+    - **Reset (Q5, Q13).** `IndexReset` detaches only `context` and sees only engines in its own process, which count as "in use". Other processes' clients are invisible to it; a CLI client's in-flight context call can fail once while the cache is rebuilt, and recovers on its next call. With M6, though, reset returns `InUse` whenever any other process hosts the root (for example the companion with memory only), so the copy says "quit Sophi", not "index in use". Inside the companion a refused reset closes and restarts the engine (`generation++`, one runtime rebuild); this only arises from a second in-process engine, in practice tests.
+    - **Self-mod gate.** A baseline jar older than M6 still opens `~/.sophi/versioning/arcadedb` embedded and recreates it. The next M6 start renames that stray directory aside (the marker exists, Q3), so the baseline's scorecards end up there, not in the shared store.
+    - **Known limits.** (a) After a downgrade and re-embed, `MemoryVec` still wins over the older inline vector. (b) Vector-index dimensions are fixed at the first `putVec`. (c) The first-use `SophiSchema` marker race is last-write-wins. (d) Mixed CLI/companion versions refuse each other (a differing schema in either direction), so run the same version of both. (e) Memory and versioning are never auto-deleted or rebuilt.
+
 ## Reasons
 
 1. **Measured, not assumed.** The database choice was settled by a spike on the real 26.5.1 jar and
@@ -189,10 +201,10 @@ addendum).
 2. **SQLite was the strongest alternative** (WAL multi-process with no election, real BM25, 4×
    faster at 44k chunks) and was rejected only because it would split storage from Jane's Palace.
 3. **Engine-level RPC was rejected** in favour of sharing the database: no new protocol to version,
-   and memory/versioning can move onto the same server later, removing "memory disabled in the
+   and memory/versioning moved onto the same server in M6, removing "memory disabled in the
    second process".
 4. **Doubt resolves to rebuild.** The context database is a cache of files on disk; corruption or a
-   schema change means recreate and reindex. (Memory, when it joins, is never auto-deleted.)
+   schema change means recreate and reindex. (Memory and versioning, which joined in M6, are never auto-deleted.)
 
 ## Consequences
 

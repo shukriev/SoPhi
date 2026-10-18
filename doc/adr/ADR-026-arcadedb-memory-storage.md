@@ -110,3 +110,5 @@ works, embedded and through `RemoteDatabase` (vectors must be sent as `List<Floa
 context-engine spike and pinned by `ArcadeServerFactsTest`. The embedded-only decision for Jane's Palace
 stands for now; ADR-041 builds the shared-server design this ADR had to revert, and Jane's Palace moves
 onto it in a later milestone.
+
+**Addendum (2026-10-17): memory moves to the shared server.** The "embedded-only, one process at a time" decision is superseded for the default home by ADR-041 M6: Jane's Palace (`memory`, plus `memory-versions`) and `sophi-versioning` now live on the shared `~/.sophi/db` server, so the CLI and the companion can use memory at the same time, with vectors in `MemoryVec` and a one-time, never-deleting migration of the old directories. `close()` threading still matters for embedded homes (tests, other homes, `--memory-home`). The `memory-scheduled` precedent stays: the scheduled daemon keeps its own embedded memory.
