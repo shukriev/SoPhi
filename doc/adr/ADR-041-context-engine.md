@@ -210,8 +210,8 @@ addendum).
 
 - `ArcadeHost.withStore` may run its block twice after a failover, so callers must pass idempotent blocks.
 - Every consumer of `sophi-store` carries Lucene and the ArcadeDB server jars.
-- `RemoteArcadeStore.putVector` is unsupported — vector writes happen on the host (inserts carry
-  their vector; `putVector`'s index-put workaround needs the embedded API).
+- Vector writes use `insertVertex` (the insert carries its vector and is indexed on both embedded and
+  remote stores); `putVector` survives only on `EmbeddedArcadeStore` for building pre-M6 fixtures.
 - Property names are interpolated unquoted into SQL, so reserved words (e.g. `by`) cannot be
   property names.
 - Jane's Palace and versioning still open their own embedded databases until they migrate.
