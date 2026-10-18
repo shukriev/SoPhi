@@ -39,7 +39,7 @@ class JanesPalaceSharedTest : FunSpec({
             palace.browse(BrowseFilter()).map { it.id }.toSet() shouldBe setOf("m1", "m2")
             runBlocking { palace.search("dentist appointment friday", 1) }.map { it.id } shouldBe listOf("m1")
         } finally { palace.close() }
-        Files.exists(home.resolve("arcadedb")) shouldBe false
+        Files.isRegularFile(home.resolve("arcadedb")) shouldBe true   // the blocker file, not a db
         Files.list(home).use { s -> s.anyMatch { it.fileName.toString().startsWith("arcadedb.migrated-") } } shouldBe true
         Files.readString(home.resolve("audit.jsonl")) shouldContain "kept"
         val again = JanesPalace(config(home, root), null, FakeEmbeddingProvider())

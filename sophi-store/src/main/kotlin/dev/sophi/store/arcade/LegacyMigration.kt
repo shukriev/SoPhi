@@ -2,6 +2,8 @@ package dev.sophi.store.arcade
 
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardOpenOption
 import java.nio.file.Path
 
 /** The types a pre-M6 embedded database holds; edges map to the vertex type they join. */
@@ -15,12 +17,17 @@ data class LegacyLayout(
  * Moves a database that lived embedded at `<legacyHome>/arcadedb` onto the shared server, once
  * (ADR-041 M6). Copy, verify counts against the source, write a [MARKER], rename the old directory
  * aside — never delete it. Once marked (also when there was nothing to move), a stray old directory is
- * only ever renamed aside, never copied over live data. The target is cleared only when it is empty or
- * holds the [IN_PROGRESS] note an interrupted copy left; any other data in it is never touched.
+ * only ever renamed aside to `arcadedb.stray-<ts>`, never copied over live data. The target is cleared
+ * only when it is empty or holds the [IN_PROGRESS] note an interrupted copy left; any other data in it
+ * is never touched. Once marked, a plain file [BLOCKER_TEXT] sits at `<legacyHome>/arcadedb`, so a pre-M6
+ * build fails to open it ("memory disabled") instead of creating an empty database there.
  */
 object LegacyMigration {
     const val MARKER = "MigrationMarker"
     const val IN_PROGRESS = "MigrationInProgress"
+    const val BLOCKER_TEXT = "This data moved to the shared Sophi store (ADR-041 M6).\n" +
+        "This file stops older Sophi builds from starting an empty database here; they show memory as disabled until upgraded.\n" +
+        "Don't delete it while any Sophi build older than M6 may run.\n"
 
     /** Never cleared, counted or copied: the host's per-database schema marker and our own. */
     private val RESERVED = setOf(ArcadeHost.SCHEMA_TYPE, MARKER, IN_PROGRESS)
@@ -44,11 +51,13 @@ object LegacyMigration {
         val old = legacyHome.resolve("arcadedb")
         val ts = now()
         if (isMarked(target)) {
-            if (Files.exists(old)) moveAside(legacyHome, ts)   // a stray directory recreated by an older build
+            if (Files.isDirectory(old)) moveAside(legacyHome, ts, "stray")   // a directory an older build recreated
+            leaveBlocker(old)
             return Result.AlreadyMigrated
         }
         if (!Files.isDirectory(old)) {
             mark(target, old, ts, emptyMap(), emptyMap())
+            leaveBlocker(old)
             return Result.NothingToMigrate
         }
         target.ensureSchema(documentTypes = listOf(IN_PROGRESS))
@@ -61,7 +70,8 @@ object LegacyMigration {
             mark(target, old, ts, counts, skipped)
             target.deleteDocument(IN_PROGRESS, ID)
         }
-        moveAside(legacyHome, ts)
+        moveAside(legacyHome, ts, "migrated")
+        leaveBlocker(old)
         return Result.Migrated(counts, skipped)
     }
 
@@ -120,17 +130,32 @@ object LegacyMigration {
 
     private fun Map<String, Any?>.properties(): Map<String, Any?> = filterKeys { !it.startsWith("@") && it != "id" }
 
+    /** Writes the [BLOCKER_TEXT] file at [old] when nothing is there; never replaces a file or directory. */
+    private fun leaveBlocker(old: Path) {
+        if (Files.exists(old, LinkOption.NOFOLLOW_LINKS)) return
+        try {
+            Files.createDirectories(old.parent)   // a fresh install may not have the home yet
+            Files.writeString(old, BLOCKER_TEXT, StandardOpenOption.CREATE_NEW)
+        } catch (e: IOException) {
+            System.err.println("couldn't leave the blocker file at $old (${e.message}); an older Sophi could start an empty database there")
+        }
+    }
+
     /**
-     * Renames `<legacyHome>/arcadedb` aside, never overwriting (Files.move refuses an existing target).
-     * Skipped with one line, to retry next start, while another process holds it or the rename fails.
+     * Renames `<legacyHome>/arcadedb` aside to `arcadedb.<suffix>-<ts>`, never overwriting (Files.move refuses an
+     * existing target). Skipped with one line, to retry next start, while another process holds it or the rename fails.
      */
-    private fun moveAside(legacyHome: Path, ts: Long) {
+    private fun moveAside(legacyHome: Path, ts: Long, suffix: String) {
         val old = legacyHome.resolve("arcadedb")
         try { EmbeddedArcadeStore.open(legacyHome).close() } catch (e: Exception) {
             System.err.println("legacy $old is in use (an older Sophi?); left in place, will move it aside next start")
             return
         }
-        try { Files.move(old, old.resolveSibling("arcadedb.migrated-$ts")) } catch (e: IOException) {
+        val dest = old.resolveSibling("arcadedb.$suffix-$ts")
+        try {
+            Files.move(old, dest)
+            if (suffix == "stray") System.err.println("an older Sophi wrote to $old after the move; kept as $dest (not in the shared store)")
+        } catch (e: IOException) {
             System.err.println("couldn't move legacy $old aside (${e.message}); left in place, will retry next start")
         }
     }

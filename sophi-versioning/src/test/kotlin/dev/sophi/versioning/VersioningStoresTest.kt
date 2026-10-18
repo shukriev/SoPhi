@@ -18,7 +18,7 @@ class VersioningStoresTest : FunSpec({
                 sc.forConfigVersion(old.id).size shouldBe 1
             }
         }
-        Files.exists(home.resolve("arcadedb")) shouldBe false
+        Files.isRegularFile(home.resolve("arcadedb")) shouldBe true   // the blocker file, not a db
         Files.isDirectory(root.resolve("databases").resolve("versioning")) shouldBe true
         VersioningStores.versionStore(other, root, shared).use { it.record(ArtifactType.SKILL, "s", "x", ProducedBy.HUMAN) }
         Files.isDirectory(other.resolve("arcadedb")) shouldBe true
@@ -30,7 +30,7 @@ class VersioningStoresTest : FunSpec({
         VersioningStores.versionStore(link, root, mapOf(real to "versioning")).use {
             it.record(ArtifactType.SKILL, "s", "x", ProducedBy.HUMAN)
         }
-        Files.exists(real.resolve("arcadedb")) shouldBe false
+        Files.isRegularFile(real.resolve("arcadedb")) shouldBe true
         Files.isDirectory(root.resolve("databases").resolve("versioning")) shouldBe true
     }
 })
