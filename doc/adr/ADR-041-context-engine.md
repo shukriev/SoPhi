@@ -1,7 +1,7 @@
 # ADR-041: Context engine on a shared, lock-elected ArcadeDB store
 
 **Date:** 2026-10-12
-**Status:** Accepted — M0–M4 implemented; frontier-model runs and the live cache check pending
+**Status:** Accepted — M0–M5 implemented; frontier-model runs, the live cache check, the LLM-summary production path and an embeddings re-test pending
 
 ## Context
 
@@ -135,6 +135,51 @@ addendum).
    the oversized-round handling work; it did not exercise the structured summary live, so structured against
    generic summaries is unsettled until a longer-task run. Single runs, one small model, n=5 prompts of which 2 never compacted in any config (effective n=3, 2 decisive). The E4 prompts were single-turn, so only mid-turn compaction ran; the cross-turn path (USER/ASSISTANT summary pair, `_workingSet` merge) is covered by unit tests only.
 
+10. **M5 — graph and semantics (rulings and outcome).** The graph is two
+    *document* types, not vertices and edges (a deviation from spec §5.1): `Symbol {projectId, fileId, path,
+    role, name, lname, kind, line}` and `Relation {projectId, fromFileId, toFileId, fromPath, toPath, kind
+    IMPORTS|LINKS|TESTS}`, indexed on name/lname/projectId/fileId and fromFileId/toFileId/projectId. The context
+    database is a rebuildable cache and File/Chunk are already documents; a lookup by indexed id is all
+    `find_symbol` and `related` need, with no traversal. Spec §5.1's `Symbol.qualifiedName`/`signature` and the
+    CONTAINS/MENTIONS edges are dropped in M5 (YAGNI; added when a tool needs them). `SCHEMA_VERSION` 2 makes
+    every host rebuild.
+    Extraction is regex (declarations from the existing patterns; imports per family; markdown
+    `[[wikilinks]]` and relative `.md` links); resolution happens in the indexer, two-phase: a file's own edges in
+    its transaction, and the whole project's after any add/remove (`Project.relationsAt` null = dirty), so a new
+    file satisfies imports in files that did not change. Qualified names resolve by path suffix
+    (`a.b.C` → `…/a/b/C.kt|.java`), relative imports by path, wikilinks by note name, TESTS by naming convention
+    (FooTest/FooSpec, foo.test.ts, test_foo.py, foo_test.go); anything else is dropped. Embeddings are one
+    `ChunkVec {id = chunkHash, emb}` vertex per distinct chunk, inserted once with its vector, embedded by the
+    host in the background only when `SOPHI_CONTEXT_EMBED` names a model; the base URL must be loopback in
+    M5 (a per-project "allow sending content to a remote provider" switch, spec §5.4, is deferred). Retrieval
+    fuses BM25 with the 50 nearest chunk vectors by RRF (k = 60); any vector failure is lexical-only.
+    Summaries are an indexing input: heuristic summary words or an LLM summary are added to a file's first
+    chunk. Each of `find_symbol`/`related` (`SOPHI_CONTEXT_TOOLS`), embeddings and summaries is on by default
+    only if E2 (offline) or E3 (live) justified it — see the outcome below.
+
+    **Outcome** (RESULTS.md, "E2 vocabulary gap" and "E3 tool surface"). E2, offline, MRR on queries (31) / commits
+    (258) / docs (37), bm25 baseline 0.76 / 0.62 / 0.58: heuristic summaries 0.76 / 0.62 / 0.58 (no movement, off);
+    LLM summaries (bonsai-27b) 0.77 / 0.62 / 0.65, which passes the fixed rule (docs +0.07) but rests on about 3 of
+    37 docs queries and costs about 55 minutes of offline summarising, and the production path (lazy, at query time)
+    does not exist, so the default is off and a follow-up plan builds it (an `LLMProvider` into the host engine,
+    `IndexRequest(kind="summarise")` for top-5 hits whose `summaryHash != contentHash`, the host drain calling
+    `FileSummariser` and `applySummary`). That path reuses code already in the tree, which is not dead: `FileSummariser`,
+    `LlmSummaries`, `Indexer.applySummary`, `IndexOptions.summaryTokens` and `Judgments.CONTEXT_SUMMARY`. ChunkVec orphan GC (vectors whose chunk hash no
+    longer exists; ChunkVec is kept across rebuilds) is needed before embeddings default on; embeddings (nomic v1.5, 768 dims) 0.70-0.74 / 0.59-0.60 / 0.64-0.65,
+    recorded as **inconclusive** and off: every run logged SEVERE `LSMVectorIndex FALLBACK: Built 0 active vector
+    IDs`, and runs were not reproducible. Follow-up: verify the ChunkVec neighbours do not come from a degraded path,
+    then re-test. Embeddings are experiment-only; a Finder-launched companion needs `launchctl setenv
+    SOPHI_CONTEXT_EMBED …` (or a terminal launch) to try them. E3, bonsai-27b, 23 FILES questions: `all` 21,
+    `core` 22, `none` 20 successes; `core` nominally beats `all` (one question where `all` timed out, +8% tokens: a tie
+    in substance), `none` loses (+48% tokens). `find_symbol`/`related` were never called, so this set cannot judge
+    them; the default `SOPHI_CONTEXT_TOOLS` stays `all` (no tier detection, frontier untested). `core` is fine for
+    small local models; follow-up: a symbol/relationship question set. On by default, then: both new tools, lexical
+    retrieval only, no summaries, no vectors. Findings to keep: `DROP TYPE ChunkVec UNSAFE` works on 26.5.1; with
+    vectors on there is no distance floor, so "No matches" never appears; the query side does not check the stored
+    embed model/dims (a cross-process mismatch goes unnoticed); a non-loopback embed URL is refused and the
+    per-project remote switch stays deferred; the eval `.tsv` files are indexed and depress every variant
+    (follow-up: exclude `evals/` from indexing).
+
 ## Reasons
 
 1. **Measured, not assumed.** The database choice was settled by a spike on the real 26.5.1 jar and
@@ -161,3 +206,5 @@ addendum).
 - Jane's Palace's recall explain line labels the store's distance as "semantic" (pre-existing,
   cosmetic; ranking uses its own cosine) — follow-up.
 - Failover after a SIGKILL'd host measured 238–284 ms in `ArcadeHostTwoProcessTest` (3 runs).
+- Schema v2 (M5): a v1 client refuses a v2 host and the first start after upgrading rebuilds every project's index.
+- With vectors on, the per-turn hint stays lexical (the score gate is calibrated on BM25).

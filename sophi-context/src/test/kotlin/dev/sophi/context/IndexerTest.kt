@@ -4,6 +4,8 @@ import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -20,6 +22,37 @@ class IndexerTest : FunSpec({
     }
     fun Path.write(rel: String, text: String) = resolve(rel).also { Files.createDirectories(it.parent); Files.writeString(it, text) }
     fun df(s: ArcadeStore, term: String) = (s.query("SELECT df FROM TermStat WHERE id = ?", term).firstOrNull()?.get("df") as Number?)?.toInt() ?: 0
+
+    fun stem(w: String) = Tokenizer.tokens(w).single()
+
+    test("heuristic summary words reach the first chunk only when IndexOptions.summaryTokens is on") {
+        val src = "package a\n\nimport b.C\n\n/** Listens for remote sessions. */\nclass Hub\n"
+        fun firstToks(on: Boolean): String {
+            val (s, ix, root) = setup(mk = { Indexer(it, GitProbe.none, options = IndexOptions(summaryTokens = on)) })
+            root.write("src/Hub.kt", src)
+            ix.scan("p1")
+            return s.query("SELECT toks FROM Chunk WHERE id = ?", ContextSchema.chunkId(ContextSchema.fileId("p1", "src/Hub.kt"), 0)).single()["toks"] as String
+        }
+        firstToks(true).split(' ') shouldContain stem("listens")
+        firstToks(false).split(' ') shouldNotContain stem("listens")
+    }
+
+    test("applySummary adds an LLM summary's words to the first chunk, replaces an earlier one, keeps df and meta exact") {
+        val (s, ix, root) = setup()
+        root.write("src/Hub.kt", "class Hub {\n fun start() = 1\n}\n")
+        ix.scan("p1")
+        val fid = ContextSchema.fileId("p1", "src/Hub.kt")
+        ix.applySummary(fid, "Accepts remote control sessions from the terminal.", "h1")
+        s.fullText("Chunk", "toks", stem("terminal"), listOf("path"), 10).map { it["path"] } shouldBe listOf("src/Hub.kt")
+        df(s, stem("terminal")) shouldBe 1
+        ix.applySummary(fid, "Serves the dashboard.", "h2")
+        df(s, stem("terminal")) shouldBe 0
+        df(s, stem("dashboard")) shouldBe 1
+        s.query("SELECT summary, summaryHash FROM File WHERE id = ?", fid).single().let {
+            it["summary"] shouldBe "Serves the dashboard."; it["summaryHash"] shouldBe "h2"
+        }
+        ContextSchema.meta(s)!!.totalLen shouldBe (s.query("SELECT sum(len) AS n FROM Chunk").single()["n"] as Number).toLong()
+    }
 
     test("first scan indexes chunks, file records and document frequencies") {
         val (s, ix, root) = setup()
@@ -159,5 +192,79 @@ class IndexerTest : FunSpec({
         ix.scan("p1")
         val r = s.query("SELECT scanned, scanTotal FROM ${ContextSchema.PROJECT} WHERE id = ?", "p1").single()
         r["scanned"].shouldBeNull(); r["scanTotal"].shouldBeNull()
+    }
+
+    test("rebuildIfStale on a schema bump drops symbols and relations and marks relations dirty") {
+        val (s, ix, _) = setup()
+        ix.rebuildIfStale(1)
+        s.upsertDocument(ContextSchema.SYMBOL, "p1:a.kt@1", mapOf("projectId" to "p1", "name" to "A"))
+        s.upsertDocument(ContextSchema.RELATION, "r1", mapOf("projectId" to "p1", "kind" to "IMPORTS"))
+        s.command("UPDATE Project SET relationsAt = 1 WHERE id = ?", "p1")
+        ix.rebuildIfStale(2)
+        s.documents(ContextSchema.SYMBOL) shouldBe emptyList()
+        s.documents(ContextSchema.RELATION) shouldBe emptyList()
+        s.query("SELECT relationsAt FROM Project WHERE id = ?", "p1").single()["relationsAt"].shouldBeNull()
+        ContextSchema.meta(s)!!.schemaVersion shouldBe 2
+        ContextEngine.SCHEMA_VERSION shouldBe 2
+    }
+
+    fun rels(s: ArcadeStore) = s.query("SELECT fromPath, toPath, kind FROM Relation WHERE projectId = ?", "p1")
+        .map { Triple(it["fromPath"], it["toPath"], it["kind"]) }.toSet()
+
+    test("symbols and relations are indexed; a later file satisfies an earlier import; deleting it removes the edge") {
+        val (s, ix, root) = setup()
+        root.write("app/Main.kt", "package app\n\nimport lib.Util\n\nclass Main\n")
+        ix.scan("p1")
+        s.query("SELECT name, kind, line FROM Symbol WHERE projectId = ?", "p1").map { Triple(it["name"], it["kind"], it["line"]) } shouldBe
+            listOf(Triple("Main", "class", 5))
+        rels(s) shouldBe emptySet()   // lib/Util.kt does not exist yet: dropped
+        root.write("lib/Util.kt", "package lib\n\nobject Util\n")
+        ix.scan("p1").added shouldBe 1   // Main.kt unchanged, yet its import now resolves
+        rels(s) shouldBe setOf(Triple("app/Main.kt", "lib/Util.kt", "IMPORTS"))
+        Files.delete(root.resolve("lib/Util.kt"))
+        ix.scan("p1")
+        rels(s) shouldBe emptySet()
+        s.query("SELECT FROM Symbol WHERE path = ?", "lib/Util.kt") shouldBe emptyList()
+    }
+
+    test("an edit refreshes only that file's outgoing edges; TESTS edges stay") {
+        val (s, ix, root) = setup()
+        root.write("src/x/Foo.kt", "package x\nclass Foo\n"); root.write("src/x/Bar.kt", "package x\nclass Bar\n")
+        val t = root.write("test/x/FooTest.kt", "package x\nimport x.Foo\nclass FooTest\n")
+        ix.scan("p1")
+        rels(s) shouldBe setOf(Triple("test/x/FooTest.kt", "src/x/Foo.kt", "IMPORTS"), Triple("test/x/FooTest.kt", "src/x/Foo.kt", "TESTS"))
+        Files.writeString(t, "package x\nimport x.Bar\nclass FooTest\n")
+        Files.setLastModifiedTime(t, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 60_000))
+        ix.scan("p1").changed shouldBe 1
+        rels(s) shouldBe setOf(Triple("test/x/FooTest.kt", "src/x/Bar.kt", "IMPORTS"), Triple("test/x/FooTest.kt", "src/x/Foo.kt", "TESTS"))
+    }
+
+    test("markdown links and backlinks are relations") {
+        val (s, ix, root) = setup()
+        root.write("docs/hub.md", "# Hub\n\nSee [[ports]] and [server](server.md).\n")
+        root.write("docs/ports.md", "# Ports\n"); root.write("docs/server.md", "# Server\n")
+        ix.scan("p1")
+        rels(s) shouldBe setOf(Triple("docs/hub.md", "docs/ports.md", "LINKS"), Triple("docs/hub.md", "docs/server.md", "LINKS"))
+    }
+
+    test("a scan cancelled before the relation rebuild leaves relations dirty; the next scan rebuilds them") {
+        var checks = 0
+        var cancelAfter = 2   // both files indexed, then the pre-rebuild check cancels
+        val (s, ix, root) = setup(mk = { Indexer(it, GitProbe.none, cancelled = { ++checks > cancelAfter }) })
+        root.write("a/A.kt", "package a\nimport b.B\nclass A\n"); root.write("b/B.kt", "package b\nclass B\n")
+        ix.scan("p1")
+        s.query("SELECT relationsAt FROM Project WHERE id = ?", "p1").single()["relationsAt"].shouldBeNull()
+        cancelAfter = Int.MAX_VALUE
+        ix.scan("p1").unchanged shouldBe 2
+        rels(s) shouldBe setOf(Triple("a/A.kt", "b/B.kt", "IMPORTS"))
+    }
+
+    test("dropProject removes its symbols and relations") {
+        val (s, ix, root) = setup()
+        root.write("a/A.kt", "package a\nimport b.B\nclass A\n"); root.write("b/B.kt", "package b\nclass B\n")
+        ix.scan("p1")
+        ix.dropProject("p1")
+        s.documents(ContextSchema.SYMBOL) shouldBe emptyList()
+        s.documents(ContextSchema.RELATION) shouldBe emptyList()
     }
 })

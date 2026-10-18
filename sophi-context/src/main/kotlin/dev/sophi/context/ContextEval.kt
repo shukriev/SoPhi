@@ -1,8 +1,10 @@
 package dev.sophi.context
 
+import dev.sophi.store.arcade.ArcadeStore
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 
 data class EvalQuery(val text: String, val expected: List<String>)
 
@@ -17,6 +19,9 @@ data class EvalReport(
     }
 }
 
+/** LLM file summaries for the eval; [cache] is TSV "contentHash<TAB>summary", appended. */
+data class LlmSummaries(val summariser: FileSummariser, val cache: Path)
+
 data class HintPoint(val minScore: Double, val minRatio: Double, val coverage: Double, val precision: Double)
 
 /**
@@ -27,7 +32,10 @@ data class HintPoint(val minScore: Double, val minRatio: Double, val coverage: D
 class ContextEval(
     private val projects: Map<String, Path>,
     private val git: GitProbe = GitProbe.system,
-    private val weights: Weights = Weights()
+    private val weights: Weights = Weights(),
+    private val options: IndexOptions = IndexOptions(),
+    private val embedder: ChunkEmbedder? = null,
+    private val summaries: LlmSummaries? = null
 ) {
     companion object {
         fun load(tsv: Path): List<EvalQuery> = Files.readAllLines(tsv).map { it.trimEnd() }
@@ -36,12 +44,12 @@ class ContextEval(
     }
 
     /** Indexes [projects] into a throwaway store, runs [block], and always deletes the store. */
-    private fun <T> withIndex(block: (Retriever, Map<String, String>) -> T): T {
+    private fun <T> withIndex(queries: List<EvalQuery>, useEmbedder: Boolean = true, block: (Retriever, Map<String, String>) -> T): T {
         val dir = Files.createTempDirectory("sophi-context-eval")
         try {
             EmbeddedArcadeStore.open(dir).use { store ->
                 ContextSchema.ensure(store)
-                val indexer = Indexer(store, git)
+                val indexer = Indexer(store, git, options = options)
                 indexer.rebuildIfStale(ContextEngine.SCHEMA_VERSION)
                 val names = HashMap<String, String>()
                 projects.forEach { (name, root) ->
@@ -50,16 +58,40 @@ class ContextEval(
                     store.upsertDocument(ContextSchema.PROJECT, id, mapOf("root" to root.toRealPath().toString(), "name" to name, "status" to "active"))
                     indexer.scan(id)
                 }
-                return block(Retriever(store, weights), names)
+                val e = embedder?.takeIf { useEmbedder }
+                e?.let { it.prepare(store); while (it.embedPending(store, 256) > 0) Unit }
+                summaries?.let { applyLlmSummaries(store, indexer, names.keys.toList(), queries, it) }
+                return block(Retriever(store, weights, e?.let { it::queryVector }), names)
             }
         } finally { dir.toFile().deleteRecursively() }
+    }
+
+    /** Mirrors production's lazy rule (summaries only for files that get retrieved): a lexical top-10 pass picks the files. */
+    private fun applyLlmSummaries(store: ArcadeStore, indexer: Indexer, ids: List<String>, queries: List<EvalQuery>, s: LlmSummaries) {
+        val files = queries.flatMap { Retriever(store, weights).search(it.text, ids, limit = 10) }
+            .map { ContextSchema.fileId(it.projectId, it.path) }.distinct()
+        val cache = HashMap<String, String>()
+        if (Files.exists(s.cache)) Files.readAllLines(s.cache).filter { '\t' in it }.forEach { cache[it.substringBefore('\t')] = it.substringAfter('\t') }
+        files.forEachIndexed { i, id ->
+            val f = store.query("SELECT path, contentHash FROM ${ContextSchema.FILE} WHERE id = ?", id).firstOrNull() ?: return@forEachIndexed
+            val hash = f["contentHash"] as String
+            val summary = cache[hash] ?: run {
+                val text = store.query("SELECT text FROM ${ContextSchema.CHUNK} WHERE fileId = ? ORDER BY startLine", id).joinToString("\n") { it["text"] as String }
+                kotlinx.coroutines.runBlocking { s.summariser.summarise(f["path"] as String, text) }?.also {
+                    cache[hash] = it
+                    Files.writeString(s.cache, "$hash\t$it\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND)
+                }
+            } ?: return@forEachIndexed
+            indexer.applySummary(id, summary, hash)
+            if ((i + 1) % 25 == 0) System.err.println("summaries: ${i + 1}/${files.size}")
+        }
     }
 
     /** Hint-gate sweep (spec §6.7): one index, every (minScore, minRatio) point scored on the same top-3 hits. */
     fun hintGrid(queries: List<EvalQuery>, scores: List<Double>, ratios: List<Double>): List<HintPoint> = hintAnalysis(queries, scores, ratios).first
 
     /** [hintGrid] plus the top-1 score of every query (for judging τ against the corpus's score scale). */
-    fun hintAnalysis(queries: List<EvalQuery>, scores: List<Double>, ratios: List<Double>): Pair<List<HintPoint>, List<Double>> = withIndex { retriever, names ->
+    fun hintAnalysis(queries: List<EvalQuery>, scores: List<Double>, ratios: List<Double>): Pair<List<HintPoint>, List<Double>> = withIndex(queries, useEmbedder = false) { retriever, names ->
         val ids = names.keys.toList()
         val searched = queries.map { q -> q to retriever.search(q.text, ids, limit = 3) }
         val grid = scores.flatMap { s -> ratios.map { r ->
@@ -72,7 +104,7 @@ class ContextEval(
     }
 
     fun run(queries: List<EvalQuery>): EvalReport {
-        return withIndex { retriever, names ->
+        return withIndex(queries) { retriever, names ->
             val grepFiles = projects.flatMap { (name, root) -> ProjectFiles.list(root, git).files.map { "$name/${it.relPath}" to root.resolve(it.relPath) } }
                 .mapNotNull { (k, p) -> runCatching { k to Files.readAllLines(p).map { it.lowercase() } }.getOrNull() }
             var h1 = 0; var h5 = 0; var h10 = 0; var mrr = 0.0; var gH10 = 0; var gMrr = 0.0

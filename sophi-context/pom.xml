@@ -14,6 +14,7 @@
     <name>Sophi — Context</name>
 
     <dependencies>
+        <dependency><groupId>dev.sophi</groupId><artifactId>sophi-ai</artifactId></dependency>
         <dependency><groupId>dev.sophi</groupId><artifactId>sophi-core</artifactId></dependency>
         <dependency><groupId>dev.sophi</groupId><artifactId>sophi-extensions</artifactId></dependency>
         <dependency><groupId>dev.sophi</groupId><artifactId>sophi-store</artifactId></dependency>
@@ -43,4 +44,16 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- engine tests must never call an embedding server -->
+                    <environmentVariables><SOPHI_CONTEXT_EMBED></SOPHI_CONTEXT_EMBED></environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

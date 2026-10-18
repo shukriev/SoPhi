@@ -42,7 +42,7 @@ class HintPlugin(
             val projects = engine.projectsOrNull() ?: return null
             val ids = ContextScope.searchIds(project(sessionId), projects)
             if (ids.isEmpty()) return null
-            val hits = engine.search(userInput, ids, 3) ?: return null
+            val hits = engine.search(userInput, ids, 3, vectors = false) ?: return null
             if (mode != "always" && !gate.fires(userInput, hits)) return null
             if (hits.isEmpty()) return null
             val multi = ids.size > 1

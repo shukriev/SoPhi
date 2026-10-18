@@ -57,7 +57,7 @@ class RuntimeBuilder {
     var provider: LLMProvider? = null
     /** Opt-in JSONL usage log (numbers only, never content): input = all prompt tokens, cacheRead = the part served from cache. Internal experiment knob. */
     var usageLogPath: Path? = System.getenv("SOPHI_USAGE_LOG")?.let(Path::of)
-    /** Internal experiment knobs (SOPHI_CONTEXT_HINT, SOPHI_CONTEXT_ORIENTATION); tests override. */
+    /** Internal experiment knobs (SOPHI_CONTEXT_HINT, SOPHI_CONTEXT_ORIENTATION, SOPHI_CONTEXT_TOOLS); tests override. */
     var contextKnobs: Map<String, String> = System.getenv()
     /** Case-insensitive knob lookup; an unset or unknown value falls back to [default]. */
     private fun knob(name: String, default: String, vararg others: String): String =
@@ -104,7 +104,8 @@ class RuntimeBuilder {
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
     /**
-     * Gives the agent the context index (ADR-041): search_context, read_context, project_map, and
+     * Gives the agent the context index (ADR-041): search_context, read_context, project_map, find_symbol, related (SOPHI_CONTEXT_TOOLS=all|core|none
+     * picks all five, search + read only, or none), and
      * a rescan after it edits files. [project] returns the session's bound project id (null = unbound: only global projects are searched, no orientation).
      * With [owned] the runtime closes [engine] on [SophiRuntime.close].
      */
@@ -228,7 +229,7 @@ class RuntimeBuilder {
         }
         builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
         contextConfig?.let { (engine, project, _) ->
-            contextTools(engine, project).forEach { registry.register(it) }
+            contextTools(engine, project, knob("SOPHI_CONTEXT_TOOLS", "all", "core", "none")).forEach { registry.register(it) }
             plugins.add(ContextPlugin(engine, project))
             val budget = ContextBudget(window)
             plugins.add(OrientationPlugin(engine, project, budget, knob("SOPHI_CONTEXT_ORIENTATION", "both", "instructions", "map", "off"),

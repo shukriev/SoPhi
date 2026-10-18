@@ -29,10 +29,29 @@ private val json = Json { ignoreUnknownKeys = true }
 @Serializable private data class ReadArgs(val path: String = "", val startLine: Int? = null, val endLine: Int? = null)
 @Serializable private data class MapArgs(val path: String? = null)
 
-/** search_context / read_context / project_map (spec §6.6). [project] = the session's bound project id (null = unbound). */
-fun contextTools(engine: ContextEngine, project: ProjectOf): List<Tool> = listOf(
-    SearchContextTool(engine, project), ReadContextTool(engine, project), ProjectMapTool(engine, project)
-)
+private const val NO_PROJECT = "No indexed project for this session — run `sophi context add <dir>`, or pick a folder with the project chip in the companion."
+private const val CAP = 15
+
+@Serializable private data class SymbolArgs(val name: String = "")
+@Serializable private data class RelatedArgs(val path: String = "")
+
+/**
+ * search_context / read_context / project_map / find_symbol / related (spec §6.6). [project] = the session's bound project id (null = unbound).
+ * [surface] = SOPHI_CONTEXT_TOOLS: all (5) | core (search + read) | none (orientation and hint only — E3).
+ */
+fun contextTools(engine: ContextEngine, project: ProjectOf, surface: String = "all"): List<Tool> = when (surface) {
+    "none" -> emptyList()
+    "core" -> listOf(SearchContextTool(engine, project), ReadContextTool(engine, project))
+    else -> listOf(SearchContextTool(engine, project), ReadContextTool(engine, project), ProjectMapTool(engine, project),
+        FindSymbolTool(engine, project), RelatedTool(engine, project))
+}
+
+/** "name:path" picks a project by name; otherwise the first (primary) project. */
+private fun locate(projects: List<ProjectInfo>, path: String): Pair<ProjectInfo, String>? {
+    val named = path.substringBefore(':', "")
+    projects.firstOrNull { it.name == named }?.let { return it to path.substringAfter(':') }
+    return projects.firstOrNull()?.let { it to path }
+}
 
 private suspend fun inScope(engine: ContextEngine, project: ProjectOf): List<ProjectInfo>? {
     if (!engine.ready) return null
@@ -57,7 +76,7 @@ private class SearchContextTool(private val engine: ContextEngine, private val p
     private suspend fun run(argumentsJson: String): String {
         val projects = inScope(engine, project) ?: return ContextEngine.NOT_READY
         val args = runCatching { json.decodeFromString<SearchArgs>(argumentsJson) }.getOrNull() ?: return "invalid arguments"
-        if (projects.isEmpty()) return "No indexed project for this session — run `sophi context add <dir>`, or pick a folder with the project chip in the companion."
+        if (projects.isEmpty()) return NO_PROJECT
         val hits = engine.search(args.query, projects.map { it.id }, args.limit.coerceIn(1, 20)) ?: return ContextEngine.NOT_READY
         val note = indexingNote(projects)
         if (hits.isEmpty()) return note ?: "No matches — try other words, or grep"
@@ -110,12 +129,6 @@ private class ReadContextTool(private val engine: ContextEngine, private val pro
         if (from > lines.size || from > to) return "${args.path} has ${lines.size} lines"
         return (from..to).joinToString("\n") { "$it: ${lines[it - 1]}" }
     }
-
-    private fun locate(projects: List<ProjectInfo>, path: String): Pair<ProjectInfo, String>? {
-        val named = path.substringBefore(':', "")
-        projects.firstOrNull { it.name == named }?.let { return it to path.substringAfter(':') }
-        return projects.firstOrNull()?.let { it to path }
-    }
 }
 
 private class ProjectMapTool(private val engine: ContextEngine, private val project: ProjectOf) : Tool {
@@ -128,9 +141,61 @@ private class ProjectMapTool(private val engine: ContextEngine, private val proj
 
     private suspend fun run(argumentsJson: String): String {
         val projects = inScope(engine, project) ?: return ContextEngine.NOT_READY
-        val project = projects.firstOrNull() ?: return "No indexed project for this session — run `sophi context add <dir>`, or pick a folder with the project chip in the companion."
+        val project = projects.firstOrNull() ?: return NO_PROJECT
         val args = runCatching { json.decodeFromString<MapArgs>(argumentsJson) }.getOrNull() ?: MapArgs()
         val map = ProjectMap.render(project, engine.fileSummariesOrNull(project.id) ?: return ContextEngine.NOT_READY, args.path)
         return (indexingNote(projects)?.plus("\n") ?: "") + map
+    }
+}
+
+private class FindSymbolTool(private val engine: ContextEngine, private val project: ProjectOf) : Tool {
+    override val name = "find_symbol"
+    override val description = "Find where a class, function or other top-level declaration is defined (exact name, then case-insensitive, then prefix), plus the top places that mention it."
+    override val parametersJson = """{"type":"object","properties":{"name":{"type":"string","description":"Identifier, e.g. ContextEngine or parse_args"}},"required":["name"]}"""
+    override fun riskLevel(argumentsJson: String) = RiskLevel.SAFE
+
+    override suspend fun execute(argumentsJson: String): String = guarded { run(argumentsJson) }
+
+    private suspend fun run(argumentsJson: String): String {
+        val projects = inScope(engine, project) ?: return ContextEngine.NOT_READY
+        val args = runCatching { json.decodeFromString<SymbolArgs>(argumentsJson) }.getOrNull()?.takeIf { it.name.isNotBlank() } ?: return "invalid arguments"
+        if (projects.isEmpty()) return NO_PROJECT
+        val ids = projects.map { it.id }
+        val name = args.name.trim()
+        val defs = engine.findSymbol(name, ids) ?: return ContextEngine.NOT_READY
+        val defFiles = defs.map { it.projectId to it.path }.toSet()
+        val mentions = (engine.search(name, ids, 10, vectors = false) ?: emptyList()).filter { (it.projectId to it.path) !in defFiles }.take(5)
+        val note = indexingNote(projects)
+        if (defs.isEmpty() && mentions.isEmpty()) return (note?.plus("\n") ?: "") + "No definition or mention of $name — try search_context or grep"
+        val names = projects.associate { it.id to it.name }
+        fun shown(pid: String, path: String) = if (projects.size > 1) "${names[pid]}:$path" else path
+        return (note?.plus("\n") ?: "") + "definitions:\n" +
+            (defs.joinToString("\n") { "  ${shown(it.projectId, it.path)}:${it.line} ${it.kind} ${it.name}" }.ifEmpty { "  (none found)" }) +
+            "\nmentions:\n" + (mentions.joinToString("\n") { "  ${shown(it.projectId, it.path)}:${it.startLine}-${it.endLine} · ${it.label ?: "-"}" }.ifEmpty { "  (none)" })
+    }
+}
+
+private class RelatedTool(private val engine: ContextEngine, private val project: ProjectOf) : Tool {
+    override val name = "related"
+    override val description = "Files connected to one file: what it imports and what imports it, its tests (or the code a test covers), and markdown links and backlinks."
+    override val parametersJson = """{"type":"object","properties":{"path":{"type":"string","description":"Path as shown by search_context"}},"required":["path"]}"""
+    override fun riskLevel(argumentsJson: String) = RiskLevel.SAFE
+
+    override suspend fun execute(argumentsJson: String): String = guarded { run(argumentsJson) }
+
+    private suspend fun run(argumentsJson: String): String {
+        val projects = inScope(engine, project) ?: return ContextEngine.NOT_READY
+        val args = runCatching { json.decodeFromString<RelatedArgs>(argumentsJson) }.getOrNull()?.takeIf { it.path.isNotBlank() } ?: return "invalid arguments"
+        if (projects.isEmpty()) return NO_PROJECT
+        val refused = "not an indexed file in this project: ${args.path}"
+        val (p, rel) = locate(projects, args.path) ?: return refused
+        if (!(engine.fileIndexedOrNull(p.id, rel) ?: return ContextEngine.NOT_READY)) return refused
+        val r = engine.related(p.id, rel) ?: return ContextEngine.NOT_READY
+        val note = if (r.rebuilding) "\nrelations are being rebuilt — results may be incomplete" else ""
+        if (r.isEmpty) return "No known relations for $rel (imports, tests and links resolve within this project only)$note"
+        return listOf("imports" to r.imports, "imported by" to r.importedBy, "tests" to r.tests, "tested by" to r.testedBy,
+            "links" to r.links, "backlinks" to r.backlinks).filter { it.second.isNotEmpty() }.joinToString("\n") { (k, v) ->
+            "$k: " + v.take(CAP).joinToString(", ") + if (v.size > CAP) " (+${v.size - CAP} more)" else ""
+        } + note
     }
 }

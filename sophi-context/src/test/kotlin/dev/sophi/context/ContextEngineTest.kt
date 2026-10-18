@@ -118,4 +118,17 @@ class ContextEngineTest : FunSpec({
         e.dirSize(d) shouldBe 8L
         e.status().let { it.ready shouldBe false; it.diskBytes shouldBe 0L }
     }
+
+    test("the host embeds chunks in the background and search fuses vectors; the hint path stays lexical") {
+        val e = autoClose(ContextEngine(tempdir().toPath(), GitProbe.none, scanInterval = 60_000, drainEveryMillis = 100,
+            embedder = ChunkEmbedder(FakeEmbeddings(), "fake")).start())
+        e.awaitReady(10_000) shouldBe true
+        val r = tempdir().toPath().also { Files.createDirectories(it.resolve(".git")) }
+        Files.createDirectories(r.resolve("cars")); Files.writeString(r.resolve("cars/Garage.kt"), "class Garage { fun park(car: Car) {} }")
+        val id = (e.register(r, auto = true) as RegisterResult.Registered).project.id
+        val end = System.currentTimeMillis() + 10_000
+        while (e.search("automobile", listOf(id)).orEmpty().isEmpty()) { check(System.currentTimeMillis() < end) { "timed out" }; Thread.sleep(100) }
+        e.search("automobile", listOf(id))!!.first().path shouldBe "cars/Garage.kt"
+        e.search("automobile", listOf(id), vectors = false) shouldBe emptyList()
+    }
 })

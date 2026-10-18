@@ -23,11 +23,12 @@ class ContextEngine(
     private val root: Path = defaultRoot(),
     private val git: GitProbe = GitProbe.system,
     private val scanInterval: Long = 30_000,
-    private val drainEveryMillis: Long = 2_000
+    private val drainEveryMillis: Long = 2_000,
+    private val embedder: ChunkEmbedder? = ChunkEmbedder.fromKnobs(System.getenv())
 ) : AutoCloseable {
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val NOT_READY = "index not ready — use grep/glob/read"
         const val DATABASE = "context"
         fun defaultRoot(): Path = Path.of(System.getProperty("user.home"), ".sophi", "db")
@@ -38,6 +39,8 @@ class ContextEngine(
     @Volatile private var lastError = 0L
     private val opened = CountDownLatch(1)
     private var hostTermPrepared = false   // writer thread only
+    private var embedPrepared = false      // writer thread only
+    private var embedIdleUntil = 0L        // writer thread only; Long.MAX_VALUE = idle until a scan changes something
     private val writer: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "sophi-context-writer").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
     }
@@ -143,12 +146,27 @@ class ContextEngine(
 
     fun requestScan(projectId: String) { withStoreOrNull { requestScan(it, projectId) } }
 
-    fun search(query: String, projectIds: List<String>, limit: Int = 8): List<SearchHit>? = withStoreOrNull { s ->
+    /** [vectors] = false keeps the BM25 scale (the hint's gate is calibrated on it). The query is embedded outside the store call. */
+    fun search(query: String, projectIds: List<String>, limit: Int = 8, vectors: Boolean = true): List<SearchHit>? {
+        val qv = if (vectors) embedder?.queryVector(query) else null
+        return withStoreOrNull { s ->
+            requestStaleScans(s, projectIds)
+            Retriever(s, Weights(), qv?.let { v -> { _: String -> v } }).search(query, projectIds, limit)
+        }
+    }
+
+    private fun requestStaleScans(s: ArcadeStore, projectIds: List<String>) {
         val now = System.currentTimeMillis()
         projects(s).filter { it.id in projectIds && (it.lastScanAt == null || now - it.lastScanAt > scanInterval) }
             .forEach { requestScan(s, it.id) }
-        Retriever(s).search(query, projectIds, limit)
     }
+
+    fun findSymbol(name: String, projectIds: List<String>, limit: Int = 10): List<SymbolHit>? = withStoreOrNull { s ->
+        requestStaleScans(s, projectIds)
+        Graph(s).findSymbol(name, projectIds, limit)
+    }
+
+    fun related(projectId: String, path: String): RelatedFiles? = withStoreOrNull { Graph(it).related(projectId, path) }
 
     fun fileIndexed(projectId: String, relPath: String): Boolean = fileIndexedOrNull(projectId, relPath) ?: false
 
@@ -189,7 +207,7 @@ class ContextEngine(
     /** Writer thread only. */
     private fun drain() {
         val h = host ?: return
-        if (h.role != Role.HOST) { hostTermPrepared = false; return }
+        if (h.role != Role.HOST) { hostTermPrepared = false; embedPrepared = false; embedIdleUntil = 0; return }
         h.withStore { s ->
             val indexer = Indexer(s, git, cancelled = { closed })
             if (!hostTermPrepared) { indexer.rebuildIfStale(SCHEMA_VERSION); hostTermPrepared = true }
@@ -198,7 +216,19 @@ class ContextEngine(
                 val id = req["id"] as String
                 val projectId = req["projectId"] as String
                 s.deleteDocument(ContextSchema.REQUEST, id)
-                if (req["kind"] == "drop") indexer.dropProject(projectId) else indexer.scan(projectId)
+                if (req["kind"] == "drop") indexer.dropProject(projectId)
+                else indexer.scan(projectId).let { if (it.added + it.changed > 0 && embedIdleUntil == Long.MAX_VALUE) embedIdleUntil = 0 }
+            }
+            val e = embedder
+            if (e != null && !closed && System.currentTimeMillis() >= embedIdleUntil) {
+                try {
+                    if (!embedPrepared) { e.prepare(s); embedPrepared = true }
+                    if (e.embedPending(s, cancelled = { closed }) == 0) embedIdleUntil = Long.MAX_VALUE
+                } catch (ex: InterruptedException) { Thread.currentThread().interrupt()
+                } catch (ex: Exception) {
+                    embedIdleUntil = System.currentTimeMillis() + 60_000   // backoff; lexical meanwhile
+                    System.err.println("context: embedding paused for 60 s (${ex.message})")
+                }
             }
         }
     }

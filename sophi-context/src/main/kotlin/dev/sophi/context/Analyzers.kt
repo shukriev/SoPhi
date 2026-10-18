@@ -2,7 +2,14 @@ package dev.sophi.context
 
 data class ChunkDraft(val startLine: Int, val endLine: Int, val kind: String, val label: String?, val text: String)
 
-data class Analysis(val chunks: List<ChunkDraft>, val summary: String?, val modules: List<String> = emptyList())
+data class SymbolDraft(val name: String, val kind: String, val line: Int)   // line is 1-based
+
+data class Analysis(
+    val chunks: List<ChunkDraft>, val summary: String?, val modules: List<String> = emptyList(),
+    val symbols: List<SymbolDraft> = emptyList(),
+    val imports: List<String> = emptyList(),   // raw, per family: "a.b.C", "./x", ".sib", "ex.com/r/pkg", "crate::a::b"
+    val links: List<String> = emptyList()      // markdown only: "[[Note]]" (wikilink, stem or folder/stem) or a relative "x/y.md"
+)
 
 /**
  * Splits a file into retrievable chunks (spec §5.2 step 3). Regex declarations, not a parser:
@@ -29,6 +36,63 @@ object Analyzers {
     private val DOC_START = Regex("""^\s*(/\*\*|///|#\s|//)""")
     private val ANNOTATION = Regex("""^@[A-Za-z]""")
 
+    private val KINDS = setOf("class", "interface", "object", "fun", "val", "var", "typealias", "enum", "record", "function",
+        "type", "const", "let", "def", "func", "struct", "trait", "impl", "mod", "protocol", "extension")
+    private val WORD = Regex("[A-Za-z]+")
+
+    /** The last declaration keyword before the name ("data class Foo" → class, "val type" → val). */
+    private fun kindOf(m: MatchResult): String =
+        WORD.findAll(m.value.removeSuffix(m.groupValues[1])).map { it.value }.lastOrNull { it in KINDS } ?: "declaration"
+
+    private val JVM_IMPORT = Regex("""^import\s+(?:static\s+)?([A-Za-z_][\w.]*?)(\.\*)?\s*(?:\bas\s+\w+)?\s*;?\s*(?://.*)?$""")
+    private val JS_FROM = Regex("""(?:^|[\s;])(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]""")
+    private val JS_CLOSE = Regex("""^\s*\}\s*from\s*['"]([^'"]+)['"]""")   // last line of a multi-line import/export { … } from
+    private val JS_BARE = Regex("""^\s*import\s*['"]([^'"]+)['"]""")
+    private val JS_REQUIRE = Regex("""\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)""")
+    private val PY_IMPORT = Regex("""^import\s+(.+)$""")
+    private val PY_FROM = Regex("""^from\s+(\.*[\w.]*)\s+import\s+(.+)$""")
+    private val GO_SINGLE = Regex("""^import\s+(?:[\w.]+\s+)?"([^"]+)"""")
+    private val GO_LINE = Regex("""^\s*(?:[\w.]+\s+)?"([^"]+)"""")
+    private val RUST_USE = Regex("""^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([\w:]+)""")
+    private val WIKI = Regex("""\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]""")
+    private val MD_LINK = Regex("""\[[^\]]*\]\(\s*<?([^)\s>#]+\.md)(?:#[^)]*)?>?\s*\)""")
+
+    private fun symbols(lang: String, lines: List<String>): List<SymbolDraft> {
+        val decl = DECL[lang] ?: return emptyList()
+        return lines.mapIndexedNotNull { i, l -> decl.find(l)?.let { m -> SymbolDraft(m.groupValues[1], kindOf(m), i + 1) } }
+    }
+
+    // ponytail: line regexes, so a multi-line Python `from x import (\n a,\n b)` yields only `x`; a parser waits for an experiment.
+    private fun imports(lang: String, lines: List<String>): List<String> = when (lang) {
+        "kotlin", "java" -> lines.mapNotNull { l -> JVM_IMPORT.find(l.trim())?.takeIf { it.groupValues[2].isEmpty() }?.groupValues?.get(1) }
+        "typescript", "javascript" -> lines.flatMap { l -> listOf(JS_FROM, JS_CLOSE, JS_BARE, JS_REQUIRE).flatMap { r -> r.findAll(l).map { it.groupValues[1] } } }
+        "python" -> lines.flatMap { l ->
+            PY_FROM.find(l)?.let { m ->
+                val mod = m.groupValues[1]
+                if (mod.all { it == '.' }) m.groupValues[2].trim().removeSurrounding("(", ")").split(',')
+                    .map { mod + it.trim().substringBefore(' ') }.filter { it.length > mod.length }
+                else listOf(mod)
+            } ?: PY_IMPORT.find(l)?.groupValues?.get(1)?.split(',')?.map { it.trim().substringBefore(' ') }.orEmpty()
+        }
+        "go" -> {
+            var block = false
+            lines.mapNotNull { l ->
+                when {
+                    l.startsWith("import (") -> { block = true; null }
+                    block && l.trim() == ")" -> { block = false; null }
+                    block -> GO_LINE.find(l)?.groupValues?.get(1)
+                    else -> GO_SINGLE.find(l)?.groupValues?.get(1)
+                }
+            }
+        }
+        "rust" -> lines.mapNotNull { RUST_USE.find(it)?.groupValues?.get(1)?.removeSuffix("::") }
+        else -> emptyList()
+    }.filter { it.isNotEmpty() }.distinct()
+
+    private fun links(text: String): List<String> =
+        (WIKI.findAll(text).map { "[[" + it.groupValues[1].trim() + "]]" } +
+            MD_LINK.findAll(text).map { it.groupValues[1] }.filter { "://" !in it && !it.startsWith("mailto:") }).distinct().toList()
+
     fun analyze(relPath: String, role: Role, lang: String, text: String): Analysis {
         if (role == Role.GENERATED) return Analysis(emptyList(), null)
         if (text.isBlank()) return Analysis(emptyList(), null)
@@ -47,7 +111,8 @@ object Analyzers {
         }.flatMap { split(it, lines) }.flatMap { c ->
             if (c.text.length <= MAX_CHARS) listOf(c) else c.text.chunked(MAX_CHARS).map { c.copy(text = it) }
         }
-        return Analysis(chunks, summary(lang, lines), modules)
+        return Analysis(chunks, summary(lang, lines), modules, symbols(lang, lines), imports(lang, lines),
+            if (lang == "markdown") links(text) else emptyList())
     }
 
     private class Start(val start: Int, val decl: Int, val label: String)
