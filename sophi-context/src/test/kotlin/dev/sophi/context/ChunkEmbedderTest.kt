@@ -38,6 +38,22 @@ class ChunkEmbedderTest : FunSpec({
         count(s, "SELECT count(*) AS n FROM Chunk WHERE vec IS NULL") shouldBe 1
     }
 
+    test("ChunkVec survives a rebuild: re-embedding after a rescan marks chunks done without calling the provider") {
+        val s = autoClose(EmbeddedArcadeStore.open(tempdir().toPath()))
+        val fake = FakeEmbeddings()
+        val e = ChunkEmbedder(fake, "fake")
+        indexedStore(s, tempdir().toPath(), mapOf("a/A.kt" to "class Car"), e)
+        val calls = fake.seen.size
+        calls shouldBe 1
+        val ix = Indexer(s, GitProbe.none)
+        ix.rebuildIfStale(schemaVersion = 99)
+        ix.scan("p")
+        count(s, "SELECT count(*) AS n FROM Chunk WHERE vec IS NULL") shouldBe 1
+        while (e.embedPending(s) > 0) Unit
+        fake.seen.size shouldBe calls
+        count(s, "SELECT count(*) AS n FROM Chunk WHERE vec IS NULL") shouldBe 0
+    }
+
     test("a model or dims change drops every vector and re-embeds") {
         val s = indexed(mapOf("a/A.kt" to "class Car"))
         ChunkEmbedder(FakeEmbeddings(4), "m1").also { it.prepare(s); while (it.embedPending(s) > 0) Unit }

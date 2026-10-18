@@ -163,7 +163,9 @@ addendum).
     37 docs queries and costs about 55 minutes of offline summarising, and the production path (lazy, at query time)
     does not exist, so the default is off and a follow-up plan builds it (an `LLMProvider` into the host engine,
     `IndexRequest(kind="summarise")` for top-5 hits whose `summaryHash != contentHash`, the host drain calling
-    `FileSummariser` and `applySummary`); embeddings (nomic v1.5, 768 dims) 0.70-0.74 / 0.59-0.60 / 0.64-0.65,
+    `FileSummariser` and `applySummary`). That path reuses code already in the tree, which is not dead: `FileSummariser`,
+    `LlmSummaries`, `Indexer.applySummary`, `IndexOptions.summaryTokens` and `Judgments.CONTEXT_SUMMARY`. ChunkVec orphan GC (vectors whose chunk hash no
+    longer exists; ChunkVec is kept across rebuilds) is needed before embeddings default on; embeddings (nomic v1.5, 768 dims) 0.70-0.74 / 0.59-0.60 / 0.64-0.65,
     recorded as **inconclusive** and off: every run logged SEVERE `LSMVectorIndex FALLBACK: Built 0 active vector
     IDs`, and runs were not reproducible. Follow-up: verify the ChunkVec neighbours do not come from a degraded path,
     then re-test. Embeddings are experiment-only; a Finder-launched companion needs `launchctl setenv

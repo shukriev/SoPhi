@@ -332,4 +332,5 @@ Verdict: by the fixed rule K nominally beats `all` on this model (a tie in subst
 ## Still pending
 
 Frontier-model E1/E5, a longer-task E4 that exercises the summary, and the live Anthropic cache check (procedure: `evals/context/EXPERIMENTS.md`); a harder
-task set if success differences matter.
+task set if success differences matter. Also pending: the LLM-summary production path (lazy, at query time; ADR-041 §10) and an embeddings re-test after verifying
+that the ChunkVec neighbours do not come from the `LSMVectorIndex FALLBACK` path.

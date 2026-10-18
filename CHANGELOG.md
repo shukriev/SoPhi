@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- Context index schema v2 (ADR-041, M5): the first start after upgrading re-indexes every project once, and a v2 host refuses v1 clients
+- Context index schema v2 (ADR-041, M5): the first start after upgrading re-indexes every project once, and a client refuses a host whose schema version differs (either direction), so run the same version of the CLI and the companion
 - Compaction summaries are no longer SYSTEM messages: mid-turn they are appended to the turn's user message, cross-turn they are a leading USER/ASSISTANT pair, so strict chat templates accept them (ADR-041, M4)
 - Compaction elides old tool output before summarising (no LLM call when that is enough), and an oversized parallel round of tool results is stubbed instead of ending the turn with `ContextExhausted` in the `elide` and `structured` modes; E4 on a small local model in `evals/context/RESULTS.md`
 - Context hint gate: the top-1/top-2 ratio threshold rises from 1.0 to 1.25 — live E1 negatives showed the old gate firing on 6 of 10 chit-chat messages against the SoPhi index, the new one on none; live E1/E5 results on a small local model recorded in `evals/context/RESULTS.md` (ADR-041)

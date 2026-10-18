@@ -1,6 +1,6 @@
 # Context engine — live experiment procedure (E1 hint, E5 orientation)
 
-Status: **small local model done** (E2 offline and E3 on bonsai also done, below) (bonsai-27b, 2026-10-14 for E1/E5, 2026-10-15 for E4; results in `RESULTS.md` → "Live E1/E5", "E4 compaction"); the frontier-model runs and the live Anthropic cache check are still pending. Runner: `sophi-arena/context_qa`. Every run spends model tokens, so each needs the user's go-ahead first.
+Status: **small local model done** (bonsai-27b: E1/E5 on 2026-10-14, E4 on 2026-10-15, plus E2 offline and E3 below; results in `RESULTS.md` → "Live E1/E5", "E4 compaction"); the frontier-model runs and the live Anthropic cache check are still pending. Runner: `sophi-arena/context_qa`. Every run spends model tokens, so each needs the user's go-ahead first.
 
 ## Knobs
 
