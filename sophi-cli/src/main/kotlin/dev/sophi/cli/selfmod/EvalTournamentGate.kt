@@ -38,10 +38,11 @@ private fun runOnce(
         add("--sessions-dir"); add(sessionsDir.toString())
         add("--model"); add(model)
         add("--provider"); add(providerType)
-        apiKeyOption?.let { add("--api-key"); add(it) }
         baseUrl?.let { add("--base-url"); add(it) }
     }
-    val process = ProcessBuilder(args).redirectErrorStream(true).start()
+    // The key goes through the environment: on the command line `ps` would show it to every process.
+    val process = ProcessBuilder(args).redirectErrorStream(true)
+        .apply { apiKeyOption?.let { environment()["SOPHI_API_KEY"] = it } }.start()
     val output = process.inputStream.bufferedReader().readText()
     check(process.waitFor() == 0) { "eval-run failed: $output" }
     return parseScores(output)

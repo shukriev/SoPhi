@@ -18,7 +18,7 @@ class GoalRunCommand : CliktCommand(name = "run", help = "Run a task immediately
     private val model: String by option("--model", "-m").default("claude-3-5-sonnet-20241022")
     private val providerType: String by option("--provider").default("claude")
     private val baseUrl: String? by option("--base-url")
-    private val apiKeyOption: String? by option("--api-key")
+    private val apiKeyOption: String? by apiKeyOption()
     private val scheduleDirStr: String by option("--schedule-dir")
         .default("${System.getProperty("user.home")}/.sophi/schedule")
     private val sessionsDirStr: String by option("--sessions-dir")
