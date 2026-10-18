@@ -11,9 +11,9 @@ object HostProcessMain {
         ProcessHandle.current().parent().ifPresent { p -> p.onExit().thenRun { kotlin.system.exitProcess(0) } }
         val root = Path.of(args[0])
         val ready = Path.of(args[1])
-        val host = ArcadeHost.open(root, database = "ctx", schemaVersion = 1, engineVersion = "child")
+        val host = ArcadeHost.open(root, engineVersion = "child").also { it.register("ctx", 1) }
         check(host.role == Role.HOST) { "child expected to host, was ${host.role}" }
-        host.withStore {
+        host.withStore("ctx") {
             it.ensureSchema(documentTypes = listOf("Note"))
             it.upsertDocument("Note", "from-host", mapOf("who" to "child"))
         }

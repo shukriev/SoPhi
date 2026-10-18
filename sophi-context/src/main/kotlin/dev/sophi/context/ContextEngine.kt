@@ -11,6 +11,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class IndexStatus(val ready: Boolean, val reason: String?, val role: String?, val projects: List<ProjectInfo>, val diskBytes: Long)
 
@@ -39,7 +40,7 @@ class ContextEngine(
     }
 
     @Volatile private var lease: SharedArcadeHost.Lease? = null
-    @Volatile private var host: ArcadeHost? = null
+    private val started = AtomicBoolean(false)
     private val writerLock: Any = writers.computeIfAbsent(root.toAbsolutePath().normalize()) { Any() }
     @Volatile private var closed = false
     @Volatile private var lastError = 0L
@@ -51,13 +52,13 @@ class ContextEngine(
         Thread(r, "sophi-context-writer").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
     }
 
-    val ready: Boolean get() = host != null && !closed
+    val ready: Boolean get() = lease != null && !closed
 
     /** Why the index failed to open; null while opening or ready. */
     @Volatile var unavailableReason: String? = null; private set
 
     fun start(): ContextEngine {
-        check(lease == null) { "ContextEngine already started" }
+        check(started.compareAndSet(false, true)) { "ContextEngine already started" }
         Thread({
             try {
                 val l = SharedArcadeHost.acquire(root, engineVersion = "sophi-context/$SCHEMA_VERSION")
@@ -66,7 +67,7 @@ class ContextEngine(
                     l.host.register(DATABASE, SCHEMA_VERSION); registered = true
                     l.host.withStore(DATABASE) { ContextSchema.ensure(it) }
                 } catch (e: Exception) { if (registered) l.host.unregister(DATABASE); l.close(); throw e }
-                synchronized(this) { lease = l; host = l.host }   // paired with release()
+                synchronized(this) { lease = l }   // paired with release()
                 if (closed) release()
             } catch (e: IncompatibleHostException) {
                 unavailableReason = "another Sophi version is using the index — update this app or the CLI"
@@ -83,7 +84,7 @@ class ContextEngine(
     fun awaitReady(timeoutMillis: Long): Boolean = opened.await(timeoutMillis, TimeUnit.MILLISECONDS) && ready
 
     fun <T> withStoreOrNull(block: (ArcadeStore) -> T): T? {
-        val h = host ?: return null
+        val h = lease?.host ?: return null
         return try { h.withStore(DATABASE, block) } catch (e: InterruptedException) {
             Thread.currentThread().interrupt(); null
         } catch (e: Exception) {
@@ -136,7 +137,7 @@ class ContextEngine(
     fun status(): IndexStatus {
         val projects = if (closed) null else projectsOrNull()
         return IndexStatus(ready = projects != null, reason = if (projects != null) null else unavailableReason ?: NOT_READY,
-            role = host?.role?.let { if (it == Role.HOST) "host" else "client" }, projects = projects ?: emptyList(),
+            role = lease?.host?.role?.let { if (it == Role.HOST) "host" else "client" }, projects = projects ?: emptyList(),
             diskBytes = dirSize(root.resolve("databases").resolve(DATABASE)))
     }
 
@@ -208,7 +209,7 @@ class ContextEngine(
     @Synchronized
     private fun release() {
         val l = lease ?: return
-        lease = null; host = null
+        lease = null
         runCatching { l.host.unregister(DATABASE) }
         l.close()
     }
@@ -225,10 +226,10 @@ class ContextEngine(
 
     /** Writer thread only. */
     private fun drain() {
-        val h = host ?: return
+        val h = lease?.host ?: return
         if (h.role != Role.HOST) { hostTermPrepared = false; embedPrepared = false; embedIdleUntil = 0; return }
         synchronized(writerLock) {
-            if (closed || host !== h) return   // closed or released while waiting for the lock
+            if (closed || lease?.host !== h) return   // closed or released while waiting for the lock
             h.withStore(DATABASE) { s ->
             val indexer = Indexer(s, git, cancelled = { closed })
             if (!hostTermPrepared) { indexer.rebuildIfStale(SCHEMA_VERSION); hostTermPrepared = true }

@@ -47,7 +47,6 @@ class ArcadeHost private constructor(
     @Volatile private var elected = false
     @Volatile private var generation = 0
     private var connectedPort: Int = -1
-    private var defaultDatabase: String? = null
     @Volatile var role: Role = Role.CLIENT
         private set
 
@@ -66,12 +65,6 @@ class ArcadeHost private constructor(
                 try { it.elect() } catch (e: Exception) { it.close(); throw e }
             }
         }
-
-        /** The one-database form (M0): [open] then [register]; [withStore] without a name uses [database]. */
-        fun open(root: Path, database: String, schemaVersion: Int, engineVersion: String, waitForHostMillis: Long = 3_000): ArcadeHost =
-            open(root, engineVersion, waitForHostMillis).also {
-                try { it.register(database, schemaVersion); it.defaultDatabase = database } catch (e: Exception) { it.close(); throw e }
-            }
     }
 
     /**
@@ -95,9 +88,6 @@ class ArcadeHost private constructor(
 
     /** Registrations in this process currently using [database]. */
     fun users(database: String): Int = users[database] ?: 0
-
-    fun <T> withStore(block: (ArcadeStore) -> T): T =
-        withStore(checkNotNull(defaultDatabase) { "no default database — use withStore(database, block)" }, block)
 
     /**
      * Runs [block] against [database]. If it fails while this process is a client and the host it was

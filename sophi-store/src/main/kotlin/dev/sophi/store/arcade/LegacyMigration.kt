@@ -91,10 +91,10 @@ object LegacyMigration {
             "fromPath" to old.toString(), "at" to at, "counts" to counts.joined(), "skipped" to skipped.joined()
         ))
 
-    private fun copy(src: ArcadeStore, target: ArcadeStore, raw: LegacyLayout, ts: Long): Pair<Map<String, Int>, Map<String, Int>> {
-        val layout = LegacyLayout(
-            raw.vertexTypes - RESERVED, raw.edgeTypes.filterKeys { it !in RESERVED }, raw.documentTypes - RESERVED
-        )
+    private fun copy(src: ArcadeStore, target: ArcadeStore, layout: LegacyLayout, ts: Long): Pair<Map<String, Int>, Map<String, Int>> {
+        require((layout.vertexTypes + layout.edgeTypes.keys + layout.documentTypes).none { it in RESERVED }) {
+            "a legacy layout must not name a reserved type ($RESERVED): $layout"
+        }
         val present = src.query("SELECT name FROM schema:types").map { it["name"] as String }.toSet()
         // Written before the first data write, so a crash leaves proof that what follows is ours to clear.
         target.upsertDocument(IN_PROGRESS, ID, mapOf("at" to ts))
@@ -167,18 +167,12 @@ object SharedStore {
     fun samePath(a: Path, b: Path): Boolean = canonical(a) == canonical(b)
     private fun canonical(p: Path): Path = runCatching { p.toRealPath() }.getOrElse { p.toAbsolutePath().normalize() }
 
-    /**
-     * Throws IllegalStateException (one-line message) when legacy data can't be adopted this run; IncompatibleHostException on schema mismatch.
-     *
-     * Every opener of a [database] that has a legacy home must pass the same non-null [legacyHome]: the migration's
-     * safety depends on it. An opener passing null skips both the host's migration and the client's refusal to run
-     * over unmigrated data, so it could start an empty store and write into it before the legacy data moves.
-     */
-    fun open(root: Path, database: String, schemaVersion: Int, legacyHome: Path? = null, layout: LegacyLayout = LegacyLayout()): FailoverArcadeStore {
+    /** Throws IllegalStateException (one-line message) when legacy data can't be adopted this run; IncompatibleHostException on schema mismatch. */
+    fun open(root: Path, database: String, schemaVersion: Int, legacyHome: Path, layout: LegacyLayout): FailoverArcadeStore {
         val lease = SharedArcadeHost.acquire(root)
         val store = try { FailoverArcadeStore(lease, database, schemaVersion) } catch (e: Throwable) { lease.close(); throw e }
         try {
-            if (legacyHome != null) adoptLegacy(store, database, legacyHome, layout)
+            adoptLegacy(store, database, legacyHome, layout)
             return store
         } catch (e: Throwable) {
             store.close(); throw e

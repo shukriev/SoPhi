@@ -35,15 +35,15 @@ class ArcadeHostTwoProcessTest : FunSpec({
         val child = spawnHost(root, ready)
         try {
             awaitFile(ready, 30_000, child)
-            ArcadeHost.open(root, database = "ctx", schemaVersion = 1, engineVersion = "parent").use { me ->
+            ArcadeHost.open(root, engineVersion = "parent").also { it.register("ctx", 1) }.use { me ->
                 me.role shouldBe Role.CLIENT
-                me.withStore { it.upsertDocument("Note", "from-client", mapOf("who" to "parent")) }
+                me.withStore("ctx") { it.upsertDocument("Note", "from-client", mapOf("who" to "parent")) }
 
                 child.destroyForcibly()
                 child.waitFor(10, TimeUnit.SECONDS) shouldBe true
 
                 val started = System.nanoTime()
-                val ids = me.withStore { s -> s.documents("Note").map { it["id"] } }
+                val ids = me.withStore("ctx") { s -> s.documents("Note").map { it["id"] } }
                 val elapsedMs = (System.nanoTime() - started) / 1_000_000
                 println("failover after SIGKILL took $elapsedMs ms")
                 me.role shouldBe Role.HOST

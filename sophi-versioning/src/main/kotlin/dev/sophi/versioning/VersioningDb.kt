@@ -9,16 +9,13 @@ import java.nio.file.Path
 
 /** How a versioning store reaches ArcadeDB: an embedded home opened around each operation (ADR-029), or one
  *  store on the shared server held for the store's lifetime (ADR-041 M6). */
-class VersioningDb private constructor(private val opener: () -> ArcadeStore, private val held: ArcadeStore?) : AutoCloseable {
+class VersioningDb private constructor(private val home: Path?, private val held: ArcadeStore?) : AutoCloseable {
     companion object {
-        fun embedded(home: Path) = VersioningDb({ EmbeddedArcadeStore.open(home) }, null)
-        fun shared(store: ArcadeStore) = VersioningDb({ store }, store)
+        fun embedded(home: Path) = VersioningDb(home, null)
+        fun shared(store: ArcadeStore) = VersioningDb(null, store)
     }
 
-    fun <T> use(block: (ArcadeStore) -> T): T {
-        val s = held ?: opener()
-        try { return block(s) } finally { if (held == null) s.close() }
-    }
+    fun <T> use(block: (ArcadeStore) -> T): T = if (held != null) block(held) else EmbeddedArcadeStore.open(home!!).use(block)
 
     override fun close() { held?.close() }
 }

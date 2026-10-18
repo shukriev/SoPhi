@@ -16,6 +16,7 @@ class VersioningStoresTest : FunSpec({
                 vs.history(ArtifactType.CONFIG, "default").map { it.id } shouldBe listOf(old.id)
                 vs.record(ArtifactType.CONFIG, "default", "{\"x\":1}", ProducedBy.HUMAN).parentVersionId shouldBe old.id
                 sc.forConfigVersion(old.id).size shouldBe 1
+                vs.get("missing") shouldBe null   // a null result on the shared store is not a reason to open embedded
             }
         }
         Files.isRegularFile(home.resolve("arcadedb")) shouldBe true   // the blocker file, not a db
@@ -24,13 +25,4 @@ class VersioningStoresTest : FunSpec({
         Files.isDirectory(other.resolve("arcadedb")) shouldBe true
     }
 
-    test("a symlink to a default home is the default home") {
-        val real = tempdir().toPath(); val root = tempdir().toPath()
-        val link = Files.createSymbolicLink(tempdir().toPath().resolve("link"), real)
-        VersioningStores.versionStore(link, root, mapOf(real to "versioning")).use {
-            it.record(ArtifactType.SKILL, "s", "x", ProducedBy.HUMAN)
-        }
-        Files.isRegularFile(real.resolve("arcadedb")) shouldBe true
-        Files.isDirectory(root.resolve("databases").resolve("versioning")) shouldBe true
-    }
 })

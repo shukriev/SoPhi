@@ -12,7 +12,7 @@ import java.nio.file.Files
 class IndexResetTest : FunSpec({
     test("reset moves the database aside when nothing hosts it") {
         val root = tempdir().toPath()
-        val host = ArcadeHost.open(root, ContextEngine.DATABASE, ContextEngine.SCHEMA_VERSION, "t")
+        val host = ArcadeHost.open(root, "t").also { it.register(ContextEngine.DATABASE, ContextEngine.SCHEMA_VERSION) }
         host.role shouldBe Role.HOST
         host.close()
         IndexReset(root).run() shouldBe ResetResult.Done

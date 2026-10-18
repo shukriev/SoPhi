@@ -28,11 +28,7 @@ private const val TOURNAMENT_CONTEXT_WINDOW = 100_000
 
 internal val defaultVersioningHome: Path = VersioningStores.DEFAULT_VERSIONING_HOME
 
-/** Seam so tests can make the shared store fail to open; production always uses [VersioningStores]. */
-@Volatile
-internal var versionStoreFactory: (Path) -> VersionStore = { VersioningStores.versionStore(it) }
-
-internal fun openVersionStore(home: Path): VersionStore = openStore { versionStoreFactory(home) }
+internal fun openVersionStore(home: Path) = openStore { VersioningStores.versionStore(home) }
 
 /** Opening a shared store can fail (e.g. an older Sophi still holds the legacy dir): one clear line, non-zero exit, no stack trace. */
 internal fun <T> openStore(block: () -> T): T =
@@ -154,21 +150,20 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
 
     override fun run() {
-        val home = Path.of(versioningHomeStr)
-        openVersionStore(home).use { versionStore ->
+        val db = openStore { VersioningStores.db(Path.of(versioningHomeStr)) }
+        try {
+            val versionStore = VersionStore(db)
             val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
                 ?: run { echo("No config version found for 'default' — nothing to run a tournament against."); return }
             val cases = loadEvalCases(Path.of(evalsDirStr))
             val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
-            openStore { VersioningStores.scorecardStore(home) }.use { scorecardStore ->
-                TournamentRun(
-                    incumbentVersionId = incumbentVersionId, versionStore = versionStore,
-                    scorecardStore = scorecardStore, cases = cases, provider = provider,
-                    registry = ToolRegistry(), sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
-                    contextWindowTokens = TOURNAMENT_CONTEXT_WINDOW, model = model, runsPerConfig = budget
-                ) { echo(it) }.run()
-            }
-        }
+            TournamentRun(
+                incumbentVersionId = incumbentVersionId, versionStore = versionStore,
+                scorecardStore = ScorecardStore(db), cases = cases, provider = provider,
+                registry = ToolRegistry(), sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
+                contextWindowTokens = TOURNAMENT_CONTEXT_WINDOW, model = model, runsPerConfig = budget
+            ) { echo(it) }.run()
+        } finally { db.close() }
     }
 }
 

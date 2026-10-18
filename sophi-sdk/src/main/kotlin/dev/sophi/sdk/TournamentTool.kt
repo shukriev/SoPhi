@@ -8,10 +8,10 @@ import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.store.arcade.ArcadeHost
 import dev.sophi.versioning.ArtifactType
+import dev.sophi.versioning.ScorecardStore
+import dev.sophi.versioning.VersionStore
 import dev.sophi.versioning.VersioningStores
 import java.nio.file.Path
-
-private val defaultVersioningHome: Path = VersioningStores.DEFAULT_VERSIONING_HOME
 
 /**
  * Lets a scheduled Goal-mode task run `sophi tournament run` and reflect on the result in its own
@@ -28,7 +28,7 @@ class TournamentTool(
     private val model: String,
     private val contextWindowTokens: Int,
     sessionsDir: Path,
-    private val versioningHome: Path = defaultVersioningHome,
+    private val versioningHome: Path = VersioningStores.DEFAULT_VERSIONING_HOME,
     private val evalsDir: Path = Path.of("evals"),
     private val runsPerConfig: Int = 3,
     private val sharedRoot: Path = ArcadeHost.defaultRoot(),
@@ -47,11 +47,11 @@ class TournamentTool(
     override fun riskLevel(argumentsJson: String) = RiskLevel.SAFE
 
     override suspend fun execute(argumentsJson: String): String {
-        val versionStore = runCatching { VersioningStores.versionStore(versioningHome, sharedRoot, shared) }
+        val db = runCatching { VersioningStores.db(versioningHome, sharedRoot, shared) }
             .getOrElse { return "versioning unavailable: ${it.message}" }
-        val scorecardStore = runCatching { VersioningStores.scorecardStore(versioningHome, sharedRoot, shared) }
-            .getOrElse { versionStore.close(); return "versioning unavailable: ${it.message}" }
         try {
+            val versionStore = VersionStore(db)
+            val scorecardStore = ScorecardStore(db)
             val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
                 ?: return "No config version found for 'default' — run `sophi config seed` first."
             val cases = loadEvalCases(evalsDir)
@@ -75,6 +75,6 @@ class TournamentTool(
             }.getOrElse { e -> return e.message ?: "tournament run failed" }
 
             return format(outcome)
-        } finally { versionStore.close(); scorecardStore.close() }
+        } finally { db.close() }
     }
 }

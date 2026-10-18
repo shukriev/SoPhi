@@ -22,13 +22,6 @@ class JanesPalaceSharedTest : FunSpec({
         JanesPalaceConfig.sharedRootFor(tempdir().toPath()) shouldBe null
     }
 
-    test("a symlink to the default home counts as the default home") {
-        val real = tempdir().toPath(); val root = tempdir().toPath()
-        val link = Files.createSymbolicLink(tempdir().toPath().resolve("link"), real)
-        JanesPalaceConfig.sharedRootFor(link, defaultHome = real, root = root) shouldBe root
-        JanesPalaceConfig.sharedRootFor(tempdir().toPath(), defaultHome = real, root = root) shouldBe null
-    }
-
     test("an existing embedded palace moves to the shared store once and is still recalled") {
         val home = tempdir().toPath(); val root = tempdir().toPath()
         val v = runBlocking { FakeEmbeddingProvider().embed(listOf("dentist appointment friday")) }.first()

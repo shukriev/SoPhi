@@ -13,7 +13,9 @@ import java.nio.file.attribute.PosixFilePermissions
 class ArcadeHostTest : FunSpec({
 
     fun open(root: java.nio.file.Path, schema: Int = 1, wait: Long = 3_000) =
-        ArcadeHost.open(root, database = "ctx", schemaVersion = schema, engineVersion = "test", waitForHostMillis = wait)
+        ArcadeHost.open(root, engineVersion = "test", waitForHostMillis = wait).also {
+            try { it.register("ctx", schema) } catch (e: Exception) { it.close(); throw e }
+        }
 
     test("first opener hosts and publishes a 0600 host.json; second opener is a client sharing the data") {
         val root = tempdir().toPath()
@@ -23,11 +25,11 @@ class ArcadeHostTest : FunSpec({
             PosixFilePermissions.toString(Files.getPosixFilePermissions(json)) shouldBe "rw-------"
             JSONObject(Files.readString(json)).getLong("pid") shouldBe ProcessHandle.current().pid()
 
-            host.withStore { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "h", mapOf("who" to "host")) }
+            host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "h", mapOf("who" to "host")) }
             open(root).use { client ->
                 client.role shouldBe Role.CLIENT
-                client.withStore { it.upsertDocument("Note", "c", mapOf("who" to "client")) }
-                client.withStore { s -> s.documents("Note").map { it["id"] } } shouldContainExactlyInAnyOrder listOf("h", "c")
+                client.withStore("ctx") { it.upsertDocument("Note", "c", mapOf("who" to "client")) }
+                client.withStore("ctx") { s -> s.documents("Note").map { it["id"] } } shouldContainExactlyInAnyOrder listOf("h", "c")
             }
         }
     }
@@ -42,12 +44,12 @@ class ArcadeHostTest : FunSpec({
     test("when the host closes, the client's next call takes over and keeps the data") {
         val root = tempdir().toPath()
         val host = open(root)
-        host.withStore { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "kept", mapOf("v" to 1)) }
+        host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "kept", mapOf("v" to 1)) }
         open(root).use { client ->
             client.role shouldBe Role.CLIENT
             host.close()
             val started = System.nanoTime()
-            val ids = client.withStore { s -> s.documents("Note").map { it["id"] } }
+            val ids = client.withStore("ctx") { s -> s.documents("Note").map { it["id"] } }
             val elapsedMs = (System.nanoTime() - started) / 1_000_000
             client.role shouldBe Role.HOST
             ids shouldBe listOf("kept")
@@ -97,11 +99,11 @@ class ArcadeHostTest : FunSpec({
     test("concurrent withStore calls after the host closes all succeed and the client ends as host") {
         val root = tempdir().toPath()
         val host = open(root)
-        host.withStore { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "k", mapOf("v" to 1)) }
+        host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "k", mapOf("v" to 1)) }
         open(root).use { client ->
             host.close()
             val results = java.util.concurrent.ConcurrentLinkedQueue<Any>()
-            (1..4).map { Thread { results.add(runCatching { client.withStore { s -> s.documents("Note").size } }.getOrElse { e -> e }) } }
+            (1..4).map { Thread { results.add(runCatching { client.withStore("ctx") { s -> s.documents("Note").size } }.getOrElse { e -> e }) } }
                 .onEach { it.start() }.onEach { it.join(10_000) }
             results.toList() shouldBe listOf(1, 1, 1, 1)
             client.role shouldBe Role.HOST
@@ -111,7 +113,7 @@ class ArcadeHostTest : FunSpec({
     test("a failed takeover releases the lock so a later call can still become host") {
         val root = tempdir().toPath()
         val host = open(root)
-        host.withStore { it.ensureSchema(documentTypes = listOf("Note")) }
+        host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")) }
         open(root, wait = 500).use { client ->
             host.close()
             // Make the database directory unusable so LocalArcadeServer/database creation fails mid-takeover.
@@ -119,10 +121,10 @@ class ArcadeHostTest : FunSpec({
             val moved = root.resolve("databases.moved")
             Files.move(dbs, moved)
             Files.writeString(dbs, "not a directory")
-            shouldThrow<Exception> { client.withStore { s -> s.documents("Note") } }
+            shouldThrow<Exception> { client.withStore("ctx") { s -> s.documents("Note") } }
             Files.delete(dbs)
             Files.move(moved, dbs)
-            client.withStore { s -> s.documents("Note") }
+            client.withStore("ctx") { s -> s.documents("Note") }
             client.role shouldBe Role.HOST
         }
     }
@@ -130,12 +132,12 @@ class ArcadeHostTest : FunSpec({
     test("stale host.json naming a live pid and the old port does not stop a client re-electing") {
         val root = tempdir().toPath()
         val host = open(root)
-        host.withStore { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "k", mapOf("v" to 1)) }
+        host.withStore("ctx") { it.ensureSchema(documentTypes = listOf("Note")); it.upsertDocument("Note", "k", mapOf("v" to 1)) }
         open(root).use { client ->
             val stale = Files.readString(root.resolve("host.json"))
             host.close()
             Files.writeString(root.resolve("host.json"), stale) // same pid (this JVM), same port, but no lock holder
-            client.withStore { s -> s.documents("Note").size } shouldBe 1
+            client.withStore("ctx") { s -> s.documents("Note").size } shouldBe 1
             client.role shouldBe Role.HOST
         }
     }

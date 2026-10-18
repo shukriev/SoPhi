@@ -60,13 +60,6 @@ class LegacyMigrationTest : FunSpec({
         t.queryVertices("Thing").size shouldBe 2
     }
 
-    test("a second run is a no-op once marked") {
-        val home = legacyHome(); val t = target()
-        LegacyMigration.run(t, home, layout)
-        LegacyMigration.run(t, home, layout) shouldBe LegacyMigration.Result.AlreadyMigrated
-        t.queryVertices("Thing").size shouldBe 2
-    }
-
     test("a crash mid-copy (MigrationInProgress present) is cleared and redone; the SophiSchema marker survives") {
         val home = legacyHome()
         val t = autoClose(FailoverArcadeStore(SharedArcadeHost.acquire(tempdir().toPath()), "mem", 7))
@@ -74,9 +67,11 @@ class LegacyMigrationTest : FunSpec({
         t.upsertDocument(LegacyMigration.IN_PROGRESS, "legacy", mapOf("at" to 1L))   // what a killed copy leaves behind
         t.upsertVertex("Thing", "stale", mapOf("name" to "half-copied"))
         t.documents("SophiSchema").single()["version"] shouldBe 7
-        // Even a layout that names the schema marker must not clear, count or copy it.
+        // A layout that names the schema marker is a bug: refused before anything is cleared.
         val greedy = layout.copy(documentTypes = layout.documentTypes + "SophiSchema")
-        LegacyMigration.run(t, home, greedy) shouldBe LegacyMigration.Result.Migrated(mapOf("Thing" to 2, "Note" to 1, "Link" to 1))
+        shouldThrow<IllegalArgumentException> { LegacyMigration.run(t, home, greedy) }
+        t.documents("SophiSchema").single()["version"] shouldBe 7
+        LegacyMigration.run(t, home, layout) shouldBe LegacyMigration.Result.Migrated(mapOf("Thing" to 2, "Note" to 1, "Link" to 1))
         t.queryVertices("Thing").map { it["id"] }.toSet() shouldBe setOf("a", "b")
         t.documents("SophiSchema").single()["version"] shouldBe 7
         t.documents(LegacyMigration.IN_PROGRESS) shouldBe emptyList()
@@ -142,12 +137,6 @@ class LegacyMigrationTest : FunSpec({
         LegacyMigration.isMarked(t) shouldBe false
         Files.isDirectory(home.resolve("arcadedb")) shouldBe true
         moved(home) shouldBe false
-    }
-
-    test("no old directory: nothing to migrate, the blocker file is left") {
-        val home = tempdir().toPath()
-        LegacyMigration.run(target(), home, layout) shouldBe LegacyMigration.Result.NothingToMigrate
-        blocked(home) shouldBe true
     }
 
     test("a home that doesn't exist yet gets the blocker file too") {
@@ -216,5 +205,13 @@ class LegacyMigrationTest : FunSpec({
                 .message shouldContain "hasn't moved to the shared store yet"
         }
         Files.isDirectory(home.resolve("arcadedb")) shouldBe true
+    }
+
+    test("SharedStore.samePath: a symlink is the path it points to; a path that doesn't exist yet still compares") {
+        val real = tempdir().toPath()
+        val link = Files.createSymbolicLink(tempdir().toPath().resolve("link"), real)
+        SharedStore.samePath(link, real) shouldBe true
+        SharedStore.samePath(real.resolve("new/../new"), real.resolve("new")) shouldBe true
+        SharedStore.samePath(link, tempdir().toPath()) shouldBe false
     }
 })

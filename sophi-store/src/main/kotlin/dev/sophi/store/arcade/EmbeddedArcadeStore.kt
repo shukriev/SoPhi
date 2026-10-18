@@ -43,7 +43,8 @@ class EmbeddedArcadeStore(private val local: Database) : SqlArcadeStore(local) {
         if (!local.schema.existsIndex("$type[id]")) local.command("sql", "CREATE INDEX ON $type (id) UNIQUE")
     }
 
-    override fun putVector(vertexType: String, id: String, property: String, vector: FloatArray) {
+    /** Legacy (pre-M6) vector write, kept for the migration fixtures: lazily declares the HNSW index, then `put`s. */
+    fun putVector(vertexType: String, id: String, property: String, vector: FloatArray) {
         val indexName = "$vertexType[$property]"
         if (!local.schema.existsIndex(indexName)) {
             // Index creation is committed in its own transaction, separate from any data

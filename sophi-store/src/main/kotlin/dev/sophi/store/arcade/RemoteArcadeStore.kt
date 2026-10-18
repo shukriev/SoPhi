@@ -5,8 +5,7 @@ import com.arcadedb.remote.RemoteDatabase
 /**
  * The store as seen by a process that isn't the elected host: the same SQL, over ArcadeDB's HTTP
  * API on loopback. Vector search uses SQL `vectorNeighbors` (the bare `vector.neighbors` spelling
- * fails to parse — ADR-026 addendum). Vector writes are host-only: the index `put` workaround in
- * [EmbeddedArcadeStore.putVector] needs the embedded Java API.
+ * fails to parse — ADR-026 addendum).
  */
 class RemoteArcadeStore(private val remote: RemoteDatabase) : SqlArcadeStore(remote) {
 
@@ -17,9 +16,6 @@ class RemoteArcadeStore(private val remote: RemoteDatabase) : SqlArcadeStore(rem
 
     /** A FloatArray crosses the wire as its toString ("[F@…"); a list of floats arrives intact. */
     override fun param(value: Any?): Any? = if (value is FloatArray) value.toList() else value
-
-    override fun putVector(vertexType: String, id: String, property: String, vector: FloatArray) =
-        throw UnsupportedOperationException("vector writes run on the elected host; use insertVertex or the host's store")
 
     // RemoteDatabase keeps its transaction state in one shared sessionId, so concurrent calls corrupt each other.
     // ponytail: one lock per client; pool a RemoteDatabase per thread if remote write throughput ever matters

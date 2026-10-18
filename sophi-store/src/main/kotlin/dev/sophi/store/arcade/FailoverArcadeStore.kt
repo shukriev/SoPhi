@@ -34,7 +34,6 @@ class FailoverArcadeStore(
         on { it.upsertEdge(type, vertexType, fromId, toId, properties) }
     override fun edges(type: String): List<Map<String, Any?>> = on { it.edges(type) }
     override fun deleteEdge(type: String, fromId: String, toId: String) = on { it.deleteEdge(type, fromId, toId) }
-    override fun putVector(vertexType: String, id: String, property: String, vector: FloatArray) = on { it.putVector(vertexType, id, property, vector) }
     override fun nearestVectors(vertexType: String, property: String, query: FloatArray, k: Int): List<Scored> =
         on { it.nearestVectors(vertexType, property, query, k) }
     override fun ensureVectorIndex(vertexType: String, property: String, dimensions: Int) = on { it.ensureVectorIndex(vertexType, property, dimensions) }

@@ -81,7 +81,6 @@ class PalaceStore(
         db.query("SELECT id, embedding FROM Memory WHERE embedding IS NOT NULL").forEach { row ->
             val id = row["id"] as String
             val inline = vectorOf(row["embedding"]) ?: return@forEach
-            // A concurrent adopter (another process starting at the same time) may win the insert: its vector is ours.
             if (vectorFor(id) == null) try { putVec(id, inline) } catch (e: Exception) { if (vectorFor(id) == null) throw e }
             if (vectorFor(id) != null) db.command("UPDATE Memory REMOVE embedding WHERE id = ?", id)
         }

@@ -92,8 +92,7 @@ data class JanesPalaceConfig(
         val DEFAULT_HOME: Path = Path.of(System.getProperty("user.home"), ".sophi", "memory")
 
         /** Only the default home moves to the shared store (ADR-041 M6); any other home stays embedded. */
-        fun sharedRootFor(home: Path, defaultHome: Path = DEFAULT_HOME, root: Path = ArcadeHost.defaultRoot()): Path? =
-            root.takeIf { SharedStore.samePath(home, defaultHome) }
+        fun sharedRootFor(home: Path): Path? = ArcadeHost.defaultRoot().takeIf { SharedStore.samePath(home, DEFAULT_HOME) }
 
         /** Only the literal string "false" disables purging -- unset, empty, or a typo all
          *  preserve today's default-on behavior. Deliberately the inverse of

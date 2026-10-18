@@ -223,7 +223,7 @@ class PalaceStoreTest : FunSpec({
         EmbeddedArcadeStore.open(home).use { db -> db.getVertex("Memory", "m1")!!["embedding"] shouldBe null }
     }
 
-    // Controller ruling Q6: the shared server reaches PalaceStore through RemoteArcadeStore, whose putVector throws.
+    // Controller ruling Q6: the shared server reaches PalaceStore through RemoteArcadeStore, which has no putVector.
     test("over the remote store, nearest finds a memory saved with putEmbedding and an adopted inline vector") {
         LocalArcadeServer.start(tempdir().toPath()).use { srv ->
             srv.database("memory")

@@ -16,6 +16,7 @@ import dev.sophi.memory.jane.ConsolidationHistoryStore
 import dev.sophi.memory.jane.ConsolidationRecord
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
+import dev.sophi.store.arcade.ArcadeHost
 import dev.sophi.versioning.VersioningStores
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -35,9 +36,6 @@ class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control S
 
 private fun consolidationHistoryHome(): Path =
     JanesPalaceConfig.DEFAULT_HOME.resolve("consolidations.jsonl")
-
-private fun memoryVersioningHome(): Path =
-    VersioningStores.DEFAULT_MEMORY_VERSIONS_HOME
 
 internal fun renderConsolidationList(records: List<ConsolidationRecord>, targetId: String?, echo: (String) -> Unit) {
     if (targetId == null) {
@@ -87,13 +85,13 @@ internal fun palace(
         buildProvider("openai-compat", apiKey, baseUrl, chatModel, 60L, 2) else null
     return openStore { JanesPalace(
         JanesPalaceConfig(
-            sharedRoot = JanesPalaceConfig.sharedRootFor(JanesPalaceConfig.DEFAULT_HOME),
+            sharedRoot = ArcadeHost.defaultRoot(),
             sessionModel = chatModel,
             autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv(),
             encoderTelemetry = JanesPalaceConfig.encoderTelemetryFromEnv()
         ),
         llm, emb, embeddingModel ?: "unknown",
-        versionStore = VersioningStores.versionStore(memoryVersioningHome())
+        versionStore = VersioningStores.versionStore(VersioningStores.DEFAULT_MEMORY_VERSIONS_HOME)
     ) }
 }
 
