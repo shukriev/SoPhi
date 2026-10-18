@@ -46,10 +46,10 @@ class ScheduleDaemonCommand : CliktCommand(
     private val memoryEnabled: Boolean by option(
         "--memory",
         help = "Enable Jane's Theory long-term memory for scheduled task outcomes (experimental). " +
-            "Requires --embedding-model and --embedding-base-url. Defaults to a SEPARATE memory " +
-            "home from interactive `sophi`/`sophi-companion` (~/.sophi/memory-scheduled) to avoid " +
-            "ArcadeDB's single-process lock (ADR-026) — override with --memory-home if you want a " +
-            "single shared store and accept that constraint."
+            "Requires --embedding-model and --embedding-base-url. Defaults to a SEPARATE embedded " +
+            "memory home (~/.sophi/memory-scheduled) — the daemon stays out of the shared server " +
+            "(ADR-041). Pass --memory-home ~/.sophi/memory to share the interactive palace through " +
+            "~/.sophi/db instead."
     ).flag(default = false)
     private val memoryHomeStr: String by option(
         "--memory-home",

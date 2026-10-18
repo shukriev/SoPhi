@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.VersionStore
+import dev.sophi.versioning.VersioningStores
 import java.nio.file.Path
 import java.time.Instant
 
@@ -15,9 +16,9 @@ private fun versionStoreHomeFor(type: ArtifactType, project: Boolean): Path = wh
         if (project) Path.of(".sophi", "skills", ".versions")
         else Path.of(System.getProperty("user.home"), ".sophi", "skills", ".versions")
     ArtifactType.LESSON -> Path.of(System.getProperty("user.home"), ".sophi", "learning", ".versions")
-    ArtifactType.CONFIG -> Path.of(System.getProperty("user.home"), ".sophi", "versioning")
+    ArtifactType.CONFIG -> VersioningStores.DEFAULT_VERSIONING_HOME
     ArtifactType.AGENT_DEFINITION -> Path.of(System.getProperty("user.home"), ".sophi", "agents", ".versions")
-    ArtifactType.MEMORY_CONSOLIDATION -> Path.of(System.getProperty("user.home"), ".sophi", "memory", ".versions")
+    ArtifactType.MEMORY_CONSOLIDATION -> VersioningStores.DEFAULT_MEMORY_VERSIONS_HOME
 }
 
 private fun parseType(raw: String): ArtifactType =
@@ -79,7 +80,9 @@ class VersionsListCommand : CliktCommand(name = "list", help = "List recorded ve
 
     override fun run() {
         val artifactType = parseType(type)
-        VersionsList(VersionStore(versionStoreHomeFor(artifactType, project)), artifactType, id) { echo(it) }.run()
+        openVersionStore(versionStoreHomeFor(artifactType, project)).use {
+            VersionsList(it, artifactType, id) { line -> echo(line) }.run()
+        }
     }
 }
 
@@ -91,7 +94,9 @@ class VersionsShowCommand : CliktCommand(name = "show", help = "Show a specific 
 
     override fun run() {
         val artifactType = parseType(type)
-        VersionsShow(VersionStore(versionStoreHomeFor(artifactType, project)), versionId) { echo(it) }.run()
+        openVersionStore(versionStoreHomeFor(artifactType, project)).use {
+            VersionsShow(it, versionId) { line -> echo(line) }.run()
+        }
     }
 }
 
@@ -108,7 +113,9 @@ class VersionsRevertCommand : CliktCommand(
 
     override fun run() {
         val artifactType = parseType(type)
-        VersionsRevert(VersionStore(versionStoreHomeFor(artifactType, project)), artifactType, id, versionId) { echo(it) }.run()
+        openVersionStore(versionStoreHomeFor(artifactType, project)).use {
+            VersionsRevert(it, artifactType, id, versionId) { line -> echo(line) }.run()
+        }
     }
 }
 

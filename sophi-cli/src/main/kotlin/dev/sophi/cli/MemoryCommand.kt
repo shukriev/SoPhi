@@ -16,13 +16,14 @@ import dev.sophi.memory.jane.ConsolidationHistoryStore
 import dev.sophi.memory.jane.ConsolidationRecord
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
-import dev.sophi.versioning.VersionStore
+import dev.sophi.store.arcade.ArcadeHost
+import dev.sophi.versioning.VersioningStores
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
 /**
  * `sophi memory` — inspect and control Jane's Theory memory (spec §9). Operates directly
- * on ~/.sophi/memory/; needs no running chat session. Providers are wired only for the
+ * on the shared memory store (ADR-041 M6) — works while the companion or another CLI is running. Providers are wired only for the
  * subcommands that need them (search, consolidation compression).
  */
 class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control Sophi's long-term memory") {
@@ -34,10 +35,7 @@ class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control S
 }
 
 private fun consolidationHistoryHome(): Path =
-    Path.of(System.getProperty("user.home"), ".sophi", "memory", "consolidations.jsonl")
-
-private fun memoryVersioningHome(): Path =
-    Path.of(System.getProperty("user.home"), ".sophi", "memory", ".versions")
+    JanesPalaceConfig.DEFAULT_HOME.resolve("consolidations.jsonl")
 
 internal fun renderConsolidationList(records: List<ConsolidationRecord>, targetId: String?, echo: (String) -> Unit) {
     if (targetId == null) {
@@ -85,15 +83,16 @@ internal fun palace(
         buildOpenAiCompatEmbeddingProvider(baseUrl, apiKey, embeddingModel, dimensions) else null
     val llm = if (baseUrl != null && chatModel != null)
         buildProvider("openai-compat", apiKey, baseUrl, chatModel, 60L, 2) else null
-    return JanesPalace(
+    return openStore { JanesPalace(
         JanesPalaceConfig(
+            sharedRoot = ArcadeHost.defaultRoot(),
             sessionModel = chatModel,
             autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv(),
             encoderTelemetry = JanesPalaceConfig.encoderTelemetryFromEnv()
         ),
         llm, emb, embeddingModel ?: "unknown",
-        versionStore = VersionStore(memoryVersioningHome())
-    )
+        versionStore = VersioningStores.versionStore(VersioningStores.DEFAULT_MEMORY_VERSIONS_HOME)
+    ) }
 }
 
 private fun CliktCommand.confirmPrompt(prompt: String): Boolean {
@@ -235,10 +234,10 @@ class MemoryRestore : CliktCommand(name = "restore", help = "Undo a soft-delete 
     }
 }
 
-class MemoryReset : CliktCommand(name = "reset", help = "Wipe ALL memory — irreversible") {
+class MemoryReset : CliktCommand(name = "reset", help = "Wipe ALL memory — the shared memory every running Sophi app (CLI and companion) uses; irreversible") {
     private val yes: Boolean by option("--yes").flag()
     override fun run() = runBlocking {
-        echo("This wipes ~/.sophi/memory entirely — every memory, thread, and profile attribute.")
+        echo("This wipes ${JanesPalaceConfig.DEFAULT_HOME} entirely — every memory, thread, and profile attribute — for every running Sophi app (CLI and companion), which share it.")
         if (!yes) {
             echo("Type RESET to confirm: ", trailingNewline = false)
             if (readLine()?.trim() != "RESET") return@runBlocking echo("Aborted.")

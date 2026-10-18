@@ -29,19 +29,28 @@ class JanesPalace(
     onWarning: (String) -> Unit = {},
     versionStore: VersionStore? = null
 ) : MemoryTechnique {
-    private val store = PalaceStore(config.home)
-    private val profile = UserProfile(store)
-    private val walker = embeddingProvider?.let { PalaceWalker(store, profile, it, config) }
-    private val encoder = llmProvider?.let { SignificanceEncoder(it, config, onWarning) }
-    private val writer = embeddingProvider?.let {
-        MemoryWriter(store, profile, it, embeddingModelName, config)
+    private val store = config.sharedRoot?.let { PalaceStore.shared(config.home, it) } ?: PalaceStore(config.home)
+    private val profile: UserProfile
+    private val walker: PalaceWalker?
+    private val encoder: SignificanceEncoder?
+    private val writer: MemoryWriter?
+    private val forgetEngine: ForgetEngine
+    private val consolidator: Consolidator
+
+    init {
+        try {   // the store holds a shared-server lease: close it if anything after it fails
+            profile = UserProfile(store)
+            walker = embeddingProvider?.let { PalaceWalker(store, profile, it, config) }
+            encoder = llmProvider?.let { SignificanceEncoder(it, config, onWarning) }
+            writer = embeddingProvider?.let { MemoryWriter(store, profile, it, embeddingModelName, config) }
+            forgetEngine = ForgetEngine(store, profile)
+            consolidator = Consolidator(
+                store, forgetEngine, llmProvider, config,
+                ConsolidationHistoryStore(config.home.resolve("consolidations.jsonl")),
+                versionStore
+            )
+        } catch (e: Throwable) { store.close(); throw e }
     }
-    private val forgetEngine = ForgetEngine(store, profile)
-    private val consolidator = Consolidator(
-        store, forgetEngine, llmProvider, config,
-        ConsolidationHistoryStore(config.home.resolve("consolidations.jsonl")),
-        versionStore
-    )
 
     override suspend fun recall(query: RecallQuery): MemoryBlock? {
         val w = walker ?: return null

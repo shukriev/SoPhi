@@ -70,7 +70,10 @@ class RuntimeBuilder {
     var systemPrompt: String? = null
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
-    var memoryHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "memory")
+    var memoryHome: Path = JanesPalaceConfig.DEFAULT_HOME
+    /** The shared server root memory lives on; null = shared only when [memoryHome] is the default (ADR-041 M6),
+     *  embedded at any other home. Tests set both to temp directories. */
+    var memorySharedRoot: Path? = null
 
     private val tools: MutableList<Tool> = mutableListOf()
     private val plugins: MutableList<SophiPlugin> = mutableListOf()
@@ -304,28 +307,22 @@ class RuntimeBuilder {
                 )
                 null
             } else {
-                // ArcadeDB locks its database directory to one process (see PalaceStore's class
-                // doc) — opening it while another Sophi process (CLI, another companion instance)
-                // already holds memoryHome throws here. Degrade the same way a failed embeddings
-                // probe does, rather than letting an uncaught exception crash the whole build().
+                // A memory database that can't open (an older Sophi holding unmigrated data, a schema
+                // mismatch, corruption) degrades like a failed embeddings probe instead of crashing build().
                 runCatching {
                     JanesPalace(
                         JanesPalaceConfig(
                             home = memoryHome, sessionModel = model,
                             autoPurgeEnabled = JanesPalaceConfig.autoPurgeEnabledFromEnv(),
-                            encoderTelemetry = JanesPalaceConfig.encoderTelemetryFromEnv()
+                            encoderTelemetry = JanesPalaceConfig.encoderTelemetryFromEnv(),
+                            sharedRoot = memorySharedRoot ?: JanesPalaceConfig.sharedRootFor(memoryHome)
                         ),
                         p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                     )
                 }.fold(
                     onSuccess = { palace -> MemoryPlugin(palace).also { pluginRegistry.register(it) } },
                     onFailure = { e ->
-                        mc.onWarning(
-                            "memory: disabled — couldn't open the memory database at $memoryHome " +
-                                "(${e.message ?: "unknown error"}). Another Sophi process (CLI or another " +
-                                "companion instance) may already have it open — only one process can use " +
-                                "a given memory directory at a time."
-                        )
+                        mc.onWarning("memory: disabled — couldn't open the memory database at $memoryHome (${e.message ?: "unknown error"})")
                         null
                     }
                 )

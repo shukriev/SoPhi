@@ -11,6 +11,7 @@ import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.sdk.runSuite
 import dev.sophi.versioning.ScorecardStore
+import dev.sophi.versioning.VersioningStores
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
@@ -59,18 +60,20 @@ class EvalsRunCommand : CliktCommand(name = "run", help = "Run the eval suite an
     private val sessionsDirStr: String by option("--sessions-dir")
         .default("${System.getProperty("user.home")}/.sophi/sessions")
     private val versioningHomeStr: String by option("--versioning-home")
-        .default("${System.getProperty("user.home")}/.sophi/versioning")
+        .default(VersioningStores.DEFAULT_VERSIONING_HOME.toString())
 
     override fun run() {
         val allCases = loadEvalCases(Path.of(evalsDirStr))
         val cases = if (category == null) allCases else allCases.filter { it.category == category }
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+        openStore { VersioningStores.scorecardStore(Path.of(versioningHomeStr)) }.use { scorecardStore ->
         EvalsRun(
             cases = cases, provider = provider, registry = ToolRegistry(),
             sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
             contextWindowTokens = EVAL_CONTEXT_WINDOW, model = model, configVersionId = configVersion,
-            systemPrompt = null, scorecardStore = ScorecardStore(Path.of(versioningHomeStr))
+            systemPrompt = null, scorecardStore = scorecardStore
         ) { echo(it) }.run()
+        }
     }
 }
 

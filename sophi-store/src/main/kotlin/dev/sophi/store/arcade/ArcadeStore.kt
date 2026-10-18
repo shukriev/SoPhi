@@ -2,6 +2,13 @@ package dev.sophi.store.arcade
 
 data class Scored(val id: String, val score: Double)
 
+/** A vector property as read back from either store: embedded gives a FloatArray, the remote wire a list of numbers. */
+fun vectorOf(value: Any?): FloatArray? = when (value) {
+    is FloatArray -> value
+    is Collection<*> -> FloatArray(value.size).also { out -> value.forEachIndexed { i, n -> out[i] = (n as Number).toFloat() } }
+    else -> null
+}
+
 /**
  * Generic document/graph/vector primitives over ArcadeDB. Domain-agnostic on purpose —
  * no Jane's-Palace or context-engine types here — so any consumer can build on this layer,
@@ -14,18 +21,16 @@ interface ArcadeStore : AutoCloseable {
     fun deleteVertex(type: String, id: String)
 
     /** Creates a new vertex. Unlike [upsertVertex] this is a plain insert, so a vector property set
-     *  here is picked up by an existing vector index without the [putVector] workaround. */
+     *  here is picked up by an existing vector index. */
     fun insertVertex(type: String, id: String, properties: Map<String, Any?>)
 
     fun upsertEdge(type: String, vertexType: String, fromId: String, toId: String, properties: Map<String, Any?>)
     fun edges(type: String): List<Map<String, Any?>>
     fun deleteEdge(type: String, fromId: String, toId: String)
 
-    /** Lazily declares the vector property + HNSW index for [vertexType].[property] on first use. */
-    fun putVector(vertexType: String, id: String, property: String, vector: FloatArray)
     /** Nearest neighbours by cosine, closest first. Observed on the embedded store (26.5.1): [Scored.score] is the
      *  index's cosine distance (identical vector = 0.0, lower is closer), not a similarity.
-     *  Callers must [ensureVectorIndex] first; behaviour without the index differs: embedded returns empty, remote throws. */
+     *  Callers must [ensureVectorIndex] first; without the index both stores return empty. */
     fun nearestVectors(vertexType: String, property: String, query: FloatArray, k: Int): List<Scored>
     fun ensureVectorIndex(vertexType: String, property: String, dimensions: Int)
 

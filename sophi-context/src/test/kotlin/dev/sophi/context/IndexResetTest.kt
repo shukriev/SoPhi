@@ -1,7 +1,9 @@
 package dev.sophi.context
 
 import dev.sophi.store.arcade.ArcadeHost
+import dev.sophi.store.arcade.FailoverArcadeStore
 import dev.sophi.store.arcade.Role
+import dev.sophi.store.arcade.SharedArcadeHost
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
@@ -10,7 +12,7 @@ import java.nio.file.Files
 class IndexResetTest : FunSpec({
     test("reset moves the database aside when nothing hosts it") {
         val root = tempdir().toPath()
-        val host = ArcadeHost.open(root, ContextEngine.DATABASE, ContextEngine.SCHEMA_VERSION, "t")
+        val host = ArcadeHost.open(root, "t").also { it.register(ContextEngine.DATABASE, ContextEngine.SCHEMA_VERSION) }
         host.role shouldBe Role.HOST
         host.close()
         IndexReset(root).run() shouldBe ResetResult.Done
@@ -35,5 +37,18 @@ class IndexResetTest : FunSpec({
         val root = tempdir().toPath()
         autoClose(ContextEngine(root, GitProbe.none, drainEveryMillis = 100).start()).awaitReady(10_000) shouldBe true
         IndexReset(root).run() shouldBe ResetResult.InUse
+    }
+
+    test("reset while memory shares the host moves only the context database") {
+        val root = tempdir().toPath()
+        val memory = FailoverArcadeStore(SharedArcadeHost.acquire(root), "memory", 1)
+        try {
+            memory.ensureSchema(documentTypes = listOf("Note")); memory.upsertDocument("Note", "kept", emptyMap())
+            ContextEngine(root, GitProbe.none, drainEveryMillis = 100, embedder = null).start().use { it.awaitReady(10_000) shouldBe true }
+            IndexReset(root).run() shouldBe ResetResult.Done
+            Files.list(root).use { s -> s.anyMatch { it.fileName.toString().startsWith("context.corrupt-") } } shouldBe true
+            memory.documents("Note").map { it["id"] } shouldBe listOf("kept")
+            autoClose(ContextEngine(root, GitProbe.none, drainEveryMillis = 100, embedder = null).start()).awaitReady(10_000) shouldBe true
+        } finally { memory.close() }
     }
 })

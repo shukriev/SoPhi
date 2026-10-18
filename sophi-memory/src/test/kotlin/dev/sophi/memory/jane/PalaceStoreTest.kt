@@ -1,5 +1,9 @@
 package dev.sophi.memory.jane
 
+import dev.sophi.store.arcade.ArcadeStore
+import dev.sophi.store.arcade.EmbeddedArcadeStore
+import dev.sophi.store.arcade.LocalArcadeServer
+import dev.sophi.store.arcade.RemoteArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
@@ -164,5 +168,111 @@ class PalaceStoreTest : FunSpec({
         val loaded = s.memories().getValue("mem_old")
         loaded.signals.dur shouldBe 0.0
         loaded.salience shouldBe 0.42
+    }
+
+    test("re-embedding a memory replaces its vector") {
+        val s = store()
+        s.upsertMemory(mem("mem_1"))
+        s.putEmbedding("mem_1", "m", floatArrayOf(1f, 0f))
+        s.putEmbedding("mem_1", "m", floatArrayOf(0f, 1f))
+        s.vectorFor("mem_1")!!.toList() shouldBe listOf(0f, 1f)
+        s.nearest(floatArrayOf(0f, 1f), 2).map { it.id } shouldBe listOf("mem_1")
+    }
+
+    test("deleteMemory and wipe remove vectors too") {
+        val s = store()
+        s.upsertMemory(mem("a")); s.upsertMemory(mem("b"))
+        s.putEmbedding("a", "m", floatArrayOf(1f, 0f)); s.putEmbedding("b", "m", floatArrayOf(0f, 1f))
+        s.deleteMemory("a")
+        s.embeddings().keys shouldBe setOf("b")
+        s.nearest(floatArrayOf(1f, 0f), 2).map { it.id } shouldBe listOf("b")
+        s.wipe()
+        s.embeddings() shouldBe emptyMap()
+    }
+
+    test("a palace written before M6 has its inline vectors adopted on open; memories without one are skipped") {
+        val home = tempdir().toPath()
+        LegacyPalaceFixture.write(home, listOf("m1" to "one", "m2" to "two"), vectors = mapOf("m1" to floatArrayOf(1f, 0f)))
+        repeat(2) {   // a second open adopts nothing new and loses nothing
+            val s = PalaceStore(home)
+            try {
+                s.memories().keys shouldBe setOf("m1", "m2")
+                s.vectorFor("m1")!!.toList() shouldBe listOf(1f, 0f)
+                s.vectorFor("m2") shouldBe null
+                s.nearest(floatArrayOf(1f, 0f), 2).map { it.id } shouldBe listOf("m1")
+                s.embeddingModel() shouldBe "fake"
+            } finally { s.close() }
+        }
+    }
+
+    // A crash after the MemoryVec insert but before the inline property is removed: the next open must not
+    // overwrite a newer MemoryVec with the stale inline copy, and must still clear the inline copy.
+    test("adoption interrupted before the inline removal keeps the MemoryVec and finishes on the next open") {
+        val home = tempdir().toPath()
+        LegacyPalaceFixture.write(home, listOf("m1" to "one"), vectors = mapOf("m1" to floatArrayOf(1f, 0f)))
+        EmbeddedArcadeStore.open(home).use { db ->
+            db.ensureSchema(vertexTypes = listOf("MemoryVec"))
+            db.ensureVectorIndex("MemoryVec", "embedding", 2)
+            db.insertVertex("MemoryVec", "m1", mapOf("embedding" to floatArrayOf(0f, 1f)))
+        }
+        val s = PalaceStore(home)
+        try {
+            s.vectorFor("m1")!!.toList() shouldBe listOf(0f, 1f)
+            s.nearest(floatArrayOf(0f, 1f), 2).map { it.id } shouldBe listOf("m1")
+        } finally { s.close() }
+        EmbeddedArcadeStore.open(home).use { db -> db.getVertex("Memory", "m1")!!["embedding"] shouldBe null }
+    }
+
+    // Controller ruling Q6: the shared server reaches PalaceStore through RemoteArcadeStore, which has no putVector.
+    test("over the remote store, nearest finds a memory saved with putEmbedding and an adopted inline vector") {
+        LocalArcadeServer.start(tempdir().toPath()).use { srv ->
+            srv.database("memory")
+            RemoteArcadeStore.connect(srv.port, "memory", srv.password).use { remote ->
+                // What LegacyMigration leaves on the server: the old inline vector copied as plain data, no index.
+                remote.ensureSchema(vertexTypes = listOf("Memory"))
+                remote.upsertVertex("Memory", "old", mapOf("embeddingModel" to "m", "embedding" to floatArrayOf(0f, 1f)))
+                val s = PalaceStore(tempdir().toPath(), remote)
+                s.upsertMemory(mem("new"))
+                s.putEmbedding("new", "m", floatArrayOf(1f, 0f))
+                s.nearest(floatArrayOf(1f, 0f), 1).map { it.id } shouldBe listOf("new")
+                s.nearest(floatArrayOf(0f, 1f), 1).map { it.id } shouldBe listOf("old")
+                s.vectorFor("old")!!.toList() shouldBe listOf(0f, 1f)
+                s.embeddings().keys shouldBe setOf("old", "new")
+                remote.getVertex("Memory", "old")!!["embedding"] shouldBe null   // the inline copy is gone
+                s.putEmbedding("new", "m", floatArrayOf(0.6f, 0.8f))           // a remote re-embed
+                s.nearest(floatArrayOf(0.6f, 0.8f), 3).map { it.id }.count { it == "new" } shouldBe 1
+                s.nearest(floatArrayOf(0.6f, 0.8f), 1).map { it.id } shouldBe listOf("new")
+                s.vectorFor("new")!!.toList() shouldBe listOf(0.6f, 0.8f)
+            }
+        }
+    }
+
+    // Two processes starting at once both adopt the same inline vector. The other one commits its MemoryVec first,
+    // so every attempt of ours (ArcadeDB retries a duplicate key a few times) hits the unique id. That must not fail
+    // the PalaceStore constructor: the vector is there, which is all adoption needs.
+    test("a concurrent adopter that wins the MemoryVec insert does not fail the open") {
+        LocalArcadeServer.start(tempdir().toPath()).use { srv ->
+            srv.database("memory")
+            RemoteArcadeStore.connect(srv.port, "memory", srv.password).use { remote ->
+                RemoteArcadeStore.connect(srv.port, "memory", srv.password).use { other ->
+                    remote.ensureSchema(vertexTypes = listOf("Memory"))
+                    remote.upsertVertex("Memory", "m1", mapOf("embeddingModel" to "m", "embedding" to floatArrayOf(0f, 1f)))
+                    var raced = 0
+                    val racing = object : ArcadeStore by remote {
+                        override fun insertVertex(type: String, id: String, properties: Map<String, Any?>) {
+                            if (type != "MemoryVec") return remote.insertVertex(type, id, properties)
+                            raced++
+                            if (other.getVertex(type, id) == null) other.insertVertex(type, id, properties)
+                            other.insertVertex(type, id, properties)   // the real duplicate-key error
+                        }
+                    }
+                    val s = PalaceStore(tempdir().toPath(), racing)
+                    (raced > 0) shouldBe true
+                    s.vectorFor("m1")!!.toList() shouldBe listOf(0f, 1f)
+                    s.nearest(floatArrayOf(0f, 1f), 3).map { it.id } shouldBe listOf("m1")
+                    remote.getVertex("Memory", "m1")!!["embedding"] shouldBe null
+                }
+            }
+        }
     }
 })

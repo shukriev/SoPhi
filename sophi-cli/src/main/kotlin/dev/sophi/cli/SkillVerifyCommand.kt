@@ -18,6 +18,7 @@ import dev.sophi.skills.SkillVersion
 import dev.sophi.skills.SkillVersionStore
 import dev.sophi.versioning.ArtifactType
 import dev.sophi.versioning.ScorecardStore
+import dev.sophi.versioning.VersioningStores
 import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -91,7 +92,7 @@ class SkillVerifyCommand : CliktCommand(name = "verify", help = "Verify a trial 
     private val sessionsDirStr: String by option("--sessions-dir")
         .default("${System.getProperty("user.home")}/.sophi/sessions")
     private val versioningHomeStr: String by option("--versioning-home")
-        .default("${System.getProperty("user.home")}/.sophi/versioning")
+        .default(VersioningStores.DEFAULT_VERSIONING_HOME.toString())
 
     override fun run() {
         val globalSkillsHome = Path.of(System.getProperty("user.home"), ".sophi", "skills")
@@ -108,12 +109,14 @@ class SkillVerifyCommand : CliktCommand(name = "verify", help = "Verify a trial 
         val allCases = loadEvalCases(Path.of(evalsDirStr))
         val cases = if (category == null) allCases else allCases.filter { it.category == category }
         val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+        openStore { VersioningStores.scorecardStore(Path.of(versioningHomeStr)) }.use { scorecardStore ->
         SkillVerify(
             skillIds = targetIds, project = project, globalSkillsHome = globalSkillsHome, projectSkillsHome = projectSkillsHome,
             cases = cases, provider = provider, registry = ToolRegistry(),
             sessionManager = FileSessionManager(Path.of(sessionsDirStr)), contextWindowTokens = SKILL_VERIFY_CONTEXT_WINDOW,
-            model = model, scorecardStore = ScorecardStore(Path.of(versioningHomeStr)),
+            model = model, scorecardStore = scorecardStore,
             confirm = { prompt -> confirmFlag && run { print(prompt); readlnOrNull()?.trim()?.lowercase() == "y" } }
         ) { echo(it) }.run()
+        }
     }
 }

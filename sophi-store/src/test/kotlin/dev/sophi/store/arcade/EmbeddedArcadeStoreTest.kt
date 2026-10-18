@@ -6,7 +6,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 
 class EmbeddedArcadeStoreTest : FunSpec({
-    fun store(): ArcadeStore {
+    fun store(): EmbeddedArcadeStore {
         val s = EmbeddedArcadeStore.open(tempdir().toPath())
         s.ensureSchema(vertexTypes = listOf("Thing"), edgeTypes = listOf("LinksTo"), documentTypes = listOf("Note"))
         return s
