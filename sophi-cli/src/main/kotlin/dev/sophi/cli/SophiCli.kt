@@ -80,10 +80,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--base-url",
         help = "Base URL for --provider openai-compat, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:8000/v1 (vLLM)"
     )
-    private val apiKeyOption: String? by option(
-        "--api-key",
-        help = "API key (falls back to ANTHROPIC_API_KEY for --provider claude; omit for no-auth local servers)"
-    )
+    private val apiKeyOption: String? by apiKeyOption()
     private val llmTimeoutSeconds: Long by option(
         "--llm-timeout-seconds",
         help = "Client-side request timeout for --provider openai-compat. Raise this for local " +

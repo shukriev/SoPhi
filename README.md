@@ -82,7 +82,7 @@ sophi --agents-dir <path>     # directory of subagent definitions (default: ~/.s
 sophi --system "<prompt>"     # system prompt for every turn
 sophi --provider <name>       # 'claude' (default) or 'openai-compat' (Ollama, vLLM, ...)
 sophi --base-url <url>        # required for --provider openai-compat
-sophi --api-key <key>         # optional; falls back to ANTHROPIC_API_KEY for claude
+sophi --api-key <key>         # optional; falls back to SOPHI_API_KEY (keeps it out of `ps`), then ANTHROPIC_API_KEY for claude
 sophi --memory                # enable long-term memory (see "Cross-cutting: memory")
 sophi --embedding-model <m>   # embedding model for --memory, e.g. nomic-embed-text
 sophi --embedding-base-url <url>   # embeddings endpoint (defaults to --base-url)

@@ -83,4 +83,23 @@ class EvalTournamentGateTest : FunSpec({
 
         outcome.result!!.accepted shouldBe false
     }
+
+    test("the key reaches the eval child through SOPHI_API_KEY, never its command line") {
+        val dir = tempdir().toPath()
+        val evalsDir = makeEvalsDir(dir)
+        val seen = dir.resolve("seen.txt")
+        val cmd = fakeJava(dir, """echo "args=${'$'}* env=${'$'}SOPHI_API_KEY" >> $seen; echo "headline=0.50  totalCases=4  configVersion=default"""")
+
+        runEvalGate(
+            baselineJar = dir.resolve("baseline.jar"), challengerJar = dir.resolve("challenger.jar"),
+            evalsDir = evalsDir, configVersionId = "default", versioningHome = dir.resolve("versioning"),
+            model = "m", providerType = "openai-compat", apiKeyOption = "s3cret", baseUrl = "http://x/v1",
+            runsPerSide = 1, javaCommand = cmd
+        )
+
+        seen.toFile().readLines().forEach { line ->
+            line.substringBefore(" env=").contains("s3cret") shouldBe false
+            line.substringAfter(" env=") shouldBe "s3cret"
+        }
+    }
 })

@@ -173,7 +173,7 @@ class MemoryForget : CliktCommand(name = "forget", help = "Hard-delete a memory 
     private val id: String? by argument(help = "memory id").optional()
     private val about: String? by option("--about", help = "Find candidates semantically instead of by id")
     private val baseUrl: String? by option("--base-url")
-    private val apiKey: String? by option("--api-key")
+    private val apiKey: String? by apiKeyOption()
     private val embeddingModel: String? by option("--embedding-model")
     private val dimensions: Int by option("--embedding-dimensions").int().default(1536)
     private val yes: Boolean by option("--yes", help = "Skip confirmation").flag()
@@ -215,7 +215,7 @@ class MemoryWhy : CliktCommand(name = "why", help = "Explain the last memory inj
 
 class MemoryConsolidate : CliktCommand(name = "consolidate", help = "Run the sleep cycle now") {
     private val baseUrl: String? by option("--base-url", help = "Chat endpoint for thread compression (optional)")
-    private val apiKey: String? by option("--api-key")
+    private val apiKey: String? by apiKeyOption()
     private val model: String? by option("--model", help = "Chat model for compression (optional)")
     private val yes: Boolean by option("--yes", help = "Skip confirmation").flag()
     override fun run() = runBlocking {

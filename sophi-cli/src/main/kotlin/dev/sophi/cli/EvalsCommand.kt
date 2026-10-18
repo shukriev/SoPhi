@@ -55,7 +55,7 @@ class EvalsRunCommand : CliktCommand(name = "run", help = "Run the eval suite an
     private val model: String by option("--model", "-m").default("claude-3-5-sonnet-20241022")
     private val providerType: String by option("--provider").default("claude")
     private val baseUrl: String? by option("--base-url")
-    private val apiKeyOption: String? by option("--api-key")
+    private val apiKeyOption: String? by apiKeyOption()
     private val sessionsDirStr: String by option("--sessions-dir")
         .default("${System.getProperty("user.home")}/.sophi/sessions")
     private val versioningHomeStr: String by option("--versioning-home")
