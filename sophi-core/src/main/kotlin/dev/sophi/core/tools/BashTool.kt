@@ -67,7 +67,7 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val args = json.decodeFromString<BashArgs>(argumentsJson)
         val timeoutSeconds = (args.timeoutSeconds ?: DEFAULT_TIMEOUT_SECONDS).coerceAtMost(MAX_TIMEOUT_SECONDS)
 
-        val process = ProcessBuilder("sh", "-c", args.command)
+        val process = shellProcess(args.command)
             .directory(root.toFile())
             .redirectErrorStream(true)
             .start()

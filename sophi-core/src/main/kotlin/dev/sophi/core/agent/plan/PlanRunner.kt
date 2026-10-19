@@ -13,6 +13,7 @@ import dev.sophi.core.agent.TurnStopReason
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.shellProcess
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -63,7 +64,7 @@ class PlanRunner(
     private val judgeModel: String = config.model,
     // stdin closed at once: this waits without a timeout, so a check that reads stdin hung the goal forever.
     private val shellRunner: (String) -> Int = { cmd ->
-        ProcessBuilder("sh", "-c", cmd).start().also { it.outputStream.close() }.waitFor()
+        shellProcess(cmd).start().also { it.outputStream.close() }.waitFor()
     },
     private val onPlanComplete: suspend (PlanOutcome) -> Unit = {},
     private val planLog: PlanLog? = null,
