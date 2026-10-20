@@ -19,6 +19,7 @@ fun main(args: Array<String>) {
             FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand()),
             ContextCommand().subcommands(ContextAddCommand(), ContextListCommand(), ContextRemoveCommand(), ContextGlobalCommand(), ContextResetCommand(), ContextEvalCommand()),
             ExportCommand(),
+            System1Command().subcommands(System1RenderCommand(), System1ParseCommand()),
             ScheduleCommand().subcommands(
                 ScheduleRunDueCommand(), ScheduleDaemonCommand(),
                 ScheduleListCommand(), ScheduleLogCommand(),
