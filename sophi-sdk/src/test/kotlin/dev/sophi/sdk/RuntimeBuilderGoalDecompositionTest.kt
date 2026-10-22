@@ -14,7 +14,7 @@ class RuntimeBuilderGoalDecompositionTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).goalDecomposition(tempdir().toPath()).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.goalDecomposition(tempdir().toPath()).build()
 
         runtime.toolNames() shouldContain "decompose_goal"
     }
@@ -23,7 +23,7 @@ class RuntimeBuilderGoalDecompositionTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW)
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .goalDecomposition(tempdir().toPath(), onProgress = {})
             .build()
 
@@ -34,7 +34,7 @@ class RuntimeBuilderGoalDecompositionTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         runtime.toolNames() shouldNotContain "decompose_goal"
     }

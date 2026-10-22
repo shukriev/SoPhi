@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
@@ -36,10 +37,9 @@ class ProposalImplement(
     private val evalsDirOverride: Path? = null,
     private val configVersionId: String = "default",
     private val versioningHome: Path = defaultVersioningHome,
-    private val model: String = "claude-3-5-sonnet-20241022",
-    private val providerType: String = "claude",
+    /** Called only once the kill switch is on, so a disabled run never probes for a model server. */
+    private val provider: () -> ResolvedProvider,
     private val apiKeyOption: String? = null,
-    private val baseUrl: String? = null,
     private val maxChangedLines: Int = 500,
     private val budgetMinutes: Long = 20,
     private val auditLog: ShadowPrAuditLog = ShadowPrAuditLog(defaultAuditLogPath),
@@ -54,6 +54,7 @@ class ProposalImplement(
             echo("SOPHI_SHADOW_PR_ENABLED is not set to true -- refusing to run.")
             return
         }
+        val resolvedProvider = provider()
         val proposal = store.get(proposalId)
         if (proposal == null || proposal.status != "accepted") {
             echo("Proposal $proposalId is not accepted (or does not exist) -- nothing to implement.")
@@ -102,8 +103,8 @@ class ProposalImplement(
             val evalOutcome = runEvalGate(
                 baselineJar = baselineBuild.jarPath!!, challengerJar = challengerBuild.jarPath!!,
                 evalsDir = evalsDirOverride ?: repoRoot.resolve("evals"), configVersionId = configVersionId,
-                versioningHome = versioningHome, model = model, providerType = providerType,
-                apiKeyOption = apiKeyOption, baseUrl = baseUrl, javaCommand = javaCommand
+                versioningHome = versioningHome, provider = resolvedProvider,
+                apiKeyOption = apiKeyOption, javaCommand = javaCommand
             )
             if (!evalOutcome.skipped && evalOutcome.result?.accepted == false) {
                 return fail(
@@ -160,10 +161,7 @@ class ProposalImplement(
 class ProposalImplementCommand : CliktCommand(name = "implement", help = "Implement an accepted proposal as a shadow PR") {
     private val id: String by argument()
     private val budgetMinutes: Long by option("--budget-minutes").long().default(20)
-    private val model: String by option("--model", "-m").default("claude-3-5-sonnet-20241022")
-    private val providerType: String by option("--provider").default("claude")
-    private val baseUrl: String? by option("--base-url")
-    private val apiKeyOption: String? by apiKeyOption()
+    private val provider by ProviderOptions()
     private val evalsDirStr: String by option("--evals-dir").default("evals")
     private val configVersion: String by option("--config-version").default("default")
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
@@ -177,8 +175,8 @@ class ProposalImplementCommand : CliktCommand(name = "implement", help = "Implem
             proposalId = id, store = store, enabled = enabled, repoRoot = repoRoot,
             worktreesParent = Path.of(worktreesParentStr), claudeCodeTool = RunClaudeCodeTool(),
             evalsDirOverride = repoRoot.resolve(evalsDirStr), configVersionId = configVersion,
-            versioningHome = Path.of(versioningHomeStr), model = model, providerType = providerType,
-            apiKeyOption = apiKeyOption, baseUrl = baseUrl, budgetMinutes = budgetMinutes,
+            versioningHome = Path.of(versioningHomeStr), provider = { provider.resolveAndWarn() },
+            apiKeyOption = provider.apiKey, budgetMinutes = budgetMinutes,
             confirm = {
                 echo("$it [y/N] ", trailingNewline = false)
                 readlnOrNull()?.trim()?.equals("y", ignoreCase = true) == true

@@ -14,7 +14,7 @@ class RuntimeBuilderScheduleTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).schedule(tempdir().toPath()).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.schedule(tempdir().toPath()).build()
 
         runtime.toolNames() shouldContain "manage_scheduled_task"
     }
@@ -23,7 +23,7 @@ class RuntimeBuilderScheduleTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         (runtime.toolNames().contains("manage_scheduled_task")) shouldBe false
     }

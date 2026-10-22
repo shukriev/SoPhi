@@ -38,7 +38,9 @@ private val jsonMapper = ObjectMapper()
 class OpenAICompatProvider(
     private val chatModel: OpenAiChatModel,
     private val rawClient: OpenAIClient,
-    override val name: String = "openai"
+    override val name: String = "openai",
+    /** Sent as `parallel_tool_calls` when a request has tools; null leaves the server's default. */
+    private val parallelToolCalls: Boolean? = null
 ) : LLMProvider {
 
     override suspend fun complete(request: CompletionRequest): LLMResponse =
@@ -57,6 +59,31 @@ class OpenAICompatProvider(
     override fun stream(request: CompletionRequest): Flow<StreamEvent> = callbackFlow {
         val params = request.toCreateParams()
         val merger = ToolCallDeltaMerger()
+        val thinkSplitter = ThinkTagSplitter()
+        val toolScanner = TextToolCallScanner()
+        // Reasoning goes straight out; content passes the tool-call scanner, which hides call markup.
+        fun send(split: Split) {
+            if (split.reasoning.isNotEmpty()) trySend(StreamEvent.Reasoning(split.reasoning))
+            val shown = toolScanner.feed(split.content)
+            if (shown.isNotEmpty()) trySend(StreamEvent.Content(shown))
+        }
+        // Runs once, on finish_reason or, failing that, at end of stream, so held text is never lost.
+        var finalised = false
+        fun finalise() {
+            if (finalised) return
+            finalised = true
+            send(thinkSplitter.flush())
+            val scanned = toolScanner.finish()
+            val merged = merger.build()
+            when {
+                merged.isNotEmpty() -> {
+                    trySend(StreamEvent.ToolCallsReady(merged))
+                    if (scanned.leftoverContent.isNotEmpty()) trySend(StreamEvent.Content(scanned.leftoverContent))
+                }
+                scanned.calls.isNotEmpty() -> trySend(StreamEvent.ToolCallsReady(scanned.calls))
+                scanned.leftoverContent.isNotEmpty() -> trySend(StreamEvent.Content(scanned.leftoverContent))
+            }
+        }
         val streamResponse = rawClient.chat().completions().createStreaming(params)
         val worker = Thread({
             try {
@@ -66,7 +93,7 @@ class OpenAICompatProvider(
                     chunk.choices().forEach { choice ->
                         val delta = choice.delta()
                         val content = delta.content().orElse(null)
-                        if (!content.isNullOrEmpty()) trySend(StreamEvent.Content(content))
+                        if (!content.isNullOrEmpty()) send(thinkSplitter.feed(content))
 
                         val reasoningText = reasoningFieldNames.firstNotNullOfOrNull { key ->
                             delta._additionalProperties()[key]?.convert(String::class.java)
@@ -76,8 +103,7 @@ class OpenAICompatProvider(
                         delta.toolCalls().orElse(null)?.forEach { merger.accumulate(it) }
 
                         choice.finishReason().ifPresent { reason ->
-                            val merged = merger.build()
-                            if (merged.isNotEmpty()) trySend(StreamEvent.ToolCallsReady(merged))
+                            finalise()
                             runCatching { reason.asString() }.getOrNull()
                                 ?.let { trySend(StreamEvent.Finish(it)) }
                         }
@@ -93,6 +119,7 @@ class OpenAICompatProvider(
                         ))
                     }
                 }
+                finalise()
                 close()
             } catch (e: Exception) {
                 close(e)
@@ -140,6 +167,8 @@ class OpenAICompatProvider(
                     .build()
             )
         }
+        // Servers reject the flag on a request with no tools, so it rides along only with them.
+        if (tools.isNotEmpty()) parallelToolCalls?.let { builder.parallelToolCalls(it) }
         return builder.build()
     }
 

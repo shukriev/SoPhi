@@ -127,6 +127,7 @@ class BuildCliRuntimeTest : FunSpec({
         ))
         cli.runtime.memoryPlugin shouldBe null
         warnings.single() shouldContain "memory: disabled — --memory needs --embedding-model"
+        warnings.single() shouldContain "nomic-embed model loaded on the local server"
     }
 
     test("memory enabled without an embedding base URL or --base-url warns and leaves memory off") {

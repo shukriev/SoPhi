@@ -26,7 +26,7 @@ class SophiRuntimeRecordSessionEndTest : FunSpec({
         val rt = RuntimeBuilder().apply {
             provider = stubProvider()
             sessionsDir = createTempDirectory("sophi-sdk-session-end-sessions")
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW)
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .learning(LearningConfig(home = learningHome, scope = "/p"))
             .build()
 
@@ -41,7 +41,7 @@ class SophiRuntimeRecordSessionEndTest : FunSpec({
         val rt = RuntimeBuilder().apply {
             provider = stubProvider()
             sessionsDir = createTempDirectory("sophi-sdk-session-end-sessions")
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         val sessionId = rt.newSession()
         rt.recordSessionEnd(sessionId) // must not throw
@@ -53,7 +53,7 @@ class SophiRuntimeRecordSessionEndTest : FunSpec({
             provider = stubProvider()
             sessionsDir = createTempDirectory("sophi-sdk-session-end-sessions")
             memoryHome = createTempDirectory("sophi-sdk-session-end-memory-home")
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW)
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .learning(LearningConfig(home = learningHome, scope = "/p"))
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",

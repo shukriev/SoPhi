@@ -47,7 +47,7 @@ class ContextPlacementTest : FunSpec({
         val provider = RecordingStreamProvider()
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
-            contextWindowTokens(32_000)
+            contextWindowTokens(32_000); model = "test-model"
             sessionsDir = tempdir().toPath()
             plugin(contributor(Placement.STABLE) { "STABLE-RULES" })
             plugin(contributor(Placement.VOLATILE) { "hint for: $it" })
@@ -73,7 +73,7 @@ class ContextPlacementTest : FunSpec({
     test("no volatile contribution leaves the user message untouched") {
         val provider = RecordingStreamProvider()
         val runtime = RuntimeBuilder().apply {
-            this.provider = provider; contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
+            this.provider = provider; contextWindowTokens(32_000); model = "test-model"; sessionsDir = tempdir().toPath()
         }.build()
         runBlocking { runtime.streamTurn(runtime.sessionManager.create(), "plain") {} }
         provider.requests.single().messages.last().content shouldBe "plain"
@@ -89,7 +89,7 @@ class ContextPlacementTest : FunSpec({
             override suspend fun execute(argumentsJson: String) = "echoed"
         }
         val runtime = RuntimeBuilder().apply {
-            this.provider = provider; contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
+            this.provider = provider; contextWindowTokens(32_000); model = "test-model"; sessionsDir = tempdir().toPath()
             tool(echo)
             plugin(contributor(Placement.VOLATILE) { "hint for: $it" })
         }.build()

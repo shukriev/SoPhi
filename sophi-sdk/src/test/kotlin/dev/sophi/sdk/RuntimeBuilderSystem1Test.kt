@@ -18,7 +18,7 @@ class RuntimeBuilderSystem1Test : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>(relaxed = true)
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).system1(home).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.system1(home).build()
 
         runtime.provider.shouldBeInstanceOf<DualSystemProvider>()
     }
@@ -27,7 +27,7 @@ class RuntimeBuilderSystem1Test : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>(relaxed = true)
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         (runtime.provider is DualSystemProvider) shouldBe false
     }

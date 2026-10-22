@@ -41,6 +41,8 @@ private fun fakeExecutable(dir: Path, name: String, body: String): List<String> 
     return listOf(script.toString())
 }
 
+private val TEST_PROVIDER = ResolvedProvider("local", "http://127.0.0.1:1/v1", "m", 8192, null, emptyList())
+
 class ProposalImplementCommandTest : FunSpec({
     test("errors and does nothing when the kill switch is off") {
         val home = tempdir().toPath()
@@ -50,7 +52,7 @@ class ProposalImplementCommandTest : FunSpec({
         val messages = mutableListOf<String>()
 
         ProposalImplement(
-            proposalId = p.id, store = store, enabled = false,
+            proposalId = p.id, store = store, provider = { error("resolved the provider with the kill switch off") }, enabled = false,
             repoRoot = tempdir().toPath(), worktreesParent = tempdir().toPath(),
             claudeCodeTool = RunClaudeCodeTool(), confirm = { true },
             echo = { messages.add(it) }
@@ -67,7 +69,7 @@ class ProposalImplementCommandTest : FunSpec({
         val messages = mutableListOf<String>()
 
         ProposalImplement(
-            proposalId = p.id, store = store, enabled = true,
+            proposalId = p.id, store = store, provider = { TEST_PROVIDER }, enabled = true,
             repoRoot = tempdir().toPath(), worktreesParent = tempdir().toPath(),
             claudeCodeTool = RunClaudeCodeTool(), confirm = { true },
             echo = { messages.add(it) }
@@ -89,7 +91,7 @@ class ProposalImplementCommandTest : FunSpec({
 
         val messages = mutableListOf<String>()
         ProposalImplement(
-            proposalId = p.id, store = store, enabled = true,
+            proposalId = p.id, store = store, provider = { TEST_PROVIDER }, enabled = true,
             repoRoot = repo, worktreesParent = scratch.resolve("worktrees"),
             claudeCodeTool = RunClaudeCodeTool(claudeCommand = claudeCmd),
             gitCommand = listOf("git"), mvnCommand = mvnCmd, ghCommand = ghCmd,
@@ -112,7 +114,7 @@ class ProposalImplementCommandTest : FunSpec({
         val mvnCmd = fakeExecutable(scratch, "fake-mvn.sh", "echo SHOULD_NOT_RUN > mvn-was-called.txt\nexit 1")
 
         ProposalImplement(
-            proposalId = p.id, store = store, enabled = true,
+            proposalId = p.id, store = store, provider = { TEST_PROVIDER }, enabled = true,
             repoRoot = repo, worktreesParent = scratch.resolve("worktrees"),
             claudeCodeTool = RunClaudeCodeTool(claudeCommand = claudeCmd),
             gitCommand = listOf("git"), mvnCommand = mvnCmd, ghCommand = listOf("gh"),

@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.default
@@ -85,10 +86,7 @@ class SkillVerifyCommand : CliktCommand(name = "verify", help = "Verify a trial 
     private val confirmFlag: Boolean by option("--confirm").flag()
     private val evalsDirStr: String by option("--evals-dir").default("evals")
     private val category: String? by option("--category")
-    private val model: String by option("--model", "-m").default("claude-3-5-sonnet-20241022")
-    private val providerType: String by option("--provider").default("claude")
-    private val baseUrl: String? by option("--base-url")
-    private val apiKeyOption: String? by apiKeyOption()
+    private val provider by ProviderOptions()
     private val sessionsDirStr: String by option("--sessions-dir")
         .default("${System.getProperty("user.home")}/.sophi/sessions")
     private val versioningHomeStr: String by option("--versioning-home")
@@ -108,13 +106,14 @@ class SkillVerifyCommand : CliktCommand(name = "verify", help = "Verify a trial 
 
         val allCases = loadEvalCases(Path.of(evalsDirStr))
         val cases = if (category == null) allCases else allCases.filter { it.category == category }
-        val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+        val resolved = provider.resolveAndWarn()
+        val llm = provider.buildProvider(resolved)
         openStore { VersioningStores.scorecardStore(Path.of(versioningHomeStr)) }.use { scorecardStore ->
         SkillVerify(
             skillIds = targetIds, project = project, globalSkillsHome = globalSkillsHome, projectSkillsHome = projectSkillsHome,
-            cases = cases, provider = provider, registry = ToolRegistry(),
-            sessionManager = FileSessionManager(Path.of(sessionsDirStr)), contextWindowTokens = SKILL_VERIFY_CONTEXT_WINDOW,
-            model = model, scorecardStore = scorecardStore,
+            cases = cases, provider = llm, registry = ToolRegistry(),
+            sessionManager = FileSessionManager(Path.of(sessionsDirStr)), contextWindowTokens = resolved.windowAtMost(SKILL_VERIFY_CONTEXT_WINDOW),
+            model = resolved.model, scorecardStore = scorecardStore,
             confirm = { prompt -> confirmFlag && run { print(prompt); readlnOrNull()?.trim()?.lowercase() == "y" } }
         ) { echo(it) }.run()
         }

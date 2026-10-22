@@ -253,7 +253,7 @@ class SophiRuntimeTest : FunSpec({
 
         val rt = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
-            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            contextWindowTokens(TEST_CONTEXT_WINDOW); model = "test-model"
             toolRegistry(registry)
         }.build()
 
@@ -402,7 +402,7 @@ class SophiRuntimeTest : FunSpec({
     test("RuntimeBuilder.loopGuard accepts a policy and still builds") {
         val rt = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
-            contextWindowTokens(TEST_CONTEXT_WINDOW)
+            contextWindowTokens(TEST_CONTEXT_WINDOW); model = "test-model"
             loopGuard(LoopGuardPolicy.ALWAYS_CONTINUE)
         }.build()
 
@@ -460,10 +460,19 @@ class SophiRuntimeTest : FunSpec({
     test("RuntimeBuilder build throws when no context window set") {
         val builder = RuntimeBuilder()
         builder.provider = mockk<LLMProvider>()
+        builder.model = "test-model"
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
 
         val ex = shouldThrow<IllegalArgumentException> { builder.build() }
         ex.message!! shouldContain "contextWindowTokens"
+    }
+
+    test("RuntimeBuilder build throws when no model set: SoPhi never picks one") {
+        val builder = RuntimeBuilder().contextWindowTokens(TEST_CONTEXT_WINDOW)
+        builder.provider = mockk<LLMProvider>()
+
+        val ex = shouldThrow<IllegalArgumentException> { builder.build() }
+        ex.message!! shouldContain "model must be set"
     }
 
     test("RuntimeBuilder wires confirmationPolicy through to the built AgentLoop, denying a DESTRUCTIVE tool") {
@@ -489,7 +498,7 @@ class SophiRuntimeTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
         val rt = builder
             .tool(destructiveTool)
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .confirmationPolicy(ConfirmationPolicy { requests -> requests.associate { it.callId to false } })
             .build()
 
@@ -524,7 +533,7 @@ class SophiRuntimeTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-test")
         val rt = builder
             .tool(destructiveTool)
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .grants(setOf("danger"))
             .build()
 
@@ -543,7 +552,7 @@ class SophiRuntimeTest : FunSpec({
         val rt = RuntimeBuilder()
             .also { it.provider = provider }
             .also { it.sessionsDir = createTempDirectory("sophi-sdk-test") }
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .mcpClientManager(mcpManager)
             .build()
 

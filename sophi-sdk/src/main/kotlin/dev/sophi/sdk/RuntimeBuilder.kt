@@ -64,7 +64,8 @@ class RuntimeBuilder {
         normalizeKnob(contextKnobs[name], default, *others)
     /** Global instructions file for the orientation section; null = none. */
     var contextGlobalInstructions: Path? = Orientation.defaultGlobal()
-    var model: String = "claude-sonnet-4-5"
+    /** Required before [build]: SoPhi never picks a model for you. */
+    var model: String? = null
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
     var systemPrompt: String? = null
@@ -219,6 +220,7 @@ class RuntimeBuilder {
     fun build(): SophiRuntime {
         val p = requireNotNull(provider) { "provider must be set before calling build()" }
             .let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
+        val model = requireNotNull(model) { "model must be set before calling build()" }
         val window = requireNotNull(contextWindowTokens) {
             "contextWindowTokens must be set before calling build() — pass the total context " +
                 "window (in tokens) of the model you configured"

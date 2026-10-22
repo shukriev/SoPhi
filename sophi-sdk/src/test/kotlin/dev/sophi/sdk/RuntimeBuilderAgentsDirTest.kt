@@ -31,7 +31,7 @@ class RuntimeBuilderAgentsDirTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).agentsDir(agentsDir).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.agentsDir(agentsDir).build()
 
         val dir = tempdir().toPath()
         val taskStore = TaskStore(dir.resolve("tasks.json"))
@@ -53,7 +53,7 @@ class RuntimeBuilderAgentsDirTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         val dir = tempdir().toPath()
         val taskStore = TaskStore(dir.resolve("tasks.json"))
@@ -79,7 +79,7 @@ class RuntimeBuilderAgentsDirTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW)
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .agentsDir(agentsDir, onWarning = { warnings.add(it) })
             .build()
 

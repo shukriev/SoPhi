@@ -19,7 +19,7 @@ class RuntimeBuilderLearningTest : FunSpec({
         builder.provider = provider
         builder.sessionsDir = createTempDirectory("sophi-sdk-learning-test")
         val learningHome = createTempDirectory("sophi-sdk-learning-home-test")
-        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW)
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .learning(dev.sophi.learning.LearningConfig(home = learningHome, scope = "/p"), StubEmbeddingProvider())
             .build()
 

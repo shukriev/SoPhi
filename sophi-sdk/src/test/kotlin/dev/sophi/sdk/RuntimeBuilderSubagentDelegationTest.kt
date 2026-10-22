@@ -35,7 +35,7 @@ class RuntimeBuilderSubagentDelegationTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).agentsDir(agentsDir).subagentDelegation().build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.agentsDir(agentsDir).subagentDelegation().build()
 
         runtime.toolNames() shouldContain "delegate_to_subagent"
 
@@ -55,7 +55,7 @@ class RuntimeBuilderSubagentDelegationTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).subagentDelegation().build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.subagentDelegation().build()
 
         runtime.toolNames() shouldNotContain "delegate_to_subagent"
     }
@@ -67,7 +67,7 @@ class RuntimeBuilderSubagentDelegationTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).agentsDir(agentsDir).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.agentsDir(agentsDir).build()
 
         runtime.toolNames() shouldNotContain "delegate_to_subagent"
     }

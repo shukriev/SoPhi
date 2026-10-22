@@ -22,7 +22,7 @@ class RuntimeBuilderContextTest : FunSpec({
         val engine = ContextEngine(tempdir().toPath(), GitProbe.none)
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
-            contextWindowTokens(32_000)
+            contextWindowTokens(32_000); model = "test-model"
             sessionsDir = tempdir().toPath()
             context(engine) { _ -> null }
         }.build()
@@ -32,7 +32,7 @@ class RuntimeBuilderContextTest : FunSpec({
 
     test("SOPHI_CONTEXT_TOOLS=core registers search and read only; none registers no context tool") {
         fun names(v: String) = RuntimeBuilder().apply {
-            provider = mockk<LLMProvider>(); contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
+            provider = mockk<LLMProvider>(); contextWindowTokens(32_000); model = "test-model"; sessionsDir = tempdir().toPath()
             contextKnobs = mapOf("SOPHI_CONTEXT_TOOLS" to v)
             context(ContextEngine(tempdir().toPath(), GitProbe.none)) { _ -> null }
         }.build().let { r -> r.toolNames().also { r.close() } }
@@ -66,7 +66,7 @@ class RuntimeBuilderContextTest : FunSpec({
         val (engine, id) = indexed()
         val provider = RecordingStreamProvider()
         val runtime = RuntimeBuilder().apply {
-            this.provider = provider; contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
+            this.provider = provider; contextWindowTokens(32_000); model = "test-model"; sessionsDir = tempdir().toPath()
             contextKnobs = knobs; contextGlobalInstructions = null
             context(engine, owned = false) { id }
         }.build()

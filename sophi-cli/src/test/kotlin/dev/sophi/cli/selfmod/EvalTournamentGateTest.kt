@@ -1,8 +1,11 @@
 package dev.sophi.cli.selfmod
 
+import dev.sophi.cli.ResolvedProvider
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
@@ -30,8 +33,8 @@ class EvalTournamentGateTest : FunSpec({
         val outcome = runEvalGate(
             baselineJar = dir.resolve("baseline.jar"), challengerJar = dir.resolve("challenger.jar"),
             evalsDir = dir.resolve("no-such-evals-dir"), configVersionId = "default",
-            versioningHome = dir.resolve("versioning"), model = "m", providerType = "claude",
-            apiKeyOption = null, baseUrl = null
+            versioningHome = dir.resolve("versioning"), provider = ResolvedProvider("claude", null, "m", 200_000, null, emptyList()),
+            apiKeyOption = null
         )
 
         outcome.skipped shouldBe true
@@ -53,7 +56,7 @@ class EvalTournamentGateTest : FunSpec({
         val outcome = runEvalGate(
             baselineJar = dir.resolve("baseline.jar"), challengerJar = dir.resolve("challenger.jar"),
             evalsDir = evalsDir, configVersionId = "default", versioningHome = dir.resolve("versioning"),
-            model = "m", providerType = "claude", apiKeyOption = null, baseUrl = null,
+            provider = ResolvedProvider("claude", null, "m", 200_000, null, emptyList()), apiKeyOption = null,
             runsPerSide = 1, javaCommand = cmd
         )
 
@@ -77,7 +80,7 @@ class EvalTournamentGateTest : FunSpec({
         val outcome = runEvalGate(
             baselineJar = dir.resolve("baseline.jar"), challengerJar = dir.resolve("challenger.jar"),
             evalsDir = evalsDir, configVersionId = "default", versioningHome = dir.resolve("versioning"),
-            model = "m", providerType = "claude", apiKeyOption = null, baseUrl = null,
+            provider = ResolvedProvider("claude", null, "m", 200_000, null, emptyList()), apiKeyOption = null,
             runsPerSide = 1, javaCommand = cmd
         )
 
@@ -93,13 +96,15 @@ class EvalTournamentGateTest : FunSpec({
         runEvalGate(
             baselineJar = dir.resolve("baseline.jar"), challengerJar = dir.resolve("challenger.jar"),
             evalsDir = evalsDir, configVersionId = "default", versioningHome = dir.resolve("versioning"),
-            model = "m", providerType = "openai-compat", apiKeyOption = "s3cret", baseUrl = "http://x/v1",
+            provider = ResolvedProvider("openai-compat", "http://x/v1", "m", 8192, null, emptyList()), apiKeyOption = "s3cret",
             runsPerSide = 1, javaCommand = cmd
         )
 
         seen.toFile().readLines().forEach { line ->
             line.substringBefore(" env=").contains("s3cret") shouldBe false
             line.substringAfter(" env=") shouldBe "s3cret"
+            line shouldContain "--provider openai-compat --model m --base-url http://x/v1"
+            line shouldNotContain "--context-window-tokens"
         }
     }
 })
