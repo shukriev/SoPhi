@@ -199,7 +199,7 @@ class SophiRuntime internal constructor(
         val manager = requireNotNull(mcpClientManager) {
             "MCP not configured for this runtime — build it via RuntimeBuilder.mcpConfig(...)"
         }
-        return manager.connectOne(config, onFailure).map { tool ->
+        return manager.connectOne(config, onFailure = onFailure).map { tool ->
             toolRegistry.register(tool)
             tool.name
         }

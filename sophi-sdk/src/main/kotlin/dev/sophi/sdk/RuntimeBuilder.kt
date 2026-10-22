@@ -29,12 +29,14 @@ import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.ToolSearchTool
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.learning.system1FromHome
 import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER
 import dev.sophi.mcp.config.McpConfigLoader
 import dev.sophi.memory.MemoryPlugin
 import dev.sophi.memory.MemoryPromptSection
@@ -256,8 +258,10 @@ class RuntimeBuilder {
                 dev.sophi.schedule.store.RunLog(dir.resolve("runs.jsonl"))
             ))
         }
-        val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers.filter { server -> server.enabled } } ?: emptyList()
-        runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
+        val mcp = mcpConfigPath?.let { McpConfigLoader().load(it) }
+        val mcpServers = mcp?.servers?.filter { server -> server.enabled } ?: emptyList()
+        runBlocking { mcpClientManager.connect(mcpServers, mcp?.deferToolsOver ?: DEFAULT_DEFER_TOOLS_OVER) }.forEach { registry.register(it) }
+        if (registry.deferredNames().isNotEmpty()) registry.register(ToolSearchTool(registry))
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
             model = model,
