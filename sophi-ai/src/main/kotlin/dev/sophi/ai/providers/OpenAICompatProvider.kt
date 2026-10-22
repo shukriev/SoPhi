@@ -57,6 +57,11 @@ class OpenAICompatProvider(
     override fun stream(request: CompletionRequest): Flow<StreamEvent> = callbackFlow {
         val params = request.toCreateParams()
         val merger = ToolCallDeltaMerger()
+        val thinkSplitter = ThinkTagSplitter()
+        fun send(split: Split) {
+            if (split.reasoning.isNotEmpty()) trySend(StreamEvent.Reasoning(split.reasoning))
+            if (split.content.isNotEmpty()) trySend(StreamEvent.Content(split.content))
+        }
         val streamResponse = rawClient.chat().completions().createStreaming(params)
         val worker = Thread({
             try {
@@ -66,7 +71,7 @@ class OpenAICompatProvider(
                     chunk.choices().forEach { choice ->
                         val delta = choice.delta()
                         val content = delta.content().orElse(null)
-                        if (!content.isNullOrEmpty()) trySend(StreamEvent.Content(content))
+                        if (!content.isNullOrEmpty()) send(thinkSplitter.feed(content))
 
                         val reasoningText = reasoningFieldNames.firstNotNullOfOrNull { key ->
                             delta._additionalProperties()[key]?.convert(String::class.java)
@@ -76,6 +81,7 @@ class OpenAICompatProvider(
                         delta.toolCalls().orElse(null)?.forEach { merger.accumulate(it) }
 
                         choice.finishReason().ifPresent { reason ->
+                            send(thinkSplitter.flush())
                             val merged = merger.build()
                             if (merged.isNotEmpty()) trySend(StreamEvent.ToolCallsReady(merged))
                             runCatching { reason.asString() }.getOrNull()
