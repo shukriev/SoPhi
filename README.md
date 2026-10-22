@@ -54,50 +54,62 @@ one-line change, not a rewrite.
 mvn -q -DskipTests package
 ```
 
-Requires an Anthropic API key for the Claude provider:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+SoPhi runs on a local model by default: start Ollama, LM Studio or llama.cpp and it finds
+the server itself. Claude is opt-in (`--provider claude --model <name>` with
+`ANTHROPIC_API_KEY` set); SoPhi never picks a cloud model for you.
 
 ---
 
 ## 💻 Use case 1: Interactive terminal agent (`sophi-cli`)
 
-Run a chat session in your terminal, backed by Claude, with persistent
+Run a chat session in your terminal, backed by a local model, with persistent
 sessions you can branch and resume.
 
+Quick start: start Ollama or LM Studio (with a model loaded), then run `sophi`.
+
 ```bash
+ollama serve & ollama pull qwen3:8b          # or load a model in LM Studio
 mvn -pl sophi-cli -am package
-java -jar sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar --model claude-sonnet-4-5
+java -jar sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar
+```
+
+SoPhi probes llama.cpp (:8080), LM Studio (:1234) and Ollama (:11434), uses the first
+model the server has loaded, and reads the context window the server loaded it with.
+
+To use Claude instead:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+sophi --provider claude --model <claude-model-id>
 ```
 
 Options:
 
 ```bash
 sophi --session <id>          # resume an existing session
-sophi --model <name>          # LLM model (default: claude-3-5-sonnet-20241022)
+sophi --model <name>          # model (local: defaults to the server's first loaded model; required otherwise)
 sophi --sessions-dir <path>   # where session JSONL files live (default: ~/.sophi/sessions)
 sophi --agents-dir <path>     # directory of subagent definitions (default: ~/.sophi/agents)
 sophi --system "<prompt>"     # system prompt for every turn
-sophi --provider <name>       # 'claude' (default) or 'openai-compat' (Ollama, vLLM, ...)
-sophi --base-url <url>        # required for --provider openai-compat
+sophi --provider <name>       # 'local' (default: finds llama.cpp, LM Studio or Ollama), 'openai-compat', or 'claude'
+sophi --base-url <url>        # local: skip discovery and use this server; required for openai-compat
+sophi --context-window-tokens <n>  # override the window (local: read from the server; openai-compat 8192; claude 200000)
 sophi --api-key <key>         # optional; falls back to SOPHI_API_KEY (keeps it out of `ps`), then ANTHROPIC_API_KEY for claude
 sophi --memory                # enable long-term memory (see "Cross-cutting: memory")
-sophi --embedding-model <m>   # embedding model for --memory, e.g. nomic-embed-text
+sophi --embedding-model <m>   # embedding model for --memory (local: a loaded nomic-embed model is used if present)
 sophi --embedding-base-url <url>   # embeddings endpoint (defaults to --base-url)
 sophi --embedding-dimensions <n>   # vector size (768 nomic-embed-text, 1536 OpenAI; default 1536)
 sophi --hub-port <port>       # port a running companion's hub listens on (default: 8765)
 sophi --no-remote             # don't register with a running companion's hub for this session
 ```
 
-Examples with local models:
+Other servers and models:
 
 ```bash
-# Ollama
-sophi --provider openai-compat --base-url http://localhost:11434/v1 --model qwen2.5:7b
+# A specific model on the local server SoPhi finds
+sophi --model qwen2.5:7b
 
-# vLLM
+# Any other OpenAI-compatible server, e.g. vLLM
 sophi --provider openai-compat --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-7B-Instruct
 ```
 
@@ -363,9 +375,11 @@ organized as a memory palace: the leverage is at **encoding time**, not
 retrieval time. Opt-in and experimental:
 
 ```bash
-# Ollama example — any OpenAI-compatible embeddings endpoint works
-sophi --provider openai-compat --base-url http://localhost:11434/v1 --model qwen2.5:7b \
-      --memory --embedding-model nomic-embed-text --embedding-dimensions 768
+# Local server with a nomic-embed model loaded: picked up automatically
+sophi --memory
+
+# Or name the embeddings model — any OpenAI-compatible embeddings endpoint works
+sophi --memory --embedding-model nomic-embed-text --embedding-dimensions 768
 ```
 
 How it works, per turn:
