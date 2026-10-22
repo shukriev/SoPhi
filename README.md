@@ -68,13 +68,15 @@ sessions you can branch and resume.
 Quick start: start Ollama or LM Studio (with a model loaded), then run `sophi`.
 
 ```bash
-ollama serve & ollama pull qwen3:8b          # or load a model in LM Studio
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve & ollama pull qwen3:8b   # or load a model in LM Studio
 mvn -pl sophi-cli -am package
 java -jar sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar
 ```
 
-SoPhi probes llama.cpp (:8080), LM Studio (:1234) and Ollama (:11434), uses the first
-model the server has loaded, and reads the context window the server loaded it with.
+SoPhi probes llama.cpp (:8080), LM Studio (:1234) and Ollama (:11434), uses a model the
+server has in memory (else the first one it lists), and reads the context window the
+server loaded it with. Ollama's own default window is 4096 tokens, smaller than SoPhi's
+tool definitions alone, hence `OLLAMA_CONTEXT_LENGTH` above.
 
 To use Claude instead:
 
@@ -87,7 +89,7 @@ Options:
 
 ```bash
 sophi --session <id>          # resume an existing session
-sophi --model <name>          # model (local: defaults to the server's first loaded model; required otherwise)
+sophi --model <name>          # model (local: defaults to a model the server has loaded; required otherwise)
 sophi --sessions-dir <path>   # where session JSONL files live (default: ~/.sophi/sessions)
 sophi --agents-dir <path>     # directory of subagent definitions (default: ~/.sophi/agents)
 sophi --system "<prompt>"     # system prompt for every turn

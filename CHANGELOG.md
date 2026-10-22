@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Breaking:** local models are the default. `--provider` defaults to `local`, which finds llama.cpp (:8080), LM Studio (:1234) or Ollama (:11434), picks a model the server has loaded, and reads the context window it was loaded with. No surface defaults to a Claude model any more:
+  - `--model` is required with `--provider claude` and `--provider openai-compat`;
+  - a `--base-url` user now also passes `--model`, or switches to `--provider local`, which reads the model from the server;
+  - **SDK:** `RuntimeBuilder.model` must be set, or `build()` fails;
+  - **sophi-web:** `sophi.provider.model` is required, or startup fails;
+  - **launchd/cron:** `sophi schedule install-launchd` writes `sophi schedule run-due` with no provider flags, so an existing install that relied on the Claude default now looks for a local server. To keep Claude, add `--provider claude --model <name>` after `run-due` in `ProgramArguments` of `~/Library/LaunchAgents/dev.sophi.schedule.plist`, then `launchctl unload` and `launchctl load -w` it. `run-due` now only resolves a provider when a task is due;
+  - a self-mod gate run against a baseline jar from before this change fails once, because that jar's `evals run` doesn't know `--provider local`; rebuild the baseline.
+- With stock Ollama, start it with `OLLAMA_CONTEXT_LENGTH=16384 ollama serve`: its default 4096-token window is smaller than SoPhi's tool definitions alone, and SoPhi warns when it detects it
+- `evals run`, `tournament run` and `skill verify` cap their fixed 100000-token window at the provider's window (detected, or `--context-window-tokens`)
 - Memory and versioning live on the shared `~/.sophi/db` server: the CLI and the companion can both use memory at the same time — no more "memory: disabled … only one process" (ADR-041, M6). Run the same version of the CLI and the companion: a differing schema is refused
 - One-time, automatic move of `~/.sophi/memory`, `~/.sophi/memory/.versions` and `~/.sophi/versioning` onto the shared server; the old directories are kept as `arcadedb.migrated-<timestamp>`, and a plain file at `<home>/arcadedb` makes an older (pre-M6) build show memory and versioning as disabled instead of starting an empty palace. A directory an older build recreates anyway is kept as `arcadedb.stray-<timestamp>` and never merged into the shared store; a self-mod gate run against a pre-M6 baseline jar fails until the baseline is upgraded
 - Context index schema v2 (ADR-041, M5): the first start after upgrading re-indexes every project once, and a client refuses a host whose schema version differs (either direction), so run the same version of the CLI and the companion
@@ -16,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context hint gate: the top-1/top-2 ratio threshold rises from 1.0 to 1.25 — live E1 negatives showed the old gate firing on 6 of 10 chit-chat messages against the SoPhi index, the new one on none; live E1/E5 results on a small local model recorded in `evals/context/RESULTS.md` (ADR-041)
 
 ### Added
+- Local models first-class: `sophi-ai` recovers tool calls written into the text (Hermes `<tool_call>`, Mistral `[TOOL_CALLS][…]`), splits `<think>` reasoning out of the answer, and returns malformed tool arguments to the model as a tool error it can retry
 - `sophi-store`: `SharedArcadeHost`, `FailoverArcadeStore`, `LegacyMigration`/`SharedStore`; per-database schema check in `host.json`
 - Context graph and semantics (ADR-041, M5): `find_symbol` and `related` tools over Symbol/Relation documents (imports, links, tests), the `SOPHI_CONTEXT_TOOLS` knob (`all` default, `core`, `none`), optional local chunk embeddings (`SOPHI_CONTEXT_EMBED`, loopback only, off, experiment-only: inconclusive in E2) fused with BM25 by RRF, summaries as an indexing input (off by default), and the `--summaries`/`--embed` flags and docs/commits sets of `sophi context eval`; results in `evals/context/RESULTS.md`
 - Automatic cross-turn compaction in every SDK runtime, structured summaries (Goal, Decisions & findings, Files touched, Commands & outcomes, Errors & attempts, Open items — the file and command lists computed from the real tool calls, not the model's memory), and the internal `SOPHI_COMPACTION` knob: `structured` (default) | `elide` | `generic` (ADR-041, M4)
