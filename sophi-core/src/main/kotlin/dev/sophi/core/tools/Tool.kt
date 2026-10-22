@@ -9,6 +9,11 @@ interface Tool {
     val name: String
     val description: String
     val parametersJson: String
+    /**
+     * True for a tool whose schema stays out of the prompt until the model loads it with
+     * `tool_search` (see [ToolRegistry.definitions]). Only honoured while `tool_search` is registered.
+     */
+    val deferred: Boolean get() = false
     fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.SAFE
     /**
      * Fine-grained risk hint consulted only for calls that already cleared the SAFE bar (i.e.

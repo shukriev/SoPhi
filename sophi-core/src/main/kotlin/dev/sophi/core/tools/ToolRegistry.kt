@@ -20,8 +20,18 @@ class ToolRegistry {
 
     fun getOrNull(name: String): Tool? = tools[name]
 
-    fun definitions(): List<ToolDefinition> =
-        tools.values.map { ToolDefinition(it.name, it.description, it.parametersJson) }
+    /**
+     * Every tool except deferred ones not in [activated]. Deferral only applies while
+     * [TOOL_SEARCH_NAME] is registered; without it the model could never load a hidden tool.
+     */
+    fun definitions(activated: Set<String> = emptySet()): List<ToolDefinition> {
+        val hideDeferred = TOOL_SEARCH_NAME in tools
+        return tools.values
+            .filter { !(hideDeferred && it.deferred && it.name !in activated) }
+            .map { ToolDefinition(it.name, it.description, it.parametersJson) }
+    }
+
+    fun deferredNames(): List<String> = tools.values.filter { it.deferred }.map { it.name }.sorted()
 
     fun names(): List<String> = tools.keys.sorted()
 

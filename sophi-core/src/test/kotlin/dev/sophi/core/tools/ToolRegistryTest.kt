@@ -4,6 +4,7 @@ import dev.sophi.ai.api.ToolDefinition
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -179,5 +180,39 @@ class ToolRegistryTest : FunSpec({
         registry.worstRiskAmong(listOf("does_not_exist")) shouldBe RiskLevel.SAFE
         registry.worstRiskAmong(null) shouldBe RiskLevel.SAFE
         registry.worstRiskAmong(emptyList()) shouldBe RiskLevel.SAFE
+    }
+
+    fun fakeTool(name: String, deferred: Boolean = false) = object : Tool {
+        override val name = name
+        override val description = "d"
+        override val parametersJson = "{}"
+        override val deferred = deferred
+        override suspend fun execute(argumentsJson: String) = ""
+    }
+
+    fun deferredRegistry(withSearch: Boolean) = ToolRegistry().also {
+        it.register(fakeTool("read_file"))
+        it.register(fakeTool("gh__create_issue", deferred = true))
+        it.register(fakeTool("gh__list_prs", deferred = true))
+        if (withSearch) it.register(ToolSearchTool(it))
+    }
+
+    test("definitions hides deferred tools unless activated") {
+        val registry = deferredRegistry(withSearch = true)
+        registry.definitions().map { it.name } shouldBe listOf("read_file", "tool_search")
+        registry.definitions(setOf("gh__list_prs")).map { it.name } shouldBe
+            listOf("read_file", "gh__list_prs", "tool_search")
+    }
+
+    test("definitions sends deferred tools when tool_search is absent") {
+        deferredRegistry(withSearch = false).definitions().map { it.name } shouldContain "gh__create_issue"
+    }
+
+    test("subset keeps the deferred flag") {
+        deferredRegistry(withSearch = true).subset(listOf("gh__list_prs")).get("gh__list_prs").deferred shouldBe true
+    }
+
+    test("deferredNames is sorted") {
+        deferredRegistry(withSearch = true).deferredNames() shouldBe listOf("gh__create_issue", "gh__list_prs")
     }
 })
