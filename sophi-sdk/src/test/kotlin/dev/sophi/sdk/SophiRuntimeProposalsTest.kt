@@ -15,7 +15,7 @@ private fun buildTestRuntime(sessionsDir: Path, scheduleDir: Path? = null): Soph
     val builder = RuntimeBuilder().apply {
         provider = mockk<LLMProvider>()
         this.sessionsDir = sessionsDir
-    }.contextWindowTokens(TEST_CONTEXT_WINDOW)
+    }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
     return (scheduleDir?.let { builder.schedule(it) } ?: builder).build()
 }
 

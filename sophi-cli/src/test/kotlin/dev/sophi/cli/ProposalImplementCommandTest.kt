@@ -52,7 +52,7 @@ class ProposalImplementCommandTest : FunSpec({
         val messages = mutableListOf<String>()
 
         ProposalImplement(
-            proposalId = p.id, store = store, provider = TEST_PROVIDER, enabled = false,
+            proposalId = p.id, store = store, provider = { error("resolved the provider with the kill switch off") }, enabled = false,
             repoRoot = tempdir().toPath(), worktreesParent = tempdir().toPath(),
             claudeCodeTool = RunClaudeCodeTool(), confirm = { true },
             echo = { messages.add(it) }
@@ -69,7 +69,7 @@ class ProposalImplementCommandTest : FunSpec({
         val messages = mutableListOf<String>()
 
         ProposalImplement(
-            proposalId = p.id, store = store, provider = TEST_PROVIDER, enabled = true,
+            proposalId = p.id, store = store, provider = { TEST_PROVIDER }, enabled = true,
             repoRoot = tempdir().toPath(), worktreesParent = tempdir().toPath(),
             claudeCodeTool = RunClaudeCodeTool(), confirm = { true },
             echo = { messages.add(it) }
@@ -91,7 +91,7 @@ class ProposalImplementCommandTest : FunSpec({
 
         val messages = mutableListOf<String>()
         ProposalImplement(
-            proposalId = p.id, store = store, provider = TEST_PROVIDER, enabled = true,
+            proposalId = p.id, store = store, provider = { TEST_PROVIDER }, enabled = true,
             repoRoot = repo, worktreesParent = scratch.resolve("worktrees"),
             claudeCodeTool = RunClaudeCodeTool(claudeCommand = claudeCmd),
             gitCommand = listOf("git"), mvnCommand = mvnCmd, ghCommand = ghCmd,
@@ -114,7 +114,7 @@ class ProposalImplementCommandTest : FunSpec({
         val mvnCmd = fakeExecutable(scratch, "fake-mvn.sh", "echo SHOULD_NOT_RUN > mvn-was-called.txt\nexit 1")
 
         ProposalImplement(
-            proposalId = p.id, store = store, provider = TEST_PROVIDER, enabled = true,
+            proposalId = p.id, store = store, provider = { TEST_PROVIDER }, enabled = true,
             repoRoot = repo, worktreesParent = scratch.resolve("worktrees"),
             claudeCodeTool = RunClaudeCodeTool(claudeCommand = claudeCmd),
             gitCommand = listOf("git"), mvnCommand = mvnCmd, ghCommand = listOf("gh"),

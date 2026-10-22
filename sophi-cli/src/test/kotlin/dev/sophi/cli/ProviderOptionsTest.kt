@@ -123,4 +123,15 @@ class ProviderOptionsTest : FunSpec({
             help shouldContain "local (default: finds llama.cpp, LM Studio or Ollama), openai-compat, or claude"
         }
     }
+
+    test("--memory uses the local server's nomic-embed model only when no embedding flag was given") {
+        val resolved = ResolvedProvider("local", "http://127.0.0.1:1234/v1", "qwen3-8b", 8192, "nomic-embed-text", emptyList())
+        chooseEmbedding(true, null, null, null, resolved) shouldBe
+            EmbeddingChoice("nomic-embed-text", "http://127.0.0.1:1234/v1", 768)
+        // An explicit --embedding-base-url is kept, never swapped for the chat server's URL.
+        chooseEmbedding(true, null, "http://emb:11434/v1", null, resolved) shouldBe
+            EmbeddingChoice(null, "http://emb:11434/v1", 1536)
+        chooseEmbedding(true, "my-embed", null, 512, resolved) shouldBe EmbeddingChoice("my-embed", null, 512)
+        chooseEmbedding(false, null, null, null, resolved) shouldBe EmbeddingChoice(null, null, 1536)
+    }
 })

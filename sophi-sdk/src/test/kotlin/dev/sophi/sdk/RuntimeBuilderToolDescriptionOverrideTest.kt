@@ -33,7 +33,7 @@ class RuntimeBuilderToolDescriptionOverrideTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).toolRegistry(registry).configVersion(version.id, versionStore).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.toolRegistry(registry).configVersion(version.id, versionStore).build()
 
         runtime.toolNames() shouldBe listOf("greet")
         registry.get("greet").description shouldBe "A rewritten description"
@@ -48,7 +48,7 @@ class RuntimeBuilderToolDescriptionOverrideTest : FunSpec({
         RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).toolRegistry(registry).configVersion(version.id, versionStore).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.toolRegistry(registry).configVersion(version.id, versionStore).build()
 
         val result = kotlinx.coroutines.runBlocking { registry.get("greet").execute("{}") }
 
@@ -65,7 +65,7 @@ class RuntimeBuilderToolDescriptionOverrideTest : FunSpec({
         RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).toolRegistry(registry).configVersion(version.id, versionStore).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.toolRegistry(registry).configVersion(version.id, versionStore).build()
 
         registry.get("greet").description shouldBe "original description"
     }

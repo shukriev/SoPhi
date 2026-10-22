@@ -49,6 +49,19 @@ import kotlin.io.path.exists
 import kotlin.time.Duration.Companion.seconds
 import java.nio.file.Path
 
+internal data class EmbeddingChoice(val model: String?, val baseUrl: String?, val dimensions: Int)
+
+/**
+ * The embeddings --memory uses: the flags as given, or, when neither --embedding-model nor
+ * --embedding-base-url was passed, the nomic-embed model the local server already has (768 dims).
+ */
+internal fun chooseEmbedding(
+    memoryEnabled: Boolean, model: String?, baseUrl: String?, dimensions: Int?, resolved: ResolvedProvider
+): EmbeddingChoice =
+    if (memoryEnabled && model == null && baseUrl == null && resolved.embeddingModel != null)
+        EmbeddingChoice(resolved.embeddingModel, resolved.baseUrl, dimensions ?: 768)
+    else EmbeddingChoice(model, baseUrl, dimensions ?: 1536)
+
 class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness", invokeWithoutSubcommand = true) {
 
     private val sessionId: String? by option(
@@ -151,8 +164,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val model = resolved.model
         val contextWindowTokens = resolved.contextWindowTokens
         val provider = providerOptions.buildProvider(resolved)
-        // With --memory and no --embedding-model, use the nomic-embed model the local server already has.
-        val autoEmbedding = memoryEnabled && embeddingModel == null && resolved.embeddingModel != null
+        val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
         val inputSource: InputSource =
@@ -173,9 +185,9 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 autoMode = autoMode,
                 godMode = godMode,
                 memoryEnabled = memoryEnabled,
-                embeddingModel = if (autoEmbedding) resolved.embeddingModel else embeddingModel,
-                embeddingBaseUrl = if (autoEmbedding) resolved.baseUrl else embeddingBaseUrl,
-                embeddingDimensions = embeddingDimensions ?: if (autoEmbedding) 768 else 1536,
+                embeddingModel = embedding.model,
+                embeddingBaseUrl = embedding.baseUrl,
+                embeddingDimensions = embedding.dimensions,
                 baseUrl = resolved.baseUrl,
                 apiKey = providerOptions.apiKey,
                 llmTimeoutSeconds = providerOptions.timeoutSeconds,

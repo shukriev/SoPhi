@@ -42,7 +42,7 @@ class SophiRuntimeLearningTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-learning-sessions")
         val rt = builder
             .tool(boomTool)
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .learning(LearningConfig(home = learningHome, scope = "/p"))
             .build()
 

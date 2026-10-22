@@ -31,7 +31,7 @@ internal fun sharedMemoryRuntime(root: Path, home: Path, dir: Path): SophiRuntim
     provider = mockk<dev.sophi.ai.api.LLMProvider>(relaxed = true)
     sessionsDir = dir.resolve("sessions"); skillsDir = dir.resolve("skills")
     memoryHome = home; memorySharedRoot = root
-}.contextWindowTokens(100_000)
+}.contextWindowTokens(100_000).apply { model = "test-model" }
     .memory("topic", "http://ignored-by-override", embeddingProvider = TopicEmbeddings, onWarning = { System.err.println(it) })
     .build()
 

@@ -21,7 +21,7 @@ class UsageLogTest : FunSpec({
             override fun stream(request: CompletionRequest) = flowOf(StreamEvent.Content("ok"), StreamEvent.Usage(TokenUsage(120, 5, cacheReadTokens = 100)))
         }
         val runtime = RuntimeBuilder().apply {
-            this.provider = provider; contextWindowTokens(32_000); sessionsDir = tempdir().toPath(); usageLogPath = log
+            this.provider = provider; contextWindowTokens(32_000); model = "test-model"; sessionsDir = tempdir().toPath(); usageLogPath = log
         }.build()
         runBlocking { runtime.streamTurn(runtime.sessionManager.create(), "hi") {} }
         val line = Files.readAllLines(log).single()

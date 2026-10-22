@@ -20,7 +20,7 @@ class RuntimeBuilderSkillInvocationTest : FunSpec({
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
             this.skillsDir = skillsDir
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         runBlocking {
             rt.pluginRegistry.dispatch(

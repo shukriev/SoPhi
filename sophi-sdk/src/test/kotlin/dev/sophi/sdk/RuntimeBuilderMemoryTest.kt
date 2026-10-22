@@ -34,7 +34,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
-        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         rt.memoryPlugin.shouldBeNull()
         rt.config.systemPrompt shouldBe DefaultPrompt.BASE
@@ -47,7 +47,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         builder.systemPrompt = "custom instructions"
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                 embeddingProvider = StubEmbeddingProvider(shouldFail = false)
@@ -67,7 +67,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                 embeddingProvider = StubEmbeddingProvider(shouldFail = false)
@@ -84,7 +84,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                 embeddingProvider = StubEmbeddingProvider(shouldFail = false)
@@ -99,7 +99,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
-        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         rt.toolNames() shouldNotContain "list_actionable_patterns"
     }
@@ -110,7 +110,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                 embeddingProvider = StubEmbeddingProvider(shouldFail = false)
@@ -125,7 +125,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
-        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         rt.toolNames() shouldNotContain "list_open_commitments"
     }
@@ -136,7 +136,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                 embeddingProvider = StubEmbeddingProvider(shouldFail = false)
@@ -151,7 +151,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.provider = stubProvider()
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
-        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         rt.toolNames() shouldNotContain "list_habits"
     }
@@ -163,7 +163,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://unreachable",
                 onWarning = { warnings.add(it) }, embeddingProvider = StubEmbeddingProvider(shouldFail = true)
@@ -187,7 +187,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = blockedHome
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                 onWarning = { warnings.add(it) }, embeddingProvider = StubEmbeddingProvider(shouldFail = false)
@@ -212,7 +212,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             builder.memoryHome = home
             builder.memorySharedRoot = createTempDirectory("sophi-sdk-memory-root-test")
             val rt = builder
-                .contextWindowTokens(TEST_CONTEXT_WINDOW)
+                .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
                 .memory(
                     embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                     onWarning = { warnings.add(it) }, embeddingProvider = StubEmbeddingProvider(shouldFail = false)
@@ -232,7 +232,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
         builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
         val rt = builder
-            .contextWindowTokens(TEST_CONTEXT_WINDOW)
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
             .memory(
                 embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
                 embeddingProvider = StubEmbeddingProvider(shouldFail = false)

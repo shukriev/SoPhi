@@ -48,8 +48,14 @@ class AgentConfigurationTest : FunSpec({
         shouldThrow<IllegalStateException> { buildProviderFromProperties(props) }
     }
 
+    test("buildProviderFromProperties fails at startup naming sophi.provider.model when no model is set") {
+        val props = ProviderProperties(type = "claude", apiKey = "sk-ant-test")
+        val ex = shouldThrow<IllegalStateException> { buildProviderFromProperties(props) }
+        ex.message!! shouldContain "sophi.provider.model"
+    }
+
     test("buildProviderFromProperties throws for an unknown type") {
-        val props = ProviderProperties(type = "bogus")
+        val props = ProviderProperties(type = "bogus", model = "m")
         shouldThrow<IllegalStateException> { buildProviderFromProperties(props) }
     }
 

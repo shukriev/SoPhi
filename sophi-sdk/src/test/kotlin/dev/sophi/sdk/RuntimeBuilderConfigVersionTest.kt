@@ -24,7 +24,7 @@ class RuntimeBuilderConfigVersionTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).configVersion(version.id, versionStore).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.configVersion(version.id, versionStore).build()
 
         runtime.config.systemPrompt shouldContain "Custom prompt"
         runtime.config.maxTokens shouldBe 2048
@@ -35,7 +35,7 @@ class RuntimeBuilderConfigVersionTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         runtime.config.maxTokens shouldBe 4096
         runtime.config.temperature shouldBe 0.7
@@ -48,7 +48,7 @@ class RuntimeBuilderConfigVersionTest : FunSpec({
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
             maxTokens = 1234
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).configVersion("does-not-exist", versionStore).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.configVersion("does-not-exist", versionStore).build()
 
         runtime.config.maxTokens shouldBe 1234
     }

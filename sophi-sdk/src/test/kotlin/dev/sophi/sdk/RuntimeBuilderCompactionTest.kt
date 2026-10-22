@@ -12,7 +12,7 @@ class RuntimeBuilderCompactionTest : FunSpec({
     test("SOPHI_COMPACTION selects the mode; unknown values fall back to structured") {
         fun mode(v: String?): CompactionMode {
             val runtime = RuntimeBuilder().apply {
-                provider = RecordingStreamProvider(); contextWindowTokens(32_000); sessionsDir = tempdir().toPath()
+                provider = RecordingStreamProvider(); contextWindowTokens(32_000); model = "test-model"; sessionsDir = tempdir().toPath()
                 contextKnobs = listOfNotNull(v?.let { "SOPHI_COMPACTION" to it }).toMap()
             }.build()
             return runtime.compactionMode.also { runtime.close() }
@@ -26,7 +26,7 @@ class RuntimeBuilderCompactionTest : FunSpec({
         val provider = RecordingStreamProvider()
         val usageLog = tempdir().toPath().resolve("usage.jsonl")
         val runtime = RuntimeBuilder().apply {
-            this.provider = provider; contextWindowTokens(4_000); sessionsDir = tempdir().toPath(); contextKnobs = emptyMap()
+            this.provider = provider; contextWindowTokens(4_000); model = "test-model"; sessionsDir = tempdir().toPath(); contextKnobs = emptyMap()
             usageLogPath = usageLog
         }.build()
         val s = runBlocking { runtime.newSession() }

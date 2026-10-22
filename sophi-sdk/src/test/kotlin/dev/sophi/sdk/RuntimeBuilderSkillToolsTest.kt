@@ -18,7 +18,7 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
             skillsDir = globalDir
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools().build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.skillTools().build()
 
         val names = runtime.toolNames()
         names shouldContain "skill"
@@ -31,7 +31,7 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
             skillsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).skillTools().build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.skillTools().build()
 
         val names = runtime.toolNames()
         names shouldContain "skill"

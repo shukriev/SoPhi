@@ -37,7 +37,8 @@ class ProposalImplement(
     private val evalsDirOverride: Path? = null,
     private val configVersionId: String = "default",
     private val versioningHome: Path = defaultVersioningHome,
-    private val provider: ResolvedProvider,
+    /** Called only once the kill switch is on, so a disabled run never probes for a model server. */
+    private val provider: () -> ResolvedProvider,
     private val apiKeyOption: String? = null,
     private val maxChangedLines: Int = 500,
     private val budgetMinutes: Long = 20,
@@ -53,6 +54,7 @@ class ProposalImplement(
             echo("SOPHI_SHADOW_PR_ENABLED is not set to true -- refusing to run.")
             return
         }
+        val resolvedProvider = provider()
         val proposal = store.get(proposalId)
         if (proposal == null || proposal.status != "accepted") {
             echo("Proposal $proposalId is not accepted (or does not exist) -- nothing to implement.")
@@ -101,7 +103,7 @@ class ProposalImplement(
             val evalOutcome = runEvalGate(
                 baselineJar = baselineBuild.jarPath!!, challengerJar = challengerBuild.jarPath!!,
                 evalsDir = evalsDirOverride ?: repoRoot.resolve("evals"), configVersionId = configVersionId,
-                versioningHome = versioningHome, provider = provider,
+                versioningHome = versioningHome, provider = resolvedProvider,
                 apiKeyOption = apiKeyOption, javaCommand = javaCommand
             )
             if (!evalOutcome.skipped && evalOutcome.result?.accepted == false) {
@@ -173,7 +175,7 @@ class ProposalImplementCommand : CliktCommand(name = "implement", help = "Implem
             proposalId = id, store = store, enabled = enabled, repoRoot = repoRoot,
             worktreesParent = Path.of(worktreesParentStr), claudeCodeTool = RunClaudeCodeTool(),
             evalsDirOverride = repoRoot.resolve(evalsDirStr), configVersionId = configVersion,
-            versioningHome = Path.of(versioningHomeStr), provider = provider.resolveAndWarn(),
+            versioningHome = Path.of(versioningHomeStr), provider = { provider.resolveAndWarn() },
             apiKeyOption = provider.apiKey, budgetMinutes = budgetMinutes,
             confirm = {
                 echo("$it [y/N] ", trailingNewline = false)

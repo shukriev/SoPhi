@@ -32,7 +32,7 @@ import kotlin.io.path.exists
 
 internal fun buildProviderFromProperties(props: ProviderProperties): LLMProvider = try {
     buildProviderFromType(
-        props.type, props.apiKey, props.baseUrl, props.model,
+        props.type, props.apiKey, props.baseUrl, props.requireModel(),
         missingApiKeyMessage = "sophi.provider.api-key is required when sophi.provider.type=claude " +
             "(neither sophi.provider.api-key nor ANTHROPIC_API_KEY was set)",
         missingBaseUrlMessage = "sophi.provider.base-url is required when sophi.provider.type=openai-compat",
@@ -84,7 +84,7 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         FileSessionManager(Path.of(System.getProperty("user.home"), ".sophi", "sessions"))
 
     @Bean
-    fun learningConfig(): LearningConfig = LearningConfig(sessionModel = providerProperties.model)
+    fun learningConfig(): LearningConfig = LearningConfig(sessionModel = providerProperties.requireModel())
 
     @Bean
     fun learningPlugin(
@@ -92,7 +92,7 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         llmProvider: LLMProvider,
         sessionManager: SessionManager
     ): LearningPlugin =
-        LearningPlugin(learningConfig, model = providerProperties.model, provider = llmProvider, sessionManager = sessionManager)
+        LearningPlugin(learningConfig, model = providerProperties.requireModel(), provider = llmProvider, sessionManager = sessionManager)
 
     @Bean
     fun pluginRegistry(learningPlugin: LearningPlugin): PluginRegistry =
@@ -105,7 +105,7 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         // per turn, via AgentController.configWithContext()'s collectContext() call — not baked in
         // here — since they depend on that turn's actual input.
         val section = learningPlugin.promptSections(learningConfig.scope)
-        return AgentConfig(model = providerProperties.model, systemPrompt = section)
+        return AgentConfig(model = providerProperties.requireModel(), systemPrompt = section)
     }
 
     @Bean

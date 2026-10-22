@@ -18,7 +18,7 @@ class RuntimeBuilderBuiltinToolsTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).builtinTools(root).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.builtinTools(root).build()
 
         runtime.toolNames() shouldContain "read_file"
     }
@@ -28,11 +28,11 @@ class RuntimeBuilderBuiltinToolsTest : FunSpec({
         val withoutKey = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).builtinTools(root).build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.builtinTools(root).build()
         val withKey = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
             sessionsDir = tempdir().toPath()
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).builtinTools(root, braveApiKey = "test-key").build()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.builtinTools(root, braveApiKey = "test-key").build()
 
         withoutKey.toolNames() shouldNotContain "web_search"
         withKey.toolNames() shouldContain "web_search"
