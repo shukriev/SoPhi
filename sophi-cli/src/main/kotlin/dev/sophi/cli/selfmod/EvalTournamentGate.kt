@@ -38,11 +38,10 @@ private fun runOnce(
         add("--versioning-home"); add(versioningHome.toString())
         add("--sessions-dir"); add(sessionsDir.toString())
         // The parent already resolved the provider; forwarding the result keeps both sides on the
-        // same server, model and window instead of each child probing for its own.
+        // same server and model instead of each child probing for its own. The child reads the window itself.
         add("--provider"); add(provider.type)
         add("--model"); add(provider.model)
         provider.baseUrl?.let { add("--base-url"); add(it) }
-        add("--context-window-tokens"); add(provider.contextWindowTokens.toString())
     }
     // The key goes through the environment: on the command line `ps` would show it to every process.
     val process = ProcessBuilder(args).redirectErrorStream(true)

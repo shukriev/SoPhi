@@ -11,6 +11,9 @@ import dev.sophi.ai.providers.LocalServer
 import dev.sophi.ai.providers.NO_LOCAL_SERVER_MESSAGE
 import dev.sophi.ai.providers.detectContextWindow
 import dev.sophi.ai.providers.discoverLocalServer
+import dev.sophi.ai.providers.isChatModel
+import dev.sophi.ai.providers.loadedChatModels
+import java.time.Duration
 
 /** The model-provider options every command that talks to a model shares. */
 class ProviderOptions : OptionGroup("Model provider") {
@@ -20,7 +23,7 @@ class ProviderOptions : OptionGroup("Model provider") {
     ).default("local")
     val model: String? by option(
         "--model", "-m",
-        help = "Model name. Optional for local (the server's first loaded model); required otherwise."
+        help = "Model name. Optional for local (a model the server has loaded); required otherwise."
     )
     val baseUrl: String? by option(
         "--base-url",
@@ -57,11 +60,16 @@ data class ResolvedProvider(
 fun ProviderOptions.resolve(discover: () -> LocalServer? = { discoverLocalServer() }): ResolvedProvider =
     when (val t = type.lowercase()) {
         "local" -> {
-            val url = baseUrl
-            val server = (if (url != null) discoverLocalServer(listOf(null to url)) else discover())
-                ?: throw UsageError(NO_LOCAL_SERVER_MESSAGE)
-            // LM Studio lists embedding models alongside chat models; never chat with one.
-            val chosen = model ?: server.models.firstOrNull { "embed" !in it.lowercase() }
+            val url = baseUrl?.trimEnd('/')
+            // A named server may be across the LAN, so it gets longer than the loopback discovery probe.
+            val server = if (url != null) {
+                discoverLocalServer(listOf(null to url), Duration.ofSeconds(5)) ?: throw UsageError(
+                    "No OpenAI-compatible server answered at $url/models. Check that it is running and that " +
+                        "--base-url ends in /v1 (e.g. http://localhost:1234/v1)."
+                )
+            } else discover() ?: throw UsageError(NO_LOCAL_SERVER_MESSAGE)
+            // `/models` lists every downloaded model; prefer one already in memory over one that must load first.
+            val chosen = model ?: loadedChatModels(server).firstOrNull() ?: server.models.firstOrNull(::isChatModel)
                 ?: throw UsageError("The local server at ${server.baseUrl} has no model loaded. Load one, or pass --model.")
             val warnings = mutableListOf<String>()
             val window = contextWindowTokens
@@ -77,6 +85,9 @@ fun ProviderOptions.resolve(discover: () -> LocalServer? = { discoverLocalServer
         )
         else -> throw UsageError("Unknown provider: $type (expected 'local', 'openai-compat' or 'claude')")
     }
+
+/** The resolved window, capped at a command's fixed [cap]: an eval budget must not exceed what the server loaded. */
+internal fun ResolvedProvider.windowAtMost(cap: Int): Int = minOf(contextWindowTokens, cap)
 
 /** [resolve] at a command's startup: prints the warnings to stderr once. */
 internal fun ProviderOptions.resolveAndWarn(): ResolvedProvider =

@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
+import dev.sophi.schedule.store.TaskStore
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 
@@ -35,12 +36,17 @@ class ScheduleRunDueCommand : CliktCommand(
     ).int().default(4096)
 
     override fun run() = runBlocking {
+        // launchd calls this every minute: only probe for a model server when a task is actually due.
+        val now = System.currentTimeMillis()
+        val due = TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")).list()
+            .any { it.enabled && (it.nextRunAtMs ?: Long.MAX_VALUE) <= now }
+        if (!due) return@runBlocking
         val (engine, _) = buildScheduleEngine(
             provider.resolveAndWarn(), provider.apiKey,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
             taskTimeoutSeconds, maxTokens,
             llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries
         )
-        engine.tickOnce()
+        engine.tickOnce(now)
     }
 }

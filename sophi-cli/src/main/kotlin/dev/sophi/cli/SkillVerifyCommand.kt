@@ -112,7 +112,7 @@ class SkillVerifyCommand : CliktCommand(name = "verify", help = "Verify a trial 
         SkillVerify(
             skillIds = targetIds, project = project, globalSkillsHome = globalSkillsHome, projectSkillsHome = projectSkillsHome,
             cases = cases, provider = llm, registry = ToolRegistry(),
-            sessionManager = FileSessionManager(Path.of(sessionsDirStr)), contextWindowTokens = SKILL_VERIFY_CONTEXT_WINDOW,
+            sessionManager = FileSessionManager(Path.of(sessionsDirStr)), contextWindowTokens = resolved.windowAtMost(SKILL_VERIFY_CONTEXT_WINDOW),
             model = resolved.model, scorecardStore = scorecardStore,
             confirm = { prompt -> confirmFlag && run { print(prompt); readlnOrNull()?.trim()?.lowercase() == "y" } }
         ) { echo(it) }.run()

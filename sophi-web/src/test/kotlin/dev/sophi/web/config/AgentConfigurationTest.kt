@@ -54,9 +54,15 @@ class AgentConfigurationTest : FunSpec({
         ex.message!! shouldContain "sophi.provider.model"
     }
 
-    test("buildProviderFromProperties throws for an unknown type") {
+    test("buildProviderFromProperties throws for an unknown type, listing every accepted type") {
         val props = ProviderProperties(type = "bogus", model = "m")
-        shouldThrow<IllegalStateException> { buildProviderFromProperties(props) }
+        shouldThrow<IllegalStateException> { buildProviderFromProperties(props) }.message!! shouldContain
+            "expected 'local', 'openai-compat' or 'claude'"
+    }
+
+    test("buildProviderFromProperties names type=local when local is missing base-url") {
+        val props = ProviderProperties(type = "local", model = "qwen3-8b")
+        shouldThrow<IllegalStateException> { buildProviderFromProperties(props) }.message!! shouldContain "type=local"
     }
 
     test("buildProviderFromProperties matches provider type case-insensitively") {

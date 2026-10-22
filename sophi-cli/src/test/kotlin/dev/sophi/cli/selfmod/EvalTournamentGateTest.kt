@@ -5,6 +5,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
@@ -102,7 +103,8 @@ class EvalTournamentGateTest : FunSpec({
         seen.toFile().readLines().forEach { line ->
             line.substringBefore(" env=").contains("s3cret") shouldBe false
             line.substringAfter(" env=") shouldBe "s3cret"
-            line shouldContain "--provider openai-compat --model m --base-url http://x/v1 --context-window-tokens 8192"
+            line shouldContain "--provider openai-compat --model m --base-url http://x/v1"
+            line shouldNotContain "--context-window-tokens"
         }
     }
 })

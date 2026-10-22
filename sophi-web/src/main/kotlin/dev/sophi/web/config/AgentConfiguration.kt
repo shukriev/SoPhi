@@ -35,8 +35,8 @@ internal fun buildProviderFromProperties(props: ProviderProperties): LLMProvider
         props.type, props.apiKey, props.baseUrl, props.requireModel(),
         missingApiKeyMessage = "sophi.provider.api-key is required when sophi.provider.type=claude " +
             "(neither sophi.provider.api-key nor ANTHROPIC_API_KEY was set)",
-        missingBaseUrlMessage = "sophi.provider.base-url is required when sophi.provider.type=openai-compat",
-        unknownTypeMessage = "Unknown sophi.provider.type: ${props.type} (expected 'claude' or 'openai-compat')"
+        missingBaseUrlMessage = "sophi.provider.base-url is required when sophi.provider.type=${props.type.lowercase()}",
+        unknownTypeMessage = "Unknown sophi.provider.type: ${props.type} (expected 'local', 'openai-compat' or 'claude')"
     )
 } catch (e: ProviderConfigException) {
     throw IllegalStateException(e.message, e)

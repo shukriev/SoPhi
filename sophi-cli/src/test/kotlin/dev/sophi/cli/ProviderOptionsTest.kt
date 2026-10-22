@@ -24,6 +24,17 @@ private fun options(vararg args: String): ProviderOptions = Holder().apply { par
 
 private const val NO_SERVER_URL = "http://127.0.0.1:1/v1"
 
+/** Serves each path in [routes] with a 200 and its body; returns the server and its /v1 base URL. */
+private fun serving(vararg routes: Pair<String, String>): Pair<HttpServer, String> {
+    val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+    for ((path, body) in routes) server.createContext(path) { ex ->
+        val bytes = body.toByteArray()
+        ex.sendResponseHeaders(200, bytes.size.toLong()); ex.responseBody.use { it.write(bytes) }
+    }
+    server.start()
+    return server to "http://127.0.0.1:${server.address.port}/v1"
+}
+
 class ProviderOptionsTest : FunSpec({
     test("local with nothing running fails with the how-to message") {
         val e = shouldThrow<UsageError> { options().resolve { null } }
@@ -70,6 +81,38 @@ class ProviderOptionsTest : FunSpec({
     test("local with an empty model list fails clearly") {
         val e = shouldThrow<UsageError> { options().resolve { LocalServer(null, NO_SERVER_URL, emptyList()) } }
         e.message shouldBe "The local server at $NO_SERVER_URL has no model loaded. Load one, or pass --model."
+    }
+
+    test("local prefers the model the server has in memory over the first one it lists") {
+        val (server, url) = serving("/api/v0/models" to
+            """{"data":[{"id":"big-unloaded","type":"llm","state":"not-loaded"},{"id":"qwen3-8b","type":"llm","state":"loaded","loaded_context_length":16384}]}""")
+        try {
+            val r = options().resolve { LocalServer(LocalServerKind.LM_STUDIO, url, listOf("big-unloaded", "qwen3-8b")) }
+            r.model shouldBe "qwen3-8b"
+            r.contextWindowTokens shouldBe 16384
+        } finally { server.stop(0) }
+    }
+
+    test("local --base-url that doesn't answer names that URL, not the default ports") {
+        val e = shouldThrow<UsageError> { options("--base-url", NO_SERVER_URL).resolve { error("no discovery with --base-url") } }
+        e.message shouldContain NO_SERVER_URL
+        e.message shouldContain "/v1"
+        e.message shouldNotContain ":11434"
+    }
+
+    test("local --base-url tolerates a trailing slash") {
+        val (server, url) = serving("/v1/models" to """{"data":[{"id":"m"}]}""")
+        try {
+            val r = options("--base-url", "$url/", "--context-window-tokens", "8192").resolve { error("no discovery with --base-url") }
+            r.baseUrl shouldBe url
+            r.model shouldBe "m"
+        } finally { server.stop(0) }
+    }
+
+    test("a fixed eval window never exceeds what the server loaded") {
+        val r = ResolvedProvider("local", null, "m", 4096, null, emptyList())
+        r.windowAtMost(100_000) shouldBe 4096
+        r.copy(contextWindowTokens = 200_000).windowAtMost(100_000) shouldBe 100_000
     }
 
     test("claude without --model fails") {

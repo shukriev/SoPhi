@@ -174,7 +174,10 @@ internal suspend fun buildCliRuntime(
             val embBase = opts.embeddingBaseUrl ?: opts.baseUrl
             val embModel = opts.embeddingModel
             if (embBase == null || embModel == null) {
-                onWarning("memory: disabled — --memory needs --embedding-model and --embedding-base-url (or --base-url)")
+                onWarning(
+                    "memory: disabled — --memory needs --embedding-model and --embedding-base-url (or --base-url), " +
+                        "or a nomic-embed model loaded on the local server"
+                )
             } else {
                 memory(embModel, embBase, opts.apiKey, opts.embeddingDimensions, onWarning)
             }

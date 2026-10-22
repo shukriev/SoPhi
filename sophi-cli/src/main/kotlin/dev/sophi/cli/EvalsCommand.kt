@@ -69,7 +69,7 @@ class EvalsRunCommand : CliktCommand(name = "run", help = "Run the eval suite an
         EvalsRun(
             cases = cases, provider = llm, registry = ToolRegistry(),
             sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
-            contextWindowTokens = EVAL_CONTEXT_WINDOW, model = resolved.model, configVersionId = configVersion,
+            contextWindowTokens = resolved.windowAtMost(EVAL_CONTEXT_WINDOW), model = resolved.model, configVersionId = configVersion,
             systemPrompt = null, scorecardStore = scorecardStore
         ) { echo(it) }.run()
         }

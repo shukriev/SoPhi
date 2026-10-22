@@ -159,7 +159,7 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
                 incumbentVersionId = incumbentVersionId, versionStore = versionStore,
                 scorecardStore = ScorecardStore(db), cases = cases, provider = provider.buildProvider(resolved),
                 registry = ToolRegistry(), sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
-                contextWindowTokens = TOURNAMENT_CONTEXT_WINDOW, model = resolved.model, runsPerConfig = budget
+                contextWindowTokens = resolved.windowAtMost(TOURNAMENT_CONTEXT_WINDOW), model = resolved.model, runsPerConfig = budget
             ) { echo(it) }.run()
         } finally { db.close() }
     }
