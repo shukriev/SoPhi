@@ -43,3 +43,15 @@ Run the failing case and the other 3 in its area, 3 times each, before and after
 Keep the change only if the failing case's pass count went up and no other case's went down.
 Kept `home-seed/` files are promoted into the real `~/.sophi` by hand; kept prompt or
 tool-description changes become ordinary PRs.
+
+## Reference model and release rule
+
+The playbook runs on the local reference model by default: Qwen3-8B Q4_K_M (`PLAYBOOK_MODEL`,
+default `qwen/qwen3-8b`) behind `--provider local` at `$LMSTUDIO_URL`. The context window and the
+embedding model are detected, not passed. Override everything with `SOPHI_FLAGS`.
+
+The baseline (date, model and quant, server, commit, pass rate, each case's result) is recorded in
+`evals/playbook/BASELINE.md` by the first full run: run every case once and score it as above.
+
+Release rule: run the full playbook before each tag, on the maintainer's Apple Silicon machine.
+A drop of more than 3 points in pass rate against `BASELINE.md` blocks the tag.
