@@ -14,6 +14,7 @@ import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldStartWith
 import io.mockk.Runs
 import io.mockk.every
 import io.mockk.just
@@ -44,6 +45,37 @@ class AgentLoopToolEventTest : FunSpec({
         val events = mutableListOf<TurnEvent>()
         loop.turn(AgentSession(id = "s1"), "go", config) { events.add(it) }
         return events
+    }
+
+    test("malformed arguments return an invalid-arguments error and the turn continues") {
+        val executed = mutableListOf<String>()
+        val tool = object : Tool {
+            override val name = "read_file"
+            override val description = "test"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override suspend fun execute(argumentsJson: String): String { executed.add(argumentsJson); return "ok" }
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(listOf(ToolCall("c1", "read_file", """{"path": "a.txt"""")), TokenUsage(1, 1)).toStreamFlow(),
+            LLMResponse.ToolUse(listOf(ToolCall("c2", "read_file", """{"path": "a.txt"}""")), TokenUsage(1, 1)).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+        )
+        val loop = AgentLoop(provider, ToolRegistry().register(tool), sessionManager, contextWindowTokens = TEST_CONTEXT_WINDOW)
+        val events = mutableListOf<TurnEvent>()
+        loop.turn(AgentSession(id = "s3"), "go", config) { events.add(it) }
+        val finished = events.filterIsInstance<TurnEvent.ToolCallFinished>()
+        finished[0].result shouldStartWith "Error: invalid arguments:"
+        finished[0].isError.shouldBeTrue()
+        executed shouldBe listOf("""{"path": "a.txt"}""")
+    }
+
+    test("blank arguments are not treated as malformed") {
+        invalidArgumentsError("t", "") shouldBe null
+    }
+
+    test("a JSON array is malformed") {
+        invalidArgumentsError("t", "[1]") shouldStartWith "Error: invalid arguments:"
     }
 
     test("successful tool call emits ToolCallFinished with isError=false and a duration") {

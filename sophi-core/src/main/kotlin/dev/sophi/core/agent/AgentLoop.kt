@@ -51,6 +51,14 @@ private data class ToolCallOutcome(val call: ToolCall, val message: Message, val
 
 private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
+/** Null when [argumentsJson] is blank or a JSON object; otherwise an error the model can act on. */
+internal fun invalidArgumentsError(toolName: String, argumentsJson: String): String? {
+    if (argumentsJson.isBlank()) return null
+    val reason = runCatching { entryJson.parseToJsonElement(argumentsJson).jsonObject }.exceptionOrNull()?.message
+        ?: return null
+    return "Error: invalid arguments: $reason. Call $toolName again with a single valid JSON object as its arguments."
+}
+
 private const val LOOP_GUARD_FAILURE_THRESHOLD = 3
 private const val LOOP_GUARD_BROADENING_THRESHOLD = 2
 /** From this many identical calls (same tool, same arguments) in one turn, the result carries a note. */
@@ -528,7 +536,8 @@ class AgentLoop(
                         } else {
                             registry.getOrNull(call.name)
                                 ?.let { tool ->
-                                    runCatching { tool.execute(call.argumentsJson) }
+                                    invalidArgumentsError(call.name, call.argumentsJson) // an "Error: " result, counted as failed below
+                                        ?: runCatching { tool.execute(call.argumentsJson) }
                                         .getOrElse { e ->
                                             // A stopped turn must stop its tools, not report them as failed.
                                             if (e is CancellationException) throw e
