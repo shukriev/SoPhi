@@ -8,6 +8,8 @@ import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.ToolCall
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldMatch
 import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -46,13 +48,34 @@ class TextToolCallScannerTest : FunSpec({
     test("hermes block becomes a call and is not shown") {
         val sc = TextToolCallScanner()
         sc.feed("Let me look.$hermes") shouldBe "Let me look."
-        sc.finish().calls shouldBe listOf(ToolCall("text-call-0", "read_file", "{\"path\":\"a.txt\"}"))
+        val call = sc.finish().calls.single()
+        call.id shouldMatch Regex("text-call-[0-9a-f]{8}-0")
+        call shouldBe ToolCall(call.id, "read_file", "{\"path\":\"a.txt\"}")
     }
 
     test("two hermes blocks become two calls") {
         val sc = TextToolCallScanner()
         sc.feed("$hermes\n$hermes") shouldBe ""
-        sc.finish().calls.map { it.id } shouldBe listOf("text-call-0", "text-call-1")
+        val ids = sc.finish().calls.map { it.id }
+        val token = ids[0].removeSuffix("-0").removePrefix("text-call-")
+        ids shouldBe listOf("text-call-$token-0", "text-call-$token-1")
+    }
+
+    test("two scanners use different tokens") {
+        fun id() = TextToolCallScanner().apply { feed(hermes) }.finish().calls.single().id
+        id() shouldNotBe id()
+    }
+
+    test("mistral array plus trailing text gives leftover, no call") {
+        val text = "[TOOL_CALLS][{\"name\":\"glob\",\"arguments\":{}}] Done, now I'll summarise."
+        val sc = TextToolCallScanner().apply { feed(text) }
+        sc.finish() shouldBe Result(emptyList(), text)
+    }
+
+    test("hermes block with junk after the JSON gives leftover, no call") {
+        val text = "<tool_call>{\"name\":\"x\"} junk</tool_call>"
+        val sc = TextToolCallScanner().apply { feed(text) }
+        sc.finish() shouldBe Result(emptyList(), text)
     }
 
     test("mistral array") {
@@ -65,7 +88,8 @@ class TextToolCallScannerTest : FunSpec({
         val sc = TextToolCallScanner()
         val shown = listOf("<tool_", "call>{\"name\":\"x\",\"arguments\":{}}</tool", "_call>").joinToString("") { sc.feed(it) }
         shown shouldBe ""
-        sc.finish().calls shouldBe listOf(ToolCall("text-call-0", "x", "{}"))
+        val call = sc.finish().calls.single()
+        listOf(call) shouldBe listOf(ToolCall(call.id, "x", "{}"))
     }
 
     test("broken JSON inside the block is returned as content, no call") {
@@ -102,8 +126,8 @@ class TextToolCallScannerTest : FunSpec({
             val events = streamEvents(server)
             events.filterIsInstance<StreamEvent.Content>().joinToString("") { it.text } shouldBe "Looking."
             events.filterIsInstance<StreamEvent.Content>().forEach { it.text shouldNotContain "<tool_call>" }
-            events.filterIsInstance<StreamEvent.ToolCallsReady>().single().calls shouldBe
-                listOf(ToolCall("text-call-0", "read_file", "{\"path\":\"a.txt\"}"))
+            val c = events.filterIsInstance<StreamEvent.ToolCallsReady>().single().calls.single()
+            c shouldBe ToolCall(c.id, "read_file", "{\"path\":\"a.txt\"}")
         } finally { server.stop(0) }
     }
 
