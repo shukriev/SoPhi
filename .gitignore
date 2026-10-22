@@ -30,3 +30,6 @@ work-folder/
 dev-scripts/
 idea.md
 evals/context/summary-cache.tsv
+
+# Private product docs
+docs/product-vision.md
