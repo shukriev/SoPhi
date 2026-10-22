@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
@@ -15,10 +16,7 @@ class GoalCommand : CliktCommand(name = "goal", help = "Manually trigger goal-ba
 
 class GoalRunCommand : CliktCommand(name = "run", help = "Run a task immediately by id, regardless of its schedule") {
     private val id by argument()
-    private val model: String by option("--model", "-m").default("claude-3-5-sonnet-20241022")
-    private val providerType: String by option("--provider").default("claude")
-    private val baseUrl: String? by option("--base-url")
-    private val apiKeyOption: String? by apiKeyOption()
+    private val provider by ProviderOptions()
     private val scheduleDirStr: String by option("--schedule-dir")
         .default("${System.getProperty("user.home")}/.sophi/schedule")
     private val sessionsDirStr: String by option("--sessions-dir")
@@ -36,17 +34,13 @@ class GoalRunCommand : CliktCommand(name = "run", help = "Run a task immediately
             "chain-of-thought counts against this budget, so a low value can exhaust it before " +
             "the model ever emits an answer or tool call."
     ).int().default(4096)
-    private val contextWindowTokens: Int by option(
-        "--context-window-tokens",
-        help = "Total context window of --model, in tokens. The turn's earlier tool rounds are " +
-            "summarised once 80% of this is used, instead of capping the number of rounds."
-    ).int().default(200_000)
 
     override fun run() = runBlocking {
         val (engine, _) = buildScheduleEngine(
-            model, providerType, apiKeyOption, baseUrl,
+            provider.resolveAndWarn(), provider.apiKey,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
-            contextWindowTokens, taskTimeoutSeconds, maxTokens
+            taskTimeoutSeconds, maxTokens,
+            llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries
         )
         val record = engine.runNow(id)
         if (record == null) echo("No task found with id $id") else echo("${record.outcome::class.simpleName}: ${record.summary}")

@@ -10,7 +10,7 @@ import org.springframework.ai.openai.OpenAiChatOptions
 import org.springframework.ai.openai.setup.OpenAiSetup
 import java.time.Duration
 
-fun buildClaudeProvider(apiKey: String, model: String = "claude-3-5-sonnet-20241022"): LLMProvider {
+fun buildClaudeProvider(apiKey: String, model: String): LLMProvider {
     val options = AnthropicChatOptions.builder()
         .apiKey(apiKey)
         .model(model)

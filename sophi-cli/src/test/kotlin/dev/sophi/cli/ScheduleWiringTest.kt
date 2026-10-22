@@ -16,9 +16,9 @@ class ScheduleWiringTest : FunSpec({
         val agentsDir = createTempDirectory("agents-test-empty")
         val scheduleDir = createTempDirectory("schedule-test")
         val (engine, _) = buildScheduleEngine(
-            model = "m", providerType = "claude", apiKeyOption = "test-key", baseUrl = null,
+            resolved = ResolvedProvider("claude", null, "m", 100_000, null, emptyList()), apiKeyOption = "test-key",
             scheduleDir = scheduleDir, sessionsDir = createTempDirectory("sessions-test"),
-            agentsDir = agentsDir, braveApiKeyOption = null, contextWindowTokens = 100_000
+            agentsDir = agentsDir, braveApiKeyOption = null
         )
         val taskStore = TaskStore(scheduleDir.resolve("tasks.json"))
         val task = taskStore.add(ScheduledTask(

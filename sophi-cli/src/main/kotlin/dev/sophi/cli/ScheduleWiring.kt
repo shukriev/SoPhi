@@ -10,15 +10,12 @@ import java.nio.file.Path
 internal data class ScheduleRuntime(val engine: ScheduleEngine, val memoryPlugin: MemoryPlugin?)
 
 internal fun buildScheduleEngine(
-    model: String,
-    providerType: String,
+    resolved: ResolvedProvider,
     apiKeyOption: String?,
-    baseUrl: String?,
     scheduleDir: Path,
     sessionsDir: Path,
     agentsDir: Path,
     braveApiKeyOption: String?,
-    contextWindowTokens: Int,
     taskTimeoutSeconds: Long = 300,
     maxTokens: Int = 4096,
     memoryHome: Path? = null,
@@ -28,9 +25,13 @@ internal fun buildScheduleEngine(
     embeddingDimensions: Int = 1536,
     onWarning: (String) -> Unit = {},
     versioningHome: Path = defaultVersioningHome,
-    evalsDir: Path = Path.of("evals")
+    evalsDir: Path = Path.of("evals"),
+    llmTimeoutSeconds: Long = 60,
+    llmMaxRetries: Int = 2
 ): ScheduleRuntime {
-    val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+    val provider = buildProvider(resolved, apiKeyOption, llmTimeoutSeconds, llmMaxRetries)
+    val model = resolved.model
+    val contextWindowTokens = resolved.contextWindowTokens
     val registry = dev.sophi.core.tools.ToolRegistry()
     buildBuiltinTools(braveApiKey = braveApiKeyOption).forEach { registry.register(it) }
     registry.register(

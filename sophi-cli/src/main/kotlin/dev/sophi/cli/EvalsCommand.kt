@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import dev.sophi.ai.api.LLMProvider
@@ -53,10 +54,7 @@ class EvalsRunCommand : CliktCommand(name = "run", help = "Run the eval suite an
     private val evalsDirStr: String by option("--evals-dir").default("evals")
     private val category: String? by option("--category")
     private val configVersion: String by option("--config-version").default("default")
-    private val model: String by option("--model", "-m").default("claude-3-5-sonnet-20241022")
-    private val providerType: String by option("--provider").default("claude")
-    private val baseUrl: String? by option("--base-url")
-    private val apiKeyOption: String? by apiKeyOption()
+    private val provider by ProviderOptions()
     private val sessionsDirStr: String by option("--sessions-dir")
         .default("${System.getProperty("user.home")}/.sophi/sessions")
     private val versioningHomeStr: String by option("--versioning-home")
@@ -65,12 +63,13 @@ class EvalsRunCommand : CliktCommand(name = "run", help = "Run the eval suite an
     override fun run() {
         val allCases = loadEvalCases(Path.of(evalsDirStr))
         val cases = if (category == null) allCases else allCases.filter { it.category == category }
-        val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+        val resolved = provider.resolveAndWarn()
+        val llm = provider.buildProvider(resolved)
         openStore { VersioningStores.scorecardStore(Path.of(versioningHomeStr)) }.use { scorecardStore ->
         EvalsRun(
-            cases = cases, provider = provider, registry = ToolRegistry(),
+            cases = cases, provider = llm, registry = ToolRegistry(),
             sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
-            contextWindowTokens = EVAL_CONTEXT_WINDOW, model = model, configVersionId = configVersion,
+            contextWindowTokens = EVAL_CONTEXT_WINDOW, model = resolved.model, configVersionId = configVersion,
             systemPrompt = null, scorecardStore = scorecardStore
         ) { echo(it) }.run()
         }

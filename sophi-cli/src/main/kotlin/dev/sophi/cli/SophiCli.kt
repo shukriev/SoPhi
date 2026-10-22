@@ -1,11 +1,11 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
-import com.github.ajalt.clikt.parameters.types.long
 import com.github.ajalt.mordant.rendering.TextColors
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.core.agent.AgentConfig
@@ -55,45 +55,13 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--session", "-s",
         help = "Session ID to resume (omit to start a new session)"
     )
-    private val model: String by option(
-        "--model", "-m",
-        help = "LLM model name (for --provider openai-compat, always set this explicitly — e.g. qwen2.5:7b)"
-    ).default("claude-3-5-sonnet-20241022")
-    private val contextWindowTokens: Int by option(
-        "--context-window-tokens",
-        help = "Total context window of --model, in tokens (e.g. 200000 for Claude Sonnet, or " +
-            "whatever your local model was built with). Sophi summarises this turn's earlier " +
-            "tool rounds once 80% of this is used, instead of capping the number of rounds. " +
-            "There is no per-model registry — you pick the model, so you say what its window is."
-    ).int().default(200_000)
-    private val providerType: String by option(
-        "--provider",
-        help = "LLM provider: 'claude' (default) or 'openai-compat' (Ollama, vLLM, or any OpenAI-compatible server)"
-    ).default("claude")
+    private val providerOptions by ProviderOptions()
     private val maxTokens: Int by option(
         "--max-tokens",
         help = "Max completion tokens per turn. Raise this for local reasoning models — hidden " +
             "chain-of-thought counts against this budget, so a low value can exhaust it before " +
             "the model ever emits an answer or tool call (finish_reason=length, no visible output)."
     ).int().default(4096)
-    private val baseUrl: String? by option(
-        "--base-url",
-        help = "Base URL for --provider openai-compat, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:8000/v1 (vLLM)"
-    )
-    private val apiKeyOption: String? by apiKeyOption()
-    private val llmTimeoutSeconds: Long by option(
-        "--llm-timeout-seconds",
-        help = "Client-side request timeout for --provider openai-compat. Raise this for local " +
-            "reasoning models, which can spend well over a minute on hidden chain-of-thought " +
-            "before producing any output."
-    ).long().default(60)
-    private val llmMaxRetries: Int by option(
-        "--llm-max-retries",
-        help = "Retries for --provider openai-compat on request failure. Each retry is subject " +
-            "to the full --llm-timeout-seconds, so worst-case latency before an error surfaces " +
-            "is timeout * (retries + 1) — lower this (e.g. to 0) for a slow model that's " +
-            "consistently near the timeout, rather than silently waiting that multiple."
-    ).int().default(2)
     private val sessionsDirStr: String by option(
         "--sessions-dir",
         help = "Directory for session JSONL files"
@@ -135,10 +103,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         "--embedding-base-url",
         help = "Embeddings endpoint base URL (defaults to --base-url; e.g. http://localhost:11434/v1)"
     )
-    private val embeddingDimensions: Int by option(
+    private val embeddingDimensions: Int? by option(
         "--embedding-dimensions",
-        help = "Embedding vector dimensions (768 for nomic-embed-text, 1536 for text-embedding-3-small)"
-    ).int().default(1536)
+        help = "Embedding vector dimensions (768 for nomic-embed-text, 1536 for text-embedding-3-small; " +
+            "default 1536, or 768 when the local server's nomic-embed model is picked for you)"
+    ).int()
     private val tokenViewKey: String by option(
         "--token-view-key",
         help = "Keyboard shortcut to toggle token visibility during streaming (default: T)"
@@ -178,7 +147,12 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
-        val provider = buildProvider(providerType, apiKeyOption, baseUrl, model, llmTimeoutSeconds, llmMaxRetries)
+        val resolved = providerOptions.resolveAndWarn()
+        val model = resolved.model
+        val contextWindowTokens = resolved.contextWindowTokens
+        val provider = providerOptions.buildProvider(resolved)
+        // With --memory and no --embedding-model, use the nomic-embed model the local server already has.
+        val autoEmbedding = memoryEnabled && embeddingModel == null && resolved.embeddingModel != null
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
         val inputSource: InputSource =
@@ -199,12 +173,12 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 autoMode = autoMode,
                 godMode = godMode,
                 memoryEnabled = memoryEnabled,
-                embeddingModel = embeddingModel,
-                embeddingBaseUrl = embeddingBaseUrl,
-                embeddingDimensions = embeddingDimensions,
-                baseUrl = baseUrl,
-                apiKey = apiKeyOption,
-                llmTimeoutSeconds = llmTimeoutSeconds,
+                embeddingModel = if (autoEmbedding) resolved.embeddingModel else embeddingModel,
+                embeddingBaseUrl = if (autoEmbedding) resolved.baseUrl else embeddingBaseUrl,
+                embeddingDimensions = embeddingDimensions ?: if (autoEmbedding) 768 else 1536,
+                baseUrl = resolved.baseUrl,
+                apiKey = providerOptions.apiKey,
+                llmTimeoutSeconds = providerOptions.timeoutSeconds,
                 hubPort = hubPort,
                 noRemote = noRemote,
                 sessionIdToResume = sessionId

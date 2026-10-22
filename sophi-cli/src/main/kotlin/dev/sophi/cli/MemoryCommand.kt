@@ -82,7 +82,7 @@ internal fun palace(
     val emb = if (baseUrl != null && embeddingModel != null)
         buildOpenAiCompatEmbeddingProvider(baseUrl, apiKey, embeddingModel, dimensions) else null
     val llm = if (baseUrl != null && chatModel != null)
-        buildProvider("openai-compat", apiKey, baseUrl, chatModel, 60L, 2) else null
+        buildProvider(ResolvedProvider("openai-compat", baseUrl, chatModel, 8192, null, emptyList()), apiKey, 60L, 2) else null
     return openStore { JanesPalace(
         JanesPalaceConfig(
             sharedRoot = ArcadeHost.defaultRoot(),

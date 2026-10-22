@@ -1,5 +1,6 @@
 package dev.sophi.cli.selfmod
 
+import dev.sophi.cli.ResolvedProvider
 import dev.sophi.core.agent.eval.loadEvalCases
 import dev.sophi.sdk.TournamentResult
 import dev.sophi.sdk.evaluateAcceptance
@@ -26,7 +27,7 @@ private fun parseScores(stdout: String): Pair<Double, Map<String, Double>> {
 
 private fun runOnce(
     jar: Path, evalsDir: Path, configVersionId: String, versioningHome: Path,
-    model: String, providerType: String, apiKeyOption: String?, baseUrl: String?, javaCommand: List<String>
+    provider: ResolvedProvider, apiKeyOption: String?, javaCommand: List<String>
 ): Pair<Double, Map<String, Double>> {
     val sessionsDir = Files.createTempDirectory("sophi-selfmod-eval-sessions-")
     val args = buildList {
@@ -36,9 +37,12 @@ private fun runOnce(
         add("--config-version"); add(configVersionId)
         add("--versioning-home"); add(versioningHome.toString())
         add("--sessions-dir"); add(sessionsDir.toString())
-        add("--model"); add(model)
-        add("--provider"); add(providerType)
-        baseUrl?.let { add("--base-url"); add(it) }
+        // The parent already resolved the provider; forwarding the result keeps both sides on the
+        // same server, model and window instead of each child probing for its own.
+        add("--provider"); add(provider.type)
+        add("--model"); add(provider.model)
+        provider.baseUrl?.let { add("--base-url"); add(it) }
+        add("--context-window-tokens"); add(provider.contextWindowTokens.toString())
     }
     // The key goes through the environment: on the command line `ps` would show it to every process.
     val process = ProcessBuilder(args).redirectErrorStream(true)
@@ -59,10 +63,8 @@ fun runEvalGate(
     evalsDir: Path,
     configVersionId: String,
     versioningHome: Path,
-    model: String,
-    providerType: String,
+    provider: ResolvedProvider,
     apiKeyOption: String?,
-    baseUrl: String?,
     runsPerSide: Int = 3,
     javaCommand: List<String> = listOf("java")
 ): EvalGateOutcome {
@@ -73,9 +75,9 @@ fun runEvalGate(
     val baselineScores = mutableMapOf<String, MutableList<Double>>()
     val challengerScores = mutableMapOf<String, MutableList<Double>>()
     repeat(runsPerSide) {
-        val (bh, bc) = runOnce(baselineJar, evalsDir, configVersionId, versioningHome, model, providerType, apiKeyOption, baseUrl, javaCommand)
+        val (bh, bc) = runOnce(baselineJar, evalsDir, configVersionId, versioningHome, provider, apiKeyOption, javaCommand)
         accumulate(baselineScores, bh, bc)
-        val (ch, cc) = runOnce(challengerJar, evalsDir, configVersionId, versioningHome, model, providerType, apiKeyOption, baseUrl, javaCommand)
+        val (ch, cc) = runOnce(challengerJar, evalsDir, configVersionId, versioningHome, provider, apiKeyOption, javaCommand)
         accumulate(challengerScores, ch, cc)
     }
 

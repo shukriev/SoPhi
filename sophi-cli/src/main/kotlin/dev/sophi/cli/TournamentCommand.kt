@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
@@ -141,10 +142,7 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
     private val configVersionId: String by option("--config-version").default("default")
     private val evalsDirStr: String by option("--evals-dir").default("evals")
     private val budget: Int by option("--budget", help = "Repeated runs per config -- also the noise-floor sample size").int().default(3)
-    private val model: String by option("--model", "-m").default("claude-3-5-sonnet-20241022")
-    private val providerType: String by option("--provider").default("claude")
-    private val baseUrl: String? by option("--base-url")
-    private val apiKeyOption: String? by apiKeyOption()
+    private val provider by ProviderOptions()
     private val sessionsDirStr: String by option("--sessions-dir")
         .default("${System.getProperty("user.home")}/.sophi/sessions")
     private val versioningHomeStr: String by option("--versioning-home").default(defaultVersioningHome.toString())
@@ -156,12 +154,12 @@ class TournamentRunCommand : CliktCommand(name = "run", help = "Propose a config
             val incumbentVersionId = versionStore.activeVersion(ArtifactType.CONFIG, "default")?.id
                 ?: run { echo("No config version found for 'default' — nothing to run a tournament against."); return }
             val cases = loadEvalCases(Path.of(evalsDirStr))
-            val provider = buildProvider(providerType, apiKeyOption, baseUrl, model)
+            val resolved = provider.resolveAndWarn()
             TournamentRun(
                 incumbentVersionId = incumbentVersionId, versionStore = versionStore,
-                scorecardStore = ScorecardStore(db), cases = cases, provider = provider,
+                scorecardStore = ScorecardStore(db), cases = cases, provider = provider.buildProvider(resolved),
                 registry = ToolRegistry(), sessionManager = FileSessionManager(Path.of(sessionsDirStr)),
-                contextWindowTokens = TOURNAMENT_CONTEXT_WINDOW, model = model, runsPerConfig = budget
+                contextWindowTokens = TOURNAMENT_CONTEXT_WINDOW, model = resolved.model, runsPerConfig = budget
             ) { echo(it) }.run()
         } finally { db.close() }
     }
