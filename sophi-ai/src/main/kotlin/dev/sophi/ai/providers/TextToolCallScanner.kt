@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import dev.sophi.ai.api.ToolCall
-import java.util.UUID
 
 internal data class Result(val calls: List<ToolCall>, val leftoverContent: String)
 
@@ -19,12 +18,11 @@ private val reader = ObjectMapper().readerFor(JsonNode::class.java).with(Deseria
  * Some local models write tool calls into the text instead of using the API field: Hermes style
  * `<tool_call>{json}</tool_call>`, or Mistral style `[TOOL_CALLS][{json}]`. Passes text through until a
  * marker appears, then buffers the rest so [finish] can parse it. Nothing is dropped if it doesn't parse.
+ * Not recognised: the newer Mistral `[TOOL_CALLS]name[ARGS]{json}` form, which is shown as plain text.
  */
 internal class TextToolCallScanner {
     private var buffer: StringBuilder? = null
     private var held = ""
-    // Unique per scanner so ids don't repeat across rounds of one turn.
-    private val token = UUID.randomUUID().toString().take(8)
 
     /** Returns the part of [content] that is safe to show. */
     fun feed(content: String): String {
@@ -63,11 +61,16 @@ internal class TextToolCallScanner {
 
     /** All-or-nothing: one bad entry means the whole block is treated as plain text. */
     private fun toCalls(nodes: List<JsonNode?>): List<ToolCall> {
-        val calls = nodes.mapIndexedNotNull { i, node ->
-            val name = node?.get("name")?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
+        val calls = nodes.mapNotNull { node ->
+            val name = node?.get("name")?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val args = node.get("arguments")
-            ToolCall("text-call-$token-$i", name, if (args == null || args.isNull) "{}" else if (args.isTextual) args.asText() else args.toString())
+            ToolCall(newCallId(), name, if (args == null || args.isNull) "{}" else if (args.isTextual) args.asText() else args.toString())
         }
         return if (calls.size == nodes.size) calls else emptyList()
     }
 }
+
+private val idChars = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+
+/** Random, so ids don't repeat across rounds of a turn; 9 alphanumerics, as Mistral chat templates require. */
+private fun newCallId(): String = String(CharArray(9) { idChars.random() })

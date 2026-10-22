@@ -56,7 +56,7 @@ class OpenAICompatContractTest : FunSpec({
     test("tool call written into the text is recovered and hidden") {
         val (events, _) = run("hermes-text-tool-call.sse")
         val call = events.filterIsInstance<StreamEvent.ToolCallsReady>().single().calls.single()
-        call.id shouldMatch Regex("text-call-[0-9a-f]{8}-0")
+        call.id shouldMatch Regex("[A-Za-z0-9]{9}")
         call.name shouldBe "read_file"
         call.argumentsJson shouldBe """{"path":"a.txt"}"""
         events.filterIsInstance<StreamEvent.Content>().forEach { it.text shouldNotContain "<tool_call>" }

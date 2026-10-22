@@ -49,7 +49,8 @@ class TextToolCallScannerTest : FunSpec({
         val sc = TextToolCallScanner()
         sc.feed("Let me look.$hermes") shouldBe "Let me look."
         val call = sc.finish().calls.single()
-        call.id shouldMatch Regex("text-call-[0-9a-f]{8}-0")
+        // Mistral chat templates reject any id that isn't exactly 9 alphanumerics.
+        call.id shouldMatch Regex("[A-Za-z0-9]{9}")
         call shouldBe ToolCall(call.id, "read_file", "{\"path\":\"a.txt\"}")
     }
 
@@ -57,11 +58,11 @@ class TextToolCallScannerTest : FunSpec({
         val sc = TextToolCallScanner()
         sc.feed("$hermes\n$hermes") shouldBe ""
         val ids = sc.finish().calls.map { it.id }
-        val token = ids[0].removeSuffix("-0").removePrefix("text-call-")
-        ids shouldBe listOf("text-call-$token-0", "text-call-$token-1")
+        ids.size shouldBe 2
+        ids.toSet().size shouldBe 2
     }
 
-    test("two scanners use different tokens") {
+    test("two scanners use different ids") {
         fun id() = TextToolCallScanner().apply { feed(hermes) }.finish().calls.single().id
         id() shouldNotBe id()
     }

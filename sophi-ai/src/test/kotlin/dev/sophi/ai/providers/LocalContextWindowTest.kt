@@ -49,13 +49,27 @@ class LocalContextWindowTest : FunSpec({
         serving(mapOf("/api/show" to fixture("ollama-show-default.json"))) {
             val w = detectContextWindow(it.copy(kind = OLLAMA), "qwen3:8b")!!
             w.tokens shouldBe 4096
-            w.warning!! shouldContain "num_ctx"
+            w.warning!! shouldContain "OLLAMA_CONTEXT_LENGTH=16384 ollama serve"
+            w.warning!! shouldContain "tool definitions alone"
         }
     }
 
     test("unknown kind tries each endpoint") {
         serving(mapOf("/props" to fixture("llamacpp-props.json"))) {
             detectContextWindow(it, "qwen3-8b") shouldBe ContextWindow(16384)
+        }
+    }
+
+    test("unknown kind: a 200 that isn't Ollama's /api/show shape is not read as Ollama's default") {
+        // LM Studio answers unknown paths with 200 and an error body; that must not become a 4096 window.
+        serving(mapOf("/" to """{"error":"Unexpected endpoint or method. Returning 200 anyway"}""")) {
+            detectContextWindow(it, "qwen/qwen3-8b") shouldBe null
+        }
+    }
+
+    test("a non-positive n_ctx is ignored") {
+        serving(mapOf("/props" to """{"n_ctx":0}""")) {
+            detectContextWindow(it.copy(kind = LLAMA_CPP), "m") shouldBe null
         }
     }
 
