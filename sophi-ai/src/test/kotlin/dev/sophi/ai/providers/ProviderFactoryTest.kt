@@ -96,7 +96,7 @@ class ProviderFactoryTest : FunSpec({
         val ex = shouldThrow<ProviderConfigException> {
             buildProviderFromType("bogus", apiKey = null, baseUrl = null, model = "some-model")
         }
-        ex.message shouldBe "Unknown provider type: bogus (expected 'claude' or 'openai-compat')"
+        ex.message shouldBe "Unknown provider type: bogus (expected 'local', 'openai-compat' or 'claude')"
     }
 
     test("buildProviderFromType throws ProviderConfigException with a custom unknownTypeMessage when one is passed") {

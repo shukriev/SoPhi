@@ -46,7 +46,8 @@ fun buildOpenAiCompatProvider(
     model: String,
     name: String = "openai-compat",
     requestTimeout: Duration = Duration.ofSeconds(60),
-    maxRetries: Int = 2
+    maxRetries: Int = 2,
+    parallelToolCalls: Boolean? = null
 ): LLMProvider {
     val effectiveApiKey = apiKey ?: ""
     val client = OpenAiSetup.setupSyncClient(
@@ -76,7 +77,7 @@ fun buildOpenAiCompatProvider(
         .openAiClient(client)
         .options(options)
         .build()
-    return OpenAICompatProvider(chatModel, client, name = name)
+    return OpenAICompatProvider(chatModel, client, name = name, parallelToolCalls = parallelToolCalls)
 }
 
 /** Ceiling on one whole call, however actively it streams — only so a server that trickles
@@ -98,17 +99,21 @@ fun buildProviderFromType(
     requestTimeout: Duration = Duration.ofSeconds(60),
     maxRetries: Int = 2,
     missingApiKeyMessage: String = "API key required for provider type 'claude' (pass apiKey or set ANTHROPIC_API_KEY)",
-    missingBaseUrlMessage: String = "baseUrl is required for provider type 'openai-compat'",
-    unknownTypeMessage: String = "Unknown provider type: $type (expected 'claude' or 'openai-compat')"
+    missingBaseUrlMessage: String = "baseUrl is required for provider type '$type'",
+    unknownTypeMessage: String = "Unknown provider type: $type (expected 'local', 'openai-compat' or 'claude')"
 ): LLMProvider = when (type.lowercase()) {
     "claude" -> {
         val key = apiKey ?: System.getenv("ANTHROPIC_API_KEY")
             ?: throw ProviderConfigException(missingApiKeyMessage)
         buildClaudeProvider(key, model)
     }
-    "openai-compat" -> {
+    "openai-compat", "local" -> {
         val url = baseUrl ?: throw ProviderConfigException(missingBaseUrlMessage)
-        buildOpenAiCompatProvider(url, apiKey, model, requestTimeout = requestTimeout, maxRetries = maxRetries)
+        // Local models tend to garble several tool calls in one turn, so ask for one at a time.
+        buildOpenAiCompatProvider(
+            url, apiKey, model, requestTimeout = requestTimeout, maxRetries = maxRetries,
+            parallelToolCalls = if (type.lowercase() == "local") false else null
+        )
     }
     else -> throw ProviderConfigException(unknownTypeMessage)
 }

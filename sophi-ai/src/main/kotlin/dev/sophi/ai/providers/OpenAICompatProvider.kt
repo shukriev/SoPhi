@@ -38,7 +38,9 @@ private val jsonMapper = ObjectMapper()
 class OpenAICompatProvider(
     private val chatModel: OpenAiChatModel,
     private val rawClient: OpenAIClient,
-    override val name: String = "openai"
+    override val name: String = "openai",
+    /** Sent as `parallel_tool_calls` when a request has tools; null leaves the server's default. */
+    private val parallelToolCalls: Boolean? = null
 ) : LLMProvider {
 
     override suspend fun complete(request: CompletionRequest): LLMResponse =
@@ -165,6 +167,8 @@ class OpenAICompatProvider(
                     .build()
             )
         }
+        // Servers reject the flag on a request with no tools, so it rides along only with them.
+        if (tools.isNotEmpty()) parallelToolCalls?.let { builder.parallelToolCalls(it) }
         return builder.build()
     }
 
