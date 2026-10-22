@@ -61,4 +61,13 @@ class McpConfigLoaderTest : FunSpec({
 
         shouldThrow<SerializationException> { loader.load(file) }
     }
+
+    test("deferToolsOver defaults to 10 and is read from the file when present") {
+        val dir = createTempDirectory("sophi-mcp-test")
+        val file = dir.resolve("mcp.json")
+        file.writeText("""{"servers": []}""")
+        loader.load(file).deferToolsOver shouldBe 10
+        file.writeText("""{"deferToolsOver": 25, "servers": []}""")
+        loader.load(file).deferToolsOver shouldBe 25
+    }
 })

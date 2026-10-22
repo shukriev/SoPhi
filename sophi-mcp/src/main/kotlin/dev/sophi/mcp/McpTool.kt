@@ -19,7 +19,8 @@ class McpTool(
     serverName: String,
     remoteTool: RemoteToolInfo,
     private val safeTools: Set<String>,
-    private val timeout: Duration = DEFAULT_MCP_TOOL_TIMEOUT
+    private val timeout: Duration = DEFAULT_MCP_TOOL_TIMEOUT,
+    override val deferred: Boolean = false
 ) : Tool {
     private val remoteName = remoteTool.name
 
