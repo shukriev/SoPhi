@@ -109,6 +109,22 @@ class AgentLoopCheckpointTest : FunSpec({
         rounds(session)[0].metadata shouldNotContainKey "checkpoint"
     }
 
+    test("a delegate call that rates SAFE still takes a checkpoint") {
+        val root = createTempDirectory("ckpt-root")
+        val (provider, sm) = scripted(
+            use("c1", "delegate_to_subagent", """{"subagent_type":"none","prompt":"edit things"}"""),
+            LLMResponse.Text("ok", TokenUsage(1, 1)),
+        )
+        val registry = registry(root, createTempDirectory("trash"))
+        registry.register(SubagentTool(emptyList(), provider, registry, sm, config, 100_000))
+        val loop = AgentLoop(provider, registry, sm, contextWindowTokens = 100_000,
+            checkpoints = CheckpointStore(root, createTempDirectory("ckpt-home")))
+
+        val session = loop.turn(AgentSession(id = "s"), "go", config)
+
+        rounds(session).single().metadata shouldContainKey "checkpoint"
+    }
+
     test("a bash command reaching outside the root is recorded") {
         val root = createTempDirectory("ckpt-root")
         val store = CheckpointStore(root, createTempDirectory("ckpt-home"))

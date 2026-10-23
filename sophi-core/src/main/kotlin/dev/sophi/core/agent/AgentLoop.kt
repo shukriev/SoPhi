@@ -8,6 +8,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.context.CompactionMode
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.context.Elider
@@ -543,7 +544,10 @@ class AgentLoop(
             }
 
             val undoMeta = mutableMapOf<String, String>()
-            if (checkpoints != null && classified.zip(allowedCalls).any { (c, a) -> a.second && c.second.riskLevel == RiskLevel.DESTRUCTIVE }) {
+            // A delegate's nested loop runs DESTRUCTIVE tools of its own, whatever the delegate call itself rates.
+            if (checkpoints != null && classified.zip(allowedCalls).any { (c, a) ->
+                    a.second && (c.second.riskLevel == RiskLevel.DESTRUCTIVE || registry.getOrNull(c.first.name).let { it is SubagentTool || it is DecomposeGoalTool })
+                }) {
                 val start = System.currentTimeMillis()
                 checkpoints.snapshot()?.let { undoMeta += mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }
             }
