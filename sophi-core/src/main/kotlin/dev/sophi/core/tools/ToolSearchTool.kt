@@ -44,9 +44,9 @@ class ToolSearchTool(private val registry: ToolRegistry) : Tool {
         val query = args?.get("query")?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
         val limit = (args?.get("max_results")?.jsonPrimitive?.runCatching { int }?.getOrNull() ?: DEFAULT_MAX_RESULTS)
             .coerceIn(1, MAX_RESULTS_LIMIT)
-        val words = query.lowercase().split(Regex("[\\s_]+")).filter { it.isNotBlank() }
+        val words = query.lowercase().split(Regex("[\\s_]+")).filter { it.length >= 2 }
 
-        val matches = registry.deferredNames().map { registry.get(it) }
+        val matches = registry.deferredNames().mapNotNull { registry.getOrNull(it) }
             .map { tool ->
                 val haystack = "${tool.name} ${tool.description}".lowercase()
                 tool to words.count { it in haystack }

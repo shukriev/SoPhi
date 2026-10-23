@@ -45,6 +45,12 @@ class ToolSearchToolTest : FunSpec({
         out.lines().first { it.startsWith("- ") } shouldStartWith "- gh__list_prs"
     }
 
+    test("one-letter query words are ignored") {
+        val out = search.execute("""{"query":"create a github issue"}""")
+        out shouldStartWith "Found 1 tool. It is now callable:"
+        out shouldContain "gh__create_issue"
+    }
+
     test("direct tools are never returned") {
         search.execute("""{"query":"read file"}""") shouldBe noMatch("read file")
     }

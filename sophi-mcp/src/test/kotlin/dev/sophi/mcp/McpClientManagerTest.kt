@@ -221,21 +221,21 @@ class McpClientManagerTest : FunSpec({
     }
 
     test("a server with 10 tools stays direct") {
-        deferredFlags(listOf(10)).single().all { !it } shouldBe true
+        deferredFlags(listOf(10)).single() shouldBe List(10) { false }
     }
 
     test("a server with 11 tools is deferred") {
-        deferredFlags(listOf(11)).single().all { it } shouldBe true
+        deferredFlags(listOf(11)).single() shouldBe List(11) { true }
     }
 
     test("the threshold applies per server") {
         val (big, small) = deferredFlags(listOf(11, 2))
-        big.all { it } shouldBe true
-        small.none { it } shouldBe true
+        big shouldBe List(11) { true }
+        small shouldBe List(2) { false }
     }
 
     test("deferToolsOver is configurable") {
-        deferredFlags(listOf(3), over = 2).single().all { it } shouldBe true
+        deferredFlags(listOf(3), over = 2).single() shouldBe List(3) { true }
     }
 
     test("deferred MCP tools keep their risk level") {

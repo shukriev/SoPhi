@@ -82,6 +82,7 @@ class RuntimeBuilder {
     private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
     private var grants: Set<String> = emptySet()
     private var mcpConfigPath: Path? = null
+    private var deferToolsOver: Int = DEFAULT_DEFER_TOOLS_OVER
     private var system1Config: Pair<Path, (String) -> Unit>? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var providedRegistry: ToolRegistry? = null
@@ -121,6 +122,8 @@ class RuntimeBuilder {
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
     fun grants(names: Set<String>): RuntimeBuilder = apply { grants = names }
     fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
+    /** Deferral threshold for MCP servers when no mcp.json is given (a loaded mcp.json's own value wins). */
+    fun deferToolsOver(n: Int): RuntimeBuilder = apply { deferToolsOver = n }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
 
     /**
@@ -258,8 +261,9 @@ class RuntimeBuilder {
             ))
         }
         val mcp = mcpConfigPath?.let { McpConfigLoader().load(it) }
+        val deferOver = mcp?.deferToolsOver ?: deferToolsOver
         val mcpServers = mcp?.servers?.filter { server -> server.enabled } ?: emptyList()
-        runBlocking { mcpClientManager.connect(mcpServers, mcp?.deferToolsOver ?: DEFAULT_DEFER_TOOLS_OVER) }.forEach { registry.register(it) }
+        runBlocking { mcpClientManager.connect(mcpServers, deferOver) }.forEach { registry.register(it) }
         registry.registerToolSearchIfDeferred()
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
@@ -384,7 +388,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            mcp?.deferToolsOver ?: DEFAULT_DEFER_TOOLS_OVER
+            deferOver
         )
     }
 }

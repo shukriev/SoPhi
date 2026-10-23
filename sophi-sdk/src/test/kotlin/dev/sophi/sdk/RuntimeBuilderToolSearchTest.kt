@@ -70,6 +70,31 @@ class RuntimeBuilderToolSearchTest : FunSpec({
         coVerify { manager.connectOne(any(), 7, any()) }
     }
 
+    fun buildNoJson(manager: McpClientManager, over: Int?, config: Path? = null) = RuntimeBuilder().apply {
+        provider = mockk<LLMProvider>()
+        sessionsDir = tempdir().toPath()
+        model = "test-model"
+    }.contextWindowTokens(100_000).mcpClientManager(manager)
+        .also { b -> over?.let { b.deferToolsOver(it) }; config?.let { b.mcpConfig(it) } }.build()
+
+    test("builder deferToolsOver is used by connectMcpServer when there is no mcp.json") {
+        val manager = mockk<McpClientManager>(relaxed = true)
+        coEvery { manager.connect(any(), any()) } returns emptyList()
+        coEvery { manager.connectOne(any(), any(), any()) } returns emptyList()
+        val runtime = buildNoJson(manager, 7)
+        runBlocking { runtime.connectMcpServer(McpServerConfig("srv", McpTransport.STDIO, listOf("x"))) }
+        coVerify { manager.connectOne(any(), 7, any()) }
+    }
+
+    test("mcp.json deferToolsOver wins over the builder's") {
+        val manager = mockk<McpClientManager>(relaxed = true)
+        coEvery { manager.connect(any(), any()) } returns emptyList()
+        coEvery { manager.connectOne(any(), any(), any()) } returns emptyList()
+        val runtime = buildNoJson(manager, 7, mcpJson(""""deferToolsOver":25,"""))
+        runBlocking { runtime.connectMcpServer(McpServerConfig("srv", McpTransport.STDIO, listOf("x"))) }
+        coVerify { manager.connectOne(any(), 25, any()) }
+    }
+
     test("deferToolsOver from mcp.json reaches the manager") {
         val manager = mockk<McpClientManager>(relaxed = true)
         coEvery { manager.connect(any(), any()) } returns emptyList()

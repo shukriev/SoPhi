@@ -305,7 +305,7 @@ Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 
 ### Large MCP servers (deferred tools)
 
-An MCP server that lists more than 10 tools is loaded on demand: the model sees only their names and calls `tool_search` to load the ones it needs for the turn, so the schemas stay out of the prompt. Change the limit with `"deferToolsOver"` at the top of `.sophi/mcp.json`.
+An MCP server that lists more than 10 tools is loaded on demand: the model sees only their names and calls `tool_search` to load the ones it needs for the turn, so the schemas stay out of the prompt. Change the limit with `"deferToolsOver"` at the top of `.sophi/mcp.json` (SDK: `RuntimeBuilder.deferToolsOver(n)` when no mcp.json is loaded).
 
 ### Browsing websites (browser-automation MCP + self-authored site skills)
 
