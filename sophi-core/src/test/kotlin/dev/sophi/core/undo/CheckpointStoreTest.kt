@@ -6,6 +6,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import java.nio.file.Path
+import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
 import kotlin.io.path.readText
@@ -135,5 +136,120 @@ class CheckpointStoreTest : FunSpec({
         root.resolve("a.txt").writeText("a")
         store.snapshot() shouldBe null
         warnings.single() shouldContain "timed out"
+    }
+
+    test("restore after .gitignore was edited keeps ignored files") {
+        val (root, store) = fixture()
+        root.resolve(".gitignore").writeText("secret\nnode_modules/\n")
+        root.resolve("secret").writeText("s")
+        root.resolve("node_modules").createDirectories().resolve("x.js").writeText("m")
+        root.resolve("a.txt").writeText("a")
+        val c = store.snapshot()!!
+        root.resolve(".gitignore").writeText("other\n")
+        root.resolve("a.txt").writeText("changed")
+        root.resolve("new.txt").writeText("n")
+        store.restore(c)
+        root.resolve(".gitignore").readText() shouldBe "secret\nnode_modules/\n"
+        root.resolve("a.txt").readText() shouldBe "a"
+        root.resolve("new.txt").exists() shouldBe false
+        root.resolve("secret").readText() shouldBe "s"
+        root.resolve("node_modules/x.js").readText() shouldBe "m"
+    }
+
+    test("restore keeps a file ignored only by the current rules") {
+        val (root, store) = fixture()
+        root.resolve("a.txt").writeText("a")
+        val c = store.snapshot()!!
+        root.resolve("tracked-then-ignored").writeText("t")
+        store.snapshot()
+        root.resolve(".gitignore").writeText("tracked-then-ignored\n")
+        store.restore(c)
+        root.resolve("tracked-then-ignored").readText() shouldBe "t"
+    }
+
+    test("restore leaves the kept paths alone and returns the pre-restore snapshot") {
+        val (root, store) = fixture()
+        root.resolve("doc").writeText("old")
+        root.resolve("a.txt").writeText("a")
+        val c = store.snapshot()!!
+        root.resolve("doc").writeText("new")
+        root.resolve("a.txt").writeText("changed")
+        val before = store.restore(c, listOf(root.resolve("doc")))
+        root.resolve("doc").readText() shouldBe "new"
+        root.resolve("a.txt").readText() shouldBe "a"
+        store.restore(before)
+        root.resolve("a.txt").readText() shouldBe "changed"
+    }
+
+    test("diffStat reads in the restore direction: a file the restore deletes shows as a delete") {
+        val (root, store) = fixture()
+        root.resolve("a.txt").writeText("a")
+        val c = store.snapshot()!!
+        root.resolve("new.txt").writeText("n")
+        store.diffStat(c) shouldContain "delete mode 100644 new.txt"
+    }
+
+    test("a root equal to the home gives a null snapshot and one warning") {
+        val home = createTempDirectory("ckpt-fakehome")
+        val warnings = mutableListOf<String>()
+        val store = CheckpointStore(home, home.resolve(".sophi/checkpoints"), home = home) { warnings += it }
+        home.resolve("a.txt").writeText("a")
+        store.snapshot() shouldBe null
+        store.snapshot() shouldBe null
+        warnings shouldHaveSize 1
+        home.resolve(".sophi").exists() shouldBe false
+    }
+
+    test("a root containing the checkpoints home is refused") {
+        val root = createTempDirectory("ckpt-root")
+        val warnings = mutableListOf<String>()
+        val store = CheckpointStore(root, root.resolve("data/checkpoints"), home = createTempDirectory("ckpt-fakehome")) { warnings += it }
+        root.resolve("a.txt").writeText("a")
+        store.snapshot() shouldBe null
+        shouldThrow<IllegalStateException> { store.restore("deadbeef".repeat(5)) }
+        warnings shouldHaveSize 1
+        root.resolve("data").exists() shouldBe false
+    }
+
+    test("a root containing the sophi home is refused") {
+        val root = createTempDirectory("ckpt-root")
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home"), sophiHome = root.resolve("sub/.sophi"), onWarning = {})
+        root.resolve("a.txt").writeText("a")
+        store.snapshot() shouldBe null
+    }
+
+    test("a root inside a git repo honours the repo's ignore rules and leaves the repo alone") {
+        val repo = createTempDirectory("ckpt-repo")
+        sh(repo, "git", "init", "-q")
+        repo.resolve(".gitignore").writeText(".env\n")
+        repo.resolve(".git/info/exclude").writeText("local.secret\n")
+        val root = repo.resolve("app").createDirectories()
+        root.resolve(".env").writeText("TOKEN=1")
+        root.resolve("local.secret").writeText("x")
+        root.resolve("a.txt").writeText("a")
+        val status = sh(repo, "git", "status", "--porcelain", "--ignored")
+        val home = createTempDirectory("ckpt-home")
+        val store = CheckpointStore(root, home)
+        val c = store.snapshot()!!
+        sh(home.toFile().listFiles()!!.single().toPath(), "git", "--git-dir=.", "ls-tree", "-r", "--name-only", c) shouldBe "a.txt\n"
+        root.resolve("a.txt").writeText("changed")
+        store.restore(c)
+        root.resolve(".env").readText() shouldBe "TOKEN=1"
+        root.resolve("local.secret").readText() shouldBe "x"
+        root.resolve("a.txt").readText() shouldBe "a"
+        sh(repo, "git", "status", "--porcelain", "--ignored") shouldBe status
+    }
+
+    test("nestedRepos names a nested git repo") {
+        val (root, store) = fixture()
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("vendor/lib").createDirectories()
+        sh(nested, "git", "init", "-q")
+        nested.resolve("f").writeText("f")
+        sh(nested, "git", "add", "-A")
+        sh(nested, "git", "-c", "user.name=u", "-c", "user.email=u@x", "commit", "-q", "-m", "init")
+        val c = store.snapshot()!!
+        store.diffStat(c)
+        store.nestedRepos(c) shouldBe listOf("vendor/lib")
     }
 })

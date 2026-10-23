@@ -192,7 +192,7 @@ class SlashHandler(
         }
 
     private suspend fun confirmAndApply(restorer: FileRestorer, session: AgentSession, plan: RestorePlan) {
-        output(plan.diffStat.ifBlank { "No workspace file changes." })
+        output(plan.diffStat.ifBlank { null }?.let { "Restoring will change:\n$it" } ?: "No workspace file changes.")
         plan.moves.forEach { output("  restore ${it.from} (from ${it.to})") }
         plan.warnings.forEach { output("  can't undo: $it") }
         output("Restore these files? (y/n)")

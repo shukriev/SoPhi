@@ -17,9 +17,9 @@ data class RestorePlan(
     val checkpoint: String?,
     /** In the order to reverse them: newest first. */
     val moves: List<FileMove>,
-    /** From [CheckpointStore.diffStat], "" without a checkpoint. */
+    /** From [CheckpointStore.diffStat]: what the restore changes. "" without a checkpoint. */
     val diffStat: String,
-    /** Bash commands of these rounds that reached outside the workspace: not undone. */
+    /** Bash commands of these rounds that reached outside the workspace, and nested repos: not undone. */
     val warnings: List<String>,
 )
 
@@ -58,21 +58,26 @@ class FileRestorer(private val checkpoints: CheckpointStore?) {
         }
         if (rounds.isEmpty()) return null
         val checkpoint = rounds.lastOrNull { "checkpoint" in it.metadata }?.metadata?.get("checkpoint")
+        val diffStat = checkpoint?.let { checkpoints?.diffStat(it) }.orEmpty()
+        // after diffStat: its snapshot is the "now" nestedRepos reads
+        val nested = checkpoint?.let { checkpoints?.nestedRepos(it) }.orEmpty().map { "changes inside nested repo $it" }
         return RestorePlan(
             targetEntryId = rounds.last().id,
             checkpoint = checkpoint,
             moves = rounds.flatMap { r -> r.metadata["moves"]?.let { json.decodeFromString<List<FileMove>>(it) }.orEmpty().asReversed() },
-            diffStat = checkpoint?.let { checkpoints?.diffStat(it) }.orEmpty(),
-            warnings = rounds.flatMap { r -> r.metadata["outsideCommands"]?.let { json.decodeFromString<List<String>>(it) }.orEmpty() },
+            diffStat = diffStat,
+            warnings = rounds.flatMap { r -> r.metadata["outsideCommands"]?.let { json.decodeFromString<List<String>>(it) }.orEmpty() } + nested,
         )
     }
 
     /**
-     * Reverses the moves, restores the checkpoint, appends the marker entry. Returns what it skipped,
-     * one line each. Moves go first so they stay reversed even when the restore throws. The caller saves the session.
+     * Reverses the moves, restores the checkpoint, appends the marker entry (`restoredFrom` = the pre-restore snapshot).
+     * Returns what it skipped, one line each; the restore leaves a skipped move's paths alone. Moves go first so they
+     * stay reversed even when the restore throws. The caller saves the session.
      */
     fun apply(session: AgentSession, plan: RestorePlan): List<String> {
         val skipped = mutableListOf<String>()
+        val keep = mutableListOf<Path>()
         for (m in plan.moves) {
             val from = Path.of(m.from)
             val to = Path.of(m.to)
@@ -81,11 +86,14 @@ class FileRestorer(private val checkpoints: CheckpointStore?) {
                 from.exists() -> "${m.from} exists again"
                 else -> runCatching { from.parent?.createDirectories(); Files.move(to, from) }.exceptionOrNull()?.let { it.message ?: it.toString() }
             }
-            if (reason != null) skipped += "Skipped ${m.to} → ${m.from}: $reason"
+            if (reason != null) {
+                skipped += "Skipped ${m.to} → ${m.from}: $reason"
+                keep += listOf(from, to).filter { it.exists() }
+            }
         }
-        if (checkpoints != null && plan.checkpoint != null) checkpoints.restore(plan.checkpoint)
+        val restoredFrom = if (checkpoints != null && plan.checkpoint != null) checkpoints.restore(plan.checkpoint, keep) else null
         session.append(EntryRole.ASSISTANT, "Files restored to before entry ${plan.targetEntryId}.",
-            mapOf("replay" to "false", "restoredTo" to plan.targetEntryId))
+            mapOf("replay" to "false", "restoredTo" to plan.targetEntryId) + listOfNotNull(restoredFrom?.let { "restoredFrom" to it }))
         return skipped
     }
 }
