@@ -98,4 +98,16 @@ class MoveFileToolTest : FunSpec({
         delete.ruleVerdict("""{"path":"/etc/hosts"}""") shouldBe RuleVerdict.HIGH_RISK
         move.ruleVerdict("""{"from":"a.txt","to":"/etc/a"}""") shouldBe RuleVerdict.HIGH_RISK
     }
+
+    test("delete_file and move_file refuse /, the home, the root and its ancestors") {
+        runBlocking {
+            root.resolve("a.txt").writeText("a")
+            for (path in listOf("/", "~", ".", "..", root.toString(), root.parent.toString())) {
+                refused { delete.execute("""{"path":"$path"}""") } shouldBe true
+                refused { move.execute("""{"from":"$path","to":"${trash.resolve("x")}"}""") } shouldBe true
+            }
+            root.resolve("a.txt").readText() shouldBe "a"
+            trash.toFile().list()!!.size shouldBe 0
+        }
+    }
 })

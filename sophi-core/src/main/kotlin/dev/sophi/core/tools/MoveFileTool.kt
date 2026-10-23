@@ -30,7 +30,11 @@ private fun resolveUserPath(root: Path, home: Path, raw: String): Path = when {
     else -> root.resolve(raw)
 }.normalize()
 
-private suspend fun moveAndRecord(from: Path, to: Path) {
+private suspend fun moveAndRecord(root: Path, home: Path, from: Path, to: Path) {
+    // `/`, the home and the workspace itself (or anything holding them) are never moved, nor trashed
+    require(listOf(root, home).none { it.toAbsolutePath().normalize().startsWith(from) }) {
+        "Refusing to move $from: it is /, your home folder, or holds the workspace"
+    }
     require(from.exists()) { "No such file or directory: $from" }
     require(!to.exists()) { "Destination already exists: $to" }
     to.parent?.createDirectories()
@@ -73,7 +77,7 @@ class MoveFileTool(
         val args = json.decodeFromString<MoveArgs>(argumentsJson)
         val from = resolveUserPath(root, home, args.from)
         val to = resolveUserPath(root, home, args.to)
-        moveAndRecord(from, to)
+        moveAndRecord(root, home, from, to)
         return "Moved $from to $to"
     }
 }
@@ -105,7 +109,7 @@ class DeleteFileTool(
         val args = json.decodeFromString<DeleteArgs>(argumentsJson)
         val path = resolveUserPath(root, home, args.path)
         val slot = trashDir.resolve("${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}")
-        moveAndRecord(path, slot.resolve(path.fileName.toString()))
+        moveAndRecord(root, home, path, slot.resolve(path.fileName.toString()))
         return "Moved $path to the SoPhi trash (/undo restores it)"
     }
 }
