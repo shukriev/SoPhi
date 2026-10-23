@@ -156,6 +156,7 @@ internal suspend fun buildCliRuntime(
         systemPrompt = opts.systemPrompt
         toolRegistry(registry)
         builtinTools(root = Path.of("").toAbsolutePath(), braveApiKey = opts.braveApiKey)
+        checkpoints()
         context(contextEngine) { _ -> contextEngine.projectContaining(cwd)?.id }
         agentsDir(agentsDir, onWarning)
         subagentDelegation()

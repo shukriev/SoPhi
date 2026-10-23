@@ -120,7 +120,9 @@ In-session slash commands:
 ```
 /list       list saved sessions
 /branch     print the active branch (entry ids + roles)
-/checkout <entry-id>   jump to a different point in the session tree
+/checkout <entry-id> [--files]   jump to a different point in the session tree; --files also restores the files
+/undo       restore the files the last tool round changed (asks first)
+/revert <entry-id>   restore the files changed from that entry on
 /compact    summarize older turns to shrink context
 /good       rate the last reply as good (feeds the learning system)
 /bad [reason]   rate the last reply as bad, optionally saying why
@@ -131,6 +133,8 @@ In-session slash commands:
 /memory [list|show <id>|threads|profile|why]   browse Jane's Theory memory (needs --memory)
 exit / quit  end the session
 ```
+
+**Undo.** Before each tool round that changes files, the CLI snapshots the workspace into a shadow git repo under `~/.sophi/checkpoints` (your own repo is untouched). `/undo` and `/revert` show what they would restore and ask first. `move_file` and `delete_file` are undoable too: deletes go to `~/.sophi/trash`. Bash commands that reach outside the workspace can't be undone and are listed as warnings. In the SDK, `RuntimeBuilder.checkpoints()` (needs `builtinTools`) turns snapshots on and `SophiRuntime.fileRestorer` does the restoring.
 
 The terminal redraws in place while a turn streams, instead of scrolling
 line by line:

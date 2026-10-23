@@ -29,6 +29,8 @@ import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.undo.CheckpointStore
+import dev.sophi.core.undo.FileRestorer
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.LearningConfig
@@ -100,6 +102,7 @@ class RuntimeBuilder {
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
+    private var checkpointsConfig: Pair<Path, (String) -> Unit>? = null
     private var contextConfig: Triple<ContextEngine, ProjectOf, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
@@ -156,6 +159,17 @@ class RuntimeBuilder {
     /** Registers the standard file/shell/search/date tool set — see [buildBuiltinTools]. */
     fun builtinTools(root: Path, braveApiKey: String? = null): RuntimeBuilder =
         apply { builtinToolsConfig = BuiltinToolsConfig(root, braveApiKey) }
+
+    /**
+     * Shadow-git snapshots of the [builtinTools] root before each round that changes files, so
+     * [SophiRuntime.fileRestorer] can undo them. Needs [builtinTools]; [build] fails otherwise.
+     * Snapshots live under [home], outside the workspace. [onWarning] fires when one can't be taken.
+     */
+    fun checkpoints(
+        enabled: Boolean = true,
+        home: Path = Path.of(System.getProperty("user.home"), ".sophi", "checkpoints"),
+        onWarning: (String) -> Unit = { System.err.println(it) }
+    ): RuntimeBuilder = apply { checkpointsConfig = if (enabled) home to onWarning else null }
 
     /**
      * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
@@ -278,6 +292,10 @@ class RuntimeBuilder {
             "generic" -> CompactionMode.GENERIC
             else -> CompactionMode.STRUCTURED
         }
+        val checkpointStore = checkpointsConfig?.let { (home, warn) ->
+            val cfg = checkNotNull(builtinToolsConfig) { "checkpoints() needs builtinTools(root)" }
+            CheckpointStore(cfg.root, home, onWarning = warn)
+        }
         val loop = AgentLoop(
             p, registry, sm,
             compactor = ContextCompactor(p, Summariser(p, compactionMode, window, dev.sophi.ai.system1.Judgments.COMPACTOR)), compaction = compactionMode,
@@ -290,7 +308,8 @@ class RuntimeBuilder {
                     path.parent?.let { java.nio.file.Files.createDirectories(it) }
                     java.nio.file.Files.writeString(path, line + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
                 }
-            } ?: { _, _ -> }
+            } ?: { _, _ -> },
+            checkpoints = checkpointStore
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
@@ -388,7 +407,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver
+            deferOver, FileRestorer(checkpointStore)
         )
     }
 }

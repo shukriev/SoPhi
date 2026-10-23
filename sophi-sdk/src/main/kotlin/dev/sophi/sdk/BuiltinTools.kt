@@ -2,6 +2,7 @@ package dev.sophi.sdk
 
 import dev.sophi.ai.providers.BraveSearchProvider
 import dev.sophi.core.tools.BashTool
+import dev.sophi.core.tools.DeleteFileTool
 import dev.sophi.core.tools.EditTool
 import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.FileReadTool
@@ -9,6 +10,7 @@ import dev.sophi.core.tools.FileWriteTool
 import dev.sophi.core.tools.GetCurrentDateTimeTool
 import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
+import dev.sophi.core.tools.MoveFileTool
 import dev.sophi.core.tools.RunClaudeCodeTool
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.WebSearchTool
@@ -24,6 +26,7 @@ import java.nio.file.Path
 fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: String? = null): List<Tool> {
     val tools = mutableListOf<Tool>(
         FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), BashTool(root),
+        MoveFileTool(root), DeleteFileTool(root),
         FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool()
     )
     val key = braveApiKey ?: System.getenv("BRAVE_SEARCH_API_KEY")

@@ -234,7 +234,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
-            "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /compact /good /bad " +
+            "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
                 "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto\n"
         )
         if (godMode) {
@@ -308,6 +308,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             autoModeToggle = cli.autoModeToggle,
             toolRegistry = cli.registry,
             planLog = cli.planLog,
+            fileRestorer = cli.runtime.fileRestorer,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
             onEvent = onEvent,
