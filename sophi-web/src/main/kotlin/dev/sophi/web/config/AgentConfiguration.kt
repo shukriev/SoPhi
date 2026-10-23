@@ -15,7 +15,6 @@ import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.core.tools.ToolSearchTool
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.learning.LearningConfig
@@ -70,7 +69,7 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         if (mcpConfigPath.exists()) {
             val mcpConfig = McpConfigLoader().load(mcpConfigPath)
             runBlocking { mcpClientManager.connect(mcpConfig.servers, mcpConfig.deferToolsOver) }.forEach { registry.register(it) }
-            if (registry.deferredNames().isNotEmpty()) registry.register(ToolSearchTool(registry))
+            registry.registerToolSearchIfDeferred()
         }
         return registry
     }

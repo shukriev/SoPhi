@@ -7,11 +7,15 @@ import dev.sophi.mcp.McpTool
 import dev.sophi.mcp.RemoteToolInfo
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.shouldBe
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import dev.sophi.mcp.config.McpServerConfig
+import dev.sophi.mcp.config.McpTransport
+import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -34,13 +38,36 @@ class RuntimeBuilderToolSearchTest : FunSpec({
     test("the runtime registers tool_search when MCP tools are deferred") {
         val manager = mockk<McpClientManager>(relaxed = true)
         coEvery { manager.connect(any(), any()) } returns tools(11, deferred = true)
-        build(manager, mcpJson("")).toolNames() shouldContain "tool_search"
+        val runtime = build(manager, mcpJson(""))
+        runtime.toolNames() shouldContain "tool_search"
+        val sent = runtime.toolRegistry.definitions().map { it.name }
+        sent shouldContain "tool_search"
+        sent.none { it.startsWith("srv__") } shouldBe true
     }
 
     test("no tool_search without deferred tools") {
         val manager = mockk<McpClientManager>(relaxed = true)
         coEvery { manager.connect(any(), any()) } returns tools(2, deferred = false)
         build(manager, mcpJson("")).toolNames() shouldNotContain "tool_search"
+    }
+
+    test("connectMcpServer registers tool_search once and passes the configured threshold") {
+        val manager = mockk<McpClientManager>(relaxed = true)
+        coEvery { manager.connect(any(), any()) } returns emptyList()
+        coEvery { manager.connectOne(any(), any(), any()) } returnsMany listOf(tools(11, true), tools(11, true).map {
+            McpTool(mockk<McpSession>(), "other", RemoteToolInfo(it.name.substringAfter("__"), "d", "{}"), emptySet(), deferred = true)
+        })
+        val runtime = build(manager, mcpJson(""""deferToolsOver":7,"""))
+        val cfg = McpServerConfig("srv", McpTransport.STDIO, listOf("x"))
+        runtime.toolNames() shouldNotContain "tool_search"
+
+        runBlocking { runtime.connectMcpServer(cfg) }
+        runtime.toolNames() shouldContain "tool_search"
+        runBlocking { runtime.connectMcpServer(cfg.copy(name = "other")) }
+
+        runtime.toolNames().count { it == "tool_search" } shouldBe 1
+        runtime.toolRegistry.definitions().none { it.name.contains("__") } shouldBe true
+        coVerify { manager.connectOne(any(), 7, any()) }
     }
 
     test("deferToolsOver from mcp.json reaches the manager") {

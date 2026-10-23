@@ -29,7 +29,6 @@ import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.core.tools.ToolSearchTool
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.LearningConfig
@@ -261,7 +260,7 @@ class RuntimeBuilder {
         val mcp = mcpConfigPath?.let { McpConfigLoader().load(it) }
         val mcpServers = mcp?.servers?.filter { server -> server.enabled } ?: emptyList()
         runBlocking { mcpClientManager.connect(mcpServers, mcp?.deferToolsOver ?: DEFAULT_DEFER_TOOLS_OVER) }.forEach { registry.register(it) }
-        if (registry.deferredNames().isNotEmpty()) registry.register(ToolSearchTool(registry))
+        registry.registerToolSearchIfDeferred()
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
             model = model,
@@ -384,7 +383,8 @@ class RuntimeBuilder {
         val schedulesDir = scheduleDir ?: Path.of(System.getProperty("user.home"), ".sophi", "schedule")
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
-            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode
+            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
+            mcp?.deferToolsOver ?: DEFAULT_DEFER_TOOLS_OVER
         )
     }
 }

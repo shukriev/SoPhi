@@ -33,6 +33,12 @@ class ToolRegistry {
 
     fun deferredNames(): List<String> = tools.values.filter { it.deferred }.map { it.name }.sorted()
 
+    /** Registers [ToolSearchTool] once there is a deferred tool and none registered yet. */
+    fun registerToolSearchIfDeferred(): ToolRegistry {
+        if (TOOL_SEARCH_NAME !in tools && deferredNames().isNotEmpty()) register(ToolSearchTool(this))
+        return this
+    }
+
     fun names(): List<String> = tools.keys.sorted()
 
     fun subset(names: List<String>): ToolRegistry {
