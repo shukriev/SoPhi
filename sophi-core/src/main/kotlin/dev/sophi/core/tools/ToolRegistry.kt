@@ -41,9 +41,12 @@ class ToolRegistry {
 
     fun names(): List<String> = tools.keys.sorted()
 
+    /** A kept [ToolSearchTool] is rebound to the subset, so it never offers tools the subset lacks. */
     fun subset(names: List<String>): ToolRegistry {
         val filtered = ToolRegistry()
-        names.forEach { name -> tools[name]?.let { filtered.register(it) } }
+        names.forEach { name ->
+            tools[name]?.let { filtered.register(if (it is ToolSearchTool) ToolSearchTool(filtered) else it) }
+        }
         return filtered
     }
 

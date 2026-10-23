@@ -9,6 +9,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldEndWith
 
 class ToolRegistryTest : FunSpec({
 
@@ -210,6 +211,14 @@ class ToolRegistryTest : FunSpec({
 
     test("subset keeps the deferred flag") {
         deferredRegistry(withSearch = true).subset(listOf("gh__list_prs")).get("gh__list_prs").deferred shouldBe true
+    }
+
+    test("a subset's tool_search only sees the subset's own deferred tools") {
+        val search = deferredRegistry(withSearch = true)
+            .subset(listOf("read_file", "tool_search", "gh__list_prs")).get("tool_search")
+        search.description shouldEndWith "Not loaded yet: gh__list_prs"
+        kotlinx.coroutines.runBlocking { search.execute("""{"query":"create"}""") } shouldBe
+            "No deferred tool matches \"create\". Deferred tools: gh__list_prs"
     }
 
     test("deferredNames is sorted") {
