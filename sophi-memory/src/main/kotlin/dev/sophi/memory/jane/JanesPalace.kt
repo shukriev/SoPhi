@@ -14,6 +14,7 @@ import dev.sophi.memory.ProfileAttributeView
 import dev.sophi.memory.RecallQuery
 import dev.sophi.memory.TurnObservation
 import dev.sophi.versioning.VersionStore
+import kotlinx.coroutines.runBlocking
 
 /**
  * The memory-palace implementation of MemoryTechnique — Jane (spec §3.3).
@@ -49,7 +50,30 @@ class JanesPalace(
                 ConsolidationHistoryStore(config.home.resolve("consolidations.jsonl")),
                 versionStore
             )
+            embeddingProvider?.let { reembedIfModelChanged(it, embeddingModelName, onWarning) }
         } catch (e: Throwable) { store.close(); throw e }
+    }
+
+    /**
+     * Vectors from another model can't be searched with this one (a different size breaks the index; the same size
+     * still means something else), so they are dropped and every memory is embedded again. A memory left without a
+     * vector, after a failed run, is embedded on the next start.
+     */
+    private fun reembedIfModelChanged(provider: EmbeddingProvider, model: String, onWarning: (String) -> Unit) {
+        val size = store.vectorSize()
+        val otherModel = model != "unknown" && store.embeddingModels().any { it.isNotBlank() && it != "unknown" && it != model }
+        if ((size != null && size != provider.dimensions) || otherModel) store.dropVectors()
+        val missing = store.memoriesWithoutVectors().ifEmpty { return }
+        try {
+            // ponytail: blocks startup while it embeds; a background pass if palaces grow to many thousands of memories
+            missing.chunked(64).forEach { part ->
+                val vectors = runBlocking { provider.embed(part.map { it.text }) }
+                part.forEachIndexed { i, m -> store.putEmbedding(m.id, model, vectors[i]) }
+            }
+        } catch (e: InterruptedException) { Thread.currentThread().interrupt()
+        } catch (e: Exception) {
+            onWarning("Memory couldn't finish updating to the new embedding model (${e.message}). It will try again next time SoPhi starts.")
+        }
     }
 
     override suspend fun recall(query: RecallQuery): MemoryBlock? {

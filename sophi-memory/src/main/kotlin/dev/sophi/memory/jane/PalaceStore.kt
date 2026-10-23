@@ -64,6 +64,21 @@ class PalaceStore(
     fun vectorFor(id: String): FloatArray? = db.getVertex(VEC, id)?.let { vectorOf(it["embedding"]) }
     fun nearest(vector: FloatArray, k: Int): List<Scored> = db.nearestVectors(VEC, "embedding", vector, k)
 
+    /** The size of the stored vectors and the models that made them; the size is null when there are none. */
+    fun vectorSize(): Int? = db.query("SELECT embedding FROM $VEC LIMIT 1").firstOrNull()?.let { vectorOf(it["embedding"])?.size }
+    fun embeddingModels(): Set<String> = db.queryVertices("Memory").mapNotNullTo(HashSet()) { it["embeddingModel"] as? String }
+    fun memoriesWithoutVectors(): List<Memory> {
+        val have = db.query("SELECT id FROM $VEC").mapTo(HashSet()) { it["id"] as String }
+        return memories().values.filter { it.id !in have }
+    }
+
+    /** Drops every vector with its index, whose size is fixed: the next put builds it for the new size. */
+    fun dropVectors() {
+        db.command("DROP TYPE $VEC UNSAFE")
+        db.ensureSchema(vertexTypes = listOf(VEC))
+        vecIndexReady = false
+    }
+
     /** One MemoryVec per memory, inserted with its vector: an insert is indexed on the embedded and the remote
      *  store alike (an UPDATE isn't). Delete+insert in one transaction, so a replay after failover is harmless. */
     private fun putVec(id: String, vector: FloatArray) {
