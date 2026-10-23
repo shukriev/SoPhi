@@ -34,6 +34,47 @@ class JanesPalaceTest : FunSpec({
         palace.close()
     }
 
+    // A palace embedded by one model can't be searched with another: its index has the old size, and
+    // even at the same size the old vectors mean something else. Startup re-embeds them with the current model.
+    fun seedPalace(home: java.nio.file.Path, embeddings: dev.sophi.ai.api.EmbeddingProvider, model: String, text: String) =
+        PalaceStore(home).let { store ->
+            runBlocking { MemoryWriter(store, UserProfile(store), embeddings, model, JanesPalaceConfig()).write(
+                TurnObservation("s1", "u", "a", 1_000L),
+                EncoderVerdict(listOf(VerdictMemory(text = text, room = Room.KNOWLEDGE.name, dur = 1.0)))) }
+            store.close()
+        }
+
+    test("a palace embedded at another size is re-embedded with the current model at startup") {
+        val home = tempdir().toPath()
+        seedPalace(home, FakeEmbeddingProvider(64), "openai", "feature flags start with ff_")
+        val palace = JanesPalace(JanesPalaceConfig(home = home, sessionModel = "m"), null, FakeEmbeddingProvider(32), "nomic")
+        palace.recall(RecallQuery("s2", "feature flags start with ff_", 2_000L))!!.rendered shouldContain "feature flags"
+        palace.close()
+        PalaceStore(home).let { it.embeddings().values.map { v -> v.size }.toSet() shouldBe setOf(32); it.close() }
+    }
+
+    test("a palace embedded by another model of the same size is re-embedded at startup") {
+        val home = tempdir().toPath()
+        seedPalace(home, FakeEmbeddingProvider(64), "other", "renew the parking permit")
+        JanesPalace(JanesPalaceConfig(home = home, sessionModel = "m"), null, FakeEmbeddingProvider(64), "nomic").close()
+        PalaceStore(home).let { it.embeddingModel() shouldBe "nomic"; it.close() }
+    }
+
+    test("a re-embed that fails warns and still opens the palace") {
+        val home = tempdir().toPath()
+        seedPalace(home, FakeEmbeddingProvider(64), "openai", "the offsite moved to Lisbon")
+        val down = object : dev.sophi.ai.api.EmbeddingProvider {
+            override val dimensions = 32
+            override suspend fun embed(texts: List<String>): List<FloatArray> = error("embedder down")
+        }
+        val warnings = mutableListOf<String>()
+        JanesPalace(JanesPalaceConfig(home = home, sessionModel = "m"), null, down, "nomic", onWarning = { warnings += it }).close()
+        warnings shouldHaveSize 1
+        // The next start, with the embedder back, finishes the job.
+        JanesPalace(JanesPalaceConfig(home = home, sessionModel = "m"), null, FakeEmbeddingProvider(32), "nomic").close()
+        PalaceStore(home).let { it.embeddings().values.map { v -> v.size }.toSet() shouldBe setOf(32); it.close() }
+    }
+
     test("consolidate() records a MEMORY_CONSOLIDATION Version when JanesPalace is given a VersionStore") {
         val vs = VersionStore(tempdir().toPath())
         val palace = JanesPalace(

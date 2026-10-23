@@ -8,6 +8,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
@@ -41,10 +42,10 @@ class JanesPalaceSharedTest : FunSpec({
         val moved = PalaceStore.shared(home, root)
         try {
             moved.vectorFor("m1")!!.toList() shouldBe v.toList()
-            moved.vectorFor("m2") shouldBe null
+            moved.vectorFor("m2")!!.toList() shouldBe runBlocking { FakeEmbeddingProvider().embed(listOf("likes green tea")) }.first().toList()   // embedded at startup
             moved.edges().map { it.key } shouldBe listOf("m1->m2")
             moved.recallsSince(0L).map { it.memoryId } shouldBe listOf("m1")
-            moved.embeddingModel() shouldBe "fake"
+            moved.embeddingModels() shouldContain "fake"
         } finally { moved.close() }
         Files.list(home).use { s -> s.filter { it.fileName.toString().startsWith("arcadedb.migrated-") }.toList() }.single()
             .let { aside -> Files.walk(aside).use { w -> w.anyMatch { Files.isRegularFile(it) } } } shouldBe true
