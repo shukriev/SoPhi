@@ -1,5 +1,6 @@
 package dev.sophi.core.undo
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -18,10 +19,10 @@ private fun sh(dir: Path, vararg cmd: String): String {
 }
 
 class CheckpointStoreTest : FunSpec({
-    fun fixture(maxFileBytes: Long = 10_000_000, git: String = "git"): Triple<Path, CheckpointStore, MutableList<String>> {
+    fun fixture(maxFileBytes: Long = 10_000_000, git: String = "git", timeout: Long = 60): Triple<Path, CheckpointStore, MutableList<String>> {
         val root = createTempDirectory("ckpt-root")
         val warnings = mutableListOf<String>()
-        val store = CheckpointStore(root, createTempDirectory("ckpt-home"), maxFileBytes, git) { warnings += it }
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home"), maxFileBytes, git, timeout) { warnings += it }
         return Triple(root, store, warnings)
     }
 
@@ -104,5 +105,35 @@ class CheckpointStoreTest : FunSpec({
         store.snapshot() shouldBe null
         store.snapshot() shouldBe null
         warnings shouldHaveSize 1
+    }
+
+    test("the user's global git config (gpgsign, hooksPath) does not affect snapshots") {
+        val dir = createTempDirectory("ckpt-cfg")
+        val hooks = dir.resolve("hooks").also { it.toFile().mkdirs() }
+        hooks.resolve("pre-commit").also { it.writeText("#!/bin/sh\nexit 1\n"); it.toFile().setExecutable(true) }
+        dir.resolve("gitconfig").writeText("[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /bin/false\n[core]\n\thooksPath = $hooks\n")
+        val wrapper = dir.resolve("git-wrapper").also {
+            it.writeText("#!/bin/sh\nGIT_CONFIG_GLOBAL=${dir.resolve("gitconfig")} exec git \"\$@\"\n")
+            it.toFile().setExecutable(true)
+        }
+        val (root, store, warnings) = fixture(git = wrapper.toString())
+        root.resolve("a.txt").writeText("a")
+        (store.snapshot() != null) shouldBe true
+        warnings shouldHaveSize 0
+    }
+
+    test("restore throws when git fails") {
+        val (root, store) = fixture()
+        root.resolve("a.txt").writeText("a")
+        shouldThrow<IllegalStateException> { store.restore("deadbeef".repeat(5)) }
+    }
+
+    test("a hung git is killed after the timeout and snapshot returns null") {
+        val dir = createTempDirectory("ckpt-hang")
+        val hang = dir.resolve("git-hang").also { it.writeText("#!/bin/sh\nsleep 30\n"); it.toFile().setExecutable(true) }
+        val (root, store, warnings) = fixture(git = hang.toString(), timeout = 1)
+        root.resolve("a.txt").writeText("a")
+        store.snapshot() shouldBe null
+        warnings.single() shouldContain "timed out"
     }
 })
