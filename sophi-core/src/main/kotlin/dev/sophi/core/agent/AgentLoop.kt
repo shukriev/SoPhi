@@ -101,7 +101,7 @@ private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
  * to one that actually finished.
  */
 enum class TurnStopReason {
-    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped
+    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped, Error
 }
 
 /** OpenAI's finish_reason for "ran out of output tokens", shared by every compatible server. */
@@ -377,15 +377,24 @@ class AgentLoop(
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
             throw e
+        } catch (e: Exception) {
+            // A provider/network error after a tool round must not lose it: its files changed, and /undo needs its metadata.
+            if (!turn.persisted && turn.pendingRounds.isNotEmpty()) runCatching {
+                saveStopped(session, userInput, turn, "an error", "[Stopped by an error: ${e.message}]", TurnStopReason.Error)
+            }.exceptionOrNull()?.let(e::addSuppressed)
+            throw e
         }
     }
 
     /**
-     * The user stopped the turn. Keeps what it already did — a browser step or a sent message
+     * The user stopped the turn, or it failed after a tool round. Keeps what it already did — a browser step or a sent message
      * happened — so the next turn knows. A tool call still running gets a result saying so, since
      * a tool call without one is rejected by the model's API on the next request.
      */
-    private suspend fun saveStopped(session: AgentSession, userInput: String, turn: TurnProgress) {
+    private suspend fun saveStopped(
+        session: AgentSession, userInput: String, turn: TurnProgress,
+        by: String = "the user", stopMessage: String = STOPPED_BY_USER, reason: TurnStopReason = TurnStopReason.UserStopped,
+    ) {
         turn.persisted = true
         session.append(EntryRole.USER, userInput)
         turn.pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
@@ -393,11 +402,11 @@ class AgentLoop(
         if (last?.role == EntryRole.ASSISTANT) {
             val calls = last.metadata["toolCalls"]?.let { runCatching { entryJson.decodeFromString<List<ToolCallRecord>>(it) }.getOrNull() }.orEmpty()
             calls.forEach { c ->
-                session.append(EntryRole.TOOL_RESULT, "Stopped by the user before this finished.",
+                session.append(EntryRole.TOOL_RESULT, "Stopped by $by before this finished.",
                     mapOf("replay" to "false", "toolCallId" to c.id, "toolName" to c.name))
             }
         }
-        session.append(EntryRole.ASSISTANT, STOPPED_BY_USER, mapOf("stopReason" to TurnStopReason.UserStopped.name))
+        session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to reason.name))
         sessionManager.save(session)
     }
 

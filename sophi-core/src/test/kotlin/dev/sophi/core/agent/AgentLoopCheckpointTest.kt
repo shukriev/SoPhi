@@ -22,10 +22,13 @@ import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.maps.shouldNotContainKey
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.assertions.throwables.shouldThrow
 import io.mockk.Runs
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
+import io.mockk.verify
+import kotlinx.coroutines.flow.flow
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
@@ -157,5 +160,31 @@ class AgentLoopCheckpointTest : FunSpec({
         val round = rounds(session).single()
         round.metadata shouldContainKey "moves"
         round.metadata shouldNotContainKey "checkpoint"
+    }
+
+    test("a provider error after a delete_file round still saves the round with its moves") {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("gone.txt").writeText("bye")
+        val provider = mockk<LLMProvider>()
+        val sm = mockk<SessionManager>()
+        var n = 0
+        every { provider.stream(any()) } answers {
+            if (n++ == 0) use("c1", "delete_file", """{"path":"gone.txt"}""").toStreamFlow()
+            else flow { throw IllegalStateException("network down") }
+        }
+        every { sm.save(any()) } just Runs
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home"))
+        val loop = AgentLoop(provider, registry(root, createTempDirectory("trash")), sm,
+            contextWindowTokens = 100_000, checkpoints = store)
+        val session = AgentSession(id = "s")
+
+        shouldThrow<IllegalStateException> { loop.turn(session, "go", config) }
+
+        val round = rounds(session).single()
+        round.metadata shouldContainKey "moves"
+        round.metadata shouldContainKey "checkpoint"
+        verify { sm.save(session) }
+        FileRestorer(store).let { it.apply(session, it.plan(session)!!) } shouldBe emptyList()
+        root.resolve("gone.txt").exists() shouldBe true
     }
 })
