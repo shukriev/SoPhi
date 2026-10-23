@@ -35,6 +35,7 @@ import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.learning.system1FromHome
 import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER
 import dev.sophi.mcp.config.McpConfigLoader
 import dev.sophi.memory.MemoryPlugin
 import dev.sophi.memory.MemoryPromptSection
@@ -81,6 +82,7 @@ class RuntimeBuilder {
     private var confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
     private var grants: Set<String> = emptySet()
     private var mcpConfigPath: Path? = null
+    private var deferToolsOver: Int = DEFAULT_DEFER_TOOLS_OVER
     private var system1Config: Pair<Path, (String) -> Unit>? = null
     private var mcpClientManager: McpClientManager = McpClientManager()
     private var providedRegistry: ToolRegistry? = null
@@ -120,6 +122,8 @@ class RuntimeBuilder {
     fun confirmationPolicy(policy: ConfirmationPolicy): RuntimeBuilder = apply { confirmationPolicy = policy }
     fun grants(names: Set<String>): RuntimeBuilder = apply { grants = names }
     fun mcpConfig(path: Path): RuntimeBuilder = apply { mcpConfigPath = path }
+    /** Deferral threshold for MCP servers when no mcp.json is given (a loaded mcp.json's own value wins). */
+    fun deferToolsOver(n: Int): RuntimeBuilder = apply { deferToolsOver = n }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
 
     /**
@@ -256,8 +260,11 @@ class RuntimeBuilder {
                 dev.sophi.schedule.store.RunLog(dir.resolve("runs.jsonl"))
             ))
         }
-        val mcpServers = mcpConfigPath?.let { McpConfigLoader().load(it).servers.filter { server -> server.enabled } } ?: emptyList()
-        runBlocking { mcpClientManager.connect(mcpServers) }.forEach { registry.register(it) }
+        val mcp = mcpConfigPath?.let { McpConfigLoader().load(it) }
+        val deferOver = mcp?.deferToolsOver ?: deferToolsOver
+        val mcpServers = mcp?.servers?.filter { server -> server.enabled } ?: emptyList()
+        runBlocking { mcpClientManager.connect(mcpServers, deferOver) }.forEach { registry.register(it) }
+        registry.registerToolSearchIfDeferred()
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
             model = model,
@@ -380,7 +387,8 @@ class RuntimeBuilder {
         val schedulesDir = scheduleDir ?: Path.of(System.getProperty("user.home"), ".sophi", "schedule")
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
-            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode
+            skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
+            deferOver
         )
     }
 }

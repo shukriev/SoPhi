@@ -20,6 +20,7 @@ import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
+import dev.sophi.core.tools.ActivatedTools
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
 import kotlinx.coroutines.CancellationException
@@ -27,6 +28,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
@@ -355,7 +357,8 @@ class AgentLoop(
     ): AgentSession {
         val turn = TurnProgress()
         return try {
-            runTurn(session, userInput, config, onEvent, turn, turnPreamble)
+            // Fresh per turn (and per nested AgentLoop): tool_search activations die with the turn.
+            withContext(ActivatedTools()) { runTurn(session, userInput, config, onEvent, turn, turnPreamble) }
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
             throw e
@@ -416,7 +419,7 @@ class AgentLoop(
                 maxTokens = config.maxTokens,
                 temperature = config.temperature,
                 systemPrompt = config.systemPrompt,
-                tools = registry.definitions()
+                tools = registry.definitions(currentCoroutineContext()[ActivatedTools]!!.names.toSet())
             )
 
             val contentBuf = StringBuilder()

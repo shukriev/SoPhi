@@ -20,14 +20,33 @@ class ToolRegistry {
 
     fun getOrNull(name: String): Tool? = tools[name]
 
-    fun definitions(): List<ToolDefinition> =
-        tools.values.map { ToolDefinition(it.name, it.description, it.parametersJson) }
+    /**
+     * Every tool except deferred ones not in [activated]. Deferral only applies while
+     * [TOOL_SEARCH_NAME] is registered; without it the model could never load a hidden tool.
+     */
+    fun definitions(activated: Set<String> = emptySet()): List<ToolDefinition> {
+        val hideDeferred = TOOL_SEARCH_NAME in tools
+        return tools.values
+            .filter { !(hideDeferred && it.deferred && it.name !in activated) }
+            .map { ToolDefinition(it.name, it.description, it.parametersJson) }
+    }
+
+    fun deferredNames(): List<String> = tools.values.filter { it.deferred }.map { it.name }.sorted()
+
+    /** Registers [ToolSearchTool] once there is a deferred tool and none registered yet. */
+    fun registerToolSearchIfDeferred(): ToolRegistry {
+        if (TOOL_SEARCH_NAME !in tools && deferredNames().isNotEmpty()) register(ToolSearchTool(this))
+        return this
+    }
 
     fun names(): List<String> = tools.keys.sorted()
 
+    /** A kept [ToolSearchTool] is rebound to the subset, so it never offers tools the subset lacks. */
     fun subset(names: List<String>): ToolRegistry {
         val filtered = ToolRegistry()
-        names.forEach { name -> tools[name]?.let { filtered.register(it) } }
+        names.forEach { name ->
+            tools[name]?.let { filtered.register(if (it is ToolSearchTool) ToolSearchTool(filtered) else it) }
+        }
         return filtered
     }
 

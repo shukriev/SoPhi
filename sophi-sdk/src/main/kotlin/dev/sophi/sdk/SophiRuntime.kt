@@ -50,7 +50,7 @@ class SophiRuntime internal constructor(
      * closes; [SophiRuntime] itself has no per-session end signal, so [close] does not call it.
      */
     val learningPlugin: LearningPlugin? = null,
-    private val toolRegistry: ToolRegistry = ToolRegistry(),
+    internal val toolRegistry: ToolRegistry = ToolRegistry(),
     internal val provider: LLMProvider? = null,
     private val contextWindowTokens: Int = 0,
     private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
@@ -59,7 +59,8 @@ class SophiRuntime internal constructor(
     private val schedulesDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
     private val contextEngine: ContextEngine? = null,
     /** Public so the CLI's /compact uses the same mode as the loop. */
-    val compactionMode: dev.sophi.core.context.CompactionMode = dev.sophi.core.context.CompactionMode.STRUCTURED
+    val compactionMode: dev.sophi.core.context.CompactionMode = dev.sophi.core.context.CompactionMode.STRUCTURED,
+    private val deferToolsOver: Int = dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER
 ) {
     private val skillInstaller = SkillInstaller()
     private val proposalStore get() = ProposalStore(schedulesDir.resolve("proposals.jsonl"))
@@ -199,10 +200,10 @@ class SophiRuntime internal constructor(
         val manager = requireNotNull(mcpClientManager) {
             "MCP not configured for this runtime — build it via RuntimeBuilder.mcpConfig(...)"
         }
-        return manager.connectOne(config, onFailure).map { tool ->
+        return manager.connectOne(config, deferToolsOver, onFailure).map { tool ->
             toolRegistry.register(tool)
             tool.name
-        }
+        }.also { toolRegistry.registerToolSearchIfDeferred() }
     }
 
     suspend fun disconnectMcpServer(serverName: String) {

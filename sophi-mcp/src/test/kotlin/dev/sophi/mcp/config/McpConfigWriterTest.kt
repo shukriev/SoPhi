@@ -42,4 +42,10 @@ class McpConfigWriterTest : FunSpec({
 
         loader.load(path).servers.map { it.name } shouldBe listOf("b")
     }
+
+    test("write keeps a non-default deferToolsOver") {
+        val path = createTempDirectory("sophi-mcp-writer-test").resolve("mcp.json")
+        writer.write(path, McpConfig(deferToolsOver = 25))
+        loader.load(path).deferToolsOver shouldBe 25
+    }
 })

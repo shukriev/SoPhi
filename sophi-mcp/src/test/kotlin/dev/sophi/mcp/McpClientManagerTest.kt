@@ -1,6 +1,7 @@
 package dev.sophi.mcp
 
 import dev.sophi.mcp.config.McpServerConfig
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.mcp.config.McpTransport
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -201,5 +202,57 @@ class McpClientManagerTest : FunSpec({
         manager.close()
 
         coVerify(exactly = 1) { session.close() }
+    }
+
+    fun deferredFlags(toolCounts: List<Int>, safe: List<String> = emptyList(), over: Int? = null): List<List<Boolean>> {
+        val connector = mockk<McpConnector>()
+        toolCounts.forEachIndexed { i, n ->
+            val session = mockk<McpSession>()
+            coEvery { session.listTools() } returns (1..n).map { RemoteToolInfo("t$it", "d", "{}") }
+            coEvery { connector.connect(match { it.name == "s$i" }) } returns session
+        }
+        val manager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+        return runBlocking {
+            toolCounts.indices.map { i ->
+                val cfg = McpServerConfig(name = "s$i", transport = McpTransport.STDIO, command = listOf("x"), safeTools = safe)
+                (if (over == null) manager.connectOne(cfg) else manager.connectOne(cfg, deferToolsOver = over)).map { it.deferred }
+            }
+        }
+    }
+
+    test("a server with 10 tools stays direct") {
+        deferredFlags(listOf(10)).single() shouldBe List(10) { false }
+    }
+
+    test("a server with 11 tools is deferred") {
+        deferredFlags(listOf(11)).single() shouldBe List(11) { true }
+    }
+
+    test("the threshold applies per server") {
+        val (big, small) = deferredFlags(listOf(11, 2))
+        big shouldBe List(11) { true }
+        small shouldBe List(2) { false }
+    }
+
+    test("deferToolsOver is configurable") {
+        deferredFlags(listOf(3), over = 2).single() shouldBe List(3) { true }
+    }
+
+    test("deferred MCP tools keep their risk level") {
+        val session = mockk<McpSession>()
+        coEvery { session.listTools() } returns listOf(RemoteToolInfo("read", "d", "{}"), RemoteToolInfo("write", "d", "{}"))
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(any()) } returns session
+        val manager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+
+        val tools = runBlocking {
+            manager.connectOne(
+                McpServerConfig(name = "s", transport = McpTransport.STDIO, command = listOf("x"), safeTools = listOf("read")),
+                deferToolsOver = 1
+            )
+        }
+
+        tools.all { it.deferred } shouldBe true
+        tools.map { it.riskLevel("{}") } shouldBe listOf(RiskLevel.SAFE, RiskLevel.DESTRUCTIVE)
     }
 })

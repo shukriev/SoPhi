@@ -68,7 +68,8 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         val mcpConfigPath = Path.of(System.getProperty("user.dir"), ".sophi", "mcp.json")
         if (mcpConfigPath.exists()) {
             val mcpConfig = McpConfigLoader().load(mcpConfigPath)
-            runBlocking { mcpClientManager.connect(mcpConfig.servers) }.forEach { registry.register(it) }
+            runBlocking { mcpClientManager.connect(mcpConfig.servers, mcpConfig.deferToolsOver) }.forEach { registry.register(it) }
+            registry.registerToolSearchIfDeferred()
         }
         return registry
     }
