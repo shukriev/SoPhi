@@ -19,6 +19,8 @@ private val READ_ONLY_PREFIXES = listOf(
     "git status", "git log", "git diff", "git show"
 )
 private val UNSAFE_SHELL_CHARS = charArrayOf(';', '&', '|', '>', '<', '`', '$')
+/** find actions that delete, run a command or write a file: not read-only. */
+private val FIND_WRITES = Regex("""\s-(delete|exec|execdir|ok|okdir|fprint\w*|fls)\b""")
 
 private val HIGH_RISK_BASH_SUBSTRINGS = listOf(
     "rm -rf", "rm -fr", "sudo ", "dd if=", "mkfs", "git push --force", "git push -f",
@@ -39,7 +41,8 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
             .getOrNull() ?: return RiskLevel.DESTRUCTIVE
         val trimmed = command.trim()
         val looksReadOnly = READ_ONLY_PREFIXES.any { trimmed.startsWith(it) } &&
-            command.none { it in UNSAFE_SHELL_CHARS }
+            command.none { it in UNSAFE_SHELL_CHARS } &&
+            !(trimmed.startsWith("find") && FIND_WRITES.containsMatchIn(trimmed))
         // Reading outside the workspace is not "read-only" in the sense that matters: `cat ~/.ssh/id_rsa`.
         val staysInside = bashReachesOutside(command, root) == null
         return if (looksReadOnly && staysInside) RiskLevel.CAUTION else RiskLevel.DESTRUCTIVE

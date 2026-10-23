@@ -77,6 +77,12 @@ class BashToolTest : FunSpec({
         tool.riskLevel("""{"command":"cat $(danger)"}""") shouldBe RiskLevel.DESTRUCTIVE
     }
 
+    test("riskLevel is DESTRUCTIVE for find that deletes, executes or writes") {
+        tool.riskLevel("""{"command":"find . -name x"}""") shouldBe RiskLevel.CAUTION
+        listOf("-delete", "-exec rm {} +", "-execdir rm {} +", "-ok rm {} +", "-okdir rm {} +", "-fprint out", "-fprint0 out", "-fprintf out %p", "-fls out")
+            .forEach { tool.riskLevel("""{"command":"find . -name '*.tmp' $it"}""") shouldBe RiskLevel.DESTRUCTIVE }
+    }
+
     test("riskLevel is DESTRUCTIVE when arguments cannot be parsed") {
         tool.riskLevel("not json") shouldBe RiskLevel.DESTRUCTIVE
     }
