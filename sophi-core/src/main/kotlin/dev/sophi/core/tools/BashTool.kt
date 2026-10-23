@@ -33,7 +33,7 @@ private data class BashArgs(val command: String, val timeoutSeconds: Long? = nul
 class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
 
     override val name = "bash"
-    override val description = "Run a shell command in the working directory"
+    override val description = "Run a shell command in the working directory. To delete, move or rename files use delete_file / move_file instead: those can be undone."
     override fun riskLevel(argumentsJson: String): RiskLevel {
         val command = runCatching { json.decodeFromString<BashArgs>(argumentsJson).command }
             .getOrNull() ?: return RiskLevel.DESTRUCTIVE
