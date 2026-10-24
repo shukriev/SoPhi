@@ -45,7 +45,8 @@ class ScheduleEngineTest : FunSpec({
         taskTimeoutMs: Long = 300_000,
         registry: ToolRegistry = ToolRegistry(),
         criticEnabled: Boolean = true,
-        planLog: dev.sophi.core.agent.plan.PlanLog? = null
+        planLog: dev.sophi.core.agent.plan.PlanLog? = null,
+        audit: dev.sophi.core.audit.AuditSink? = null
     ): Triple<ScheduleEngine, TaskStore, RunLog> {
         val home = tempdir().toPath()
         val taskStore = TaskStore(home.resolve("tasks.json"))
@@ -55,7 +56,7 @@ class ScheduleEngineTest : FunSpec({
             FileSessionManager(createTempDirectory("schedule-engine-test")),
             notifier, model = "m", contextWindowTokens = TEST_CONTEXT_WINDOW,
             maxConcurrentTasks = maxConcurrentTasks, taskTimeoutMs = taskTimeoutMs,
-            criticEnabled = criticEnabled, planLog = planLog
+            criticEnabled = criticEnabled, planLog = planLog, audit = audit
         )
         return Triple(engine, taskStore, runLog)
     }
@@ -800,5 +801,30 @@ class ScheduleEngineTest : FunSpec({
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
 
         runLog.forTask(task.id).last().outcome shouldBe RunOutcome.Succeeded
+    }
+
+    test("a scheduled task's tool calls are audited, the granted one under rule grant") {
+        val grantedTool = object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "ran"
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}")))),
+            flowOf(StreamEvent.Content("done"))
+        )
+        val entries = mutableListOf<dev.sophi.core.audit.AuditEntry>()
+        val (engine, taskStore, _) = engine(provider, registry = ToolRegistry().register(grantedTool), audit = { entries += it })
+        taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "run it",
+            toolGrants = setOf("danger")
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        entries.single().let { it.tool shouldBe "danger"; it.rule shouldBe "grant"; it.outcome shouldBe "ok" }
     }
 })

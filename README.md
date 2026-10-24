@@ -134,6 +134,8 @@ In-session slash commands:
 exit / quit  end the session
 ```
 
+**Audit log.** The CLI appends every tool call, approved or denied, to `~/.sophi/audit.jsonl`, one JSON line each: `ts`, `actor`, `tenant`, `session`, `tool`, `risk`, `args`, `decision`, `rule` (what decided: `user`, `grant`, `policy`...), `outcome` (`ok`, `error`, `denied` or `cancelled`), `result` and `durationMs`. Secrets in args and results are redacted. Scheduled tasks are audited too. In the SDK, `RuntimeBuilder.auditLog()` turns it on, or `audit(sink)` takes your own `AuditSink`.
+
 **Undo.** Before each tool round that changes files, the CLI snapshots the workspace into a shadow git repo under `~/.sophi/checkpoints` (your own repo is untouched). `/undo` and `/revert` show what they would restore and ask first. `move_file` and `delete_file` are undoable too: deletes go to `~/.sophi/trash`. Bash commands that reach outside the workspace can't be undone and are listed as warnings. In the SDK, `RuntimeBuilder.checkpoints()` (needs `builtinTools`) turns snapshots on and `SophiRuntime.fileRestorer` does the restoring.
 
 The terminal redraws in place while a turn streams, instead of scrolling

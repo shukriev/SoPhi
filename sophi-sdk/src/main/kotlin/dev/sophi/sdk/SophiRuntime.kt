@@ -11,6 +11,7 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.undo.FileRestorer
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
@@ -63,7 +64,9 @@ class SophiRuntime internal constructor(
     val compactionMode: dev.sophi.core.context.CompactionMode = dev.sophi.core.context.CompactionMode.STRUCTURED,
     private val deferToolsOver: Int = dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER,
     /** Always present: with [RuntimeBuilder.checkpoints] off it still reverses recorded moves. */
-    val fileRestorer: FileRestorer = FileRestorer(null)
+    val fileRestorer: FileRestorer = FileRestorer(null),
+    /** The sink [RuntimeBuilder.auditLog] or [RuntimeBuilder.audit] set, or null when auditing is off. */
+    val auditSink: AuditSink? = null
 ) {
     private val skillInstaller = SkillInstaller()
     private val proposalStore get() = ProposalStore(schedulesDir.resolve("proposals.jsonl"))
@@ -253,7 +256,8 @@ class SophiRuntime internal constructor(
             maxTokens = maxTokens,
             systemPrompt = listOfNotNull(config.systemPrompt, DefaultPrompt.UNATTENDED).joinToString("\n\n"),
             pluginRegistry = pluginRegistry,
-            planLog = plansDir?.let { PlanLog(it) }
+            planLog = plansDir?.let { PlanLog(it) },
+            audit = auditSink
         )
     }
 }
