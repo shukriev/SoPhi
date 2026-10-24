@@ -1,5 +1,7 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.audit.noteDecision
+
 @kotlinx.serialization.Serializable
 data class ConfirmationRequest(
     val callId: String,
@@ -13,7 +15,7 @@ fun interface ConfirmationPolicy {
     suspend fun confirm(requests: List<ConfirmationRequest>): Map<String, Boolean>
 
     companion object {
-        val ALLOW_ALL: ConfirmationPolicy = ConfirmationPolicy { requests -> requests.associate { it.callId to true } }
-        val DENY_ALL: ConfirmationPolicy = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
+        val ALLOW_ALL: ConfirmationPolicy = ConfirmationPolicy { requests -> requests.associate { noteDecision(it.callId, "allow-all"); it.callId to true } }
+        val DENY_ALL: ConfirmationPolicy = ConfirmationPolicy { requests -> requests.associate { noteDecision(it.callId, "deny-all"); it.callId to false } }
     }
 }

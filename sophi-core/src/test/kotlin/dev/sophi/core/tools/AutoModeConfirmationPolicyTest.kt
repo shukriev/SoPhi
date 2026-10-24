@@ -2,7 +2,9 @@ package dev.sophi.core.tools
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import dev.sophi.core.audit.DecisionNotes
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 private class FixedRuleTool(
     override val name: String,
@@ -96,5 +98,28 @@ class AutoModeConfirmationPolicyTest : FunSpec({
         }
 
         result shouldBe mapOf("c1" to false)
+    }
+
+    test("auto-approved calls are noted auto:rule or auto:classifier; forwarded ones are left to the fallback") {
+        val registry = ToolRegistry()
+            .register(FixedRuleTool("rule_ok", RuleVerdict.LOW_RISK))
+            .register(FixedRuleTool("ask_classifier", RuleVerdict.UNKNOWN))
+            .register(FixedRuleTool("risky_tool", RuleVerdict.HIGH_RISK))
+        val classifier = RiskClassifier { _, _, _, _ -> RuleVerdict.LOW_RISK }
+        val fallback = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
+        val policy = AutoModeConfirmationPolicy(registry, classifier, fallback)
+        val notes = DecisionNotes()
+
+        runBlocking {
+            withContext(notes) {
+                policy.confirm(listOf(
+                    ConfirmationRequest("c1", "rule_ok", "{}", RiskLevel.DESTRUCTIVE),
+                    ConfirmationRequest("c2", "ask_classifier", "{}", RiskLevel.DESTRUCTIVE),
+                    ConfirmationRequest("c3", "risky_tool", "{}", RiskLevel.DESTRUCTIVE)
+                ))
+            }
+        }
+
+        notes.rules shouldBe mapOf("c1" to "auto:rule", "c2" to "auto:classifier")
     }
 })

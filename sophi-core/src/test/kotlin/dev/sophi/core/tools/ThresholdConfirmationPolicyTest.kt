@@ -2,7 +2,9 @@ package dev.sophi.core.tools
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import dev.sophi.core.audit.DecisionNotes
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 class ThresholdConfirmationPolicyTest : FunSpec({
     test("requests below the threshold auto-approve without calling the fallback") {
@@ -86,5 +88,22 @@ class ThresholdConfirmationPolicyTest : FunSpec({
 
         result shouldBe mapOf("c1" to true)
         fallbackCalls shouldBe 0
+    }
+
+    test("auto-approved calls are noted with the threshold") {
+        val fallback = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
+        val policy = ThresholdConfirmationPolicy(RiskLevel.DESTRUCTIVE, fallback)
+        val notes = DecisionNotes()
+
+        runBlocking {
+            withContext(notes) {
+                policy.confirm(listOf(
+                    ConfirmationRequest("c1", "caution_tool", "{}", RiskLevel.CAUTION),
+                    ConfirmationRequest("c2", "destructive_tool", "{}", RiskLevel.DESTRUCTIVE)
+                ))
+            }
+        }
+
+        notes.rules shouldBe mapOf("c1" to "threshold:DESTRUCTIVE")
     }
 })

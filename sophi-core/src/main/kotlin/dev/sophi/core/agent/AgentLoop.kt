@@ -9,6 +9,14 @@ import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.agent.plan.DecomposeGoalTool
+import dev.sophi.core.audit.ActorContext
+import dev.sophi.core.audit.AuditEntry
+import dev.sophi.core.audit.AuditScope
+import dev.sophi.core.audit.AuditSink
+import dev.sophi.core.audit.DecisionNotes
+import dev.sophi.core.audit.LOCAL_ACTOR
+import dev.sophi.core.audit.redactArguments
+import dev.sophi.core.audit.redactSecrets
 import dev.sophi.core.context.CompactionMode
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.context.Elider
@@ -217,7 +225,9 @@ class AgentLoop(
     /** How mid-turn compaction works: elide old tool results first (ELIDE/STRUCTURED), then summarise. */
     private val compaction: CompactionMode = CompactionMode.STRUCTURED,
     /** Snapshots the workspace before each round with a DESTRUCTIVE call, so /undo can restore it. Null = no checkpoints. */
-    private val checkpoints: CheckpointStore? = null
+    private val checkpoints: CheckpointStore? = null,
+    /** Gets one entry per tool call. Null = the enclosing loop's sink (AuditScope), if any. */
+    private val audit: AuditSink? = null
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
@@ -226,6 +236,33 @@ class AgentLoop(
     private fun truncateToolResult(result: String): String {
         val maxChars = (contextWindowTokens * MAX_TOOL_RESULT_FRACTION_OF_WINDOW * CHARS_PER_TOKEN_ESTIMATE).toInt()
         return if (result.length <= maxChars) result else result.take(maxChars) + "\n... output truncated"
+    }
+
+    /** Writes [req]'s audit entry. Never fails the call: a sink that throws is ignored. */
+    private suspend fun recordAudit(
+        sink: AuditSink, session: AgentSession, req: ConfirmationRequest, allowed: Boolean,
+        notes: DecisionNotes, failed: Boolean, result: String, start: Long
+    ) {
+        val actor = currentCoroutineContext()[ActorContext]
+        val entry = AuditEntry(
+            ts = start,
+            actor = actor?.actorId ?: LOCAL_ACTOR,
+            tenant = actor?.tenantId,
+            session = session.id,
+            tool = req.toolName,
+            risk = req.riskLevel,
+            args = redactArguments(req.argumentsJson).take(4000),
+            decision = if (allowed) "allowed" else "denied",
+            rule = when {
+                req.riskLevel == RiskLevel.SAFE -> "safe"
+                req.toolName in grants -> "grant"
+                else -> notes.rules[req.callId] ?: "policy"
+            },
+            outcome = if (!allowed) "denied" else if (failed) "error" else "ok",
+            result = if (allowed) redactSecrets(result).take(500) else "",
+            durationMs = System.currentTimeMillis() - start,
+        )
+        runCatching { sink.record(entry) }
     }
 
     /**
@@ -373,7 +410,10 @@ class AgentLoop(
         val turn = TurnProgress()
         return try {
             // Fresh per turn (and per nested AgentLoop): tool_search activations die with the turn.
-            withContext(ActivatedTools()) { runTurn(session, userInput, config, onEvent, turn, turnPreamble) }
+            // A nested loop built without a sink audits to the outer loop's.
+            val sink = audit ?: currentCoroutineContext()[AuditScope]?.sink
+            val scope = if (sink == null) ActivatedTools() else ActivatedTools() + AuditScope(sink)
+            withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble) }
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
             throw e
@@ -534,13 +574,14 @@ class AgentLoop(
             val needsDecision = classified.filter { (_, req) ->
                 req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
             }
+            val notes = DecisionNotes()
             val decisions = if (needsDecision.isEmpty()) {
                 emptyMap()
             } else {
                 val requests = needsDecision.map { it.second }
                 onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
                 try {
-                    confirmationPolicy.confirm(requests)
+                    withContext(notes) { confirmationPolicy.confirm(requests) }
                 } finally {
                     onEvent(TurnEvent.ConfirmationFinished)
                 }
@@ -562,8 +603,9 @@ class AgentLoop(
             }
             val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
             // In a finally, so a stopped round still tells /undo what it changed (saveStopped persists it).
+            val auditSink = currentCoroutineContext()[AuditScope]?.sink
             val toolOutcomes = try { withContext(changes) {
-                allowedCalls.map { (call, allowed) ->
+                allowedCalls.zip(classified) { (call, allowed), (_, req) ->
                     async {
                         onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
                         val start = System.currentTimeMillis()
@@ -589,6 +631,7 @@ class AgentLoop(
                         // this convention) — count both the same way for loop-guard/reliability purposes.
                         failed = failed || result.startsWith("Error: ")
                         onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
+                        if (auditSink != null) recordAudit(auditSink, session, req, allowed, notes, failed, result, start)
                         ToolCallOutcome(
                             call,
                             Message(
