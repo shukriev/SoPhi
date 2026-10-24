@@ -14,6 +14,8 @@ import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.cli.goal.GoalController
 import dev.sophi.cli.goal.GoalRunResult
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.undo.FileRestorer
+import dev.sophi.core.undo.RestorePlan
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.BrowseFilter
 import dev.sophi.memory.MemoryPlugin
@@ -39,6 +41,7 @@ class SlashHandler(
     private val goalController: GoalController? = null,
     private val toolRegistry: ToolRegistry? = null,
     private val planLog: PlanLog? = null,
+    private val fileRestorer: FileRestorer? = null,
     /**
      * Total context window of `config.model`, in tokens. Optional here for the same reason
      * `provider` and `toolRegistry` are: a SlashHandler built without the full agent wiring
@@ -70,6 +73,7 @@ class SlashHandler(
                 session
             }
             "checkout" -> {
+                if (arg != null && "--files" in arg.split(" ")) return handleCheckoutFiles(arg, session)
                 if (arg.isNullOrEmpty()) {
                     output("Usage: /checkout <entry-id>")
                 } else {
@@ -81,6 +85,17 @@ class SlashHandler(
                     }
                 }
                 session
+            }
+            "undo" -> withRestorer(session) { restorer, current ->
+                restorer.plan(current)?.let { confirmAndApply(restorer, current, it) } ?: output("Nothing to undo.")
+            }
+            "revert" -> withRestorer(session) { restorer, current ->
+                if (arg.isNullOrEmpty()) output("Usage: /revert <entry-id>")
+                else try {
+                    restorer.plan(current, arg)?.let { confirmAndApply(restorer, current, it) } ?: output("Nothing to undo.")
+                } catch (e: IllegalArgumentException) {
+                    output("Error: ${e.message}")
+                }
             }
             "compact" -> {
                 if (compactor == null) {
@@ -142,12 +157,54 @@ class SlashHandler(
             "auto" -> { handleAuto(); session }
             else -> {
                 output(
-                    "Unknown command: /$cmd  Available: /list /branch /checkout /compact /good /bad " +
+                    "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
                         "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto"
                 )
                 session
             }
         }
+    }
+
+    /** Reloads the session (turns are saved by the runtime, so [session] may be stale) and runs [block] on it. */
+    private suspend fun withRestorer(session: AgentSession, block: suspend (FileRestorer, AgentSession) -> Unit): AgentSession {
+        val restorer = fileRestorer
+        if (restorer == null) { output("Undo is not available."); return session }
+        val current = sessionManager.load(session.id)
+        block(restorer, current)
+        return current
+    }
+
+    private suspend fun handleCheckoutFiles(arg: String, session: AgentSession): AgentSession =
+        withRestorer(session) { restorer, current ->
+            val id = arg.split(" ").firstOrNull { it.isNotEmpty() && !it.startsWith("--") }
+            if (id == null) { output("Usage: /checkout <entry-id> [--files]"); return@withRestorer }
+            try {
+                val branch = current.branch()
+                val at = branch.indexOfFirst { it.id == id }
+                // The plan has to come first: after the checkout the later rounds are off the branch.
+                val plan = branch.getOrNull(at + 1)?.takeIf { at >= 0 }?.let { restorer.plan(current, it.id) }
+                current.checkout(id)
+                output("Checked out entry $id")
+                if (plan != null) confirmAndApply(restorer, current, plan)
+            } catch (e: Exception) {
+                output("Error: ${e.message}")
+            }
+        }
+
+    private suspend fun confirmAndApply(restorer: FileRestorer, session: AgentSession, plan: RestorePlan) {
+        output(plan.diffStat.ifBlank { null }?.let { "Restoring will change:\n$it" } ?: "No workspace file changes.")
+        plan.moves.forEach { output("  restore ${it.from} (from ${it.to})") }
+        plan.warnings.forEach { output("  can't undo: $it") }
+        output("Restore these files? (y/n)")
+        if (!input.awaitYesNo()) { output("Left as is."); return }
+        try {
+            restorer.apply(session, plan).forEach { output(it) }
+            output("Restored.")
+        } catch (e: IllegalStateException) {
+            output("Error: ${e.message}")
+        }
+        // Saved even when the restore threw: the moves were already reversed.
+        sessionManager.save(session)
     }
 
     private fun handleSchedule(arg: String?) {

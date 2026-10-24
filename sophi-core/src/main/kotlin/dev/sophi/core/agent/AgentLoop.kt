@@ -8,6 +8,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.context.CompactionMode
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.context.Elider
@@ -23,11 +24,13 @@ import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.ActivatedTools
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.bashReachesOutside
+import dev.sophi.core.undo.CheckpointStore
+import dev.sophi.core.undo.RoundChanges
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
@@ -98,7 +101,7 @@ private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
  * to one that actually finished.
  */
 enum class TurnStopReason {
-    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped
+    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped, Error
 }
 
 /** OpenAI's finish_reason for "ran out of output tokens", shared by every compatible server. */
@@ -212,7 +215,9 @@ class AgentLoop(
     /** Called once per model request with that request's usage and kind ("turn" | "summarise" | "elide"); failures never reach the loop. */
     private val onUsage: (TokenUsage, String) -> Unit = { _, _ -> },
     /** How mid-turn compaction works: elide old tool results first (ELIDE/STRUCTURED), then summarise. */
-    private val compaction: CompactionMode = CompactionMode.STRUCTURED
+    private val compaction: CompactionMode = CompactionMode.STRUCTURED,
+    /** Snapshots the workspace before each round with a DESTRUCTIVE call, so /undo can restore it. Null = no checkpoints. */
+    private val checkpoints: CheckpointStore? = null
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
@@ -245,6 +250,16 @@ class AgentLoop(
         session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to stopReason.name))
         sessionManager.save(session)
         return session
+    }
+
+    /** A round's `moves`, and its allowed bash commands that reach outside the workspace (`outsideCommands`). */
+    private fun undoRecord(changes: RoundChanges, allowedCalls: List<Pair<ToolCall, Boolean>>): Map<String, String> = buildMap {
+        if (changes.moves.isNotEmpty()) put("moves", entryJson.encodeToString(changes.moves))
+        val root = checkpoints?.root ?: return@buildMap
+        val outside = allowedCalls.filter { (c, ok) -> ok && c.name == "bash" }.mapNotNull { (c, _) ->
+            runCatching { entryJson.parseToJsonElement(c.argumentsJson).jsonObject["command"]?.jsonPrimitive?.content }.getOrNull()
+        }.filter { bashReachesOutside(it, root) != null }
+        if (outside.isNotEmpty()) put("outsideCommands", entryJson.encodeToString(outside))
     }
 
     private fun stubbedToolCallIds(messages: List<Message>): Set<String> =
@@ -362,15 +377,24 @@ class AgentLoop(
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
             throw e
+        } catch (e: Exception) {
+            // A provider/network error after a tool round must not lose it: its files changed, and /undo needs its metadata.
+            if (!turn.persisted && turn.pendingRounds.isNotEmpty()) runCatching {
+                saveStopped(session, userInput, turn, "an error", "[Stopped by an error: ${e.message}]", TurnStopReason.Error)
+            }.exceptionOrNull()?.let(e::addSuppressed)
+            throw e
         }
     }
 
     /**
-     * The user stopped the turn. Keeps what it already did — a browser step or a sent message
+     * The user stopped the turn, or it failed after a tool round. Keeps what it already did — a browser step or a sent message
      * happened — so the next turn knows. A tool call still running gets a result saying so, since
      * a tool call without one is rejected by the model's API on the next request.
      */
-    private suspend fun saveStopped(session: AgentSession, userInput: String, turn: TurnProgress) {
+    private suspend fun saveStopped(
+        session: AgentSession, userInput: String, turn: TurnProgress,
+        by: String = "the user", stopMessage: String = STOPPED_BY_USER, reason: TurnStopReason = TurnStopReason.UserStopped,
+    ) {
         turn.persisted = true
         session.append(EntryRole.USER, userInput)
         turn.pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
@@ -378,11 +402,11 @@ class AgentLoop(
         if (last?.role == EntryRole.ASSISTANT) {
             val calls = last.metadata["toolCalls"]?.let { runCatching { entryJson.decodeFromString<List<ToolCallRecord>>(it) }.getOrNull() }.orEmpty()
             calls.forEach { c ->
-                session.append(EntryRole.TOOL_RESULT, "Stopped by the user before this finished.",
+                session.append(EntryRole.TOOL_RESULT, "Stopped by $by before this finished.",
                     mapOf("replay" to "false", "toolCallId" to c.id, "toolName" to c.name))
             }
         }
-        session.append(EntryRole.ASSISTANT, STOPPED_BY_USER, mapOf("stopReason" to TurnStopReason.UserStopped.name))
+        session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to reason.name))
         sessionManager.save(session)
     }
 
@@ -491,6 +515,7 @@ class AgentLoop(
                 )
             }
             messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = toolCalls))
+            val roundIndex = pendingRounds.size
             pendingRounds.add(PendingEntry(
                 EntryRole.ASSISTANT, "",
                 mapOf(
@@ -527,7 +552,17 @@ class AgentLoop(
                 call to allowed
             }
 
-            val toolOutcomes = coroutineScope {
+            val undoMeta = mutableMapOf<String, String>()
+            // A delegate's nested loop runs DESTRUCTIVE tools of its own, whatever the delegate call itself rates.
+            if (checkpoints != null && classified.zip(allowedCalls).any { (c, a) ->
+                    a.second && (c.second.riskLevel == RiskLevel.DESTRUCTIVE || registry.getOrNull(c.first.name).let { it is SubagentTool || it is DecomposeGoalTool })
+                }) {
+                val start = System.currentTimeMillis()
+                checkpoints.snapshot()?.let { undoMeta += mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }
+            }
+            val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
+            // In a finally, so a stopped round still tells /undo what it changed (saveStopped persists it).
+            val toolOutcomes = try { withContext(changes) {
                 allowedCalls.map { (call, allowed) ->
                     async {
                         onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
@@ -566,6 +601,9 @@ class AgentLoop(
                         )
                     }
                 }.awaitAll()
+            } } finally {
+                undoMeta += undoRecord(changes, allowedCalls)
+                if (undoMeta.isNotEmpty()) pendingRounds[roundIndex] = pendingRounds[roundIndex].let { it.copy(metadata = it.metadata + undoMeta) }
             }
             // Successful calls never trip the failure guard, so a model can repeat one forever without
             // learning anything new. Tell it on the 3rd identical call; the guard steps in at the 6th.
