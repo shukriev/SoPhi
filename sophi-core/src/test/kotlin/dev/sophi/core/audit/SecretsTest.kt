@@ -17,7 +17,7 @@ class SecretsTest : FunSpec({
             "slack_token" to "xoxb-1234567890-0987654321-abcdefghijkl",
             "jwt" to "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
             "api_key" to "sk-abcdefghijklmnopqrstuvwx",
-            "bearer" to "Bearer abc",
+            "bearer" to "Bearer abc123xyz",
         )
         for ((type, raw) in cases) {
             val out = redactSecrets("x $raw y")
@@ -81,5 +81,39 @@ class SecretsTest : FunSpec({
         out shouldContain "[REDACTED:api_key]"
         out shouldNotContain "password=x"
         out shouldContain "password=[REDACTED:secret]"
+    }
+
+    test("kebab-case words containing sk- are left alone") {
+        for (t in listOf("task-management-system-overview", "ask-for-help-with-the-deployment", "risk-assessment-for-the-quarter")) {
+            redactSecrets(t) shouldBe t
+        }
+    }
+
+    test("quoted and escaped values are redacted whole, closing quote kept") {
+        redactSecrets("""PASSWORD="a b c" X=1""") shouldBe """PASSWORD="[REDACTED:secret]" X=1"""
+        redactSecrets("""{"password": "has space"}""") shouldBe """{"password": "[REDACTED:secret]"}"""
+        redactSecrets("""authToken="abc\"def" next""") shouldBe """authToken="[REDACTED:secret]" next"""
+        redactSecrets("""{\"password\":\"a b\",\"u\":1}""") shouldBe """{\"password\":\"[REDACTED:secret]\",\"u\":1}"""
+        redactSecrets("'client_secret': 'x y'") shouldBe "'client_secret': '[REDACTED:secret]'"
+    }
+
+    test("an unquoted value stops at whitespace, a quote or a backslash") {
+        redactSecrets("""PASSWORD=abc\nX=1""") shouldBe """PASSWORD=[REDACTED:secret]\nX=1"""
+        redactSecrets("PASSWORD=\nX=1") shouldBe "PASSWORD=\nX=1"
+    }
+
+    test("ordinary code and config are not mangled") {
+        for (t in listOf(
+            "max_tokens=4096", "tokens: 123", "token_count=5", "use_token: true", "if token == expected:",
+            "const token = getToken();", "token = null", "password = 12", """{"max_tokens":4096,"stream":true}""",
+        )) {
+            redactSecrets(t) shouldBe t
+        }
+    }
+
+    test("Bearer and Basic need an Authorization context or a token shape") {
+        for (t in listOf("Basic configuration here", "basic authentication", "The bearer of bad news")) redactSecrets(t) shouldBe t
+        redactSecrets("Authorization: Bearer abcdefgh") shouldBe "Authorization: [REDACTED:bearer]"
+        redactSecrets("authorization=basic dXNlcg") shouldBe "authorization=[REDACTED:bearer]"
     }
 })

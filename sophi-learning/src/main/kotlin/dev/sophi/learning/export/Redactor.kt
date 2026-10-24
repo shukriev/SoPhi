@@ -1,6 +1,6 @@
 package dev.sophi.learning.export
 
-import dev.sophi.core.audit.redactSecrets
+import dev.sophi.core.audit.redactTokens
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -18,7 +18,7 @@ class Redactor(userPatternsFile: Path? = null) {
     val hitsByType: Map<String, Int> get() = hits.toMap()
 
     fun redact(text: String): String {
-        var out = redactSecrets(text) { hits.merge(it, 1, Int::plus) }
+        var out = redactTokens(text) { hits.merge(it, 1, Int::plus) }
         for ((type, regex) in patterns) {
             out = regex.replace(out) { hits.merge(type, 1, Int::plus); "[REDACTED:$type]" }
         }
