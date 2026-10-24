@@ -220,4 +220,18 @@ class AgentLoopAuditTest : FunSpec({
         e.args shouldNotContain "abcdefghij"
         e.result shouldNotContain "abcdefghij"
     }
+
+    test("a turn cancelled while ToolCallFinished is delivered still audits the completed call once") {
+        val entries = mutableListOf<AuditEntry>()
+        val (provider, sm) = scripted(use(ToolCall("c1", "look", "{}")), done)
+        val l = loop(provider, sm, FakeTool("look"), audit = { entries += it })
+
+        try {
+            l.turn(AgentSession(id = "s"), "go", config) { event ->
+                if (event is TurnEvent.ToolCallFinished) throw kotlinx.coroutines.CancellationException("stopped")
+            }
+        } catch (_: kotlinx.coroutines.CancellationException) {}
+
+        entries.single().outcome shouldBe "ok"
+    }
 })

@@ -636,8 +636,9 @@ class AgentLoop(
                         // just as often as by throwing (every built-in tool's own validation follows
                         // this convention) — count both the same way for loop-guard/reliability purposes.
                         failed = failed || result.startsWith("Error: ")
-                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
+                        // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
                         audit(if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
+                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
                         ToolCallOutcome(
                             call,
                             Message(
