@@ -31,12 +31,12 @@ val SECRET_PATTERNS: List<Pair<String, Regex>> = listOf(
 
 /**
  * Audit-only: NAME=value, NAME: value and "name":"value" inside free text (.env content, JSON in a string). Keeps the
- * name and drops the value. Not in SECRET_PATTERNS, because it rewrites JSON structure. The keyword must END the name
- * (API_KEY, authToken; not max_tokens) and the value is skipped when it is a number, true/false/null or a call.
+ * name and drops the value. Not in SECRET_PATTERNS, because it rewrites JSON structure. The keyword, plus an optional
+ * key/base/value/id suffix, must END the name (API_KEY, SECRET_KEY_BASE, authToken; not max_tokens) and the value is skipped when it is a number, true/false/null or a call.
  * A quoted value is taken whole (backslash escapes respected), an unquoted one runs to whitespace, quote or backslash.
  */
 private val ASSIGNMENT = Regex(
-    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|credentials?))" +
+    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)(?:_?(?:key|base|value|id))*)" +
         "(\\\\?[\"']?[ \\t]*[=:](?!=)[ \\t]*)" +
         "(?!(?:true|false|null|none|nil)(?![A-Za-z0-9_])|\\d+(?:\\.\\d+)?(?![A-Za-z0-9_])|[A-Za-z_][A-Za-z0-9_.]*\\(|\\[REDACTED)" +
         "(\\\\\"(?:(?!\\\\\").)*\\\\\"|\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|[^\\s'\"\\\\]+)",

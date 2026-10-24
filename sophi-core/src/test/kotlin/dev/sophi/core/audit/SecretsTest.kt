@@ -116,4 +116,14 @@ class SecretsTest : FunSpec({
         redactSecrets("Authorization: Bearer abcdefgh") shouldBe "Authorization: [REDACTED:bearer]"
         redactSecrets("authorization=basic dXNlcg") shouldBe "authorization=[REDACTED:bearer]"
     }
+
+    test("secret names with a key/base/value/id suffix are redacted") {
+        redactSecrets("SECRET_KEY=abc123def") shouldBe "SECRET_KEY=[REDACTED:secret]"
+        redactSecrets("STRIPE_SECRET_KEY=sk_live_abcdef123") shouldBe "STRIPE_SECRET_KEY=[REDACTED:secret]"
+        redactSecrets("""DJANGO_SECRET_KEY="x y"""") shouldBe """DJANGO_SECRET_KEY="[REDACTED:secret]""""
+        redactSecrets("SECRET_KEY_BASE=abc") shouldBe "SECRET_KEY_BASE=[REDACTED:secret]"
+        redactSecrets("GH_TOKEN_VALUE=abc") shouldBe "GH_TOKEN_VALUE=[REDACTED:secret]"
+        redactSecrets("PRIVATE_KEY=abc") shouldBe "PRIVATE_KEY=[REDACTED:secret]"
+        redactSecrets("secretKey: abc") shouldBe "secretKey: [REDACTED:secret]"
+    }
 })
