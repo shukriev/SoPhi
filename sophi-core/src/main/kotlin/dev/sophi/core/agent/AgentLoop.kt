@@ -238,12 +238,14 @@ class AgentLoop(
         return if (result.length <= maxChars) result else result.take(maxChars) + "\n... output truncated"
     }
 
-    /** Writes [req]'s audit entry. Never fails the call: a sink that throws is ignored. */
-    private suspend fun recordAudit(
-        sink: AuditSink, session: AgentSession, req: ConfirmationRequest, allowed: Boolean,
-        notes: DecisionNotes, failed: Boolean, result: String, start: Long
+    /**
+     * Writes [req]'s audit entry. Never fails the call: a sink that throws is ignored. Not suspending,
+     * so a cancelled call can still be recorded on its way out.
+     */
+    private fun recordAudit(
+        sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
+        notes: DecisionNotes, outcome: String, result: String, start: Long
     ) {
-        val actor = currentCoroutineContext()[ActorContext]
         val entry = AuditEntry(
             ts = start,
             actor = actor?.actorId ?: LOCAL_ACTOR,
@@ -252,14 +254,14 @@ class AgentLoop(
             tool = req.toolName,
             risk = req.riskLevel,
             args = redactArguments(req.argumentsJson).take(4000),
-            decision = if (allowed) "allowed" else "denied",
+            decision = if (outcome == "denied") "denied" else "allowed",
             rule = when {
                 req.riskLevel == RiskLevel.SAFE -> "safe"
                 req.toolName in grants -> "grant"
                 else -> notes.rules[req.callId] ?: "policy"
             },
-            outcome = if (!allowed) "denied" else if (failed) "error" else "ok",
-            result = if (allowed) redactSecrets(result).take(500) else "",
+            outcome = outcome,
+            result = redactSecrets(result).take(500),
             durationMs = System.currentTimeMillis() - start,
         )
         runCatching { sink.record(entry) }
@@ -604,11 +606,15 @@ class AgentLoop(
             val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
             // In a finally, so a stopped round still tells /undo what it changed (saveStopped persists it).
             val auditSink = currentCoroutineContext()[AuditScope]?.sink
+            val actor = currentCoroutineContext()[ActorContext]
             val toolOutcomes = try { withContext(changes) {
                 allowedCalls.zip(classified) { (call, allowed), (_, req) ->
                     async {
                         onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
                         val start = System.currentTimeMillis()
+                        fun audit(outcome: String, result: String) {
+                            if (auditSink != null) recordAudit(auditSink, actor, session, req, notes, outcome, result, start)
+                        }
                         var failed = false
                         val result = if (!allowed) {
                             failed = true
@@ -620,7 +626,7 @@ class AgentLoop(
                                         ?: runCatching { tool.execute(call.argumentsJson) }
                                         .getOrElse { e ->
                                             // A stopped turn must stop its tools, not report them as failed.
-                                            if (e is CancellationException) throw e
+                                            if (e is CancellationException) { audit("cancelled", ""); throw e }
                                             failed = true; "Error: ${e.message}"
                                         }
                                 }
@@ -631,7 +637,7 @@ class AgentLoop(
                         // this convention) — count both the same way for loop-guard/reliability purposes.
                         failed = failed || result.startsWith("Error: ")
                         onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
-                        if (auditSink != null) recordAudit(auditSink, session, req, allowed, notes, failed, result, start)
+                        audit(if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
                         ToolCallOutcome(
                             call,
                             Message(

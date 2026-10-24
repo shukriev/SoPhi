@@ -23,6 +23,11 @@ import io.mockk.Runs
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class AgentLoopAuditTest : FunSpec({
@@ -166,5 +171,53 @@ class AgentLoopAuditTest : FunSpec({
         loop(provider, sm, outerTool, audit = { entries += it }).turn(AgentSession(id = "outer"), "go", config)
 
         entries.map { it.session to it.tool } shouldBe listOf("inner" to "look", "outer" to "delegate")
+    }
+
+    test("a call cancelled mid-run is audited as cancelled and the turn ends as stopped") {
+        val entries = mutableListOf<AuditEntry>()
+        val started = CompletableDeferred<Unit>()
+        val (provider, sm) = scripted(use(ToolCall("c1", "hang", "{}")), done)
+        val l = loop(provider, sm, FakeTool("hang") { started.complete(Unit); awaitCancellation() },
+            audit = { entries += it })
+        val session = AgentSession(id = "s")
+
+        coroutineScope {
+            val job = launch { l.turn(session, "go", config) }
+            started.await()
+            job.cancelAndJoin()
+        }
+
+        val e = entries.single()
+        e.outcome shouldBe "cancelled"
+        e.decision shouldBe "allowed"
+        e.result shouldBe ""
+        session.branch().last().metadata["stopReason"] shouldBe TurnStopReason.UserStopped.name
+    }
+
+    test("a decision the policy did not note is audited with rule policy") {
+        val entries = mutableListOf<AuditEntry>()
+        val (provider, sm) = scripted(use(ToolCall("c1", "rm", "{}")), done)
+        loop(provider, sm, FakeTool("rm", RiskLevel.DESTRUCTIVE),
+            policy = { requests -> requests.associate { it.callId to true } }, audit = { entries += it })
+            .turn(AgentSession(id = "s"), "go", config)
+
+        entries.single().rule shouldBe "policy"
+    }
+
+    test("a secret straddling the truncation boundary leaves no fragment") {
+        val entries = mutableListOf<AuditEntry>()
+        val key = "sk-abcdefghijklmnopqrstuvwx"
+        // {"pad":" is 8 chars, so the key spans arg chars 3990..4017 and result chars 490..517.
+        val args = """{"pad":"${"x".repeat(3982)} $key ${"x".repeat(100)}"}"""
+        val result = "y".repeat(489) + " " + key + " " + "y".repeat(100) // the token pattern needs a non-alphanumeric before it
+        val (provider, sm) = scripted(use(ToolCall("c1", "look", args)), done)
+        loop(provider, sm, FakeTool("look") { result }, audit = { entries += it })
+            .turn(AgentSession(id = "s"), "go", config)
+
+        val e = entries.single()
+        e.args shouldNotContain "sk-abc"
+        e.result shouldNotContain "sk-abc"
+        e.args shouldNotContain "abcdefghij"
+        e.result shouldNotContain "abcdefghij"
     }
 })

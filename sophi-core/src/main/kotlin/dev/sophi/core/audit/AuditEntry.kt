@@ -5,7 +5,10 @@ import kotlinx.serialization.Serializable
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 
-/** One tool call, as written to the audit log. `args` and `result` are already redacted and truncated. */
+/**
+ * One tool call, as written to the audit log. `args` and `result` are already redacted and truncated.
+ * `decision` is `allowed` or `denied`; `outcome` is `ok`, `error`, `denied` or `cancelled` (stopped mid-run, `result` empty).
+ */
 @Serializable
 data class AuditEntry(
     val v: Int = 1,
