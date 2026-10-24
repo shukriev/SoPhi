@@ -3,6 +3,7 @@ package dev.sophi.core.audit
 import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
@@ -10,7 +11,7 @@ import kotlin.concurrent.thread
 
 private fun entry(i: Int = 0) = AuditEntry(
     ts = 1000L + i, actor = LOCAL_ACTOR, session = "s", tool = "bash", risk = RiskLevel.CAUTION,
-    args = "{}", decision = "allow", rule = "r", outcome = "ok", result = "done", durationMs = 5,
+    args = "{}", decision = "allowed", rule = "r", outcome = "ok", result = "done", durationMs = 5,
 )
 
 class JsonlAuditSinkTest : FunSpec({
@@ -22,6 +23,22 @@ class JsonlAuditSinkTest : FunSpec({
         val lines = Files.readAllLines(file)
         lines.size shouldBe 2
         lines.map { Json.decodeFromString<AuditEntry>(it) } shouldBe listOf(entry(1), entry(2))
+    }
+
+    test("each line carries every field, including defaults and a null tenant") {
+        val file = Files.createTempDirectory("audit").resolve("audit.jsonl")
+        JsonlAuditSink(file).record(entry())
+        val line = Files.readAllLines(file).single()
+        line shouldContain "\"v\":1"
+        line shouldContain "\"tenant\":null"
+        for (f in listOf("ts", "actor", "session", "tool", "risk", "args", "decision", "rule", "outcome", "result", "durationMs")) {
+            line shouldContain "\"$f\":"
+        }
+    }
+
+    test("a throwing onWarning does not escape record") {
+        val sink = JsonlAuditSink(Files.createTempDirectory("audit")) { error("boom") }
+        sink.record(entry())
     }
 
     test("record creates missing parent directories") {
