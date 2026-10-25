@@ -7,11 +7,13 @@ import dev.sophi.core.audit.noteDecision
  * to the LLM classifier when the tool has no opinion (UNKNOWN). LOW_RISK auto-approves; anything
  * else (HIGH_RISK, or a missing tool) is forwarded to [fallback] for a real human decision,
  * batched together exactly as ConfirmationPolicy already batches a round's requests.
+ * [classifierRule] is the audit rule noted when [classifier] approves (god mode, whose classifier approves everything, says "allow-all").
  */
 class AutoModeConfirmationPolicy(
     private val registry: ToolRegistry,
     private val classifier: RiskClassifier,
-    private val fallback: ConfirmationPolicy
+    private val fallback: ConfirmationPolicy,
+    private val classifierRule: String = "auto:classifier",
 ) : ConfirmationPolicy {
 
     override suspend fun confirm(requests: List<ConfirmationRequest>): Map<String, Boolean> {
@@ -26,13 +28,13 @@ class AutoModeConfirmationPolicy(
         return autoResult + humanResult
     }
 
-    /** The rule that auto-approved [request] ("auto:rule" or "auto:classifier"), or null when a human must decide. */
+    /** The rule that auto-approved [request] ("auto:rule" or [classifierRule]), or null when a human must decide. */
     private suspend fun resolve(request: ConfirmationRequest): String? {
         val tool = registry.getOrNull(request.toolName) ?: return null
         val ruleVerdict = tool.ruleVerdict(request.argumentsJson)
         return when {
             ruleVerdict != RuleVerdict.UNKNOWN -> "auto:rule".takeIf { ruleVerdict == RuleVerdict.LOW_RISK }
-            classifier.classify(tool.name, tool.description, request.riskLevel, request.argumentsJson) == RuleVerdict.LOW_RISK -> "auto:classifier"
+            classifier.classify(tool.name, tool.description, request.riskLevel, request.argumentsJson) == RuleVerdict.LOW_RISK -> classifierRule
             else -> null
         }
     }

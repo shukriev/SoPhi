@@ -1,5 +1,6 @@
 package dev.sophi.cli
 
+import dev.sophi.core.audit.DecisionNotes
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
@@ -73,6 +74,34 @@ class RemoteAwareConfirmationPolicyTest : FunSpec({
                     server.sendCommand(HubCommand.ConfirmationResponse("s1", "c1", approved = false))
 
                     result.await() shouldBe mapOf("c1" to false)
+                    hubClient.close()
+                }
+            }
+        } finally {
+            server.stop()
+        }
+    }
+    test("a remote answer is noted as the user's decision for each request") {
+        val port = freePort()
+        val server = HubServer(port)
+        server.start()
+        try {
+            runBlocking {
+                withTimeout(5000) {
+                    val hubClient = HubClient(port, sessionId = "s1")
+                    hubClient.connect(this)
+                    hubClient.publish(HubEvent.SessionRegistered("s1", null, 1L, "/repo"))
+                    delay(200)
+
+                    val policy = RemoteAwareConfirmationPolicy(ControllableTerminalPolicy(), { hubClient }, sessionId = { "s1" })
+                    val second = ConfirmationRequest("c2", "bash", "{}", RiskLevel.DESTRUCTIVE)
+                    val notes = DecisionNotes()
+                    val result = async(notes) { policy.confirm(listOf(bashRequest, second)) }
+                    delay(200)
+                    server.sendCommand(HubCommand.ConfirmationResponse("s1", "c1", approved = true))
+
+                    result.await() shouldBe mapOf("c1" to true, "c2" to true)
+                    notes.rules shouldBe mapOf("c1" to "user", "c2" to "user")
                     hubClient.close()
                 }
             }
