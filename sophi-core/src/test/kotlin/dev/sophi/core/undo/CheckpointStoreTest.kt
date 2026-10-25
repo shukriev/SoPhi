@@ -252,4 +252,25 @@ class CheckpointStoreTest : FunSpec({
         store.diffStat(c)
         store.nestedRepos(c) shouldBe listOf("vendor/lib")
     }
+
+    test("a nested repo with no commit is left out of the snapshot, which still succeeds") {
+        val (root, store, warnings) = fixture()
+        root.resolve("a.txt").writeText("a")
+        val sub = root.resolve("sub").createDirectories()
+        sh(sub, "git", "init", "-q")
+        sub.resolve("f.txt").writeText("f")
+        val nestedStatus = sh(sub, "git", "status", "--porcelain")
+        val c = store.snapshot()!!
+        warnings.single() shouldContain "sub"
+        root.resolve("a.txt").writeText("changed")
+        sub.resolve("f.txt").writeText("changed")
+        sub.resolve("g.txt").writeText("g")
+        store.restore(c)
+        root.resolve("a.txt").readText() shouldBe "a"
+        sub.resolve("f.txt").readText() shouldBe "changed"
+        sub.resolve("g.txt").readText() shouldBe "g"
+        sh(sub, "git", "rev-parse", "--git-dir").trim() shouldBe ".git"
+        sh(sub, "git", "status", "--porcelain") shouldBe nestedStatus.replace("?? f.txt\n", "?? f.txt\n?? g.txt\n")
+        store.nestedRepos(c) shouldBe listOf("sub")
+    }
 })

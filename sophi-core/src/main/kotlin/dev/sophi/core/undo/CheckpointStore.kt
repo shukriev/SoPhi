@@ -49,6 +49,8 @@ class CheckpointStore(
         else -> null
     }
     private val warned = mutableSetOf<String>()
+    /** Nested repos with no commit yet, as of the latest snapshot: `add -A` fails on them, so they are left out. */
+    @Volatile private var unbornRepos = emptyList<String>()
 
     private class Result(val code: Int, val out: String) {
         val ok get() = code == 0
@@ -123,9 +125,14 @@ class CheckpointStore(
                 left--
             }
         }
+        // a nested repo shows as one untracked "dir/" entry; read-only rev-parse inside it tells whether it has a commit
+        unbornRepos = changed.filter { it.endsWith("/") && root.resolve(it).resolve(".git").exists() &&
+            !exec(false, "-C", it, "rev-parse", "-q", "--verify", "HEAD", userRepo = true).ok }
+        for (repo in unbornRepos) warn("checkpoint: leaving out $repo, a nested git repo with no commit yet; changes inside it can't be undone")
+        left -= unbornRepos.size
         val hasHead = exec(false, "rev-parse", "-q", "--verify", "HEAD").ok
         if (left > 0 || !hasHead) {
-            if (!run("add", "-A").ok) return null
+            if (!run("add", "-A", "--", ".", *unbornRepos.map { ":(exclude,literal)$it" }.toTypedArray()).ok) return null
             if (!run("commit", "-q", "--allow-empty", "-m", "checkpoint").ok) return null
         }
         return run("rev-parse", "HEAD").takeIf { it.ok }?.out?.trim()
@@ -137,10 +144,13 @@ class CheckpointStore(
         return run("diff", "--stat", "--summary", now, to).takeIf { it.ok }?.out?.trim().orEmpty()
     }
 
-    /** Nested repos in [checkpoint] or the latest snapshot: `add -A` keeps only their commit, so edits inside them can't be undone. */
-    fun nestedRepos(checkpoint: String): List<String> = listOf(checkpoint, "HEAD")
+    /**
+     * Nested repos in [checkpoint] or the latest snapshot: `add -A` keeps only their commit, or nothing when they have none,
+     * so edits inside them can't be undone.
+     */
+    fun nestedRepos(checkpoint: String): List<String> = (listOf(checkpoint, "HEAD")
         .flatMap { sha -> exec(false, "ls-tree", "-r", "-z", sha).takeIf { it.ok }?.out?.let(::nulSplit).orEmpty() }
-        .filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') }.distinct()
+        .filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') } + unbornRepos.map { it.removeSuffix("/") }).distinct()
 
     private fun checked(vararg args: String, input: String? = null, okCodes: Set<Int> = setOf(0)): String {
         val r = exec(false, *args, input = input)
