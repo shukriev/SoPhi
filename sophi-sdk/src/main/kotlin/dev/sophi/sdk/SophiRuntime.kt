@@ -7,11 +7,11 @@ import dev.sophi.core.agent.AgentDefinition
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.plan.PlanLog
+import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.undo.FileRestorer
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint

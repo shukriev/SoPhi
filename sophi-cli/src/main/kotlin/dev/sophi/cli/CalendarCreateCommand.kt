@@ -5,6 +5,7 @@ import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.calendar.tools.CreateCalendarEventTool
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentLoop
+import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToolRegistry
@@ -20,6 +21,7 @@ class CalendarCreate(
     /** Total context window of `config.model`, in tokens — see AgentLoop. */
     private val contextWindowTokens: Int,
     private val description: String,
+    private val audit: AuditSink? = null,
     private val echo: (String) -> Unit
 ) {
     suspend fun run() {
@@ -27,7 +29,8 @@ class CalendarCreate(
         val nestedLoop = AgentLoop(
             provider, scopedRegistry, sessionManager,
             confirmationPolicy = confirmationPolicy,
-            contextWindowTokens = contextWindowTokens
+            contextWindowTokens = contextWindowTokens,
+            audit = audit
         )
         val now = ZonedDateTime.now()
         val systemPrompt = "You create exactly one calendar event from a short shorthand description using the " +

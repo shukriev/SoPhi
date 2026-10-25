@@ -310,6 +310,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             toolRegistry = cli.registry,
             planLog = cli.planLog,
             fileRestorer = cli.runtime.fileRestorer,
+            auditSink = cli.runtime.auditSink,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
             onEvent = onEvent,

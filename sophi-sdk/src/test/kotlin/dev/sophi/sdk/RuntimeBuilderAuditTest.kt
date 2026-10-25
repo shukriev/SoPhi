@@ -6,6 +6,12 @@ import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.audit.AuditEntry
 import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.schedule.model.ScheduledTask
+import dev.sophi.schedule.model.TaskMode
+import dev.sophi.schedule.model.Trigger
+import dev.sophi.schedule.notify.NoopNotifier
+import dev.sophi.schedule.store.RunLog
+import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
@@ -43,8 +49,7 @@ class RuntimeBuilderAuditTest : FunSpec({
         lines[0].contains(""""session":"$id"""") shouldBe true
     }
 
-    test("without auditLog nothing is written and auditSink is null") {
-        // No path to check: the only sink there could be is the one auditLog() builds.
+    test("without auditLog the runtime has no auditSink") {
         val runtime = builder().build()
         runBlocking { runtime.turn(runtime.newSession(), "write it") }
         runtime.auditSink shouldBe null
@@ -56,5 +61,19 @@ class RuntimeBuilderAuditTest : FunSpec({
         runBlocking { runtime.turn(runtime.newSession(), "write it") }
         got.single().tool shouldBe "write_file"
         got.single().rule shouldBe "allow-all"
+    }
+
+    test("a scheduled task run through runtime.scheduleEngine reaches the audit sink") {
+        val got = mutableListOf<AuditEntry>()
+        val runtime = builder().audit { got += it }.build()
+        val home = tempdir().toPath()
+        val tasks = TaskStore(home.resolve("tasks.json"))
+        val task = tasks.add(ScheduledTask(
+            name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "write it",
+            toolGrants = setOf("write_file")
+        ))
+        val engine = runtime.scheduleEngine(tasks, RunLog(home.resolve("runs.jsonl")), NoopNotifier)
+        runBlocking { engine.runNow(task.id) }
+        got.single().let { it.tool shouldBe "write_file"; it.rule shouldBe "grant" }
     }
 })

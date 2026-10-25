@@ -25,12 +25,12 @@ import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.agent.plan.PlanProgressEvent
+import dev.sophi.core.audit.AuditSink
+import dev.sophi.core.audit.JsonlAuditSink
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.core.audit.AuditSink
-import dev.sophi.core.audit.JsonlAuditSink
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.FileRestorer
 import dev.sophi.extensions.PluginRegistry
