@@ -299,4 +299,40 @@ class CheckpointStoreTest : FunSpec({
         CheckpointStore(root, homeIsAFile) { warnings += it }.snapshot() shouldBe null
         warnings.single() shouldContain "checkpoint:"
     }
+
+    /** A nested repo `n` with a commit, whose own config then points [key] at a script that touches a marker. */
+    fun nestedWithMarker(key: String): Triple<Path, Path, Path> {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        sh(nested, "git", "init", "-q")
+        nested.resolve(".gitattributes").writeText("* filter=mark\n")
+        nested.resolve("f.txt").writeText("f")
+        sh(nested, "git", "add", "-A")
+        sh(nested, "git", "-c", "user.name=u", "-c", "user.email=u@x", "commit", "-q", "-m", "init")
+        val marker = createTempDirectory("ckpt-marker").resolve("ran")
+        val hook = createTempDirectory("ckpt-hook").resolve("hook.sh")
+        hook.writeText("#!/bin/sh\ntouch '$marker'\ncat\n")
+        hook.toFile().setExecutable(true)
+        sh(nested, "git", "config", key, hook.toString())
+        return Triple(root, nested, marker)
+    }
+
+    test("a snapshot never runs a committed nested repo's clean filter") {
+        val (root, nested, marker) = nestedWithMarker("filter.mark.clean")
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home")) {}
+        store.snapshot()!!
+        nested.resolve("f.txt").writeText("edited")
+        store.snapshot()!!
+        marker.exists() shouldBe false
+    }
+
+    test("a snapshot never runs a committed nested repo's core.fsmonitor") {
+        val (root, nested, marker) = nestedWithMarker("core.fsmonitor")
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home")) {}
+        store.snapshot()!!
+        nested.resolve("f.txt").writeText("edited")
+        store.snapshot()!!
+        marker.exists() shouldBe false
+    }
 })
