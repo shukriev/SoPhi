@@ -29,7 +29,7 @@ import kotlinx.serialization.json.JsonObject
  * `JsonObject?` directly (delegating to `CallToolRequestParams.arguments`) — the same shape
  * assumed by the task brief, so no deviation was needed here.
  *
- * With [audit], every call writes one entry (actor = the client's handshake name, else "mcp-client"; rule "safe"
+ * With [audit], every call writes one entry (actor [mcpActor]; rule "safe"
  * or "deny-all"), redacted and capped exactly like AgentLoop's. A failing sink never changes the response.
  *
  * DESTRUCTIVE tools are never executed when called via this server: [Tool.execute] is not invoked
@@ -62,10 +62,8 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSin
             val start = System.currentTimeMillis()
             val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
             val risk = tool.riskLevel(argumentsJson)
-            // Actor: the name the client gave in its initialize handshake.
             fun audit(outcome: String, result: String) = audit?.recordQuietly {
-                val actor = server.sessions[sessionId]?.clientVersion?.name ?: "mcp-client"
-                auditEntry(actor, null, "mcp-serve:$sessionId", tool.name, risk, argumentsJson,
+                auditEntry(mcpActor(server.sessions[sessionId]?.clientVersion?.name), null, "mcp-serve:$sessionId", tool.name, risk, argumentsJson,
                     if (outcome == "denied") "deny-all" else "safe", outcome, result, start)
             }
             if (risk != RiskLevel.SAFE) {
@@ -91,3 +89,6 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSin
     }
     return server
 }
+
+/** The audit actor for an MCP client: its handshake name, prefixed so a client can't pose as "local". */
+internal fun mcpActor(clientName: String?): String = clientName?.takeIf { it.isNotBlank() }?.let { "mcp:$it" } ?: "mcp-client"

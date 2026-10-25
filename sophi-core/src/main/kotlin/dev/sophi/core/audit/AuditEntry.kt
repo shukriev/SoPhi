@@ -43,8 +43,8 @@ class ActorContext(val actorId: String, val tenantId: String? = null) : Abstract
 private const val REDACT_WINDOW = 20_000
 
 /**
- * The one way to build an entry: [argumentsJson] and [result] are redacted on a window far longer than any secret
- * pattern match, then truncated, so a cut never leaves half a secret. `decision` follows from [outcome].
+ * The one way to build an entry: [result], and each string in [argumentsJson] (parsed whole, so secret keys always
+ * go), is redacted on a window far longer than any secret pattern match, then truncated, so a cut never leaves half a secret. `decision` follows from [outcome].
  */
 fun auditEntry(
     actor: String, tenant: String?, session: String, tool: String, risk: RiskLevel, argumentsJson: String,
@@ -56,7 +56,7 @@ fun auditEntry(
     session = session,
     tool = tool,
     risk = risk,
-    args = redactArguments(argumentsJson.take(REDACT_WINDOW)).take(4000),
+    args = redactArguments(argumentsJson, REDACT_WINDOW).take(4000),
     decision = if (outcome == "denied") "denied" else "allowed",
     rule = rule,
     outcome = outcome,

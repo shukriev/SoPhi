@@ -20,10 +20,12 @@ val SECRET_PATTERNS: List<Pair<String, Regex>> = listOf(
     "gitlab_token" to Regex("glpat-[A-Za-z0-9_-]{20,}"),
     "google_api_key" to Regex("AIza[0-9A-Za-z_-]{35}"),
     "stripe_key" to Regex("(?<![A-Za-z0-9])(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"),
-    // scheme://user:password@host: the whole userinfo goes.
-    "url_credentials" to Regex("(?<=://)[^/\\s:@\"'\\\\{}]+:[^/\\s@\"'\\\\{}]+(?=@)"),
-    // curl -u / --user user:password
-    "basic_auth" to Regex("(?<=(?:^|\\s)(?:-u|--user)[ =]{1,3})[^\\s:\"'\\\\{}]+:[^\\s\"'\\\\{}]+"),
+    // scheme://user:password@host: the whole userinfo goes, up to the last @ before the host (a password may hold @).
+    "url_credentials" to Regex("(?<=://)[^/?#\\s:@\"'\\\\{}]+:[^/?#\\s\"'\\\\{}]+(?=@)"),
+    // curl -u / --user user:password, and curl's attached -uuser:password (not -u1000:1000, a docker uid:gid)
+    "basic_auth" to Regex(
+        "(?:(?<=(?:^|\\s)(?:-u|--user)[ =]{1,3})|(?<=(?:^|\\s)-u)(?=[^\\s\\d]))[^\\s:\"'\\\\{}]+:[^\\s\"'\\\\{}]+",
+    ),
     "aws_key" to Regex("AKIA[0-9A-Z]{16}"),
     "slack_token" to Regex("xox[baprs]-[A-Za-z0-9-]{10,}"),
     "jwt" to Regex("eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}"),
@@ -45,18 +47,18 @@ val SECRET_PATTERNS: List<Pair<String, Regex>> = listOf(
  * quote or backslash.
  */
 private val ASSIGNMENT = Regex(
-    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)(?:_?(?:key|base|value|id))*)" +
+    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)(?:_?(?:key|base|value|id|header|hash))*)" +
         "(\\\\?[\"']?[ \\t]*[=:](?!=)[ \\t]*)" +
         "(?!(?:true|false|null|none|nil)(?![A-Za-z0-9_])|\\d+(?:\\.\\d+)?(?![A-Za-z0-9_])|[A-Za-z_][A-Za-z0-9_.]*\\(|\\[REDACTED)" +
         // Unrolled and possessive, so the engine iterates instead of recursing once per character (a 100k-char value
-        // used to throw StackOverflowError). Last before the bare value: a quote that never closes, value up to whitespace.
-        "(\\\\\"(?:(?!\\\\\").)*+\\\\\"|\"[^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+\"|'[^'\\\\]*+(?:\\\\.[^'\\\\]*+)*+'|[\"'][^\\s'\"\\\\]++|[^\\s'\"\\\\]+)",
+        // used to throw StackOverflowError). A quote (plain or escaped) that never closes: the value up to whitespace.
+        "(\\\\\"(?:(?!\\\\\").)*+\\\\\"|\\\\\"[^\\s'\"\\\\]++|\"[^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+\"|'[^'\\\\]*+(?:\\\\.[^'\\\\]*+)*+'|[\"'][^\\s'\"\\\\]++|[^\\s'\"\\\\]+)",
 )
 
-/** A JSON key whose value is a secret: the keyword (plus an optional key/base/value/id suffix) ends it, so max_tokens stays. */
+/** A JSON key whose value is a secret: the keyword (plus optional key/base/value/id/header/hash suffixes) ends it, so max_tokens stays. */
 private val SECRET_KEY = Regex(
     "(?:password|passwd|passphrase|secret|token|api[_-]?key|authorization|credentials?|private[_-]?key|access[_-]?key)" +
-        "(?:_?(?:key|base|value|id))*$",
+        "(?:_?(?:key|base|value|id|header|hash))*$",
     RegexOption.IGNORE_CASE,
 )
 
@@ -81,18 +83,22 @@ fun redactSecrets(text: String): String =
         else m.groupValues[1] + m.groupValues[2] + v.substring(0, open) + "[REDACTED:secret]" + v.substring(v.length - close)
     }
 
-/** For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest; non-JSON input → redactSecrets(text). */
-fun redactArguments(argumentsJson: String): String {
+/**
+ * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest; non-JSON
+ * input → redactSecrets(text). The whole JSON is always parsed; [window] caps only the text each redactSecrets sees
+ * (each string value, or the non-JSON text), so a long argument keeps its key redaction.
+ */
+fun redactArguments(argumentsJson: String, window: Int = Int.MAX_VALUE): String {
     val tree = try {
         Json.parseToJsonElement(argumentsJson)
     } catch (_: Exception) {
-        return redactSecrets(argumentsJson)
+        return redactSecrets(argumentsJson.take(window))
     }
-    return tree.redacted().toString()
+    return tree.redacted(window).toString()
 }
 
-private fun JsonElement.redacted(): JsonElement = when (this) {
-    is JsonObject -> JsonObject(mapValues { (k, v) -> if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted() })
-    is JsonArray -> JsonArray(map { it.redacted() })
-    is JsonPrimitive -> if (isString) JsonPrimitive(redactSecrets(content)) else this
+private fun JsonElement.redacted(window: Int): JsonElement = when (this) {
+    is JsonObject -> JsonObject(mapValues { (k, v) -> if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(window) })
+    is JsonArray -> JsonArray(map { it.redacted(window) })
+    is JsonPrimitive -> if (isString) JsonPrimitive(redactSecrets(content.take(window))) else this
 }

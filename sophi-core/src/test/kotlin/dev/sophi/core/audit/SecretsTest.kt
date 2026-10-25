@@ -1,5 +1,6 @@
 package dev.sophi.core.audit
 
+import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -172,5 +173,43 @@ class SecretsTest : FunSpec({
         out["tokens_used"]!!.jsonPrimitive.content shouldBe "12"
         for (k in listOf("password", "apiKey", "client_secret", "Authorization", "access_token", "credentials"))
             out[k]!!.jsonPrimitive.content shouldBe "[REDACTED]"
+    }
+    test("arguments longer than the redaction window still get their secret keys redacted") {
+        val args = """{"headers":{"Authorization":"Basic dXNlcjpwYXNz"},"pin_password":123456,"credentials":{"user":"a","pass":"b"},"body":"${"z".repeat(25_000)}"}"""
+        val out = auditEntry("a", null, "s", "t", RiskLevel.SAFE, args, "safe", "ok", "", 0).args
+        out shouldNotContain "dXNlcjpwYXNz"
+        out shouldNotContain "123456"
+        out shouldNotContain "\"pass\""
+        out.length shouldBe 4000
+    }
+
+    test("an unterminated escaped-quote value in raw text is redacted") {
+        redactSecrets("""\"token\": \"hunter2hunter2 AAAA""") shouldBe """\"token\": \"[REDACTED:secret] AAAA"""
+        onDefaultStack { redactSecrets("""\"token\": \"""" + "A".repeat(100_000)) } shouldBe """\"token\": \"[REDACTED:secret]"""
+    }
+
+    test("secret keys with a header or hash suffix are redacted; look-alike names are kept") {
+        val out = Json.parseToJsonElement(redactArguments(
+            """{"authorization_header":"a","client_secret_hash":"b","max_tokens":1,"token_count":2,"tokens_used":3,"tokenizer":"cl100k","secretary":"bob"}"""
+        )).jsonObject
+        out["authorization_header"]!!.jsonPrimitive.content shouldBe "[REDACTED]"
+        out["client_secret_hash"]!!.jsonPrimitive.content shouldBe "[REDACTED]"
+        for ((k, v) in mapOf("max_tokens" to "1", "token_count" to "2", "tokens_used" to "3", "tokenizer" to "cl100k", "secretary" to "bob"))
+            out[k]!!.jsonPrimitive.content shouldBe v
+    }
+
+    test("curl's attached -uuser:pass is redacted; other -u/-U flags are unchanged") {
+        redactTokens("curl -uadmin:hunter2 x") shouldBe "curl -u[REDACTED:basic_auth] x"
+        for (t in listOf("sort -u file.txt", "psql -U admin:x", "sort -ufile.txt", "docker -u1000:1000 img")) redactTokens(t) shouldBe t
+        redactTokens("docker -u 1000:1000 img") shouldBe "docker -u [REDACTED:basic_auth] img" // as before: acceptable
+    }
+
+    test("a URL password containing @ is redacted up to the last @ before the host") {
+        redactTokens("https://a:b@c:d@host/x") shouldBe "https://[REDACTED:url_credentials]@host/x"
+        redactTokens("https://host:8080/p?e=a@b") shouldBe "https://host:8080/p?e=a@b"
+        redactTokens("https://host:8080?e=a@b") shouldBe "https://host:8080?e=a@b"
+        for (t in listOf("git@github.com:org/repo.git", "mailto:a@b.c", "ssh://git@host:22/x")) redactTokens(t) shouldBe t
+        val raw = """{"c":"url \"https://a:b@c@h\" C:\\x {u}:p@h"}"""
+        Json.parseToJsonElement(redactTokens(raw)) // still parses
     }
 })

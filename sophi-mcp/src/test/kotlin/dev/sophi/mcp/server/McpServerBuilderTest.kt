@@ -209,4 +209,9 @@ class McpServerBuilderTest : FunSpec({
         val throwing = buildMcpServer(tools, names) { throw IllegalStateException("disk full") }
         for (n in names) callTool(throwing, n) shouldBe callTool(quiet, n)
     }
+    test("a client's handshake name is prefixed, so it can't pose as the local user") {
+        mcpActor("local") shouldBe "mcp:local"
+        mcpActor(null) shouldBe "mcp-client"
+        mcpActor(" ") shouldBe "mcp-client"
+    }
 })
