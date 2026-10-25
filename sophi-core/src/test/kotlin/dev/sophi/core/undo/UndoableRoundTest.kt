@@ -74,4 +74,20 @@ class UndoableRoundTest : FunSpec({
         runBlocking { undoableRound(session, store, "goal") { } }
         session.entries.shouldBeEmpty()
     }
+
+    test("a no-op round with a dirty nested repo in the workspace appends nothing") {
+        val (root, store) = store()
+        val nested = root.resolve("n").also { it.toFile().mkdirs() }
+        fun git(vararg args: String) = ProcessBuilder(listOf("git", "-c", "user.name=u", "-c", "user.email=u@x") + args)
+            .directory(nested.toFile()).start().waitFor() shouldBe 0
+        git("init", "-q")
+        nested.resolve("f.txt").writeText("f")
+        git("add", "-A")
+        git("commit", "-q", "-m", "init")
+        nested.resolve("f.txt").writeText("dirty")
+        store.snapshot()!!
+        val session = AgentSession(id = "s")
+        runBlocking { undoableRound(session, store, "goal") { } }
+        session.entries.shouldBeEmpty()
+    }
 })

@@ -106,12 +106,14 @@ class CheckpointStore(
         if (r.ok) repoIgnores.writeText(nulSplit(r.out).joinToString("") { anchored(it) }) else repoIgnores.deleteIfExists()
     }
 
-    /** Commit sha of the workspace as it is now, or null when git or the disk is unusable. Reuses HEAD when nothing changed. */
+    /** Commit sha of the workspace as it is now, or null (with a warning) when anything fails. Reuses HEAD when nothing changed. */
     @Synchronized
     fun snapshot(): String? = try {
         takeSnapshot()
-    } catch (e: IOException) {
-        warn("checkpoint: cannot snapshot: ${e.message}")
+    } catch (e: Exception) {
+        // a checkpoint never fails the round it guards
+        if (e is InterruptedException) Thread.currentThread().interrupt()
+        warn("checkpoint: cannot snapshot: ${e.message ?: e}")
         null
     }
 
@@ -144,7 +146,9 @@ class CheckpointStore(
         val hasHead = exec(false, "rev-parse", "-q", "--verify", "HEAD").ok
         if (left > 0 || !hasHead) {
             if (!run("add", "-A", "--", ".", *unbornRepos.map { ":(exclude,literal)$it" }.toTypedArray()).ok) return null
-            if (!run("commit", "-q", "--allow-empty", "-m", "checkpoint").ok) return null
+            // status can list a change the index doesn't keep (a nested repo's dirty content): same tree, same checkpoint
+            val sameTree = hasHead && exec(false, "diff", "--cached", "--quiet", "HEAD").ok
+            if (!sameTree && !run("commit", "-q", "--allow-empty", "-m", "checkpoint").ok) return null
         }
         return run("rev-parse", "HEAD").takeIf { it.ok }?.out?.trim()
     }
