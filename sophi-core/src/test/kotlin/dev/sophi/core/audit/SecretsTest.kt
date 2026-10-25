@@ -6,8 +6,10 @@ import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldEndWith
 import io.kotest.matchers.string.shouldNotContain
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -217,16 +219,49 @@ class SecretsTest : FunSpec({
     }
     fun entryFor(args: String, result: String = "") = auditEntry("a", null, "s", "t", RiskLevel.SAFE, args, "safe", "ok", result, 0)
 
-    test("suffix bombs and deep nesting still produce a redacted entry on a default stack") {
-        val keyBomb = onDefaultStack { entryFor("""{"token${"key".repeat(3000)}":"hunter2"}""").args }
-        keyBomb shouldNotContain "hunter2"
-        val textBomb = onDefaultStack { entryFor("{}", "token${"_key".repeat(6000)}=hunter2").result }
-        textBomb shouldNotContain "hunter2"
-        onDefaultStack { redactSecrets("token${"_key".repeat(6000)}=hunter2") } shouldNotContain "hunter2"
-        val deep = "[".repeat(5000) + "\"password=hunter2\"" + "]".repeat(5000)
-        val deepArgs = onDefaultStack { entryFor(deep).args }
-        deepArgs shouldNotContain "hunter2"
-        deepArgs.length shouldBeGreaterThan 0
+    test("suffix bombs are redacted inside the kept output, on a default stack") {
+        // No window or cap, so the secret is in the output and the possessive suffix loop is what's exercised.
+        onDefaultStack { redactArguments("""{"token${"key".repeat(3000)}":"hunter2","x":1}""") } shouldEndWith """":"[REDACTED]","x":1}"""
+        onDefaultStack { redactSecrets("token${"_key".repeat(6000)}=hunter2 tail") } shouldEndWith "_key=[REDACTED:secret] tail"
+        // And as entries: written, not dropped.
+        onDefaultStack { entryFor("""{"token${"key".repeat(3000)}":"hunter2"}""", "token${"_key".repeat(6000)}=hunter2").args } shouldNotContain "hunter2"
+    }
+
+    test("JSON nested too deep to walk keeps its key redaction or fails closed") {
+        val args = """{"headers":{"Authorization":"Basic dXNlcjpwYXNz"},"pin_password":123456,"credentials":{"user":"a","pass":"b"},"x":${"[".repeat(5000)}1${"]".repeat(5000)}}"""
+        val out = onDefaultStack { entryFor(args).args }
+        for (secret in listOf("dXNlcjpwYXNz", "123456", "\"pass\"")) out shouldNotContain secret
+        if (out != "[unredactable]") Json.parseToJsonElement(out)
+    }
+
+    test("URL passwords may hold commas; a comma after the host still ends the userinfo") {
+        redactTokens("https://user:pa,ss@h.com/x") shouldBe "https://[REDACTED:url_credentials]@h.com/x"
+        redactTokens("git clone https://bob:s3cr,et@github.com/x") shouldBe "git clone https://[REDACTED:url_credentials]@github.com/x"
+        redactTokens("https://u:p@h.com,me@x.com") shouldBe "https://[REDACTED:url_credentials]@h.com,me@x.com"
+        redactTokens("https://a:b@c:d@host/x") shouldBe "https://[REDACTED:url_credentials]@host/x"
+        for (t in listOf("git@github.com:org/repo.git", "mailto:a@b.c")) redactTokens(t) shouldBe t
+        Json.parseToJsonElement(redactTokens("""{"c":"https://u:p,\"q@h"}"""))
+    }
+
+    test("redaction work is bounded by input redacted, not output kept") {
+        val big = (1..450).joinToString(",", "[", "]") { "\"${"A".repeat(20_001)}\"" }
+        val values = Json.parseToJsonElement(redactArguments(big, 20_000, budget = 4000, work = 100_000))
+            .jsonArray.map { it.jsonPrimitive.content }
+        values.count { it != "[…]" } shouldBe 5 // 100k of work / 20k per value
+    }
+
+    test("a long URL password cut by the window leaves nothing after the scheme") {
+        val pw = "a!".repeat(1500)
+        val text = "Bearer ${"A".repeat(17_000)} https://u:$pw@h.com"
+        val args = entryFor("""{"b":"$text"}""").args
+        args shouldNotContain "a!a!"
+        redactArguments(text, 20_000) shouldNotContain "a!a!" // non-JSON fallback
+        redactWindowed(text, 20_000) shouldNotContain "a!a!" // the result path
+        redactWindowed(text, 20_000) shouldEndWith "https://…"
+    }
+
+    test("free-text authorization_header assignments are redacted") {
+        redactSecrets("authorization_header: abc123") shouldBe "authorization_header: [REDACTED:secret]"
     }
 
     test("a token cut by the window edge leaves no fragment, even after redaction shrinks the text") {

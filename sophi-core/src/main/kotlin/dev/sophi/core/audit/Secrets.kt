@@ -20,8 +20,12 @@ val SECRET_PATTERNS: List<Pair<String, Regex>> = listOf(
     "gitlab_token" to Regex("glpat-[A-Za-z0-9_-]{20,}"),
     "google_api_key" to Regex("AIza[0-9A-Za-z_-]{35}"),
     "stripe_key" to Regex("(?<![A-Za-z0-9])(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"),
-    // scheme://user:password@host: the whole userinfo goes, up to the last @ before the host (a password may hold @).
-    "url_credentials" to Regex("(?<=://)[^/?#,\\s:@\"'\\\\{}]+:[^/?#,\\s\"'\\\\{}]+(?=@)"),
+    // scheme://user:password@host: the whole userinfo goes, up to the last @ before the host. A password may hold @ and
+    // commas, but no comma after an @ (https://u:p@h.com,me@x.com keeps h.com). Each @-segment must itself be followed
+    // by an @, so the loop is possessive and never backtracks.
+    "url_credentials" to Regex(
+        "(?<=://)[^/?#,\\s:@\"'\\\\{}]+:[^/?#\\s\"'\\\\{}@]+(?:@[^/?#,\\s\"'\\\\{}@]+(?=@))*+(?=@)",
+    ),
     // curl -u / --user user:password, and curl's attached -uuser:password (not -u1000:1000, a docker uid:gid)
     "basic_auth" to Regex(
         "(?:(?<=(?:^|\\s)(?:-u|--user)[ =]{1,3})|(?<=(?:^|\\s)-u)(?=[^\\s\\d]))[^\\s:\"'\\\\{}]+:[^\\s\"'\\\\{}]+",
@@ -47,7 +51,7 @@ val SECRET_PATTERNS: List<Pair<String, Regex>> = listOf(
  * quote or backslash.
  */
 private val ASSIGNMENT = Regex(
-    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)(?:_?(?:key|base|value|id|header|hash))*+)" +
+    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?|authorization)(?:_?(?:key|base|value|id|header|hash))*+)" +
         "(\\\\?[\"']?[ \\t]*[=:](?!=)[ \\t]*)" +
         "(?!(?:true|false|null|none|nil)(?![A-Za-z0-9_])|\\d+(?:\\.\\d+)?(?![A-Za-z0-9_])|[A-Za-z_][A-Za-z0-9_.]*\\(|\\[REDACTED)" +
         // Unrolled and possessive, so the engine iterates instead of recursing once per character (a 100k-char value
@@ -84,38 +88,56 @@ fun redactSecrets(text: String): String =
     }
 
 private val PRIVATE_KEY_BEGIN = Regex("-----BEGIN [A-Z ]*PRIVATE KEY-----")
+// A URL whose userinfo runs into the cut: no @, path or terminator after the scheme.
+private val URL_TO_CUT = Regex("(?<=://)[^/?#\\s\"'\\\\{}@]*$")
 private const val WINDOW_EDGE = 200
+private const val MAX_JSON_DEPTH = 200
+const val UNREDACTABLE = "[unredactable]"
 
 /**
  * [redactSecrets] on at most [window] chars of [text]. When the window cut the text, a secret may have been cut below
- * its pattern's minimum length and survived, so the trailing [WINDOW_EDGE] chars go, then the token-shaped run (and any
- * unclosed private key) ending there, and "…" marks the cut.
+ * its pattern's minimum length and survived, so the trailing [WINDOW_EDGE] chars go, then the token-shaped run, a URL
+ * userinfo, or an unclosed private key ending there, and "…" marks the cut.
  */
 fun redactWindowed(text: String, window: Int): String {
     if (text.length <= window) return redactSecrets(text)
     var out = redactSecrets(text.take(window)).dropLast(WINDOW_EDGE).dropLastWhile { it.isLetterOrDigit() || it in "._~+/=-" } // TOKEN_CHARS, the alphabet of every token pattern
+    URL_TO_CUT.find(out)?.let { out = out.substring(0, it.range.first) }
     PRIVATE_KEY_BEGIN.find(out)?.let { out = out.substring(0, it.range.first) }
     return "$out…"
 }
 
 /**
- * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest; non-JSON
- * input → redactSecrets(text). The whole JSON is always parsed; [window] caps only the text each redaction sees (each
- * string value, or the non-JSON text, see [redactWindowed]), so a long argument keeps its key redaction. Once [budget]
- * output chars are redacted, later strings become "[…]": a caller that keeps only the first [budget] chars never pays
- * for the rest. JSON nested too deep to walk (StackOverflowError) falls back to the text path.
+ * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest. The whole
+ * JSON is always parsed; [window] caps the text each redaction sees (see [redactWindowed]), so a long argument keeps its
+ * key redaction. Later strings become "[…]" once [budget] output chars are kept or [work] input chars were redacted, and
+ * so does anything nested deeper than [MAX_JSON_DEPTH]. Only input that isn't JSON at all is redacted as text; JSON that
+ * still can't be redacted fails closed to [UNREDACTABLE].
  */
-fun redactArguments(argumentsJson: String, window: Int = Int.MAX_VALUE, budget: Int = Int.MAX_VALUE): String = try {
-    var left = budget
-    fun JsonElement.redacted(): JsonElement = when (this) {
-        is JsonObject -> JsonObject(mapValues { (k, v) -> left -= k.length; if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted() })
-        is JsonArray -> JsonArray(map { it.redacted() })
-        is JsonPrimitive -> if (!isString) this else if (left <= 0) JsonPrimitive("[…]")
-            else JsonPrimitive(redactWindowed(content, window)).also { left -= it.content.length }
+fun redactArguments(
+    argumentsJson: String, window: Int = Int.MAX_VALUE, budget: Int = Int.MAX_VALUE, work: Int = Int.MAX_VALUE,
+): String {
+    val tree = try {
+        Json.parseToJsonElement(argumentsJson)
+    } catch (_: Exception) {
+        return redactWindowed(argumentsJson, window)
+    } catch (_: StackOverflowError) {
+        return UNREDACTABLE
     }
-    Json.parseToJsonElement(argumentsJson).redacted().toString()
-} catch (_: Exception) {
-    redactWindowed(argumentsJson, window)
-} catch (_: StackOverflowError) {
-    redactWindowed(argumentsJson, window)
+    var left = budget
+    var workLeft = work
+    fun JsonElement.redacted(depth: Int): JsonElement = when {
+        depth > MAX_JSON_DEPTH -> JsonPrimitive("[…]")
+        this is JsonObject -> JsonObject(mapValues { (k, v) ->
+            left -= k.length
+            if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(depth + 1)
+        })
+        this is JsonArray -> JsonArray(map { it.redacted(depth + 1) })
+        this is JsonPrimitive && isString -> if (left <= 0 || workLeft <= 0) JsonPrimitive("[…]") else {
+            workLeft -= minOf(content.length, window)
+            JsonPrimitive(redactWindowed(content, window)).also { left -= it.content.length }
+        }
+        else -> this
+    }
+    return runCatching { tree.redacted(0).toString() }.getOrDefault(UNREDACTABLE)
 }

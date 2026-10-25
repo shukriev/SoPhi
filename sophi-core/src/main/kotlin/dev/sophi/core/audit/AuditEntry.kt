@@ -41,7 +41,6 @@ class ActorContext(val actorId: String, val tenantId: String? = null) : Abstract
 // ponytail: each string is redacted on its first 20k chars and a cut window loses its last ~200 chars plus the token
 // run there (see redactWindowed), so a long value shows less than it could; widen the window if that ever matters.
 private const val REDACT_WINDOW = 20_000
-private const val UNREDACTABLE = "[unredactable]"
 
 /**
  * The one way to build an entry: [result], and each string in [argumentsJson] (parsed whole, so secret keys always
@@ -58,7 +57,7 @@ fun auditEntry(
     session = session,
     tool = tool,
     risk = risk,
-    args = runCatching { redactArguments(argumentsJson, REDACT_WINDOW, budget = 4000).take(4000) }.getOrDefault(UNREDACTABLE),
+    args = runCatching { redactArguments(argumentsJson, REDACT_WINDOW, budget = 4000, work = 5 * REDACT_WINDOW).take(4000) }.getOrDefault(UNREDACTABLE),
     decision = if (outcome == "denied") "denied" else "allowed",
     rule = rule,
     outcome = outcome,
