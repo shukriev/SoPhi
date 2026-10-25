@@ -1,5 +1,6 @@
 package dev.sophi.mcp.server
 
+import dev.sophi.core.audit.AuditEntry
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.mcp.StdioMcpConnector
@@ -8,8 +9,17 @@ import dev.sophi.mcp.config.McpTransport
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import io.mockk.every
+import io.mockk.mockk
+import io.modelcontextprotocol.kotlin.sdk.server.ClientConnection
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequestParams
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.nio.file.Files
 
 private fun fakeTool(toolName: String, risk: RiskLevel = RiskLevel.SAFE, parametersJson: String = "{}") =
@@ -133,5 +143,70 @@ class McpServerBuilderTest : FunSpec({
         echo.inputSchemaJson shouldContain "\"properties\""
         echo.inputSchemaJson shouldContain "\"text\""
         echo.inputSchemaJson shouldContain "\"required\""
+    }
+    // Calls an exposed tool's handler in process, as the SDK does for a connected client.
+    fun callTool(server: io.modelcontextprotocol.kotlin.sdk.server.Server, name: String, args: String = "{}") = runBlocking {
+        val connection = mockk<ClientConnection> { every { sessionId } returns "conn-1" }
+        server.tools.getValue(name).handler.invoke(
+            connection, CallToolRequest(CallToolRequestParams(name, Json.parseToJsonElement(args).jsonObject))
+        )
+    }
+
+    test("an allowed SAFE call writes one redacted audit entry") {
+        val entries = mutableListOf<AuditEntry>()
+        val server = buildMcpServer(listOf(fakeTool("grep")), setOf("grep"), audit = { entries += it })
+
+        callTool(server, "grep", """{"password":"hunter2"}""").isError shouldNotBe true
+
+        val e = entries.single()
+        e.actor shouldBe "mcp-client"
+        e.session shouldBe "mcp-serve:conn-1"
+        e.tool shouldBe "grep"
+        e.rule shouldBe "safe"
+        e.decision shouldBe "allowed"
+        e.outcome shouldBe "ok"
+        e.result shouldBe "ok"
+        e.args shouldNotContain "hunter2"
+    }
+
+    test("a refused non-SAFE call writes one denied entry and is not executed") {
+        val entries = mutableListOf<AuditEntry>()
+        var executed = 0
+        val rm = object : Tool {
+            override val name = "rm"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed++; return "gone" }
+        }
+        val server = buildMcpServer(listOf(rm), setOf("rm"), audit = { entries += it })
+
+        callTool(server, "rm").isError shouldBe true
+
+        executed shouldBe 0
+        val e = entries.single()
+        e.decision shouldBe "denied"
+        e.outcome shouldBe "denied"
+        e.rule shouldBe "deny-all"
+        e.result shouldBe ""
+    }
+
+    test("a failing SAFE call is audited as error, and a throwing sink does not change any response") {
+        val boom = object : Tool {
+            override val name = "boom"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.SAFE
+            override suspend fun execute(argumentsJson: String): String = error("kaput")
+        }
+        val entries = mutableListOf<AuditEntry>()
+        callTool(buildMcpServer(listOf(boom), setOf("boom"), audit = { entries += it }), "boom")
+        entries.single().outcome shouldBe "error"
+
+        val tools = listOf(fakeTool("grep"), fakeTool("rm", RiskLevel.DESTRUCTIVE), boom)
+        val names = setOf("grep", "rm", "boom")
+        val quiet = buildMcpServer(tools, names)
+        val throwing = buildMcpServer(tools, names) { throw IllegalStateException("disk full") }
+        for (n in names) callTool(throwing, n) shouldBe callTool(quiet, n)
     }
 })

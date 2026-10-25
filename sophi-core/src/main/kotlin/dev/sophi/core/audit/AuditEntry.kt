@@ -37,3 +37,34 @@ const val LOCAL_ACTOR = "local"
 class ActorContext(val actorId: String, val tenantId: String? = null) : AbstractCoroutineContextElement(Key) {
     companion object Key : CoroutineContext.Key<ActorContext>
 }
+
+// ponytail: a value redacted from far longer to far shorter (a 19k-char quoted secret) can pull the window's cut edge
+// into the kept 500/4000 chars; redact the whole text if that ever matters more than ~150 ms per MB.
+private const val REDACT_WINDOW = 20_000
+
+/**
+ * The one way to build an entry: [argumentsJson] and [result] are redacted on a window far longer than any secret
+ * pattern match, then truncated, so a cut never leaves half a secret. `decision` follows from [outcome].
+ */
+fun auditEntry(
+    actor: String, tenant: String?, session: String, tool: String, risk: RiskLevel, argumentsJson: String,
+    rule: String, outcome: String, result: String, start: Long,
+) = AuditEntry(
+    ts = start,
+    actor = actor,
+    tenant = tenant,
+    session = session,
+    tool = tool,
+    risk = risk,
+    args = redactArguments(argumentsJson.take(REDACT_WINDOW)).take(4000),
+    decision = if (outcome == "denied") "denied" else "allowed",
+    rule = rule,
+    outcome = outcome,
+    result = redactSecrets(result.take(REDACT_WINDOW)).take(500),
+    durationMs = System.currentTimeMillis() - start,
+)
+
+/** Builds and records an entry; anything thrown on the way, Errors included (a regex overflow), drops only this entry. */
+fun AuditSink.recordQuietly(entry: () -> AuditEntry) {
+    runCatching { record(entry()) }
+}

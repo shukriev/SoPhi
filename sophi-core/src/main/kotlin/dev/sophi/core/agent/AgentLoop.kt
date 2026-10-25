@@ -10,13 +10,12 @@ import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.audit.ActorContext
-import dev.sophi.core.audit.AuditEntry
 import dev.sophi.core.audit.AuditScope
 import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.audit.DecisionNotes
 import dev.sophi.core.audit.LOCAL_ACTOR
-import dev.sophi.core.audit.redactArguments
-import dev.sophi.core.audit.redactSecrets
+import dev.sophi.core.audit.auditEntry
+import dev.sophi.core.audit.recordQuietly
 import dev.sophi.core.context.CompactionMode
 import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.context.Elider
@@ -100,10 +99,6 @@ private const val CHARS_PER_TOKEN_ESTIMATE = 4
  * actual configured window instead.
  */
 private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
-
-// ponytail: a value redacted from far longer to far shorter (a 19k-char quoted secret) can pull the window's cut edge
-// into the kept 500/4000 chars; redact the whole text if that ever matters more than ~150 ms per MB.
-private const val AUDIT_REDACT_WINDOW = 20_000
 
 /**
  * Why a turn ended via [AgentLoop.finishEarly] rather than a normal completion. Callers (e.g.
@@ -243,33 +238,20 @@ class AgentLoop(
     }
 
     /**
-     * Writes [req]'s audit entry. Never fails the call: anything thrown while building or writing it, Errors
-     * included (a pathological input overflowing a redaction regex), drops this one entry. Not suspending,
-     * so a cancelled call can still be recorded on its way out. Redaction runs on a window far longer than
-     * any secret pattern match, then the window is truncated, so a cut never leaves half a secret.
+     * Writes [req]'s audit entry. Never fails the call (see [recordQuietly]). Not suspending,
+     * so a cancelled call can still be recorded on its way out.
      */
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
         notes: DecisionNotes, outcome: String, result: String, start: Long
-    ) {
-        runCatching { sink.record(AuditEntry(
-            ts = start,
-            actor = actor?.actorId ?: LOCAL_ACTOR,
-            tenant = actor?.tenantId,
-            session = session.id,
-            tool = req.toolName,
-            risk = req.riskLevel,
-            args = redactArguments(req.argumentsJson.take(AUDIT_REDACT_WINDOW)).take(4000),
-            decision = if (outcome == "denied") "denied" else "allowed",
-            rule = when {
-                req.riskLevel == RiskLevel.SAFE -> "safe"
-                req.toolName in grants -> "grant"
-                else -> notes.rules[req.callId] ?: "policy"
-            },
-            outcome = outcome,
-            result = redactSecrets(result.take(AUDIT_REDACT_WINDOW)).take(500),
-            durationMs = System.currentTimeMillis() - start,
-        )) }
+    ) = sink.recordQuietly {
+        val rule = when {
+            req.riskLevel == RiskLevel.SAFE -> "safe"
+            req.toolName in grants -> "grant"
+            else -> notes.rules[req.callId] ?: "policy"
+        }
+        auditEntry(actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId, session.id, req.toolName, req.riskLevel,
+            req.argumentsJson, rule, outcome, result, start)
     }
 
     /**
