@@ -16,6 +16,7 @@ import dev.sophi.core.agent.plan.StepCritic
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.FileWriteTool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.undo.CheckpointStore
@@ -239,5 +240,35 @@ class GoalControllerTest : FunSpec({
         plan.targetEntryId shouldBe session.entries.single { it.content == "[goal file changes]" }.id
         FileRestorer(store).apply(session, plan)
         root.resolve("x.txt").exists() shouldBe false
+    }
+
+    test("a goal step's bash command that reaches outside the workspace shows up in /undo's warnings") {
+        val root = createTempDirectory("goal-root")
+        val store = CheckpointStore(root, createTempDirectory("goal-ckpt")) {}
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "bash", """{"command":"cat /etc/hosts > out.txt"}""")))),
+            flowOf(StreamEvent.Content("done"))
+        )
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        val sm = sessionManager()
+        val gc = GoalController(
+            agentLoop = AgentLoop(provider, ToolRegistry().register(BashTool(root)), sm, contextWindowTokens = TEST_CONTEXT_WINDOW),
+            sessionManager = sm, provider = provider, planner = planner,
+            critic = StepCritic { _, _ -> 1.0 },
+            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
+            planLog = PlanLog(tempdir().toPath()),
+            input = ScriptedInputSource(listOf("y")),
+            liveRegion = LiveRegion(StringBuilder()) { 80 },
+            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
+            learning = null, checkpoints = store, onTurnSettled = { _, _, _ -> }
+        ) {}
+        val session = AgentSession(id = "s1")
+
+        runBlocking { gc.run(session, "copy hosts") }
+
+        FileRestorer(store).plan(session)!!.warnings shouldBe listOf("cat /etc/hosts > out.txt")
     }
 })

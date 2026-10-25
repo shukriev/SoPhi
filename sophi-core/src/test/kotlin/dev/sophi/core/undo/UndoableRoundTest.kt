@@ -58,7 +58,10 @@ class UndoableRoundTest : FunSpec({
     }
 
     test("a snapshot that throws never blocks the run") {
-        val store = io.mockk.mockk<CheckpointStore> { io.mockk.every { snapshot() } throws IllegalStateException("disk gone") }
+        val store = io.mockk.mockk<CheckpointStore> {
+            io.mockk.every { snapshot() } throws IllegalStateException("disk gone")
+            io.mockk.every { root } returns java.nio.file.Path.of("/w")
+        }
         val session = AgentSession(id = "s")
         runBlocking { undoableRound(session, store, "goal") { 7 } } shouldBe 7
         session.entries.shouldBeEmpty()
