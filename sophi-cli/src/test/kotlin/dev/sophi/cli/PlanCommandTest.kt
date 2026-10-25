@@ -226,4 +226,30 @@ class PlanCommandTest : FunSpec({
 
         output.single() shouldBe "Planning is not available (no tools configured)."
     }
+
+    test("a run that throws still saves the session with its undo round") {
+        val root = tempdir().toPath()
+        val store = dev.sophi.core.undo.CheckpointStore(root, tempdir().toPath()) {}
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        val sm = FileSessionManager(tempdir().toPath())
+        val session = AgentSession(id = "s1")
+        sm.save(session)
+        // plan log append sits outside PlanRunner's step catch: a plans dir turned into a file makes run() throw
+        val plansDir = tempdir().toPath()
+        val brokenLog = dev.sophi.core.agent.plan.PlanLog(plansDir)
+        plansDir.toFile().delete()
+        plansDir.toFile().writeText("not a dir")
+        val cmd = PlanCommand(
+            provider = provider, registry = ToolRegistry(), sessionManager = sm,
+            config = AgentConfig(model = "test-model"), contextWindowTokens = TEST_CONTEXT_WINDOW,
+            confirmationPolicy = ConfirmationPolicy.ALLOW_ALL, planLog = brokenLog,
+            checkpoints = store, echo = { output.add(it) }
+        )
+
+        runCatching { runBlocking { cmd.run("ship it", session) } }.isFailure shouldBe true
+
+        runBlocking { sm.load("s1") }.entries.map { it.content } shouldContain "[plan file changes]"
+    }
 })
