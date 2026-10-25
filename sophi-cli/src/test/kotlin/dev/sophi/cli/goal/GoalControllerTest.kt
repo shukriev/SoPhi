@@ -16,7 +16,10 @@ import dev.sophi.core.agent.plan.StepCritic
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.FileWriteTool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.undo.CheckpointStore
+import dev.sophi.core.undo.FileRestorer
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import io.kotest.core.spec.style.FunSpec
@@ -34,6 +37,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.exists
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
@@ -201,5 +205,39 @@ class GoalControllerTest : FunSpec({
 
         result.shouldBeInstanceOf<GoalRunResult.Ran>()
         session.entries.any { it.content.contains("[goal interrupted") } shouldBe true
+    }
+
+    test("/undo right after a goal reverses the files its steps wrote") {
+        val root = createTempDirectory("goal-root")
+        val store = CheckpointStore(root, createTempDirectory("goal-ckpt")) {}
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "write_file", """{"path":"x.txt","content":"hi"}""")))),
+            flowOf(StreamEvent.Content("done"))
+        )
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        val sm = sessionManager()
+        val gc = GoalController(
+            agentLoop = AgentLoop(provider, ToolRegistry().register(FileWriteTool(root)), sm, contextWindowTokens = TEST_CONTEXT_WINDOW),
+            sessionManager = sm, provider = provider, planner = planner,
+            critic = StepCritic { _, _ -> 1.0 },
+            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
+            planLog = PlanLog(tempdir().toPath()),
+            input = ScriptedInputSource(listOf("y")),
+            liveRegion = LiveRegion(StringBuilder()) { 80 },
+            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
+            learning = null, checkpoints = store, onTurnSettled = { _, _, _ -> }
+        ) {}
+        val session = AgentSession(id = "s1")
+
+        runBlocking { gc.run(session, "write x") }
+        root.resolve("x.txt").exists() shouldBe true
+
+        val plan = FileRestorer(store).plan(session)!!
+        plan.targetEntryId shouldBe session.entries.single { it.content == "[goal file changes]" }.id
+        FileRestorer(store).apply(session, plan)
+        root.resolve("x.txt").exists() shouldBe false
     }
 })

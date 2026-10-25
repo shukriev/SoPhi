@@ -11,6 +11,7 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.FileRestorer
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
@@ -62,9 +63,11 @@ class SophiRuntime internal constructor(
     /** Public so the CLI's /compact uses the same mode as the loop. */
     val compactionMode: dev.sophi.core.context.CompactionMode = dev.sophi.core.context.CompactionMode.STRUCTURED,
     private val deferToolsOver: Int = dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER,
-    /** Always present: with [RuntimeBuilder.checkpoints] off it still reverses recorded moves. */
-    val fileRestorer: FileRestorer = FileRestorer(null)
+    /** Null when [RuntimeBuilder.checkpoints] is off. Public so a host running its own loops (/goal, /plan) snapshots too. */
+    val checkpointStore: CheckpointStore? = null
 ) {
+    /** Always present: with [RuntimeBuilder.checkpoints] off it still reverses recorded moves. */
+    val fileRestorer: FileRestorer = FileRestorer(checkpointStore)
     private val skillInstaller = SkillInstaller()
     private val proposalStore get() = ProposalStore(schedulesDir.resolve("proposals.jsonl"))
 
