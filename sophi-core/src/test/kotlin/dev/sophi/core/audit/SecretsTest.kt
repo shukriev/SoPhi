@@ -126,4 +126,51 @@ class SecretsTest : FunSpec({
         redactSecrets("PRIVATE_KEY=abc") shouldBe "PRIVATE_KEY=[REDACTED:secret]"
         redactSecrets("secretKey: abc") shouldBe "secretKey: [REDACTED:secret]"
     }
+    // Each redaction on its own thread with the JVM's default stack, as a tool coroutine would run it.
+    fun onDefaultStack(block: () -> String): String {
+        var out: Result<String>? = null
+        Thread { out = runCatching(block) }.apply { start(); join() }
+        return out!!.getOrThrow()
+    }
+
+    test("a huge quoted secret value, terminated or not, is redacted without overflowing the stack") {
+        val big = "A".repeat(120_000)
+        onDefaultStack { redactSecrets("secret=\"$big\" tail") } shouldBe "secret=\"[REDACTED:secret]\" tail"
+        onDefaultStack { redactSecrets("secret='$big' tail") } shouldBe "secret='[REDACTED:secret]' tail"
+        // Unterminated (a fetched page cut mid-attribute): the value up to the next whitespace still goes.
+        onDefaultStack { redactSecrets("secret=\"$big") } shouldBe "secret=\"[REDACTED:secret]"
+        onDefaultStack { redactSecrets("""{\"token\": \"$big\"}""") } shouldNotContain "AAAA"
+        onDefaultStack { redactSecrets("secret=\"" + "a\\\"b".repeat(40_000)) }  // many escapes, unterminated
+        val nested = onDefaultStack { redactArguments("""{"content":"{\"token\": \"$big\"}"}""") }
+        nested shouldNotContain "AAAA"
+        Json.parseToJsonElement(nested)
+    }
+
+    test("credentials in URLs, curl -u and vendor key prefixes are redacted") {
+        redactSecrets("curl https://admin:hunter2@host/x") shouldBe "curl https://[REDACTED:url_credentials]@host/x"
+        redactSecrets("DATABASE_URL=postgres://u:p4ssw0rd@db:5432/app") shouldNotContain "p4ssw0rd"
+        redactTokens("postgres://u:p4ssw0rd@db:5432/app") shouldBe "postgres://[REDACTED:url_credentials]@db:5432/app"
+        redactSecrets("curl -u admin:hunter2 https://api.example.com") shouldBe "curl -u [REDACTED:basic_auth] https://api.example.com"
+        redactSecrets("curl --user admin:hunter2 x") shouldBe "curl --user [REDACTED:basic_auth] x"
+        val keys = mapOf(
+            "sk_live_" + "a1".repeat(12) to "stripe_key", "sk_test_" + "b2".repeat(12) to "stripe_key",
+            "rk_live_" + "c3".repeat(12) to "stripe_key", "github_pat_11ABCDEFG0123456789_abcdefghijklmnop" to "github_token",
+            "glpat-abcdefghij1234567890" to "gitlab_token", "AIzaSyA1234567890abcdefghijklmnopqrstuv" to "google_api_key",
+        )
+        for ((k, type) in keys) redactTokens("use $k now") shouldBe "use [REDACTED:$type] now"
+        // plain URLs, ports and e-mail-like text are left alone
+        for (t in listOf("https://host:8080/x", "git@github.com:org/repo.git", "mailto:a@b.c", "sort -u file.txt"))
+            redactSecrets(t) shouldBe t
+    }
+
+    test("redactArguments keeps count-like keys and redacts secret-named ones") {
+        val out = Json.parseToJsonElement(redactArguments(
+            """{"max_tokens":4096,"token_count":3,"tokens_used":12,"password":"a","apiKey":"b","client_secret":"c","Authorization":"d","access_token":"e","credentials":"f"}"""
+        )).jsonObject
+        out["max_tokens"]!!.jsonPrimitive.content shouldBe "4096"
+        out["token_count"]!!.jsonPrimitive.content shouldBe "3"
+        out["tokens_used"]!!.jsonPrimitive.content shouldBe "12"
+        for (k in listOf("password", "apiKey", "client_secret", "Authorization", "access_token", "credentials"))
+            out[k]!!.jsonPrimitive.content shouldBe "[REDACTED]"
+    }
 })

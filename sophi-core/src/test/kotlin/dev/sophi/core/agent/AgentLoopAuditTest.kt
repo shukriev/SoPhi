@@ -234,4 +234,31 @@ class AgentLoopAuditTest : FunSpec({
 
         entries.single().outcome shouldBe "ok"
     }
+    test("a tool result that is a huge unterminated quoted secret does not break the turn") {
+        val entries = mutableListOf<AuditEntry>()
+        val result = "<a secret=\"" + "A".repeat(200_000) // a fetched page cut mid-attribute
+        val (provider, sm) = scripted(use(ToolCall("c1", "fetch", "{}")), done)
+        val l = loop(provider, sm, FakeTool("fetch") { result }, audit = { entries += it })
+        // A thread with the JVM's default stack, like a real Dispatchers.Default worker.
+        var outcome: Result<AgentSession>? = null
+        Thread { outcome = runCatching { kotlinx.coroutines.runBlocking { l.turn(AgentSession(id = "s"), "go", config) } } }
+            .apply { start(); join() }
+
+        val session = outcome!!.getOrThrow()
+        session.branch().last().content shouldBe "done"
+        entries.single().result shouldNotContain "AAAA"
+    }
+
+    test("a secret at the 500-char result boundary of a large result is fully redacted") {
+        val entries = mutableListOf<AuditEntry>()
+        val key = "sk-abcdefghijklmnopqrstuvwx"
+        val result = "y".repeat(489) + " " + key + " password=\"hunter2 hunter2\" " + "y".repeat(2_000_000)
+        val (provider, sm) = scripted(use(ToolCall("c1", "look", "{}")), done)
+        loop(provider, sm, FakeTool("look") { result }, audit = { entries += it })
+            .turn(AgentSession(id = "s"), "go", config)
+
+        val e = entries.single()
+        e.result shouldNotContain "abcdefghij"
+        e.result.length shouldBe 500
+    }
 })
