@@ -273,4 +273,21 @@ class CheckpointStoreTest : FunSpec({
         sh(sub, "git", "status", "--porcelain") shouldBe nestedStatus.replace("?? f.txt\n", "?? f.txt\n?? g.txt\n")
         store.nestedRepos(c) shouldBe listOf("sub")
     }
+
+    test("a snapshot never runs the enclosing repo's core.fsmonitor, nor a nested repo's") {
+        val repo = createTempDirectory("ckpt-fsm")
+        val marker = createTempDirectory("ckpt-marker").resolve("ran")
+        val hook = repo.resolve("hook.sh")
+        hook.writeText("#!/bin/sh\ntouch '$marker'\n")
+        hook.toFile().setExecutable(true)
+        sh(repo, "git", "init", "-q")
+        sh(repo, "git", "config", "core.fsmonitor", hook.toString())
+        val root = repo.resolve("sub").createDirectories()
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        sh(nested, "git", "init", "-q")
+        sh(nested, "git", "config", "core.fsmonitor", hook.toString())
+        CheckpointStore(root, createTempDirectory("ckpt-home")) {}.snapshot()!!
+        marker.exists() shouldBe false
+    }
 })

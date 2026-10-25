@@ -66,10 +66,13 @@ class CheckpointStore(
         val log = Files.createTempFile("sophi-git", ".out")
         val stdin = input?.let { Files.createTempFile("sophi-git", ".in").apply { writeText(it) } }
         try {
-            // user's global config must not leak in: signing would prompt, hooksPath would run their hooks
-            val cmd = if (userRepo) listOf(git, "--no-optional-locks", *args) else listOf(
+            // Config that runs a program: a repo SoPhi doesn't own (or the user's global config) would otherwise run it on
+            // every snapshot, unconfirmed: core.fsmonitor on any index read, hooks on any hook-running command.
+            val noExec = arrayOf("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null")
+            // user's global config must not leak in: signing would prompt
+            val cmd = if (userRepo) listOf(git, "--no-optional-locks", *noExec, *args) else listOf(
                 git, "--git-dir=$shadow", "--work-tree=$root", "-c", "user.name=sophi", "-c", "user.email=sophi@localhost",
-                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+                "-c", "commit.gpgsign=false", *noExec,
                 *(if (repoIgnores.exists()) arrayOf("-c", "core.excludesFile=$repoIgnores") else emptyArray()), *args,
             )
             val pb = ProcessBuilder(cmd).directory(root.toFile()).redirectErrorStream(true).redirectOutput(log.toFile())
