@@ -3,7 +3,7 @@ package dev.sophi.core.audit
 import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
-import io.kotest.matchers.longs.shouldBeLessThan
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -241,12 +241,13 @@ class SecretsTest : FunSpec({
 
     test("redaction stops once the argument output is past its cap") {
         val big = (1..300).joinToString(",", "{", "}") { "\"k$it\":\"password=x ${"y".repeat(30_000)}\"" }
-        val start = System.nanoTime()
-        val args = entryFor(big).args
-        val ms = (System.nanoTime() - start) / 1_000_000
-        args.length shouldBe 4000
-        args shouldNotContain "password=x"
-        ms shouldBeLessThan 2_500L // ~5 s before: every value was redacted
+        entryFor(big).args shouldNotContain "password=x"
+        // Deterministic stand-in for "fast" (~5 s before, every value redacted): past the budget nothing is redacted.
+        val values = Json.parseToJsonElement(redactArguments(big, 20_000, budget = 4000)).jsonObject.values.map { it.jsonPrimitive.content }
+        // Each value redacts to ~30 chars (its 20k window is cut), so the 4000-char budget stops after ~130 of 300.
+        values.count { it != "[…]" } shouldBeLessThan 150
+        values.last() shouldBe "[…]"
+        values.first() shouldContain "password=[REDACTED:secret]"
     }
 
     test("comma-joined URLs keep the second host") {
