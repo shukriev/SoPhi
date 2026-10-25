@@ -63,4 +63,12 @@ class UndoableRoundTest : FunSpec({
         runBlocking { undoableRound(session, store, "goal") { 7 } } shouldBe 7
         session.entries.shouldBeEmpty()
     }
+
+    test("a round that changed no files appends nothing, so it doesn't use up an /undo") {
+        val (root, store) = store()
+        root.resolve("a.txt").writeText("a")
+        val session = AgentSession(id = "s")
+        runBlocking { undoableRound(session, store, "goal") { } }
+        session.entries.shouldBeEmpty()
+    }
 })

@@ -232,7 +232,11 @@ class PlanCommandTest : FunSpec({
         val store = dev.sophi.core.undo.CheckpointStore(root, tempdir().toPath()) {}
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        // planning runs inside the round: the file it writes makes the round one /undo must keep
+        coEvery { provider.complete(any()) } answers {
+            root.resolve("x.txt").toFile().writeText("x")
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"do it"}]}""", TokenUsage(1, 1))
+        }
         val sm = FileSessionManager(tempdir().toPath())
         val session = AgentSession(id = "s1")
         sm.save(session)

@@ -31,17 +31,24 @@ class RoundChanges(private val parent: RoundChanges? = null) : AbstractCoroutine
 /**
  * Runs [block] as one round of [session] for /undo, when its tools run in nested loops on other sessions (a /goal or /plan
  * run): snapshots first, and appends one replay=false entry with the `checkpoint`/`moves` metadata AgentLoop writes, even
- * when [block] throws. Appends nothing when there is neither. The caller saves the session.
+ * when [block] throws. Appends nothing when the round changed no files. The caller saves the session.
  */
 suspend fun <T> undoableRound(session: AgentSession, checkpoints: CheckpointStore?, label: String, block: suspend () -> T): T {
     val start = System.currentTimeMillis()
     // a checkpoint failure never blocks the run
-    val meta = checkpoints?.let { runCatching { it.snapshot() }.getOrNull() }?.let { mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }.orEmpty()
+    val checkpoint = checkpoints?.let { runCatching { it.snapshot() }.getOrNull() }
+    val ms = System.currentTimeMillis() - start
     val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
     try {
         return withContext(changes) { block() }
     } finally {
-        val moves = changes.moves.takeIf { it.isNotEmpty() }?.let { mapOf("moves" to Json.encodeToString(it)) }.orEmpty()
-        if (meta.isNotEmpty() || moves.isNotEmpty()) session.append(EntryRole.ASSISTANT, "[$label file changes]", mapOf("replay" to "false") + meta + moves)
+        val moves = changes.moves
+        // an unchanged workspace snapshots to the same sha
+        val changed = checkpoint != null && runCatching { checkpoints.snapshot() }.getOrNull() != checkpoint
+        if (changed || moves.isNotEmpty()) session.append(EntryRole.ASSISTANT, "[$label file changes]", buildMap {
+            put("replay", "false")
+            if (checkpoint != null) { put("checkpoint", checkpoint); put("checkpointMs", "$ms") }
+            if (moves.isNotEmpty()) put("moves", Json.encodeToString(moves))
+        })
     }
 }
