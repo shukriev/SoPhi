@@ -290,4 +290,13 @@ class CheckpointStoreTest : FunSpec({
         CheckpointStore(root, createTempDirectory("ckpt-home")) {}.snapshot()!!
         marker.exists() shouldBe false
     }
+
+    test("an IO failure makes snapshot warn and return null instead of throwing") {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val warnings = mutableListOf<String>()
+        val homeIsAFile = kotlin.io.path.createTempFile("ckpt-home")
+        CheckpointStore(root, homeIsAFile) { warnings += it }.snapshot() shouldBe null
+        warnings.single() shouldContain "checkpoint:"
+    }
 })

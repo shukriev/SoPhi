@@ -35,7 +35,8 @@ class RoundChanges(private val parent: RoundChanges? = null) : AbstractCoroutine
  */
 suspend fun <T> undoableRound(session: AgentSession, checkpoints: CheckpointStore?, label: String, block: suspend () -> T): T {
     val start = System.currentTimeMillis()
-    val meta = checkpoints?.snapshot()?.let { mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }.orEmpty()
+    // a checkpoint failure never blocks the run
+    val meta = checkpoints?.let { runCatching { it.snapshot() }.getOrNull() }?.let { mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }.orEmpty()
     val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
     try {
         return withContext(changes) { block() }

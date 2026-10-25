@@ -105,9 +105,16 @@ class CheckpointStore(
         if (r.ok) repoIgnores.writeText(nulSplit(r.out).joinToString("") { anchored(it) }) else repoIgnores.deleteIfExists()
     }
 
-    /** Commit sha of the workspace as it is now, or null when git is unusable. Reuses HEAD when nothing changed. */
+    /** Commit sha of the workspace as it is now, or null when git or the disk is unusable. Reuses HEAD when nothing changed. */
     @Synchronized
-    fun snapshot(): String? {
+    fun snapshot(): String? = try {
+        takeSnapshot()
+    } catch (e: IOException) {
+        warn("checkpoint: cannot snapshot: ${e.message}")
+        null
+    }
+
+    private fun takeSnapshot(): String? {
         refusal?.let { warn(it); return null }
         if (!shadow.resolve("HEAD").exists()) {
             shadow.createDirectories()

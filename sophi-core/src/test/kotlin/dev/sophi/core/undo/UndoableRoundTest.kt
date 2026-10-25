@@ -56,4 +56,11 @@ class UndoableRoundTest : FunSpec({
         e.message shouldContain "boom"
         session.entries.single().metadata["moves"] shouldBe """[{"from":"/a","to":"/b"}]"""
     }
+
+    test("a snapshot that throws never blocks the run") {
+        val store = io.mockk.mockk<CheckpointStore> { io.mockk.every { snapshot() } throws IllegalStateException("disk gone") }
+        val session = AgentSession(id = "s")
+        runBlocking { undoableRound(session, store, "goal") { 7 } } shouldBe 7
+        session.entries.shouldBeEmpty()
+    }
 })
