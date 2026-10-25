@@ -134,7 +134,16 @@ In-session slash commands:
 exit / quit  end the session
 ```
 
-**Audit log.** The CLI appends every tool call, approved or denied, to `~/.sophi/audit.jsonl`, one JSON line each: `ts`, `actor`, `tenant`, `session`, `tool`, `risk`, `args`, `decision`, `rule` (what decided: `user`, `grant`, `policy`...), `outcome` (`ok`, `error`, `denied` or `cancelled`; a call cancelled before it starts, e.g. during confirmation, has no entry), `result` and `durationMs`. Secrets in args and results are redacted. Scheduled tasks are audited too, and so are calls from external MCP clients to `sophi mcp-serve` (actor `mcp:<client name>`, or `mcp-client` when it gives none; `rule` `safe` or `deny-all`). Calls made through sophi-web are not audited yet. In the SDK, `RuntimeBuilder.auditLog()` turns it on, or `audit(sink)` takes your own `AuditSink`.
+**Audit log.** The CLI appends every tool call, approved or denied, to `~/.sophi/audit.jsonl`, one JSON line each: `ts`, `actor`, `tenant`, `session`, `tool`, `risk`, `args`, `decision`, `rule` (what decided: `user`, `grant`, `policy`...), `outcome` (`ok`, `error`, `denied` or `cancelled`), `result` and `durationMs`. Secrets in args and results are redacted. Scheduled tasks are audited too, and so are calls from external MCP clients to `sophi mcp-serve` (actor `mcp:<client name>`, or `mcp-client` when it gives none; `rule` `safe` or `deny-all`). In the SDK, `RuntimeBuilder.auditLog()` turns it on, or `audit(sink)` takes your own `AuditSink`.
+
+Known limits of the audit log:
+
+- Redaction is pattern-based and best effort.
+- `args` and `result` keep a bounded sample (4,000 and 500 chars) and redaction work per entry is capped, so later values of a large call show as `[…]`.
+- A value that can't be redacted safely is logged as `[unredactable]`.
+- Secrets in shapes the patterns don't know (custom formats, encoded or split values) can still appear.
+- Calls made through sophi-web are not audited yet.
+- A call cancelled before it starts (e.g. during confirmation) has no entry.
 
 **Undo.** Before each tool round that changes files, the CLI snapshots the workspace into a shadow git repo under `~/.sophi/checkpoints` (your own repo is untouched). `/undo` and `/revert` show what they would restore and ask first. `move_file` and `delete_file` are undoable too: deletes go to `~/.sophi/trash`. Bash commands that reach outside the workspace can't be undone and are listed as warnings. In the SDK, `RuntimeBuilder.checkpoints()` (needs `builtinTools`) turns snapshots on and `SophiRuntime.fileRestorer` does the restoring.
 

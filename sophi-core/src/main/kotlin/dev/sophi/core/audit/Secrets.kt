@@ -88,10 +88,12 @@ fun redactSecrets(text: String): String =
     }
 
 private val PRIVATE_KEY_BEGIN = Regex("-----BEGIN [A-Z ]*PRIVATE KEY-----")
-// A URL whose userinfo runs into the cut: no @, path or terminator after the scheme.
-private val URL_TO_CUT = Regex("(?<=://)[^/?#\\s\"'\\\\{}@]*$")
+// A URL whose userinfo may run into the cut: no path or terminator after the scheme (an @ can be part of the password).
+private val URL_TO_CUT = Regex("(?<=://)[^/?#\\s\"'\\\\{}]*$")
 private const val WINDOW_EDGE = 200
 private const val MAX_JSON_DEPTH = 200
+// Work charged per key or string on top of its length, so empty values and many short ones still use up the budget.
+private const val WORK_PER_ITEM = 32
 const val UNREDACTABLE = "[unredactable]"
 
 /**
@@ -108,11 +110,12 @@ fun redactWindowed(text: String, window: Int): String {
 }
 
 /**
- * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest. The whole
- * JSON is always parsed; [window] caps the text each redaction sees (see [redactWindowed]), so a long argument keeps its
- * key redaction. Later strings become "[…]" once [budget] output chars are kept or [work] input chars were redacted, and
- * so does anything nested deeper than [MAX_JSON_DEPTH]. Only input that isn't JSON at all is redacted as text; JSON that
- * still can't be redacted fails closed to [UNREDACTABLE].
+ * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest, and token
+ * patterns on the keys. The whole JSON is always parsed; [window] caps the text each redaction sees (see
+ * [redactWindowed]), so a long argument keeps its key redaction. Once [budget] output chars are kept or [work] is used
+ * (each key and string costs its windowed length plus [WORK_PER_ITEM]), the rest of each object or array is replaced
+ * by one "[…]"; anything nested deeper than [MAX_JSON_DEPTH] is "[…]" too. Only input that isn't JSON-shaped is
+ * redacted as text; JSON (or almost-JSON: starts with { or [) that can't be redacted fails closed to [UNREDACTABLE].
  */
 fun redactArguments(
     argumentsJson: String, window: Int = Int.MAX_VALUE, budget: Int = Int.MAX_VALUE, work: Int = Int.MAX_VALUE,
@@ -120,21 +123,38 @@ fun redactArguments(
     val tree = try {
         Json.parseToJsonElement(argumentsJson)
     } catch (_: Exception) {
-        return redactWindowed(argumentsJson, window)
+        val start = argumentsJson.trimStart().firstOrNull()
+        return if (start == '{' || start == '[') UNREDACTABLE else redactWindowed(argumentsJson, window)
     } catch (_: StackOverflowError) {
         return UNREDACTABLE
     }
     var left = budget
     var workLeft = work
+    fun exhausted() = left <= 0 || workLeft <= 0
+    fun charge(text: String) { workLeft -= minOf(text.length, window) + WORK_PER_ITEM }
+    val cut = JsonPrimitive("[…]")
     fun JsonElement.redacted(depth: Int): JsonElement = when {
-        depth > MAX_JSON_DEPTH -> JsonPrimitive("[…]")
-        this is JsonObject -> JsonObject(mapValues { (k, v) ->
-            left -= k.length
-            if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(depth + 1)
-        })
-        this is JsonArray -> JsonArray(map { it.redacted(depth + 1) })
-        this is JsonPrimitive && isString -> if (left <= 0 || workLeft <= 0) JsonPrimitive("[…]") else {
-            workLeft -= minOf(content.length, window)
+        depth > MAX_JSON_DEPTH -> cut
+        this is JsonObject -> {
+            val out = LinkedHashMap<String, JsonElement>()
+            for ((k, v) in this) {
+                if (exhausted()) { out["…"] = cut; break }
+                charge(k)
+                val key = redactWindowed(k, window).also { left -= it.length }
+                out[key] = if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(depth + 1)
+            }
+            JsonObject(out)
+        }
+        this is JsonArray -> {
+            val out = ArrayList<JsonElement>()
+            for (v in this) {
+                if (exhausted()) { out += cut; break }
+                out += v.redacted(depth + 1)
+            }
+            JsonArray(out)
+        }
+        this is JsonPrimitive && isString -> if (exhausted()) cut else {
+            charge(content)
             JsonPrimitive(redactWindowed(content, window)).also { left -= it.content.length }
         }
         else -> this

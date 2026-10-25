@@ -7,6 +7,7 @@ import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldEndWith
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.string.shouldNotContain
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -232,6 +233,43 @@ class SecretsTest : FunSpec({
         val out = onDefaultStack { entryFor(args).args }
         for (secret in listOf("dXNlcjpwYXNz", "123456", "\"pass\"")) out shouldNotContain secret
         if (out != "[unredactable]") Json.parseToJsonElement(out)
+    }
+
+    // 1000, not 5000: kotlinx's own parser overflows a default stack near 5000 levels once warm (that input fails closed, above).
+    test("a 1000-deep array is cut at depth 200 with a marker, and the rest is still redacted") {
+        val out = onDefaultStack { redactArguments("""{"password":"p","x":${"[".repeat(1000)}1${"]".repeat(1000)}}""") }
+        out shouldStartWith """{"password":"[REDACTED]","x":"""
+        out shouldContain "[".repeat(200) + "\"[…]\""
+        out shouldNotContain "[".repeat(201)
+        Json.parseToJsonElement(out)
+    }
+
+    test("almost-JSON that fails to parse is unredactable, not text-redacted") {
+        val broken = """{"headers":{"Authorization":"Basic dXNlcjpwYXNz"},"pin_password":123456,"credentials":{"user":"a","pass":"b"}"""
+        redactArguments(broken) shouldBe "[unredactable]"
+        redactArguments("  [1, 2") shouldBe "[unredactable]"
+        redactArguments("not json password=x") shouldBe "not json password=[REDACTED:secret]"
+    }
+
+    test("a cut URL password holding @ leaves nothing after the scheme") {
+        val text = "Bearer ${"A".repeat(17_000)} https://u:p@${"s!".repeat(1500)}@h.com" // 20,026 chars: the window cuts the password
+        for (out in listOf(entryFor("""{"b":"$text"}""").args, redactArguments(text, 20_000), redactWindowed(text, 20_000))) {
+            out shouldNotContain "s!s!"
+            out shouldNotContain "u:p"
+        }
+    }
+
+    test("empty values and long keys are charged to the work budget") {
+        val empties = Json.parseToJsonElement(redactArguments(List(300_000) { "\"\"" }.joinToString(",", "[", "]"), 20_000, work = 100_000)).jsonArray
+        empties.size shouldBe 3126 // 3125 values x 32 work each, then the "[…]" marker
+        empties.last().jsonPrimitive.content shouldBe "[…]"
+        val longKeys = (1..2000).joinToString(",", "{", "}") { "\"${"k".repeat(10_000)}$it\":1" }
+        Json.parseToJsonElement(redactArguments(longKeys, 20_000, work = 100_000)).jsonObject.size shouldBe 11 // 10 keys + marker
+    }
+
+    test("token-shaped JSON keys are redacted and the output stays JSON") {
+        val out = redactArguments("""{"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123":1,"ok":2}""")
+        out shouldBe """{"[REDACTED:github_token]":1,"ok":2}"""
     }
 
     test("URL passwords may hold commas; a comma after the host still ends the userinfo") {
