@@ -2,6 +2,7 @@ package dev.sophi.core.undo
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -394,5 +395,41 @@ class CheckpointStoreTest : FunSpec({
         val c = store.snapshot()!!
         val shadow = java.nio.file.Files.list(shadowHome).use { it.toList().single() }
         sh(root, "git", "--git-dir=$shadow", "ls-tree", "--name-only", c).trim() shouldBe "a.txt"
+    }
+
+    /** A root with a.txt and a committed nested repo `n` (n/f.txt), already recorded by one snapshot. */
+    fun recordedNested(warnings: MutableList<String> = mutableListOf()): Triple<Path, CheckpointStore, Path> {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        sh(nested, "git", "init", "-q")
+        nested.resolve("f.txt").writeText("f")
+        sh(nested, "git", "add", "-A")
+        sh(nested, "git", "-c", "user.name=u", "-c", "user.email=u@x", "commit", "-q", "-m", "i")
+        val shadowHome = createTempDirectory("ckpt-home")
+        CheckpointStore(root, shadowHome) { warnings += it }.also { it.snapshot()!! }
+        val shadow = java.nio.file.Files.list(shadowHome).use { it.toList().single() }
+        return Triple(root, CheckpointStore(root, shadowHome) { warnings += it }, shadow)
+    }
+
+    test("a nested repo that became a plain directory is snapshotted as files") {
+        val (root, store, shadow) = recordedNested()
+        root.resolve("n/.git").toFile().deleteRecursively()
+        root.resolve("a.txt").writeText("changed")
+        val c = store.snapshot()!!
+        sh(root, "git", "--git-dir=$shadow", "ls-tree", "-r", "--name-only", c).lines() shouldContain "n/f.txt"
+    }
+
+    test("a nested repo whose HEAD can't be read keeps its recorded commit") {
+        val warnings = mutableListOf<String>()
+        val (root, store, shadow) = recordedNested(warnings)
+        val before = sh(root, "git", "--git-dir=$shadow", "ls-tree", "HEAD", "n").trim()
+        before shouldContain "160000"
+        root.resolve("n/.git").toFile().deleteRecursively()
+        root.resolve("n/.git").writeText("gitdir: /nonexistent/sophi-test\n")
+        root.resolve("a.txt").writeText("changed")
+        val c = store.snapshot()!!
+        sh(root, "git", "--git-dir=$shadow", "ls-tree", c, "n").trim() shouldBe before
+        warnings.none { "no commit yet" in it } shouldBe true
     }
 })

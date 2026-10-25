@@ -138,28 +138,32 @@ class CheckpointStore(
                 left--
             }
         }
-        // Nested repos: a new one is one untracked "dir/" entry, a recorded one a gitlink in the shadow index. `add` would
-        // look inside them and run their own clean filters, so it leaves them out, and their HEAD (a read-only rev-parse
-        // inside) is recorded by hand. One with no commit yet can't be recorded at all.
-        val gitlinks = nulSplit(exec(false, "ls-files", "-s", "-z").out).filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') }
-        val nested = (changed.filter { it.endsWith("/") && root.resolve(it).resolve(".git").exists() }.map { it.removeSuffix("/") } + gitlinks).distinct()
-        val heads = nested.associateWith { p ->
-            if (!root.resolve(p).resolve(".git").exists()) null
-            else exec(false, "-C", p, "rev-parse", "-q", "--verify", "HEAD", userRepo = true).takeIf { it.ok }?.out?.trim()
-        }
-        unbornRepos = nested.filter { heads[it] == null && root.resolve(it).resolve(".git").exists() }.map { "$it/" }
-        for (repo in unbornRepos) warn("checkpoint: leaving out $repo, a nested git repo with no commit yet; changes inside it can't be undone")
         val hasHead = exec(false, "rev-parse", "-q", "--verify", "HEAD").ok
+        unbornRepos = emptyList()
         if (left > 0 || !hasHead) {
-            for ((path, sha) in heads) {
-                val recorded = when {
-                    sha != null -> run("update-index", "--add", "--cacheinfo", "160000,$sha,$path").ok
-                    path in gitlinks -> run("update-index", "--force-remove", "--", path).ok
-                    else -> true
+            // Nested repos: a new one is one untracked "dir/" entry, a recorded one a gitlink in the shadow index. `add`
+            // would look inside them and run their own clean filters, so it leaves out the ones still repos, and their
+            // HEAD (a read-only rev-parse inside) is recorded by hand. One with no commit yet can't be recorded at all.
+            val gitlinks = nulSplit(exec(false, "ls-files", "-s", "-z").out).filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') }
+            val repos = (changed.filter { it.endsWith("/") }.map { it.removeSuffix("/") } + gitlinks).distinct()
+                .filter { root.resolve(it).resolve(".git").exists() }
+            for (path in gitlinks - repos.toSet()) if (!run("update-index", "--force-remove", "--", path).ok) return null
+            val unborn = mutableListOf<String>()
+            for (path in repos) {
+                val head = exec(false, "-C", path, "rev-parse", "-q", "--verify", "HEAD", userRepo = true)
+                when {
+                    head.ok -> if (!run("update-index", "--add", "--cacheinfo", "160000,${head.out.trim()},$path").ok) return null
+                    // exit 1 with -q is "no such ref"; anything else (a broken .git, a timeout) leaves the recorded gitlink as is
+                    head.code == 1 -> unborn += path
+                    else -> warn("checkpoint: cannot read the HEAD of nested repo $path, keeping its last recorded commit: ${head.out.trim()}")
                 }
-                if (!recorded) return null
             }
-            if (!run("add", "-A", "--", ".", *nested.map { ":(exclude,literal)$it" }.toTypedArray()).ok) return null
+            for (path in unborn) {
+                warn("checkpoint: leaving out $path/, a nested git repo with no commit yet; changes inside it can't be undone")
+                if (path in gitlinks && !run("update-index", "--force-remove", "--", path).ok) return null
+            }
+            unbornRepos = unborn.map { "$it/" }
+            if (!run("add", "-A", "--", ".", *repos.map { ":(exclude,literal)$it" }.toTypedArray()).ok) return null
             // status can list a change the index doesn't keep (an unborn repo, a nested repo's dirty content): same tree, same checkpoint
             val sameTree = hasHead && exec(false, "diff", "--cached", "--quiet", "HEAD").ok
             if (!sameTree && !run("commit", "-q", "--allow-empty", "-m", "checkpoint").ok) return null
