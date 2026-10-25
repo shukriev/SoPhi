@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
+import kotlin.io.path.writeText
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
@@ -231,15 +232,23 @@ class GoalControllerTest : FunSpec({
             interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
             learning = null, checkpoints = store, onTurnSettled = { _, _, _ -> }
         ) {}
+        // a chat round before the goal, as AgentLoop records it: checkpoint taken, then chat.txt written
         val session = AgentSession(id = "s1")
+        val chatCheckpoint = store.snapshot()!!
+        root.resolve("chat.txt").writeText("chat")
+        session.append(dev.sophi.core.session.EntryRole.ASSISTANT, "wrote chat.txt", mapOf("toolCalls" to "[]", "checkpoint" to chatCheckpoint))
+        sm.save(session)
 
         runBlocking { gc.run(session, "write x") }
         root.resolve("x.txt").exists() shouldBe true
 
-        val plan = FileRestorer(store).plan(session)!!
-        plan.targetEntryId shouldBe session.entries.single { it.content == "[goal file changes]" }.id
-        FileRestorer(store).apply(session, plan)
+        // /undo works on the session as saved on disk
+        val saved = runBlocking { sm.load("s1") }
+        val plan = FileRestorer(store).plan(saved)!!
+        plan.targetEntryId shouldBe saved.entries.single { it.content == "[goal file changes]" }.id
+        FileRestorer(store).apply(saved, plan)
         root.resolve("x.txt").exists() shouldBe false
+        root.resolve("chat.txt").exists() shouldBe true
     }
 
     test("a goal step's bash command that reaches outside the workspace shows up in /undo's warnings") {
