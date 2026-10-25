@@ -2,6 +2,8 @@ package dev.sophi.core.audit
 
 import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.longs.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -180,7 +182,8 @@ class SecretsTest : FunSpec({
         out shouldNotContain "dXNlcjpwYXNz"
         out shouldNotContain "123456"
         out shouldNotContain "\"pass\""
-        out.length shouldBe 4000
+        // The 25k body is one token-shaped run cut by the window, so it goes whole (see redactWindowed).
+        Json.parseToJsonElement(out).jsonObject["body"]!!.jsonPrimitive.content shouldBe "…"
     }
 
     test("an unterminated escaped-quote value in raw text is redacted") {
@@ -211,5 +214,42 @@ class SecretsTest : FunSpec({
         for (t in listOf("git@github.com:org/repo.git", "mailto:a@b.c", "ssh://git@host:22/x")) redactTokens(t) shouldBe t
         val raw = """{"c":"url \"https://a:b@c@h\" C:\\x {u}:p@h"}"""
         Json.parseToJsonElement(redactTokens(raw)) // still parses
+    }
+    fun entryFor(args: String, result: String = "") = auditEntry("a", null, "s", "t", RiskLevel.SAFE, args, "safe", "ok", result, 0)
+
+    test("suffix bombs and deep nesting still produce a redacted entry on a default stack") {
+        val keyBomb = onDefaultStack { entryFor("""{"token${"key".repeat(3000)}":"hunter2"}""").args }
+        keyBomb shouldNotContain "hunter2"
+        val textBomb = onDefaultStack { entryFor("{}", "token${"_key".repeat(6000)}=hunter2").result }
+        textBomb shouldNotContain "hunter2"
+        onDefaultStack { redactSecrets("token${"_key".repeat(6000)}=hunter2") } shouldNotContain "hunter2"
+        val deep = "[".repeat(5000) + "\"password=hunter2\"" + "]".repeat(5000)
+        val deepArgs = onDefaultStack { entryFor(deep).args }
+        deepArgs shouldNotContain "hunter2"
+        deepArgs.length shouldBeGreaterThan 0
+    }
+
+    test("a token cut by the window edge leaves no fragment, even after redaction shrinks the text") {
+        val key = "sk-abcdefghijklmnopqrstuvwxyz0123"
+        val args = entryFor("""{"b":"Bearer ${"A".repeat(19_975)} $key"}""").args
+        args shouldNotContain "sk-abc"
+        Json.parseToJsonElement(args)
+        val result = entryFor("{}", "Bearer ${"A".repeat(19_975)} $key").result
+        result shouldNotContain "sk-abc"
+        redactArguments("Bearer ${"A".repeat(19_975)} $key", 20_000) shouldNotContain "sk-abc" // non-JSON fallback
+    }
+
+    test("redaction stops once the argument output is past its cap") {
+        val big = (1..300).joinToString(",", "{", "}") { "\"k$it\":\"password=x ${"y".repeat(30_000)}\"" }
+        val start = System.nanoTime()
+        val args = entryFor(big).args
+        val ms = (System.nanoTime() - start) / 1_000_000
+        args.length shouldBe 4000
+        args shouldNotContain "password=x"
+        ms shouldBeLessThan 2_500L // ~5 s before: every value was redacted
+    }
+
+    test("comma-joined URLs keep the second host") {
+        redactTokens("https://u:p@h.com,me@x.com") shouldBe "https://[REDACTED:url_credentials]@h.com,me@x.com"
     }
 })

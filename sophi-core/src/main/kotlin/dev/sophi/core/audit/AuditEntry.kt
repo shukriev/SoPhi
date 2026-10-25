@@ -38,13 +38,15 @@ class ActorContext(val actorId: String, val tenantId: String? = null) : Abstract
     companion object Key : CoroutineContext.Key<ActorContext>
 }
 
-// ponytail: a value redacted from far longer to far shorter (a 19k-char quoted secret) can pull the window's cut edge
-// into the kept 500/4000 chars; redact the whole text if that ever matters more than ~150 ms per MB.
+// ponytail: each string is redacted on its first 20k chars and a cut window loses its last ~200 chars plus the token
+// run there (see redactWindowed), so a long value shows less than it could; widen the window if that ever matters.
 private const val REDACT_WINDOW = 20_000
+private const val UNREDACTABLE = "[unredactable]"
 
 /**
  * The one way to build an entry: [result], and each string in [argumentsJson] (parsed whole, so secret keys always
- * go), is redacted on a window far longer than any secret pattern match, then truncated, so a cut never leaves half a secret. `decision` follows from [outcome].
+ * go), is redacted on a window far longer than any secret pattern match, then truncated, so a cut never leaves half a secret.
+ * If redaction itself throws, that field is "[unredactable]" and the entry is still written. `decision` follows from [outcome].
  */
 fun auditEntry(
     actor: String, tenant: String?, session: String, tool: String, risk: RiskLevel, argumentsJson: String,
@@ -56,11 +58,11 @@ fun auditEntry(
     session = session,
     tool = tool,
     risk = risk,
-    args = redactArguments(argumentsJson, REDACT_WINDOW).take(4000),
+    args = runCatching { redactArguments(argumentsJson, REDACT_WINDOW, budget = 4000).take(4000) }.getOrDefault(UNREDACTABLE),
     decision = if (outcome == "denied") "denied" else "allowed",
     rule = rule,
     outcome = outcome,
-    result = redactSecrets(result.take(REDACT_WINDOW)).take(500),
+    result = runCatching { redactWindowed(result, REDACT_WINDOW).take(500) }.getOrDefault(UNREDACTABLE),
     durationMs = System.currentTimeMillis() - start,
 )
 

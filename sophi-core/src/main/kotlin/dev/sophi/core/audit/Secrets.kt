@@ -21,7 +21,7 @@ val SECRET_PATTERNS: List<Pair<String, Regex>> = listOf(
     "google_api_key" to Regex("AIza[0-9A-Za-z_-]{35}"),
     "stripe_key" to Regex("(?<![A-Za-z0-9])(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"),
     // scheme://user:password@host: the whole userinfo goes, up to the last @ before the host (a password may hold @).
-    "url_credentials" to Regex("(?<=://)[^/?#\\s:@\"'\\\\{}]+:[^/?#\\s\"'\\\\{}]+(?=@)"),
+    "url_credentials" to Regex("(?<=://)[^/?#,\\s:@\"'\\\\{}]+:[^/?#,\\s\"'\\\\{}]+(?=@)"),
     // curl -u / --user user:password, and curl's attached -uuser:password (not -u1000:1000, a docker uid:gid)
     "basic_auth" to Regex(
         "(?:(?<=(?:^|\\s)(?:-u|--user)[ =]{1,3})|(?<=(?:^|\\s)-u)(?=[^\\s\\d]))[^\\s:\"'\\\\{}]+:[^\\s\"'\\\\{}]+",
@@ -47,7 +47,7 @@ val SECRET_PATTERNS: List<Pair<String, Regex>> = listOf(
  * quote or backslash.
  */
 private val ASSIGNMENT = Regex(
-    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)(?:_?(?:key|base|value|id|header|hash))*)" +
+    "(?i)\\b([A-Za-z0-9_]*(?:password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)(?:_?(?:key|base|value|id|header|hash))*+)" +
         "(\\\\?[\"']?[ \\t]*[=:](?!=)[ \\t]*)" +
         "(?!(?:true|false|null|none|nil)(?![A-Za-z0-9_])|\\d+(?:\\.\\d+)?(?![A-Za-z0-9_])|[A-Za-z_][A-Za-z0-9_.]*\\(|\\[REDACTED)" +
         // Unrolled and possessive, so the engine iterates instead of recursing once per character (a 100k-char value
@@ -58,7 +58,7 @@ private val ASSIGNMENT = Regex(
 /** A JSON key whose value is a secret: the keyword (plus optional key/base/value/id/header/hash suffixes) ends it, so max_tokens stays. */
 private val SECRET_KEY = Regex(
     "(?:password|passwd|passphrase|secret|token|api[_-]?key|authorization|credentials?|private[_-]?key|access[_-]?key)" +
-        "(?:_?(?:key|base|value|id|header|hash))*$",
+        "(?:_?(?:key|base|value|id|header|hash))*+$",
     RegexOption.IGNORE_CASE,
 )
 
@@ -83,22 +83,39 @@ fun redactSecrets(text: String): String =
         else m.groupValues[1] + m.groupValues[2] + v.substring(0, open) + "[REDACTED:secret]" + v.substring(v.length - close)
     }
 
+private val PRIVATE_KEY_BEGIN = Regex("-----BEGIN [A-Z ]*PRIVATE KEY-----")
+private const val WINDOW_EDGE = 200
+
 /**
- * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest; non-JSON
- * input → redactSecrets(text). The whole JSON is always parsed; [window] caps only the text each redactSecrets sees
- * (each string value, or the non-JSON text), so a long argument keeps its key redaction.
+ * [redactSecrets] on at most [window] chars of [text]. When the window cut the text, a secret may have been cut below
+ * its pattern's minimum length and survived, so the trailing [WINDOW_EDGE] chars go, then the token-shaped run (and any
+ * unclosed private key) ending there, and "…" marks the cut.
  */
-fun redactArguments(argumentsJson: String, window: Int = Int.MAX_VALUE): String {
-    val tree = try {
-        Json.parseToJsonElement(argumentsJson)
-    } catch (_: Exception) {
-        return redactSecrets(argumentsJson.take(window))
-    }
-    return tree.redacted(window).toString()
+fun redactWindowed(text: String, window: Int): String {
+    if (text.length <= window) return redactSecrets(text)
+    var out = redactSecrets(text.take(window)).dropLast(WINDOW_EDGE).dropLastWhile { it.isLetterOrDigit() || it in "._~+/=-" } // TOKEN_CHARS, the alphabet of every token pattern
+    PRIVATE_KEY_BEGIN.find(out)?.let { out = out.substring(0, it.range.first) }
+    return "$out…"
 }
 
-private fun JsonElement.redacted(window: Int): JsonElement = when (this) {
-    is JsonObject -> JsonObject(mapValues { (k, v) -> if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(window) })
-    is JsonArray -> JsonArray(map { it.redacted(window) })
-    is JsonPrimitive -> if (isString) JsonPrimitive(redactSecrets(content.take(window))) else this
+/**
+ * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest; non-JSON
+ * input → redactSecrets(text). The whole JSON is always parsed; [window] caps only the text each redaction sees (each
+ * string value, or the non-JSON text, see [redactWindowed]), so a long argument keeps its key redaction. Once [budget]
+ * output chars are redacted, later strings become "[…]": a caller that keeps only the first [budget] chars never pays
+ * for the rest. JSON nested too deep to walk (StackOverflowError) falls back to the text path.
+ */
+fun redactArguments(argumentsJson: String, window: Int = Int.MAX_VALUE, budget: Int = Int.MAX_VALUE): String = try {
+    var left = budget
+    fun JsonElement.redacted(): JsonElement = when (this) {
+        is JsonObject -> JsonObject(mapValues { (k, v) -> left -= k.length; if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted() })
+        is JsonArray -> JsonArray(map { it.redacted() })
+        is JsonPrimitive -> if (!isString) this else if (left <= 0) JsonPrimitive("[…]")
+            else JsonPrimitive(redactWindowed(content, window)).also { left -= it.content.length }
+    }
+    Json.parseToJsonElement(argumentsJson).redacted().toString()
+} catch (_: Exception) {
+    redactWindowed(argumentsJson, window)
+} catch (_: StackOverflowError) {
+    redactWindowed(argumentsJson, window)
 }
