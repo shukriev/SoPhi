@@ -326,4 +326,38 @@ class SecretsTest : FunSpec({
     test("comma-joined URLs keep the second host") {
         redactTokens("https://u:p@h.com,me@x.com") shouldBe "https://[REDACTED:url_credentials]@h.com,me@x.com"
     }
+    test("unquoted JSON literals are redacted as strings and the output parses") {
+        val jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop"
+        for ((input, leaked) in listOf(
+            """{"cmd":AKIAABCDEFGHIJKLMNOP}""" to "AKIAABCDEFGHIJKLMNOP",
+            """{"h":sk-abcdefghijklmnopqrstuvwxyz}""" to "sk-abcdefghij",
+            """{"env":API_KEY=hunter2}""" to "hunter2",
+            """{"a":$jwt}""" to "eyJhbGci",
+        )) {
+            val out = entryFor(input).args
+            out shouldNotContain leaked
+            Json.parseToJsonElement(out)
+        }
+        // Real literals pass through untouched.
+        redactArguments("""{"n":-1.5e3,"t":true,"f":false,"z":null}""") shouldBe """{"n":-1.5e3,"t":true,"f":false,"z":null}"""
+    }
+
+    test("JSON behind a prefix that fails to parse is unredactable; prose and commands stay text-redacted") {
+        val body = """{"pin_password":123456,"credentials":{"user":"a","pass":"b"}}"""
+        for (input in listOf("﻿$body", "```json\n$body\n```", """"{\"pin_password\":123456""")) redactArguments(input) shouldBe "[unredactable]"
+        redactArguments("ls -la /tmp && echo password=x") shouldBe "ls -la /tmp && echo password=[REDACTED:secret]"
+        redactArguments("Please set the token to abc123 later.") shouldBe "Please set the token to abc123 later."
+    }
+
+    test("a key longer than the window is treated as secret-named") {
+        redactArguments("""{"${"x".repeat(20_001)}":"hunter2"}""", 20_000) shouldNotContain "hunter2"
+    }
+
+    test("keys that redact to the same text are numbered, so no value vanishes") {
+        val out = Json.parseToJsonElement(redactArguments(
+            """{"ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123":1,"ghp_ZYXWVUTSRQPONMLKJIHGFEDCBA9876":2}"""
+        )).jsonObject
+        out.keys shouldBe setOf("[REDACTED:github_token]", "[REDACTED:github_token]#2")
+        out.values.map { it.jsonPrimitive.content } shouldBe listOf("1", "2")
+    }
 })

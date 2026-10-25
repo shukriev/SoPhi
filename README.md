@@ -139,7 +139,9 @@ exit / quit  end the session
 Known limits of the audit log:
 
 - Redaction is pattern-based and best effort.
-- `args` and `result` keep a bounded sample (4,000 and 500 chars) and redaction work per entry is capped, so later values of a large call show as `[…]`.
+- `args` and `result` keep a bounded sample (4,000 and 500 chars) and redaction work per entry is capped. Past the cap, the rest of each object or array, keys and values alike, is replaced by one `"…": "[…]"` (or `"[…]"`) marker.
+- Arguments that aren't JSON get the weaker text redaction, so numeric secrets and secrets under unfamiliar key names can survive. Text that looks like JSON but doesn't parse is logged as `[unredactable]` instead.
+- Keys that redact to the same text (two GitHub tokens used as keys, say) are numbered `#2`, `#3`, so no value is lost.
 - A value that can't be redacted safely is logged as `[unredactable]`.
 - Secrets in shapes the patterns don't know (custom formats, encoded or split values) can still appear.
 - Calls made through sophi-web are not audited yet.

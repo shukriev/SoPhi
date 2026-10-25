@@ -3,6 +3,7 @@ package dev.sophi.core.audit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -95,6 +96,9 @@ private const val MAX_JSON_DEPTH = 200
 // Work charged per key or string on top of its length, so empty values and many short ones still use up the budget.
 private const val WORK_PER_ITEM = 32
 const val UNREDACTABLE = "[unredactable]"
+// JSON structure anywhere in text that didn't parse (a BOM, a ```json fence, a cut JSON string): fail closed.
+private val JSON_INSIDE = Regex("[{\\[]\\s*\\\\?\"")
+private val JSON_NUMBER = Regex("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
 
 /**
  * [redactSecrets] on at most [window] chars of [text]. When the window cut the text, a secret may have been cut below
@@ -115,7 +119,8 @@ fun redactWindowed(text: String, window: Int): String {
  * [redactWindowed]), so a long argument keeps its key redaction. Once [budget] output chars are kept or [work] is used
  * (each key and string costs its windowed length plus [WORK_PER_ITEM]), the rest of each object or array is replaced
  * by one "[…]"; anything nested deeper than [MAX_JSON_DEPTH] is "[…]" too. Only input that isn't JSON-shaped is
- * redacted as text; JSON (or almost-JSON: starts with { or [) that can't be redacted fails closed to [UNREDACTABLE].
+ * redacted as text; JSON (or almost-JSON: starts with { or [, or holds {" / [" anywhere) that can't be redacted fails
+ * closed to [UNREDACTABLE]. Keys that redact alike are numbered (#2, #3), and unquoted literals are redacted as strings.
  */
 fun redactArguments(
     argumentsJson: String, window: Int = Int.MAX_VALUE, budget: Int = Int.MAX_VALUE, work: Int = Int.MAX_VALUE,
@@ -124,7 +129,8 @@ fun redactArguments(
         Json.parseToJsonElement(argumentsJson)
     } catch (_: Exception) {
         val start = argumentsJson.trimStart().firstOrNull()
-        return if (start == '{' || start == '[') UNREDACTABLE else redactWindowed(argumentsJson, window)
+        val jsonish = start == '{' || start == '[' || JSON_INSIDE.containsMatchIn(argumentsJson)
+        return if (jsonish) UNREDACTABLE else redactWindowed(argumentsJson, window)
     } catch (_: StackOverflowError) {
         return UNREDACTABLE
     }
@@ -140,8 +146,10 @@ fun redactArguments(
             for ((k, v) in this) {
                 if (exhausted()) { out["…"] = cut; break }
                 charge(k)
-                val key = redactWindowed(k, window).also { left -= it.length }
-                out[key] = if (SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(depth + 1)
+                var key = redactWindowed(k, window).also { left -= it.length }
+                if (key in out) key = generateSequence(2) { it + 1 }.map { "$key#$it" }.first { it !in out } // two keys redacted alike
+                // A key too long to scan whole is treated as secret-named (a suffix scan would miss the suffix bomb).
+                out[key] = if (k.length > window || SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(depth + 1)
             }
             JsonObject(out)
         }
@@ -153,11 +161,13 @@ fun redactArguments(
             }
             JsonArray(out)
         }
-        this is JsonPrimitive && isString -> if (exhausted()) cut else {
+        // The parser also accepts unquoted literals (AKIA..., API_KEY=x); only null, true/false and numbers pass as-is.
+        this is JsonNull || this is JsonPrimitive && !isString && (content == "true" || content == "false" || JSON_NUMBER.matches(content)) -> this
+        this is JsonPrimitive -> if (exhausted()) cut else {
             charge(content)
             JsonPrimitive(redactWindowed(content, window)).also { left -= it.content.length }
         }
-        else -> this
+        else -> this // JsonObject/JsonArray are handled above; kept for exhaustiveness
     }
     return runCatching { tree.redacted(0).toString() }.getOrDefault(UNREDACTABLE)
 }
