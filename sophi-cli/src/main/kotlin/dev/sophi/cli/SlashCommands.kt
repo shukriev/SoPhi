@@ -14,6 +14,7 @@ import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.cli.goal.GoalController
 import dev.sophi.cli.goal.GoalRunResult
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.FileRestorer
 import dev.sophi.core.undo.RestorePlan
 import dev.sophi.learning.LearningPlugin
@@ -42,6 +43,7 @@ class SlashHandler(
     private val toolRegistry: ToolRegistry? = null,
     private val planLog: PlanLog? = null,
     private val fileRestorer: FileRestorer? = null,
+    private val checkpoints: CheckpointStore? = null,
     /**
      * Total context window of `config.model`, in tokens. Optional here for the same reason
      * `provider` and `toolRegistry` are: a SlashHandler built without the full agent wiring
@@ -312,7 +314,7 @@ class SlashHandler(
         return PlanCommand(
             provider = llm, registry = registry, sessionManager = sessionManager, config = config,
             contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = planLog,
-            onEvent = onEvent, liveRegion = liveRegion, input = input, echo = output
+            onEvent = onEvent, liveRegion = liveRegion, input = input, checkpoints = checkpoints, echo = output
         ).run(arg, session)
     }
 

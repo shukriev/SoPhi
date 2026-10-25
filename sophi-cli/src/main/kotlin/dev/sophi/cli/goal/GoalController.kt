@@ -16,6 +16,8 @@ import dev.sophi.core.agent.plan.StopCondition
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.undo.CheckpointStore
+import dev.sophi.core.undo.undoableRound
 import dev.sophi.learning.LearningPlugin
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -35,6 +37,8 @@ class GoalController(
     private val tokenViewKey: Char,
     private val autoExitTokenView: Boolean,
     private val learning: LearningPlugin?,
+    /** Snapshots before the run, so /undo reverses the whole goal in one step. Null = no checkpoints. */
+    private val checkpoints: CheckpointStore? = null,
     /** Mirrored out to a connected companion, exactly as TurnController does for a chat turn. */
     private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit,
@@ -93,14 +97,14 @@ class GoalController(
             onProgress = { renderer.handle(it) }
         )
 
-        val outcome: Result<PlanOutcome>? = coroutineScope {
+        val outcome: Result<PlanOutcome>? = undoableRound(session, checkpoints, "goal") { coroutineScope {
             val runDeferred = async { runCatching { runner.run(session.id, args.task, stopCondition, initialPlan = plan) } }
             val escDeferred = async { input.awaitControlKeys(tokenViewKey) { renderer.toggleTokenView() } }
             select {
                 runDeferred.onAwait { result -> escDeferred.cancel(); result }
                 escDeferred.onAwait { runDeferred.cancel(); null }
             }
-        }
+        } }
 
         return when {
             outcome == null -> {
