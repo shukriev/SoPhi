@@ -113,7 +113,7 @@ class CheckpointStore(
     } catch (e: Exception) {
         // a checkpoint never fails the round it guards
         if (e is InterruptedException) Thread.currentThread().interrupt()
-        warn("checkpoint: cannot snapshot: ${e.message ?: e}")
+        warn("checkpoint: cannot snapshot: ${e::class.simpleName}: ${e.message}")
         null
     }
 
@@ -138,15 +138,29 @@ class CheckpointStore(
                 left--
             }
         }
-        // a nested repo shows as one untracked "dir/" entry; read-only rev-parse inside it tells whether it has a commit
-        unbornRepos = changed.filter { it.endsWith("/") && root.resolve(it).resolve(".git").exists() &&
-            !exec(false, "-C", it, "rev-parse", "-q", "--verify", "HEAD", userRepo = true).ok }
+        // Nested repos: a new one is one untracked "dir/" entry, a recorded one a gitlink in the shadow index. `add` would
+        // look inside them and run their own clean filters, so it leaves them out, and their HEAD (a read-only rev-parse
+        // inside) is recorded by hand. One with no commit yet can't be recorded at all.
+        val gitlinks = nulSplit(exec(false, "ls-files", "-s", "-z").out).filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') }
+        val nested = (changed.filter { it.endsWith("/") && root.resolve(it).resolve(".git").exists() }.map { it.removeSuffix("/") } + gitlinks).distinct()
+        val heads = nested.associateWith { p ->
+            if (!root.resolve(p).resolve(".git").exists()) null
+            else exec(false, "-C", p, "rev-parse", "-q", "--verify", "HEAD", userRepo = true).takeIf { it.ok }?.out?.trim()
+        }
+        unbornRepos = nested.filter { heads[it] == null && root.resolve(it).resolve(".git").exists() }.map { "$it/" }
         for (repo in unbornRepos) warn("checkpoint: leaving out $repo, a nested git repo with no commit yet; changes inside it can't be undone")
-        left -= unbornRepos.size
         val hasHead = exec(false, "rev-parse", "-q", "--verify", "HEAD").ok
         if (left > 0 || !hasHead) {
-            if (!run("add", "-A", "--", ".", *unbornRepos.map { ":(exclude,literal)$it" }.toTypedArray()).ok) return null
-            // status can list a change the index doesn't keep (a nested repo's dirty content): same tree, same checkpoint
+            for ((path, sha) in heads) {
+                val recorded = when {
+                    sha != null -> run("update-index", "--add", "--cacheinfo", "160000,$sha,$path").ok
+                    path in gitlinks -> run("update-index", "--force-remove", "--", path).ok
+                    else -> true
+                }
+                if (!recorded) return null
+            }
+            if (!run("add", "-A", "--", ".", *nested.map { ":(exclude,literal)$it" }.toTypedArray()).ok) return null
+            // status can list a change the index doesn't keep (an unborn repo, a nested repo's dirty content): same tree, same checkpoint
             val sameTree = hasHead && exec(false, "diff", "--cached", "--quiet", "HEAD").ok
             if (!sameTree && !run("commit", "-q", "--allow-empty", "-m", "checkpoint").ok) return null
         }
