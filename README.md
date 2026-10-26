@@ -48,7 +48,32 @@ app — same core, three ways to run it.
 They all sit on the same core, so switching between them later is a
 one-line change, not a rewrite.
 
+## 📦 Install
+
+**Installers (no Java needed).** Download from the newest `cli-v*`
+[release](../../releases): `sophi-macos-arm64.pkg` (Apple Silicon), `sophi-macos-x64.pkg`
+(Intel) or `sophi-windows-x64.msi`, open it, then run `sophi` in a new terminal. They are not
+code-signed yet: on macOS approve the package once under System Settings → Privacy & Security;
+on Windows choose "More info → Run anyway". To uninstall on macOS, delete `/Applications/sophi.app`
+and `/usr/local/bin/sophi`; on Windows use Apps & features.
+
+**One-liner (needs Java 21+).** No checkout required.
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/shukriev/SoPhi/main/scripts/get-sophi.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/shukriev/SoPhi/main/scripts/get-sophi.ps1 | iex
+```
+
+Re-run to upgrade; set `SOPHI_VERSION=cli-v<x.y.z>` to pin a release. Maintainers publish
+a release by pushing a `cli-v*` tag (`.github/workflows/cli-release.yml`).
+
 ## 🚀 Build
+
 
 ```bash
 mvn -q -DskipTests package

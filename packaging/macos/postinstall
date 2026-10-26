@@ -1,0 +1,10 @@
+#!/bin/sh
+# jpackage --resource-dir hook: runs after the .pkg installs sophi.app, and puts `sophi` on the
+# PATH. A wrapper rather than a symlink, so the launcher always sees its real path inside the app.
+mkdir -p /usr/local/bin
+cat > /usr/local/bin/sophi <<'WRAPPER'
+#!/bin/sh
+exec /Applications/sophi.app/Contents/MacOS/sophi "$@"
+WRAPPER
+chmod 755 /usr/local/bin/sophi
+exit 0
