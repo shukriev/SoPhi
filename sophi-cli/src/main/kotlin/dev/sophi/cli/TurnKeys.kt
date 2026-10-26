@@ -18,6 +18,8 @@ sealed interface KeyAction {
 
 /** How long a lone ESC waits for a following byte before it counts as the interrupt key. */
 private const val ESC_WAIT_MS = 30L
+/** Consecutive empty 100 ms reads after which a paste with no end marker is treated as over. */
+const val PASTE_QUIET_READS = 10
 /** How long the rest of an escape sequence may lag (ssh, a large paste) before it counts as stalled. */
 private const val SEQUENCE_WAIT_MS = 200L
 
@@ -31,9 +33,19 @@ class TurnKeyDecoder {
     var pasting = false
         private set
     private var lastWasCr = false
+    private var quietReads = 0
+
+    /**
+     * The caller's read timed out ([PASTE_QUIET_READS] of these ≈ 1 s at 100 ms reads). A paste
+     * arrives as a burst, so a quiet paste lost its end marker: end it, or ESC and Enter stay dead.
+     */
+    fun idle() {
+        if (pasting && ++quietReads >= PASTE_QUIET_READS) pasting = false
+    }
 
     /** [next] returns -2 on timeout and -1 at EOF (JLine NonBlockingReader). */
     suspend fun decode(first: Int, next: suspend (timeoutMs: Long) -> Int): KeyAction {
+        quietReads = 0
         val afterCr = lastWasCr
         lastWasCr = first == 13
         return when (first) {

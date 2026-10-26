@@ -121,7 +121,7 @@ class SophiTerminal(
                 val ch = read(100)
                 val confirmation = pendingConfirmation.get()
                 if (decoder != null) {
-                    if (ch == -2) continue
+                    if (ch == -2) { decoder.idle(); continue }
                     val pasted = decoder.pasting
                     val toggle = !pasted && (ch == toggleLower || ch == toggleUpper)
                     val action = if (toggle) KeyAction.Ignore else decoder.decode(ch, read)

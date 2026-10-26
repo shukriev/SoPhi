@@ -81,6 +81,19 @@ class TurnKeysTest : FunSpec({
         decodeAll(*pasteStart, 'a'.code, 27, SLOW, '['.code, '2'.code, '0'.code, SLOW, '1'.code, '~'.code, 13) shouldBe
             listOf(key(TurnKey.Text('a')), key(TurnKey.Enter))
     }
+    test("a paste whose end marker never comes ends after a quiet second") {
+        runBlocking {
+            val decoder = TurnKeyDecoder()
+            val start = bytes("\u001b[200~").drop(1).iterator()
+            decoder.decode(27) { if (start.hasNext()) start.next() else -2 }
+            repeat(PASTE_QUIET_READS - 1) { decoder.idle() }
+            decoder.decode(13) { -2 } shouldBe key(TurnKey.Text('\n'))
+            repeat(PASTE_QUIET_READS - 1) { decoder.idle() }
+            decoder.pasting shouldBe true // a key in between restarts the count
+            decoder.idle()
+            decoder.decode(13) { -2 } shouldBe key(TurnKey.Enter)
+        }
+    }
     test("other control bytes are ignored") {
         decode(3) shouldBe KeyAction.Ignore
         decode(1) shouldBe KeyAction.Ignore
