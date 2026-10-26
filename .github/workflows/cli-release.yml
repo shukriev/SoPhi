@@ -60,8 +60,10 @@ jobs:
           - os: macos-15-intel
             arch: x64
     runs-on: ${{ matrix.os }}
-    # Signs and notarizes once the Apple Developer ID secrets/variables exist (see
-    # packaging/SIGNING.md); until then it builds an unsigned .pkg.
+    # Signs and notarizes once the Apple Developer ID credentials exist: secrets
+    # MACOS_CERTIFICATES_P12 (base64 .p12 holding the Developer ID Application and Installer
+    # certificates), MACOS_CERTIFICATES_PASSWORD, APPLE_ID, APPLE_APP_PASSWORD; variables
+    # APPLE_TEAM_ID and APPLE_SIGNING_NAME ("Name (TEAMID)"). Until then it builds an unsigned .pkg.
     env:
       SIGN: ${{ vars.APPLE_TEAM_ID != '' }}
       PKG: out/sophi-macos-${{ matrix.arch }}.pkg
@@ -226,8 +228,9 @@ jobs:
           & (Join-Path $dir 'sophi.exe') --help
           if ($LASTEXITCODE) { exit 1 }
 
-      # SignPath Foundation signs the .msi once the SIGNPATH_* variables and token exist (see
-      # packaging/SIGNING.md). Tag builds only: every release-signing request waits for a manual
+      # SignPath Foundation signs the .msi once secret SIGNPATH_API_TOKEN and variables
+      # SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG and SIGNPATH_SIGNING_POLICY_SLUG exist.
+      # Tag builds only: every release-signing request waits for a manual
       # approval in SignPath, which a trial run shouldn't need.
       - name: Upload the unsigned .msi for signing
         id: unsigned

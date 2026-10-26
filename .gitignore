@@ -33,3 +33,6 @@ evals/context/summary-cache.tsv
 
 # Private product docs
 docs/product-vision.md
+
+# Local signing setup notes
+packaging/SIGNING.md

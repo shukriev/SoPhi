@@ -52,8 +52,8 @@ one-line change, not a rewrite.
 
 **Installers (no Java needed).** Download from the newest `cli-v*`
 [release](../../releases): `sophi-macos-arm64.pkg` (Apple Silicon), `sophi-macos-x64.pkg`
-(Intel) or `sophi-windows-x64.msi`, open it, then run `sophi` in a new terminal. Until code signing is set up
-([packaging/SIGNING.md](packaging/SIGNING.md)), they are unsigned: on macOS approve the package once under System Settings → Privacy & Security;
+(Intel) or `sophi-windows-x64.msi`, open it, then run `sophi` in a new terminal. Until code signing is set up,
+they are unsigned: on macOS approve the package once under System Settings → Privacy & Security;
 on Windows choose "More info → Run anyway". To uninstall on macOS, delete `/Applications/sophi.app`
 and `/usr/local/bin/sophi`; on Windows use Apps & features.
 
