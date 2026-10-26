@@ -74,7 +74,7 @@ class AgentControllerTest : FunSpec({
             )
         )
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.turn(session, "hi", config, any(), any()) } returns updated
+        coEvery { agentLoop.turn(session, "hi", config, any(), any(), any()) } returns updated
 
         val response = controller.turn("s1", ChatRequest("hi"))
         response.statusCode shouldBe HttpStatus.OK
@@ -94,7 +94,7 @@ class AgentControllerTest : FunSpec({
             )
         )
         every { sessionManager.load("s-learn") } returns session
-        coEvery { agentLoop.turn(session, "hi", config, any(), any()) } returns updated
+        coEvery { agentLoop.turn(session, "hi", config, any(), any(), any()) } returns updated
 
         learningController.turn("s-learn", ChatRequest("hi"))
 
@@ -121,7 +121,7 @@ class AgentControllerTest : FunSpec({
         )
         every { sessionManager.load("s-ctx") } returns session
         val configSlot = slot<AgentConfig>()
-        coEvery { agentLoop.turn(session, "hi", capture(configSlot), any(), any()) } returns updated
+        coEvery { agentLoop.turn(session, "hi", capture(configSlot), any(), any(), any()) } returns updated
 
         contributingController.turn("s-ctx", ChatRequest("hi"))
 
@@ -138,7 +138,7 @@ class AgentControllerTest : FunSpec({
         every { sessionManager.load("s1") } answers { AgentSession("s1") }
         var active = 0
         var maxActive = 0
-        coEvery { agentLoop.turn(any(), any(), config, any(), any()) } coAnswers {
+        coEvery { agentLoop.turn(any(), any(), config, any(), any(), any()) } coAnswers {
             active++
             maxActive = maxOf(maxActive, active)
             kotlinx.coroutines.delay(20)
@@ -161,7 +161,7 @@ class AgentControllerTest : FunSpec({
     test("streamTurn returns non-null SseEmitter for valid session") {
         val session = AgentSession("s1")
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.streamTurn(any(), any(), any(), any(), any()) } returns session
+        coEvery { agentLoop.streamTurn(any(), any(), any(), any(), any(), any()) } returns session
 
         controller.streamTurn("s1", "hello").shouldNotBeNull()
     }

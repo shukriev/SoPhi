@@ -19,4 +19,8 @@ sealed class TurnEvent {
      */
     data class ConfirmationStarted(val toolNames: List<String>) : TurnEvent()
     object ConfirmationFinished : TurnEvent()
+    /** The user's mid-turn messages were handed to the model, before its next request. */
+    data class SteerApplied(val texts: List<String>) : TurnEvent()
+    /** A message queued as a follow-up is starting as its own turn. */
+    data class FollowUpStarted(val text: String) : TurnEvent()
 }
