@@ -5,13 +5,16 @@ data class BashPart(val text: String, val redirects: Boolean)
 
 private val KEYWORDS = setOf("if", "then", "else", "elif", "do", "while", "until", "fi", "done", "!", "time", "{", "}")
 private val ASSIGNMENT = Regex("^[A-Za-z_][A-Za-z0-9_]*=")
-private val FD_DUP = Regex("^&[0-9-]")
+private val FD_DUP = Regex("^&([0-9]+|-)(?=[\\s;&|)<>]|$)")
+private val REDIRECT_WORD = Regex("^[0-9]*(>>?|<{1,3})[&|]?")
+private val CASE_WORD = Regex("\\bcase\\b")
 private val NULL_TARGET = Regex("^\\s*/dev/null(?=[\\s;&|)]|$)")
 
 /**
  * Splits a command on `; & | newline ( )` outside quotes and recurses into `$(..)`, backticks and `<(..)`/`>(..)`,
  * so a deny rule can't be dodged with compound syntax. Returns null when it can't split safely (unterminated quote
- * or substitution, heredoc); callers must treat that as "ask".
+ * or substitution, heredoc, `$'..'`, `case` inside a substitution, stray `)`); callers apply R3: deny if any deny rule
+ * exists for the tool, else ask if any ask rule exists, else no rule applies.
  * ponytail: hand-rolled scanner covers common shell; tree-sitter-bash is the upgrade path for full grammar.
  */
 fun splitBashCommand(command: String): List<BashPart>? {
@@ -21,6 +24,7 @@ fun splitBashCommand(command: String): List<BashPart>? {
     val cur = StringBuilder()
     var redirects = false
     var quote = ' '
+    var groups = 0
     var i = 0
 
     fun flush() {
@@ -37,7 +41,9 @@ fun splitBashCommand(command: String): List<BashPart>? {
         val backtick = s[opener] == '`'
         val close = if (backtick) findBacktick(s, opener + 1) else findParen(s, opener + openLen)
         if (close < 0) return -1
-        pending += splitBashCommand(s.substring(opener + openLen, close)) ?: return -1
+        val inner = s.substring(opener + openLen, close)
+        if (!backtick && CASE_WORD.containsMatchIn(inner)) return -1 // case arms contain a bare `)`
+        pending += splitBashCommand(inner) ?: return -1
         cur.append(s, opener, close + 1)
         return close + 1
     }
@@ -69,6 +75,10 @@ fun splitBashCommand(command: String): List<BashPart>? {
         when {
             c == '\'' || c == '"' -> { quote = c; cur.append(c); i++ }
             (c == '<' || c == '>') && s.startsWith("(", i + 1) -> i = substitution(i, 2).also { if (it < 0) return null }
+            c == '$' && s.startsWith("$'", i) -> return null
+            c == '{' && (cur.isEmpty() || cur.last() == ' ') && (i + 1 == s.length || s[i + 1].isWhitespace()) -> { flush(); i++ }
+            c == '(' -> { groups++; flush(); i++ }
+            c == ')' -> { if (groups-- == 0) return null; flush(); i++ }
             c == '<' && s.startsWith("<<<", i) -> { cur.append("<<<"); i += 3 }
             c == '<' && s.startsWith("<<", i) -> return null
             c == '>' -> {
@@ -79,7 +89,7 @@ fun splitBashCommand(command: String): List<BashPart>? {
                 if (!FD_DUP.containsMatchIn(rest) && !NULL_TARGET.containsMatchIn(rest)) redirects = true
             }
             (c == '&' || c == '|') && (cur.lastOrNull().let { it == '<' || it == '>' } || (c == '&' && s.startsWith(">", i + 1))) -> { cur.append(c); i++ }
-            c in ";&|\n()" -> { flush(); i++ }
+            c in ";&|\n" -> { flush(); i++ }
             c == ' ' || c == '\t' -> { if (cur.isNotEmpty() && cur.last() != ' ') cur.append(' '); i++ }
             else -> { cur.append(c); i++ }
         }
@@ -89,12 +99,19 @@ fun splitBashCommand(command: String): List<BashPart>? {
     return out
 }
 
-/** Drops leading shell keywords and `NAME=value` assignments. */
+/** Drops leading shell keywords, `NAME=value` assignments and redirections, leaving the command word first. */
 private fun stripLeading(text: String): String {
     var t = text
     while (true) {
         val word = t.substring(0, wordEnd(t))
-        if (word in KEYWORDS || ASSIGNMENT.containsMatchIn(word)) t = t.substring(word.length).trimStart() else return t
+        val rest = t.substring(word.length).trimStart()
+        when {
+            word in KEYWORDS || ASSIGNMENT.containsMatchIn(word) -> t = rest
+            REDIRECT_WORD.containsMatchIn(word) && !word.startsWith("<(") && !word.startsWith(">(") ->
+                // a bare operator takes the next word as its target
+                t = if (REDIRECT_WORD.replaceFirst(word, "").isEmpty()) rest.substring(wordEnd(rest)).trimStart() else rest
+            else -> return t
+        }
     }
 }
 

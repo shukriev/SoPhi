@@ -19,6 +19,14 @@ class BashSplitTest : FunSpec({
         "FOO=1 BAR=\"a b\" rm x" to listOf("rm x"),
         "git   status" to listOf("git status"),
         "diff <(ls a) <(ls b)" to listOf("diff <(ls a) <(ls b)", "ls a", "ls b"),
+        "! rm x" to listOf("rm x"),
+        "echo \$'\\'' ; rm -f x ; echo '\\'" to null,
+        "echo \$(case a in a) rm -f x;; esac)" to null,
+        "a)" to null,
+        "function f { rm -f x; }; f" to listOf("function f", "rm -f x", "f"),
+        ">/dev/null rm -f x" to listOf("rm -f x"),
+        "> out.txt rm -f x" to listOf("rm -f x"),
+        "2>&1 rm x" to listOf("rm x"),
         "" to emptyList(),
         "  ;  " to emptyList(),
         "echo \"unterminated" to null,
@@ -33,6 +41,9 @@ class BashSplitTest : FunSpec({
     }
 
     test("redirects flag") {
+        splitBashCommand("true >&1x")!!.single().redirects shouldBe true
+        splitBashCommand("true >&2")!!.single().redirects shouldBe false
+        splitBashCommand("> out.txt rm x")!!.single().redirects shouldBe true
         splitBashCommand("git status > out.txt") shouldBe listOf(BashPart("git status > out.txt", true))
         splitBashCommand("git status 2>&1 >/dev/null")!!.single().redirects shouldBe false
         splitBashCommand("echo \"a > b\"")!!.single().redirects shouldBe false
