@@ -30,6 +30,10 @@ class BashSplitTest : FunSpec({
         "&>/dev/null rm -f x" to listOf("rm -f x"),
         "&>> log rm -f x" to listOf("rm -f x"),
         "" to emptyList(),
+        "FOO=1" to emptyList(),
+        "> ~/.bashrc" to listOf("> ~/.bashrc"),
+        "ls; > ~/.bashrc" to listOf("ls", "> ~/.bashrc"),
+        ">/dev/null" to listOf(">/dev/null"),
         "  ;  " to emptyList(),
         "echo \"unterminated" to null,
         "echo \$(ls" to null,
@@ -43,6 +47,8 @@ class BashSplitTest : FunSpec({
     }
 
     test("redirects flag") {
+        splitBashCommand("> ~/.bashrc")!!.single().redirects shouldBe true
+        splitBashCommand(">/dev/null")!!.single().redirects shouldBe false
         splitBashCommand("true >&1x")!!.single().redirects shouldBe true
         splitBashCommand("true >&2")!!.single().redirects shouldBe false
         splitBashCommand("> out.txt rm x")!!.single().redirects shouldBe true

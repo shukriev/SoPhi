@@ -130,6 +130,11 @@ class PermissionRulesTest : FunSpec({
         PermissionRules.alwaysAllowRules("github_x", emptyList()) shouldBe listOf(PermissionRule("github_x", null, ALLOW))
     }
 
+    test("a subject tool with nothing to match offers no always-allow") {
+        // subject-based tools pass null, never an empty list, when there is nothing to match
+        PermissionRules.alwaysAllowRules("bash", null) shouldBe null
+    }
+
     test("missing files load as no rules") {
         load().active.shouldBeEmpty()
         PermissionRules.EMPTY.active.shouldBeEmpty()

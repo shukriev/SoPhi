@@ -23,17 +23,21 @@ fun splitBashCommand(command: String): List<BashPart>? {
     val pending = mutableListOf<BashPart>()
     val cur = StringBuilder()
     var redirects = false
+    var sawRedirect = false
     var quote = ' '
     var groups = 0
     var i = 0
 
     fun flush() {
-        val text = stripLeading(cur.toString().trim())
-        if (text.isNotEmpty()) out += BashPart(text, redirects)
+        val raw = cur.toString().trim()
+        val text = stripLeading(raw)
+        // a redirect-only part (`> ~/.bashrc`) must not vanish: it is kept as written so rules can see it
+        if (text.isNotEmpty()) out += BashPart(text, redirects) else if (sawRedirect) out += BashPart(raw, redirects)
         out += pending
         pending.clear()
         cur.clear()
         redirects = false
+        sawRedirect = false
     }
 
     // Copies the substitution opened at [opener] into the part and queues its inner parts; returns the index after it, or -1.
@@ -83,6 +87,7 @@ fun splitBashCommand(command: String): List<BashPart>? {
             c == '<' && s.startsWith("<<", i) -> return null
             c == '>' -> {
                 cur.append(c)
+                sawRedirect = true
                 i++
                 if (i < s.length && s[i] == '>') continue
                 val rest = s.substring(i)

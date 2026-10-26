@@ -60,7 +60,8 @@ class PermissionRules(
     /** Project allow rules not trusted yet (R2). */
     val untrusted: List<PermissionRule> get() = snap.untrusted
 
-    /** Null = no rule applies (the existing flow decides). [subjects] null = couldn't be computed (R3). */
+    /** Null = no rule applies (the existing flow decides). [subjects] null = couldn't be computed (R3).
+     *  An empty list means "the tool has no subjects"; a subject-based tool with nothing to match passes null, never empty. */
     fun decide(toolName: String, subjects: List<PermissionSubject>?): Effect? {
         val rules = snap.active.filter { globMatches(it.tool, toolName) }
         fun any(effect: Effect, applies: (PermissionRule) -> Boolean) = rules.any { it.effect == effect && applies(it) }
@@ -137,7 +138,7 @@ class PermissionRules(
         }
 
         /** The rules "always allow" writes for these subjects: one exact rule per subject, a tool-wide rule
-         *  when the tool has no subjects, or null when "always" can't be offered (subjects null, any not allowable). */
+         *  when the tool has no subjects (empty list; subject-based tools pass null instead), or null when "always" can't be offered (subjects null, any not allowable). */
         fun alwaysAllowRules(toolName: String, subjects: List<PermissionSubject>?): List<PermissionRule>? {
             if (subjects == null || subjects.any { !it.allowable }) return null
             val tool = globEscape(toolName)
