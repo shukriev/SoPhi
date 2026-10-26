@@ -35,9 +35,11 @@ class TuiEngine(
     }
 
     private suspend fun nextLine(): String? {
-        val hub = hubMessages ?: return input.readLine()
+        // Whatever the user typed during the last turn and never sent comes back at the prompt.
+        val draft = turnController.takeDraft()
+        val hub = hubMessages ?: return input.readLine(draft)
         return coroutineScope {
-            val local = async { input.readLine() }
+            val local = async { input.readLine(draft) }
             val remote = async { hub.receive() }
             select<String?> {
                 local.onAwait { line -> remote.cancel(); line }

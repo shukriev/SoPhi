@@ -22,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withTimeout
+import io.kotest.matchers.collections.shouldContain
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
@@ -162,5 +163,22 @@ class TuiEngineTest : FunSpec({
 
         withTimeout(5000) { engine.run(AgentSession(id = "s1")) }
         verify(exactly = 1) { provider.stream(any()) }
+    }
+
+    test("the next prompt is prefilled with the draft") {
+        val input = ScriptedInputSource(listOf("hi"))
+        val screen = StringBuilder()
+        every { provider.stream(any()) } returns flow {
+            emit(StreamEvent.Content("par"))
+            input.type(*"half".map { TurnKey.Text(it) }.toTypedArray())
+            withTimeout(5000) { while ("› half" !in screen.toString()) delay(10) }
+            input.signalEsc()
+            delay(Long.MAX_VALUE)
+        }
+        val turnController = TurnController(runtime, input, LiveRegion(screen) { 80 }) {}
+
+        TuiEngine(turnController, slashHandler, input).run(AgentSession(id = "s1"))
+
+        input.prefills shouldContain "half"
     }
 })

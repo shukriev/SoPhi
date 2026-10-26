@@ -3,6 +3,7 @@ package dev.sophi.cli
 import dev.sophi.cli.streaming.StreamingTurnPresenter
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.TurnInbox
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionIdContext
 import kotlinx.coroutines.async
@@ -27,12 +28,37 @@ class TurnController(
     private val autoExitTokenView: Boolean = true,
     private val output: (String) -> Unit
 ) {
+    private var draft = ""
+
+    /** Text the user typed during the last turn that never reached the model; "" once read. */
+    fun takeDraft(): String = draft.also { draft = "" }
+
     suspend fun runTurn(session: AgentSession, userInput: String): AgentSession =
         coroutineScope {
-            val presenter = StreamingTurnPresenter(autoExitTokenView)
+            var presenter = StreamingTurnPresenter(autoExitTokenView)
+            val inbox = TurnInbox()
+            val editor = SteerEditor(inbox)
 
-            fun render() = liveRegion.update(presenter.renderFrame())
+            fun render() {
+                val queue = editor.render()
+                liveRegion.update(presenter.renderFrame() + if (queue.isEmpty()) "" else "\n" + queue)
+            }
             render()
+
+            fun outputReasoningIfAny() {
+                presenter.reasoningText()?.let { output(ResponseRenderer.renderReasoning(it)) }
+            }
+
+            // A steer or follow-up starts a new stretch of the reply: settle what streamed so far,
+            // print the user's words where they landed in the conversation, then stream afresh.
+            fun startSegment(texts: List<String>) {
+                liveRegion.clear()
+                outputReasoningIfAny()
+                presenter.finalText().takeIf { it.isNotEmpty() }?.let { output(ResponseRenderer.renderText(it)) }
+                texts.forEach { output("You: $it") }
+                presenter = StreamingTurnPresenter(autoExitTokenView)
+                render()
+            }
 
             // Sole writer to liveRegion while a phase is active: ticks on a fixed cadence instead of
             // once per token, so a fast token stream doesn't repaint the terminal hundreds of times.
@@ -48,17 +74,21 @@ class TurnController(
             // animationJob never touch it.
             val turnDeferred = async(SessionIdContext(session.id)) {
                 try {
-                    runtime.streamTurn(session, userInput) { event ->
+                    runtime.streamTurn(session, userInput, inbox) { event ->
                         onEvent(event)
-                        when (val rendered = presenter.feed(event)) {
-                            is StreamingTurnPresenter.Rendered.Cleared -> liveRegion.clear()
-                            is StreamingTurnPresenter.Rendered.Redraw -> render()
-                            is StreamingTurnPresenter.Rendered.ToolLine -> {
-                                liveRegion.clear()
-                                output(rendered.text)
-                                render()
+                        when (event) {
+                            is TurnEvent.SteerApplied -> startSegment(event.texts)
+                            is TurnEvent.FollowUpStarted -> startSegment(listOf(event.text))
+                            else -> when (val rendered = presenter.feed(event)) {
+                                is StreamingTurnPresenter.Rendered.Cleared -> liveRegion.clear()
+                                is StreamingTurnPresenter.Rendered.Redraw -> render()
+                                is StreamingTurnPresenter.Rendered.ToolLine -> {
+                                    liveRegion.clear()
+                                    output(rendered.text)
+                                    render()
+                                }
+                                null -> Unit
                             }
-                            null -> Unit
                         }
                     } to null
                 } catch (e: Exception) {
@@ -69,11 +99,10 @@ class TurnController(
                 input.awaitControlKeys(tokenViewKey, onToggle = {
                     presenter.toggleTokenView()
                     render()
+                }, onKey = {
+                    editor.key(it)
+                    if (!presenter.confirmationPending) render()
                 })
-            }
-
-            fun outputReasoningIfAny() {
-                presenter.reasoningText()?.let { output(ResponseRenderer.renderReasoning(it)) }
             }
 
             select<AgentSession> {
@@ -100,6 +129,6 @@ class TurnController(
                     output(ResponseRenderer.renderText(presenter.finalText()) + " [interrupted]")
                     session
                 }
-            }
+            }.also { draft = editor.takeDraft() }
         }
 }
