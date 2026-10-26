@@ -31,7 +31,6 @@ import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.ActivatedTools
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.core.tools.bashReachesOutside
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.RoundChanges
 import kotlinx.coroutines.CancellationException
@@ -278,13 +277,10 @@ class AgentLoop(
         return session
     }
 
-    /** A round's `moves`, and its allowed bash commands that reach outside the workspace (`outsideCommands`). */
-    private fun undoRecord(changes: RoundChanges, allowedCalls: List<Pair<ToolCall, Boolean>>): Map<String, String> = buildMap {
+    /** A round's `moves`, and its (and its subagents') allowed bash commands that reach outside the workspace (`outsideCommands`). */
+    private fun undoRecord(changes: RoundChanges): Map<String, String> = buildMap {
         if (changes.moves.isNotEmpty()) put("moves", entryJson.encodeToString(changes.moves))
-        val root = checkpoints?.root ?: return@buildMap
-        val outside = allowedCalls.filter { (c, ok) -> ok && c.name == "bash" }.mapNotNull { (c, _) ->
-            runCatching { entryJson.parseToJsonElement(c.argumentsJson).jsonObject["command"]?.jsonPrimitive?.content }.getOrNull()
-        }.filter { bashReachesOutside(it, root) != null }
+        val outside = checkpoints?.root?.let(changes::outsideCommands).orEmpty()
         if (outside.isNotEmpty()) put("outsideCommands", entryJson.encodeToString(outside))
     }
 
@@ -591,6 +587,11 @@ class AgentLoop(
                 checkpoints.snapshot()?.let { undoMeta += mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }
             }
             val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
+            // Recorded whether or not this loop knows the root: a host's undoableRound may (a /goal step's loop doesn't).
+            allowedCalls.filter { (c, ok) -> ok && c.name == "bash" }.forEach { (c, _) ->
+                runCatching { entryJson.parseToJsonElement(c.argumentsJson).jsonObject["command"]?.jsonPrimitive?.content }.getOrNull()
+                    ?.let(changes::recordCommand)
+            }
             // In a finally, so a stopped round still tells /undo what it changed (saveStopped persists it).
             val auditSink = currentCoroutineContext()[AuditScope]?.sink
             val actor = currentCoroutineContext()[ActorContext]
@@ -639,7 +640,7 @@ class AgentLoop(
                     }
                 }.awaitAll()
             } } finally {
-                undoMeta += undoRecord(changes, allowedCalls)
+                undoMeta += undoRecord(changes)
                 if (undoMeta.isNotEmpty()) pendingRounds[roundIndex] = pendingRounds[roundIndex].let { it.copy(metadata = it.metadata + undoMeta) }
             }
             // Successful calls never trip the failure guard, so a model can repeat one forever without

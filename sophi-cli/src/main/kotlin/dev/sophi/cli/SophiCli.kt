@@ -296,6 +296,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             input = inputSource, liveRegion = liveRegion, interactive = sophiTerminal.isInteractive,
             tokenViewKey = tokenViewKey.singleOrNull() ?: 'T', autoExitTokenView = autoExitTokenView,
             learning = learningPlugin,
+            checkpoints = cli.runtime.checkpointStore,
             onEvent = onEvent,
             onTurnSettled = { userInput, assistantReply, error ->
                 cli.runtime.settleExternalTurn(session.id, userInput, assistantReply, error)
@@ -311,6 +312,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             planLog = cli.planLog,
             fileRestorer = cli.runtime.fileRestorer,
             auditSink = cli.runtime.auditSink,
+            checkpoints = cli.runtime.checkpointStore,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
             onEvent = onEvent,

@@ -32,7 +32,6 @@ import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.undo.CheckpointStore
-import dev.sophi.core.undo.FileRestorer
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.LearningConfig
@@ -423,7 +422,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, FileRestorer(checkpointStore), auditSink
+            deferOver, checkpointStore, auditSink
         )
     }
 }

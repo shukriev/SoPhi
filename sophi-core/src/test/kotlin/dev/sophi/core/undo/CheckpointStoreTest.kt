@@ -2,6 +2,7 @@ package dev.sophi.core.undo
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -251,5 +252,184 @@ class CheckpointStoreTest : FunSpec({
         val c = store.snapshot()!!
         store.diffStat(c)
         store.nestedRepos(c) shouldBe listOf("vendor/lib")
+    }
+
+    test("a nested repo with no commit is left out of the snapshot, which still succeeds") {
+        val (root, store, warnings) = fixture()
+        root.resolve("a.txt").writeText("a")
+        val sub = root.resolve("sub").createDirectories()
+        sh(sub, "git", "init", "-q")
+        sub.resolve("f.txt").writeText("f")
+        val nestedStatus = sh(sub, "git", "status", "--porcelain")
+        val c = store.snapshot()!!
+        warnings.single() shouldContain "sub"
+        root.resolve("a.txt").writeText("changed")
+        sub.resolve("f.txt").writeText("changed")
+        sub.resolve("g.txt").writeText("g")
+        store.restore(c)
+        root.resolve("a.txt").readText() shouldBe "a"
+        sub.resolve("f.txt").readText() shouldBe "changed"
+        sub.resolve("g.txt").readText() shouldBe "g"
+        sh(sub, "git", "rev-parse", "--git-dir").trim() shouldBe ".git"
+        sh(sub, "git", "status", "--porcelain") shouldBe nestedStatus.replace("?? f.txt\n", "?? f.txt\n?? g.txt\n")
+        store.nestedRepos(c) shouldBe listOf("sub")
+    }
+
+    test("a snapshot never runs the enclosing repo's core.fsmonitor, nor a nested repo's") {
+        val repo = createTempDirectory("ckpt-fsm")
+        val marker = createTempDirectory("ckpt-marker").resolve("ran")
+        val hook = repo.resolve("hook.sh")
+        hook.writeText("#!/bin/sh\ntouch '$marker'\n")
+        hook.toFile().setExecutable(true)
+        sh(repo, "git", "init", "-q")
+        sh(repo, "git", "config", "core.fsmonitor", hook.toString())
+        val root = repo.resolve("sub").createDirectories()
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        sh(nested, "git", "init", "-q")
+        sh(nested, "git", "config", "core.fsmonitor", hook.toString())
+        CheckpointStore(root, createTempDirectory("ckpt-home")) {}.snapshot()!!
+        marker.exists() shouldBe false
+    }
+
+    test("an IO failure makes snapshot warn and return null instead of throwing") {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val warnings = mutableListOf<String>()
+        val homeIsAFile = kotlin.io.path.createTempFile("ckpt-home")
+        CheckpointStore(root, homeIsAFile) { warnings += it }.snapshot() shouldBe null
+        warnings.single() shouldContain "checkpoint:"
+    }
+
+    /** A nested repo `n` with a commit, whose own config then points [key] at a script that touches a marker. */
+    fun nestedWithMarker(key: String): Triple<Path, Path, Path> {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        sh(nested, "git", "init", "-q")
+        nested.resolve(".gitattributes").writeText("* filter=mark\n")
+        nested.resolve("f.txt").writeText("f")
+        sh(nested, "git", "add", "-A")
+        sh(nested, "git", "-c", "user.name=u", "-c", "user.email=u@x", "commit", "-q", "-m", "init")
+        val marker = createTempDirectory("ckpt-marker").resolve("ran")
+        val hook = createTempDirectory("ckpt-hook").resolve("hook.sh")
+        hook.writeText("#!/bin/sh\ntouch '$marker'\ncat\n")
+        hook.toFile().setExecutable(true)
+        sh(nested, "git", "config", key, hook.toString())
+        return Triple(root, nested, marker)
+    }
+
+    test("a snapshot never runs a committed nested repo's clean filter") {
+        val (root, nested, marker) = nestedWithMarker("filter.mark.clean")
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home")) {}
+        val first = store.snapshot()!!
+        nested.resolve("f.txt").writeText("edited")
+        store.snapshot()!!
+        // a change outside the nested repo too, so the snapshot runs `add`
+        nested.resolve("f.txt").writeText("edited again")
+        root.resolve("a.txt").writeText("changed")
+        root.resolve("b.txt").writeText("b")
+        store.snapshot()!!
+        store.restore(first)
+        root.resolve("a.txt").readText() shouldBe "a"
+        marker.exists() shouldBe false
+    }
+
+    test("a snapshot never runs a committed nested repo's core.fsmonitor") {
+        val (root, nested, marker) = nestedWithMarker("core.fsmonitor")
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home")) {}
+        store.snapshot()!!
+        nested.resolve("f.txt").writeText("edited")
+        store.snapshot()!!
+        // a change outside the nested repo too, so the snapshot runs `add`
+        nested.resolve("f.txt").writeText("edited again")
+        root.resolve("a.txt").writeText("changed")
+        root.resolve("b.txt").writeText("b")
+        store.snapshot()!!
+        marker.exists() shouldBe false
+    }
+
+    test("a committed nested repo's HEAD move is recorded, and restore leaves its files alone") {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        fun commit(vararg cmd: String) = sh(nested, "git", "-c", "user.name=u", "-c", "user.email=u@x", *cmd)
+        sh(nested, "git", "init", "-q")
+        nested.resolve("f.txt").writeText("f")
+        sh(nested, "git", "add", "-A")
+        commit("commit", "-q", "-m", "one")
+        val shadowHome = createTempDirectory("ckpt-home")
+        val store = CheckpointStore(root, shadowHome) {}
+        val c = store.snapshot()!!
+        val shadow = java.nio.file.Files.list(shadowHome).use { it.toList().single() }
+        fun treeSha(rev: String) = sh(root, "git", "--git-dir=$shadow", "ls-tree", rev, "n").trim().split(Regex("\\s+"))[2]
+        treeSha(c) shouldBe sh(nested, "git", "rev-parse", "HEAD").trim()
+
+        nested.resolve("f.txt").writeText("two")
+        commit("commit", "-qam", "two")
+        val head2 = sh(nested, "git", "rev-parse", "HEAD").trim()
+        val c2 = store.snapshot()!!
+        treeSha(c2) shouldBe head2
+
+        nested.resolve("f.txt").writeText("dirty")
+        root.resolve("a.txt").writeText("changed")
+        store.restore(c)
+        root.resolve("a.txt").readText() shouldBe "a"
+        nested.resolve("f.txt").readText() shouldBe "dirty"
+        sh(nested, "git", "rev-parse", "HEAD").trim() shouldBe head2
+        store.nestedRepos(c) shouldBe listOf("n")
+    }
+
+    test("a removed nested repo drops out of the next snapshot") {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        sh(nested, "git", "init", "-q")
+        nested.resolve("f.txt").writeText("f")
+        sh(nested, "git", "add", "-A")
+        sh(nested, "git", "-c", "user.name=u", "-c", "user.email=u@x", "commit", "-q", "-m", "i")
+        val shadowHome = createTempDirectory("ckpt-home")
+        val store = CheckpointStore(root, shadowHome) {}
+        store.snapshot()!!
+        nested.toFile().deleteRecursively()
+        val c = store.snapshot()!!
+        val shadow = java.nio.file.Files.list(shadowHome).use { it.toList().single() }
+        sh(root, "git", "--git-dir=$shadow", "ls-tree", "--name-only", c).trim() shouldBe "a.txt"
+    }
+
+    /** A root with a.txt and a committed nested repo `n` (n/f.txt), already recorded by one snapshot. */
+    fun recordedNested(warnings: MutableList<String> = mutableListOf()): Triple<Path, CheckpointStore, Path> {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("a")
+        val nested = root.resolve("n").createDirectories()
+        sh(nested, "git", "init", "-q")
+        nested.resolve("f.txt").writeText("f")
+        sh(nested, "git", "add", "-A")
+        sh(nested, "git", "-c", "user.name=u", "-c", "user.email=u@x", "commit", "-q", "-m", "i")
+        val shadowHome = createTempDirectory("ckpt-home")
+        CheckpointStore(root, shadowHome) { warnings += it }.also { it.snapshot()!! }
+        val shadow = java.nio.file.Files.list(shadowHome).use { it.toList().single() }
+        return Triple(root, CheckpointStore(root, shadowHome) { warnings += it }, shadow)
+    }
+
+    test("a nested repo that became a plain directory is snapshotted as files") {
+        val (root, store, shadow) = recordedNested()
+        root.resolve("n/.git").toFile().deleteRecursively()
+        root.resolve("a.txt").writeText("changed")
+        val c = store.snapshot()!!
+        sh(root, "git", "--git-dir=$shadow", "ls-tree", "-r", "--name-only", c).lines() shouldContain "n/f.txt"
+    }
+
+    test("a nested repo whose HEAD can't be read keeps its recorded commit") {
+        val warnings = mutableListOf<String>()
+        val (root, store, shadow) = recordedNested(warnings)
+        val before = sh(root, "git", "--git-dir=$shadow", "ls-tree", "HEAD", "n").trim()
+        before shouldContain "160000"
+        root.resolve("n/.git").toFile().deleteRecursively()
+        root.resolve("n/.git").writeText("gitdir: /nonexistent/sophi-test\n")
+        root.resolve("a.txt").writeText("changed")
+        val c = store.snapshot()!!
+        sh(root, "git", "--git-dir=$shadow", "ls-tree", c, "n").trim() shouldBe before
+        warnings.none { "no commit yet" in it } shouldBe true
     }
 })

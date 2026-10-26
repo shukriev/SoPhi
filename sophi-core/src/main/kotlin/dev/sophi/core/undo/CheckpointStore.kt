@@ -49,6 +49,8 @@ class CheckpointStore(
         else -> null
     }
     private val warned = mutableSetOf<String>()
+    /** Nested repos with no commit yet, as of the latest snapshot: `add -A` fails on them, so they are left out. */
+    @Volatile private var unbornRepos = emptyList<String>()
 
     private class Result(val code: Int, val out: String) {
         val ok get() = code == 0
@@ -64,10 +66,14 @@ class CheckpointStore(
         val log = Files.createTempFile("sophi-git", ".out")
         val stdin = input?.let { Files.createTempFile("sophi-git", ".in").apply { writeText(it) } }
         try {
-            // user's global config must not leak in: signing would prompt, hooksPath would run their hooks
-            val cmd = if (userRepo) listOf(git, "--no-optional-locks", *args) else listOf(
+            // Config that runs a program: a repo SoPhi doesn't own (or the user's global config) would otherwise run it on
+            // every snapshot, unconfirmed: core.fsmonitor on any index read, hooks on any hook-running command, and a
+            // committed nested repo's own clean filters when status looks inside it (ignoreSubmodules=dirty: it doesn't).
+            val noExec = arrayOf("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=dirty")
+            // user's global config must not leak in: signing would prompt
+            val cmd = if (userRepo) listOf(git, "--no-optional-locks", *noExec, *args) else listOf(
                 git, "--git-dir=$shadow", "--work-tree=$root", "-c", "user.name=sophi", "-c", "user.email=sophi@localhost",
-                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+                "-c", "commit.gpgsign=false", *noExec,
                 *(if (repoIgnores.exists()) arrayOf("-c", "core.excludesFile=$repoIgnores") else emptyArray()), *args,
             )
             val pb = ProcessBuilder(cmd).directory(root.toFile()).redirectErrorStream(true).redirectOutput(log.toFile())
@@ -100,9 +106,18 @@ class CheckpointStore(
         if (r.ok) repoIgnores.writeText(nulSplit(r.out).joinToString("") { anchored(it) }) else repoIgnores.deleteIfExists()
     }
 
-    /** Commit sha of the workspace as it is now, or null when git is unusable. Reuses HEAD when nothing changed. */
+    /** Commit sha of the workspace as it is now, or null (with a warning) when anything fails. Reuses HEAD when nothing changed. */
     @Synchronized
-    fun snapshot(): String? {
+    fun snapshot(): String? = try {
+        takeSnapshot()
+    } catch (e: Exception) {
+        // a checkpoint never fails the round it guards
+        if (e is InterruptedException) Thread.currentThread().interrupt()
+        warn("checkpoint: cannot snapshot: ${e::class.simpleName}: ${e.message}")
+        null
+    }
+
+    private fun takeSnapshot(): String? {
         refusal?.let { warn(it); return null }
         if (!shadow.resolve("HEAD").exists()) {
             shadow.createDirectories()
@@ -124,9 +139,34 @@ class CheckpointStore(
             }
         }
         val hasHead = exec(false, "rev-parse", "-q", "--verify", "HEAD").ok
+        unbornRepos = emptyList()
         if (left > 0 || !hasHead) {
-            if (!run("add", "-A").ok) return null
-            if (!run("commit", "-q", "--allow-empty", "-m", "checkpoint").ok) return null
+            // Nested repos: a new one is one untracked "dir/" entry, a recorded one a gitlink in the shadow index. `add`
+            // would look inside them and run their own clean filters, so it leaves out the ones still repos, and their
+            // HEAD (a read-only rev-parse inside) is recorded by hand. One with no commit yet can't be recorded at all.
+            val gitlinks = nulSplit(exec(false, "ls-files", "-s", "-z").out).filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') }
+            val repos = (changed.filter { it.endsWith("/") }.map { it.removeSuffix("/") } + gitlinks).distinct()
+                .filter { root.resolve(it).resolve(".git").exists() }
+            for (path in gitlinks - repos.toSet()) if (!run("update-index", "--force-remove", "--", path).ok) return null
+            val unborn = mutableListOf<String>()
+            for (path in repos) {
+                val head = exec(false, "-C", path, "rev-parse", "-q", "--verify", "HEAD", userRepo = true)
+                when {
+                    head.ok -> if (!run("update-index", "--add", "--cacheinfo", "160000,${head.out.trim()},$path").ok) return null
+                    // exit 1 with -q is "no such ref"; anything else (a broken .git, a timeout) leaves the recorded gitlink as is
+                    head.code == 1 -> unborn += path
+                    else -> warn("checkpoint: cannot read the HEAD of nested repo $path, keeping its last recorded commit: ${head.out.trim()}")
+                }
+            }
+            for (path in unborn) {
+                warn("checkpoint: leaving out $path/, a nested git repo with no commit yet; changes inside it can't be undone")
+                if (path in gitlinks && !run("update-index", "--force-remove", "--", path).ok) return null
+            }
+            unbornRepos = unborn.map { "$it/" }
+            if (!run("add", "-A", "--", ".", *repos.map { ":(exclude,literal)$it" }.toTypedArray()).ok) return null
+            // status can list a change the index doesn't keep (an unborn repo, a nested repo's dirty content): same tree, same checkpoint
+            val sameTree = hasHead && exec(false, "diff", "--cached", "--quiet", "HEAD").ok
+            if (!sameTree && !run("commit", "-q", "--allow-empty", "-m", "checkpoint").ok) return null
         }
         return run("rev-parse", "HEAD").takeIf { it.ok }?.out?.trim()
     }
@@ -137,10 +177,13 @@ class CheckpointStore(
         return run("diff", "--stat", "--summary", now, to).takeIf { it.ok }?.out?.trim().orEmpty()
     }
 
-    /** Nested repos in [checkpoint] or the latest snapshot: `add -A` keeps only their commit, so edits inside them can't be undone. */
-    fun nestedRepos(checkpoint: String): List<String> = listOf(checkpoint, "HEAD")
+    /**
+     * Nested repos in [checkpoint] or the latest snapshot: `add -A` keeps only their commit, or nothing when they have none,
+     * so edits inside them can't be undone.
+     */
+    fun nestedRepos(checkpoint: String): List<String> = (listOf(checkpoint, "HEAD")
         .flatMap { sha -> exec(false, "ls-tree", "-r", "-z", sha).takeIf { it.ok }?.out?.let(::nulSplit).orEmpty() }
-        .filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') }.distinct()
+        .filter { it.startsWith("160000 ") }.map { it.substringAfter('\t') } + unbornRepos.map { it.removeSuffix("/") }).distinct()
 
     private fun checked(vararg args: String, input: String? = null, okCodes: Set<Int> = setOf(0)): String {
         val r = exec(false, *args, input = input)
