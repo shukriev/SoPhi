@@ -45,6 +45,7 @@ class SlashHandler(
     private val planLog: PlanLog? = null,
     private val fileRestorer: FileRestorer? = null,
     private val auditSink: AuditSink? = null,
+    private val permissions: dev.sophi.core.permissions.PermissionRules? = null,
     private val checkpoints: CheckpointStore? = null,
     /**
      * Total context window of `config.model`, in tokens. Optional here for the same reason
@@ -253,7 +254,7 @@ class SlashHandler(
                 if (subArg.isNullOrEmpty()) output("Usage: /calendar create <description>")
                 else CalendarCreate(
                     llmProvider, calProvider, sessionManager, confirmationPolicy, config,
-                    window, subArg, auditSink, output
+                    window, subArg, auditSink, permissions, output
                 ).run()
             }
             else -> output("Unknown /calendar subcommand: $sub  Available: list get delete calendars create")
@@ -316,7 +317,7 @@ class SlashHandler(
         return PlanCommand(
             provider = llm, registry = registry, sessionManager = sessionManager, config = config,
             contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = planLog,
-            onEvent = onEvent, liveRegion = liveRegion, input = input, checkpoints = checkpoints, echo = output
+            onEvent = onEvent, liveRegion = liveRegion, input = input, checkpoints = checkpoints, audit = auditSink, permissions = permissions, echo = output
         ).run(arg, session)
     }
 

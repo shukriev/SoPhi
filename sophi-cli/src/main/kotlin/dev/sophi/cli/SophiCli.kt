@@ -283,7 +283,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             agentLoop = AgentLoop(
                 provider, cli.registry, cli.runtime.sessionManager,
                 confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
-                audit = cli.runtime.auditSink
+                audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules
             ),
             sessionManager = cli.runtime.sessionManager, provider = provider,
             planner = goalPlanner,
@@ -312,6 +312,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             planLog = cli.planLog,
             fileRestorer = cli.runtime.fileRestorer,
             auditSink = cli.runtime.auditSink,
+            permissions = cli.runtime.permissionRules,
             checkpoints = cli.runtime.checkpointStore,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,

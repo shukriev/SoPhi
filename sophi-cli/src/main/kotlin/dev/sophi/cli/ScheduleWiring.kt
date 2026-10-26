@@ -49,6 +49,7 @@ internal fun buildScheduleEngine(
         toolRegistry(registry)
         agentsDir(agentsDir)
         auditLog()
+        permissionRules(Path.of("").toAbsolutePath())
         tool(dev.sophi.schedule.tools.ProposeImprovementTool())
         plugin(dev.sophi.schedule.tools.ProposalPlugin(proposalStore))
         if (memoryHome != null) {

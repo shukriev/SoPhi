@@ -16,6 +16,7 @@ import dev.sophi.core.tools.MoveFileTool
 import dev.sophi.core.tools.RunClaudeCodeTool
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.WebSearchTool
+import dev.sophi.core.permissions.PermissionRules
 import dev.sophi.mcp.server.buildMcpServer
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import java.nio.file.Path
@@ -49,4 +50,14 @@ fun builtinMcpServer(
     root: Path = Path.of("").toAbsolutePath(),
     braveApiKey: String? = null,
     audit: AuditSink? = JsonlAuditSink(),
-): Server = buildMcpServer(buildBuiltinTools(root, braveApiKey), exposedNames, audit)
+    /** Defaults to the same global and project files as the CLI; a malformed file throws [PermissionRulesException]. */
+    permissions: PermissionRules? = loadPermissionRules(root),
+): Server = buildMcpServer(buildBuiltinTools(root, braveApiKey), exposedNames, audit, permissions)
+
+/** The default-path rules: `home/permissions.json`, `projectRoot/.sophi/permissions.json`, trust in `home/permissions-trust.json`. */
+fun loadPermissionRules(
+    projectRoot: Path,
+    home: Path = Path.of(System.getProperty("user.home"), ".sophi"),
+): PermissionRules = PermissionRules.load(
+    home.resolve("permissions.json"), projectRoot.resolve(".sophi").resolve("permissions.json"), home.resolve("permissions-trust.json")
+)
