@@ -48,7 +48,25 @@ app — same core, three ways to run it.
 They all sit on the same core, so switching between them later is a
 one-line change, not a rewrite.
 
+## 📦 Install
+
+Needs Java 21+. No checkout required.
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/shukriev/SoPhi/main/scripts/get-sophi.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/shukriev/SoPhi/main/scripts/get-sophi.ps1 | iex
+```
+
+Re-run to upgrade; set `SOPHI_VERSION=cli-v<x.y.z>` to pin a release. Maintainers publish
+a release by pushing a `cli-v*` tag (`.github/workflows/cli-release.yml`).
+
 ## 🚀 Build
+
 
 ```bash
 mvn -q -DskipTests package
