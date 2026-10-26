@@ -15,7 +15,6 @@ import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.mockk.Runs
 import io.mockk.every
@@ -90,7 +89,8 @@ class AgentLoopSteerTest : FunSpec({
         entries[3].metadata["steer"] shouldBe "true"
         entries[3].metadata["replay"] shouldBe null
         entries[4].content shouldBe "done"
-        PromptBuilder.build(entries).map { it.role to it.content } shouldContain (MessageRole.USER to "use port 8080")
+        PromptBuilder.build(entries).map { it.role to it.content } shouldBe listOf(
+            MessageRole.USER to "go\n\nuse port 8080", MessageRole.ASSISTANT to "done")
     }
 
     test("steer queued during the final round continues the turn") {

@@ -19,6 +19,10 @@ object PromptBuilder {
         return if (reason.isEmpty()) "(No answer: the user stopped it.)" else "(No answer: this turn was cut off — $reason.)"
     }
 
+    /**
+     * Adjacent USER messages are merged: a steer saved after a tool round (replay=false) would
+     * otherwise replay right after the turn's input, and strict chat templates require alternation.
+     */
     fun build(entries: List<SessionEntry>): List<Message> = entries
         .filter { it.metadata["replay"] != "false" }
         .map { entry ->
@@ -33,5 +37,10 @@ object PromptBuilder {
                 toolName = entry.metadata["toolName"]
             )
         }
+    }.fold(mutableListOf()) { out, m ->
+        val last = out.lastOrNull()
+        if (last?.role == MessageRole.USER && m.role == MessageRole.USER) out[out.lastIndex] = last.copy(content = last.content + "\n\n" + m.content)
+        else out.add(m)
+        out
     }
 }

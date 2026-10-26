@@ -28,7 +28,16 @@ private class ContinuationParser : DefaultParser() {
     }
 }
 
-class SophiTerminal(private val jlineTerminal: Terminal) {
+/**
+ * Keys read this soon after a confirmation appears are dropped, not taken as its answer: someone
+ * mid-way through typing a steer would otherwise approve a call with `y` or write an allow rule with `a`.
+ */
+const val CONFIRMATION_GRACE_MS = 500L
+
+class SophiTerminal(
+    private val jlineTerminal: Terminal,
+    private val now: () -> Long = System::currentTimeMillis
+) {
     private val reader: LineReader = LineReaderBuilder.builder()
         .terminal(jlineTerminal)
         .history(DefaultHistory())
@@ -69,12 +78,14 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
     // otherwise race that loop for the same keystrokes and could starve forever.
     private val pendingConfirmation = AtomicReference<CompletableDeferred<ConfirmAnswer>?>(null)
     @Volatile private var alwaysOffered = false
+    @Volatile private var confirmationSince = 0L
 
     suspend fun awaitYesNo(): Boolean = awaitConfirmation(false) == ConfirmAnswer.YES
 
     suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer {
         val deferred = CompletableDeferred<ConfirmAnswer>()
         alwaysOffered = offerAlways
+        confirmationSince = now()
         check(pendingConfirmation.compareAndSet(null, deferred)) { "a confirmation is already pending" }
         try {
             return deferred.await()
@@ -106,6 +117,7 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
                 val ch = withContext(Dispatchers.IO) { nonBlockingReader.read(100) }
                 val confirmation = pendingConfirmation.get()
                 if (confirmation != null) {
+                    if (ch >= 0 && now() - confirmationSince < CONFIRMATION_GRACE_MS) continue
                     when (ch) {
                         'y'.code, 'Y'.code -> confirmation.complete(ConfirmAnswer.YES)
                         'a'.code, 'A'.code -> if (alwaysOffered) confirmation.complete(ConfirmAnswer.ALWAYS)

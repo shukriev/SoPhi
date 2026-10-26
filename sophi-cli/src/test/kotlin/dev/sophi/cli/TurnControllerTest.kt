@@ -12,6 +12,9 @@ import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.extensions.AgentHook
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.JsonlLog
 import dev.sophi.sdk.Sophi
@@ -27,6 +30,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
@@ -301,5 +305,31 @@ class TurnControllerTest : FunSpec({
 
         controller.takeDraft() shouldBe "steer text\nfollow text\nhalf"
         controller.takeDraft() shouldBe ""
+    }
+
+    // ESC while a follow-up's BEFORE_TURN hook runs: the runtime puts it back in the inbox as the
+    // cancelled turn settles, so the draft must be taken after that, not right after the select.
+    test("ESC before a follow-up's turn starts returns it to the editor") {
+        val input = ScriptedInputSource(emptyList())
+        val screen = StringBuilder()
+        val stall = object : SophiPlugin {
+            override val name = "stall"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.BEFORE_TURN
+                override suspend fun invoke(context: HookContext) {
+                    if (context.userInput == "more") { input.signalEsc(); awaitCancellation() }
+                }
+            })
+        }
+        every { provider.stream(any()) } returns flow {
+            emit(StreamEvent.Content("first"))
+            input.type(*keys("more"), TurnKey.AltEnter)
+            screen.awaitDrawn("⏎ more (next turn)")
+        }
+        val controller = TurnController(runtimeFor(extraPlugin = stall), input, LiveRegion(screen) { 80 }) {}
+
+        controller.runTurn(AgentSession(id = "s1"), "hi")
+
+        controller.takeDraft() shouldBe "more"
     }
 })

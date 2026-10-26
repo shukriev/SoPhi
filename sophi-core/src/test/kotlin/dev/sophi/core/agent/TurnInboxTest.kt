@@ -39,4 +39,12 @@ class TurnInboxTest : FunSpec({
         (1..8).map { t -> thread { repeat(1000) { inbox.steer("$t-$it") } } }.forEach { it.join() }
         inbox.drainSteers().size shouldBe 8000
     }
+
+    test("putBack goes ahead of queued follow-ups") {
+        val inbox = TurnInbox()
+        inbox.followUp("f2")
+        inbox.putBack("f1")
+        inbox.takeFollowUp() shouldBe "f1"
+        inbox.takeFollowUp() shouldBe "f2"
+    }
 })

@@ -101,4 +101,20 @@ class PromptBuilderTest : FunSpec({
         msgs[1].content.contains("the user stopped it") shouldBe true
         msgs[3].content shouldBe "Done — archived 12 emails."
     }
+
+    // A steer applied after a tool round is saved after that round, whose entries are replay=false.
+    // Replayed later it would follow the turn's input directly, and strict chat templates
+    // (Gemma/Mistral) reject two USER messages in a row.
+    test("a steer saved after a tool round replays merged into the turn's input") {
+        val noReplay = mapOf("replay" to "false")
+        val msgs = PromptBuilder.build(listOf(
+            entry(EntryRole.USER, "install deps"),
+            entry(EntryRole.ASSISTANT, "", noReplay),
+            entry(EntryRole.TOOL_RESULT, "npm: not found", noReplay),
+            entry(EntryRole.USER, "try yarn", mapOf("steer" to "true")),
+            entry(EntryRole.ASSISTANT, "Installed with yarn."),
+        ))
+        msgs.map { it.role } shouldBe listOf(MessageRole.USER, MessageRole.ASSISTANT)
+        msgs[0].content shouldBe "install deps\n\ntry yarn"
+    }
 })

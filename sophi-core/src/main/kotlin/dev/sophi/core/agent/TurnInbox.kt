@@ -20,6 +20,9 @@ class TurnInbox {
 
     fun takeFollowUp(): String? = synchronized(lock) { followUps.removeFirstOrNull() }
 
+    /** Returns a taken message to the front of the follow-ups, for a turn cancelled before it started. */
+    fun putBack(text: String) { if (text.isNotBlank()) synchronized(lock) { followUps.add(0, text) } }
+
     /** Steers then follow-ups, emptying both. */
     fun drainAll(): List<String> = synchronized(lock) { (steers + followUps).also { steers.clear(); followUps.clear() } }
 

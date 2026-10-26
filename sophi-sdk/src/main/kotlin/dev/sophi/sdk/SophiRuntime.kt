@@ -120,8 +120,15 @@ class SophiRuntime internal constructor(
         // Cancellation and errors propagate out of oneTurn, leaving the inbox as it is.
         while (inbox != null) {
             val next = inbox.drainSteers().takeIf { it.isNotEmpty() }?.joinToString("\n") ?: inbox.takeFollowUp() ?: break
-            onEvent(TurnEvent.FollowUpStarted(next))
-            current = oneTurn(current, next, inbox, onEvent)
+            var looping = false
+            try {
+                onEvent(TurnEvent.FollowUpStarted(next))
+                current = oneTurn(current, next, inbox, onEvent) { looping = true }
+            } catch (e: CancellationException) {
+                // Cancelled before AgentLoop started (hooks, recall): nothing saved it, so it goes back.
+                if (!looping) inbox.putBack(next)
+                throw e
+            }
         }
         return current
     }
@@ -130,7 +137,8 @@ class SophiRuntime internal constructor(
         session: AgentSession,
         input: String,
         inbox: TurnInbox?,
-        onEvent: suspend (TurnEvent) -> Unit
+        onEvent: suspend (TurnEvent) -> Unit,
+        onLoopStart: () -> Unit = {}
     ): AgentSession {
         pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(session.id, userInput = input))
         // BEFORE_TURN fires first so a plugin can prime state that its own contribute() then reads.
@@ -147,6 +155,7 @@ class SophiRuntime internal constructor(
         // assistantReply and the hooks that encode the exchange drop the turn.
         val partial = StringBuilder()
         return try {
+            onLoopStart()
             val updated = agentLoop.streamTurn(session, input, turnConfig, preamble, inbox) { event ->
                 if (event is TurnEvent.Token) partial.append(event.text)
                 bridge(event)

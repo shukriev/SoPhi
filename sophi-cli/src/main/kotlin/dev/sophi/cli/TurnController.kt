@@ -33,11 +33,13 @@ class TurnController(
     /** Text the user typed during the last turn that never reached the model; "" once read. */
     fun takeDraft(): String = draft.also { draft = "" }
 
-    suspend fun runTurn(session: AgentSession, userInput: String): AgentSession =
-        coroutineScope {
+    suspend fun runTurn(session: AgentSession, userInput: String): AgentSession {
+        val inbox = TurnInbox()
+        val editor = SteerEditor(inbox)
+        // The draft is taken once coroutineScope returns, i.e. after a cancelled turn has settled:
+        // a follow-up cancelled before its loop started is put back in the inbox only then.
+        return coroutineScope {
             var presenter = StreamingTurnPresenter(autoExitTokenView)
-            val inbox = TurnInbox()
-            val editor = SteerEditor(inbox)
 
             fun render() {
                 val queue = editor.render()
@@ -129,6 +131,7 @@ class TurnController(
                     output(ResponseRenderer.renderText(presenter.finalText()) + " [interrupted]")
                     session
                 }
-            }.also { draft = editor.takeDraft() }
-        }
+            }
+        }.also { draft = editor.takeDraft() }
+    }
 }

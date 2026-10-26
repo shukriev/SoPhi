@@ -15,9 +15,15 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 
 class SophiRuntimeSteerTest : FunSpec({
     /** Records every hook; [onAfter] runs inside AFTER_TURN with its 1-based call number. */
@@ -90,5 +96,40 @@ class SophiRuntimeSteerTest : FunSpec({
 
         inbox.drainAll() shouldBe listOf("later")
         rec.before shouldBe listOf("first")
+    }
+
+    // Between taking a follow-up from the inbox and AgentLoop starting (BEFORE_TURN hooks, recall),
+    // nothing saves it yet, so a cancel there must put it back or the text is lost.
+    test("a follow-up cancelled before its loop starts goes back to the inbox") {
+        val inbox = TurnInbox()
+        val blocked = CompletableDeferred<Unit>()
+        val stall = object : SophiPlugin {
+            override val name = "stall"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.BEFORE_TURN
+                override suspend fun invoke(context: HookContext) {
+                    if (context.userInput == "then B") { blocked.complete(Unit); awaitCancellation() }
+                }
+            })
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } answers { flow { inbox.followUp("then B"); emit(StreamEvent.Content("A")) } }
+        val rt = Sophi.runtime {
+            this.provider = provider
+            model = "test-model"
+            contextWindowTokens(100_000)
+            sessionsDir = tempdir().toPath()
+            plugin(stall)
+        }
+
+        var thrown: Throwable? = null
+        val turn = launch {
+            try { rt.streamTurn(AgentSession(id = "s1", title = "t"), "first", inbox) { } } catch (e: Throwable) { thrown = e; throw e }
+        }
+        blocked.await()
+        turn.cancelAndJoin()
+
+        thrown.shouldBeInstanceOf<CancellationException>()
+        inbox.drainAll() shouldBe listOf("then B")
     }
 })
