@@ -12,10 +12,34 @@ class TurnKeysTest : FunSpec({
     fun decode(vararg bytes: Int, tail: Int = -2): KeyAction = runBlocking {
         val rest = bytes.drop(1).iterator()
         var tailReads = 0
-        decodeTurnKey(bytes[0]) {
+        TurnKeyDecoder().decode(bytes[0]) {
             if (rest.hasNext()) rest.next() else tail.also { check(++tailReads < 5) { "decoder loops on $tail" } }
         }
     }
+    // One decoder over a whole byte stream, as the terminal loop drives it. SLOW is a byte that
+    // arrives late: a read waiting under 100 ms times out (-2) before it, a longer one gets it.
+    val SLOW = -3
+    fun decodeAll(vararg bytes: Int): List<KeyAction> = runBlocking {
+        val q = ArrayDeque(bytes.toList())
+        val decoder = TurnKeyDecoder()
+        val out = mutableListOf<KeyAction>()
+        while (q.isNotEmpty()) {
+            val first = q.removeFirst().takeIf { it != SLOW } ?: continue
+            val action = decoder.decode(first) { t ->
+                when {
+                    q.isEmpty() -> -2
+                    q.first() == SLOW && t < 100 -> -2
+                    q.first() == SLOW -> { q.removeFirst(); q.removeFirstOrNull() ?: -2 }
+                    else -> q.removeFirst()
+                }
+            }
+            if (action != KeyAction.Ignore) out += action
+        }
+        out
+    }
+    fun bytes(text: String) = text.map { it.code }.toIntArray()
+    val pasteStart = bytes("\u001b[200~")
+    val pasteEnd = bytes("\u001b[201~")
     fun key(k: TurnKey) = KeyAction.Key(k)
 
     test("printable characters") {
@@ -43,10 +67,19 @@ class TurnKeysTest : FunSpec({
         decode(27, 'f'.code) shouldBe KeyAction.Ignore
         decode(27, 127) shouldBe KeyAction.Ignore
     }
-    test("bracketed paste markers start and end a paste") {
-        decode(27, '['.code, '2'.code, '0'.code, '0'.code, '~'.code) shouldBe key(TurnKey.PasteStart)
-        decode(27, '['.code, '2'.code, '0'.code, '1'.code, '~'.code) shouldBe key(TurnKey.PasteEnd)
-        decode(27, '['.code, '2'.code, '~'.code) shouldBe KeyAction.Ignore
+    test("inside a bracketed paste, Enter is a newline in the text and CRLF is one newline") {
+        decodeAll(*pasteStart, 'a'.code, 13, 10, 'b'.code, 13, 'c'.code, *pasteEnd, 13) shouldBe listOf(
+            key(TurnKey.Text('a')), key(TurnKey.Text('\n')), key(TurnKey.Text('b')), key(TurnKey.Text('\n')),
+            key(TurnKey.Text('c')), key(TurnKey.Enter)
+        )
+    }
+    test("an ESC inside a paste never interrupts: colour codes, ESC + byte and a lone ESC are dropped") {
+        decodeAll(*pasteStart, *bytes("\u001b[31mx\u001bq"), 27, SLOW, 'y'.code, 'z'.code, 27, SLOW, *pasteEnd, 13) shouldBe
+            listOf(key(TurnKey.Text('x')), key(TurnKey.Text('z')), key(TurnKey.Enter))
+    }
+    test("a paste end marker split by a pause still ends the paste") {
+        decodeAll(*pasteStart, 'a'.code, 27, SLOW, '['.code, '2'.code, '0'.code, SLOW, '1'.code, '~'.code, 13) shouldBe
+            listOf(key(TurnKey.Text('a')), key(TurnKey.Enter))
     }
     test("other control bytes are ignored") {
         decode(3) shouldBe KeyAction.Ignore

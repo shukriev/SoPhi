@@ -5,7 +5,6 @@ import dev.sophi.core.agent.TurnInbox
 /** The line the user types while a turn runs: Enter steers it, Alt+Enter queues a follow-up. */
 class SteerEditor(private val inbox: TurnInbox) {
     private val buffer = StringBuilder()
-    private var pasting = false
 
     fun key(k: TurnKey) {
         when (k) {
@@ -16,10 +15,8 @@ class SteerEditor(private val inbox: TurnInbox) {
                 val pair = n >= 2 && buffer[n - 1].isLowSurrogate() && buffer[n - 2].isHighSurrogate()
                 buffer.setLength((n - if (pair) 2 else 1).coerceAtLeast(0))
             }
-            TurnKey.Enter -> if (pasting) buffer.append('\n') else send(inbox::steer)
+            TurnKey.Enter -> send(inbox::steer)
             TurnKey.AltEnter -> send(inbox::followUp)
-            TurnKey.PasteStart -> pasting = true
-            TurnKey.PasteEnd -> pasting = false
         }
     }
 

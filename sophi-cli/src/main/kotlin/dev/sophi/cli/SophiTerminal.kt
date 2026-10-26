@@ -115,9 +115,29 @@ class SophiTerminal(
         if (onKey != null) setBracketedPaste(true)
         try {
             val nonBlockingReader = jlineTerminal.reader()
+            val read: suspend (Long) -> Int = { t -> withContext(Dispatchers.IO) { nonBlockingReader.read(t) } }
+            val decoder = onKey?.let { TurnKeyDecoder() }
             while (currentCoroutineContext().isActive) {
-                val ch = withContext(Dispatchers.IO) { nonBlockingReader.read(100) }
+                val ch = read(100)
                 val confirmation = pendingConfirmation.get()
+                if (decoder != null) {
+                    if (ch == -2) continue
+                    val pasted = decoder.pasting
+                    val toggle = !pasted && (ch == toggleLower || ch == toggleUpper)
+                    val action = if (toggle) KeyAction.Ignore else decoder.decode(ch, read)
+                    if (confirmation != null) {
+                        // pasted text and the paste markers never answer a confirmation; nor does the toggle key
+                        if (pasted || toggle || now() - confirmationSince < CONFIRMATION_GRACE_MS) continue
+                        answer(confirmation, action)
+                        continue
+                    }
+                    when {
+                        toggle -> onToggle()
+                        action == KeyAction.Interrupt -> return
+                        action is KeyAction.Key -> onKey?.invoke(action.key)
+                    }
+                    continue
+                }
                 if (confirmation != null) {
                     if (ch >= 0 && now() - confirmationSince < CONFIRMATION_GRACE_MS) continue
                     when (ch) {
@@ -130,18 +150,23 @@ class SophiTerminal(
                 when (ch) {
                     toggleLower, toggleUpper -> onToggle()
                     -2 -> {}
-                    else -> if (onKey == null) {
-                        if (ch == 27) return
-                    } else when (val action = decodeTurnKey(ch) { t -> withContext(Dispatchers.IO) { nonBlockingReader.read(t) } }) {
-                        KeyAction.Interrupt -> return
-                        is KeyAction.Key -> onKey(action.key)
-                        KeyAction.Ignore -> {}
-                    }
+                    27 -> return
                 }
             }
         } finally {
+            // A paste still arriving when the turn ends lands at the next prompt, where JLine reads it as a paste too.
             if (onKey != null) setBracketedPaste(false)
             jlineTerminal.attributes = previousAttributes
+        }
+    }
+
+    private fun answer(confirmation: CompletableDeferred<ConfirmAnswer>, action: KeyAction) {
+        val ch = ((action as? KeyAction.Key)?.key as? TurnKey.Text)?.ch?.lowercaseChar()
+        when {
+            ch == 'y' -> confirmation.complete(ConfirmAnswer.YES)
+            ch == 'a' -> if (alwaysOffered) confirmation.complete(ConfirmAnswer.ALWAYS)
+            ch == 'n' || action == KeyAction.Interrupt || action == KeyAction.Key(TurnKey.Enter) ->
+                confirmation.complete(ConfirmAnswer.NO)
         }
     }
 

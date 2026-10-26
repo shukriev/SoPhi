@@ -97,6 +97,15 @@ class SophiTerminalTest : FunSpec({
         controlKeysJob.cancel()
     }
 
+    // A paste arriving while a confirmation is up must not answer it: its markers start with ESC
+    // (which would mean "no") and the pasted text may hold an answer key.
+    test("a paste during a confirmation doesn't answer it") {
+        val sophi = SophiTerminal(terminalWithInput("\u001b[200~n a\u001b[201~y"), now = pastGrace())
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}, onKey = {}) }
+        sophi.awaitConfirmation(true) shouldBe ConfirmAnswer.YES
+        controlKeysJob.cancel()
+    }
+
     // printAbove routes through JLine's own out-of-band message API rather than a raw println,
     // so a message arriving asynchronously (a fire-and-forget background job's warning, say)
     // doesn't get glued onto whatever the active readLine() prompt already rendered.

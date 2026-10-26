@@ -8,9 +8,6 @@ sealed interface TurnKey {
     object Backspace : TurnKey
     object Enter : TurnKey
     object AltEnter : TurnKey
-    /** Bracketed-paste markers: an Enter between them is a newline in the text, not a send. */
-    object PasteStart : TurnKey
-    object PasteEnd : TurnKey
 }
 
 sealed interface KeyAction {
@@ -19,27 +16,57 @@ sealed interface KeyAction {
     object Ignore : KeyAction
 }
 
-/** Decodes one keypress read in raw mode. [next] returns -2 on timeout (JLine NonBlockingReader). */
-suspend fun decodeTurnKey(first: Int, next: suspend (timeoutMs: Long) -> Int): KeyAction = when (first) {
-    127, 8 -> KeyAction.Key(TurnKey.Backspace)
-    13, 10 -> KeyAction.Key(TurnKey.Enter)
-    27 -> when (val b = next(30)) {
-        13, 10 -> KeyAction.Key(TurnKey.AltEnter)
-        '['.code, 'O'.code -> {
+/** How long a lone ESC waits for a following byte before it counts as the interrupt key. */
+private const val ESC_WAIT_MS = 30L
+/** How long the rest of an escape sequence may lag (ssh, a large paste) before it counts as stalled. */
+private const val SEQUENCE_WAIT_MS = 200L
+
+/**
+ * Decodes keypresses read in raw mode, one per [decode] call. Stateful across calls because of
+ * bracketed paste: between ESC[200~ and ESC[201~ an Enter is a newline in the text and an ESC is
+ * pasted noise, never the interrupt key. One decoder per turn, so a lost end marker can't outlive it.
+ */
+class TurnKeyDecoder {
+    /** True between the paste markers. */
+    var pasting = false
+        private set
+    private var lastWasCr = false
+
+    /** [next] returns -2 on timeout and -1 at EOF (JLine NonBlockingReader). */
+    suspend fun decode(first: Int, next: suspend (timeoutMs: Long) -> Int): KeyAction {
+        val afterCr = lastWasCr
+        lastWasCr = first == 13
+        return when (first) {
+            127, 8 -> KeyAction.Key(TurnKey.Backspace)
+            13, 10 -> when {
+                !pasting -> KeyAction.Key(TurnKey.Enter)
+                first == 10 && afterCr -> KeyAction.Ignore // CRLF is one newline
+                else -> KeyAction.Key(TurnKey.Text('\n'))
+            }
+            27 -> escape(next)
+            in 0..31, -2, -1 -> KeyAction.Ignore
+            else -> KeyAction.Key(TurnKey.Text(first.toChar()))
+        }
+    }
+
+    private suspend fun escape(next: suspend (Long) -> Int): KeyAction {
+        val b = next(if (pasting) SEQUENCE_WAIT_MS else ESC_WAIT_MS)
+        if (b == '['.code || b == 'O'.code) {
             // consume a CSI/SS3 sequence up to its final byte (0x40..0x7E), or until it stalls or EOF
             val seq = StringBuilder()
-            var c = next(30)
-            while (c >= 0 && c !in 0x40..0x7E) { seq.append(c.toChar()); c = next(30) }
-            when {
-                b == '['.code && c == '~'.code && seq.toString() == "200" -> KeyAction.Key(TurnKey.PasteStart)
-                b == '['.code && c == '~'.code && seq.toString() == "201" -> KeyAction.Key(TurnKey.PasteEnd)
-                else -> KeyAction.Ignore
-            }
+            var c = next(SEQUENCE_WAIT_MS)
+            while (c >= 0 && c !in 0x40..0x7E) { seq.append(c.toChar()); c = next(SEQUENCE_WAIT_MS) }
+            if (b == '['.code && c == '~'.code && seq.toString() == "200") pasting = true
+            if (b == '['.code && c == '~'.code && seq.toString() == "201") pasting = false
+            return KeyAction.Ignore
         }
-        // a lone ESC, ESC ESC, or EOF interrupts; ESC + byte is Option-as-Meta (Alt+b, Alt+Backspace)
-        -2, -1, 27 -> KeyAction.Interrupt
-        else -> KeyAction.Ignore
+        // pasted noise; a second ESC may start the end marker, so decode it as one
+        if (pasting) return if (b == 27) escape(next) else KeyAction.Ignore
+        return when (b) {
+            13, 10 -> KeyAction.Key(TurnKey.AltEnter)
+            // a lone ESC, ESC ESC, or EOF interrupts; ESC + byte is Option-as-Meta (Alt+b, Alt+Backspace)
+            -2, -1, 27 -> KeyAction.Interrupt
+            else -> KeyAction.Ignore
+        }
     }
-    in 0..31, -2, -1 -> KeyAction.Ignore
-    else -> KeyAction.Key(TurnKey.Text(first.toChar()))
 }
