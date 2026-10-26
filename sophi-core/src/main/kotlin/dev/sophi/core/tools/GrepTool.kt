@@ -33,7 +33,7 @@ class GrepTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
 
     override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
         runCatching { json.decodeFromString<GrepArgs>(argumentsJson) }.getOrNull()
-            ?.let { listOf(pathSubject(root, root.resolve(it.path ?: ".").normalize())) }
+            ?.let { pathSubject(root, root.resolve(it.path ?: ".").normalize()) }?.let { listOf(it) }
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<GrepArgs>(argumentsJson)
         val searchRoot = root.resolve(args.path ?: ".").normalize()

@@ -29,7 +29,7 @@ class FileReadTool(private val root: Path = Paths.get("").toAbsolutePath()) : To
 
     override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
         runCatching { json.decodeFromString<FileReadArgs>(argumentsJson) }.getOrNull()
-            ?.let { listOf(pathSubject(root, root.resolve(it.path).normalize())) }
+            ?.let { pathSubject(root, root.resolve(it.path).normalize()) }?.let { listOf(it) }
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<FileReadArgs>(argumentsJson)
         val resolved = root.resolve(args.path).normalize()

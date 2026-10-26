@@ -36,7 +36,7 @@ class FileWriteTool(private val root: Path = Paths.get("").toAbsolutePath()) : T
 
     override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
         runCatching { json.decodeFromString<FileWriteArgs>(argumentsJson) }.getOrNull()
-            ?.let { listOf(pathSubject(root, root.resolve(it.path).normalize())) }
+            ?.let { pathSubject(root, root.resolve(it.path).normalize()) }?.let { listOf(it) }
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<FileWriteArgs>(argumentsJson)
         val resolved = root.resolve(args.path).normalize()

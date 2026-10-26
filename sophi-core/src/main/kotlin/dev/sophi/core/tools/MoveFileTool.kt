@@ -77,7 +77,10 @@ class MoveFileTool(
 
     override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
         runCatching { json.decodeFromString<MoveArgs>(argumentsJson) }.getOrNull()
-            ?.let { listOf(pathSubject(root, resolveUserPath(root, home, it.from)), pathSubject(root, resolveUserPath(root, home, it.to))) }
+            ?.let { args ->
+                val subjects = listOf(args.from, args.to).map { pathSubject(root, resolveUserPath(root, home, it)) }
+                if (subjects.any { it == null }) null else subjects.filterNotNull()
+            }
 
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<MoveArgs>(argumentsJson)
@@ -113,7 +116,7 @@ class DeleteFileTool(
 
     override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
         runCatching { json.decodeFromString<DeleteArgs>(argumentsJson) }.getOrNull()
-            ?.let { listOf(pathSubject(root, resolveUserPath(root, home, it.path))) }
+            ?.let { pathSubject(root, resolveUserPath(root, home, it.path)) }?.let { listOf(it) }
 
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<DeleteArgs>(argumentsJson)

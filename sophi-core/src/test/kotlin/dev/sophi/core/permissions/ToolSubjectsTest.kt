@@ -79,6 +79,7 @@ class ToolSubjectsTest : FunSpec({
             url("https://user@evil.com/x") shouldBe listOf("https://evil.com/x")
             url("http://a.com:80/Path?Q=1") shouldBe listOf("http://a.com/Path?Q=1")
         }
+        test("drops a trailing dot on the host") { url("https://evil.com./x") shouldBe listOf("https://evil.com/x") }
         test("keeps a non-default port") { url("http://a.com:8080/") shouldBe listOf("http://a.com:8080/") }
         test("unparseable is null") {
             url("not a url") shouldBe null
@@ -93,6 +94,11 @@ class ToolSubjectsTest : FunSpec({
             Files.writeString(root.resolve(".env"), "s")
             Files.createSymbolicLink(root.resolve("link"), root.resolve(".env"))
             subject("link") shouldBe listOf(".env")
+        }
+        test("a dangling symlink is null: writing through it creates its target") {
+            Files.createSymbolicLink(root.resolve("dangling"), root.resolve("not-there.env"))
+            write.permissionSubjects("""{"path":"dangling","content":"x"}""") shouldBe null
+            write.permissionSubjects("""{"path":"dangling/sub","content":"x"}""") shouldBe null
         }
         test("a new file under a symlinked dir resolves through the link") {
             Files.createDirectories(root.resolve("secrets"))
