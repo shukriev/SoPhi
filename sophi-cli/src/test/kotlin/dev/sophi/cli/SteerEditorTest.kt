@@ -36,6 +36,21 @@ class SteerEditorTest : FunSpec({
         editor.render() shouldBe "  ↳ a\n  ⏎ b (next turn)\n› c"
     }
 
+    test("a pasted newline stays in the line instead of sending it") {
+        val inbox = TurnInbox()
+        val editor = SteerEditor(inbox)
+
+        editor.key(TurnKey.PasteStart)
+        editor.type("one"); editor.key(TurnKey.Enter); editor.type("two")
+        editor.key(TurnKey.PasteEnd)
+        inbox.snapshot() shouldBe emptyList()
+        editor.render() shouldBe "› one ↵ two"
+
+        editor.key(TurnKey.Enter)
+        inbox.snapshot() shouldBe listOf(TurnInbox.Queued("one\ntwo", false))
+        editor.render() shouldBe "  ↳ one ↵ two"
+    }
+
     test("Backspace drops an emoji typed as a surrogate pair whole") {
         val editor = SteerEditor(TurnInbox())
         editor.type("x😀")

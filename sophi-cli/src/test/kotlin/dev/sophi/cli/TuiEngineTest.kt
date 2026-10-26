@@ -181,4 +181,38 @@ class TuiEngineTest : FunSpec({
 
         input.prefills shouldContain "half"
     }
+
+    test("a hub message arriving first keeps the draft for the next prompt") {
+        val prefills = mutableListOf<String>()
+        val hubMessages = Channel<String>(Channel.UNLIMITED)
+        val keys = ScriptedInputSource(emptyList())
+        val input = object : InputSource by keys {
+            override suspend fun readLine(prefill: String): String? {
+                prefills += prefill
+                // prompts 1 and 2: the user doesn't type, a companion message wins; prompt 3: exit
+                when (prefills.size) {
+                    1 -> hubMessages.trySend("first")
+                    2 -> hubMessages.trySend("second")
+                    else -> return "exit"
+                }
+                delay(Long.MAX_VALUE); return null
+            }
+        }
+        val screen = StringBuilder()
+        var calls = 0
+        every { provider.stream(any()) } answers {
+            if (calls++ > 0) flowOf(StreamEvent.Content("ok")) else flow {
+                // the first turn: the user types half a line, then presses ESC
+                keys.type(*"half".map { TurnKey.Text(it) }.toTypedArray())
+                withTimeout(5000) { while ("› half" !in screen.toString()) delay(10) }
+                keys.signalEsc()
+                delay(Long.MAX_VALUE)
+            }
+        }
+        val turnController = TurnController(runtime, input, LiveRegion(screen) { 80 }) {}
+
+        withTimeout(5000) { TuiEngine(turnController, slashHandler, input, hubMessages).run(AgentSession(id = "s1")) }
+
+        prefills shouldBe listOf("", "half", "half")
+    }
 })

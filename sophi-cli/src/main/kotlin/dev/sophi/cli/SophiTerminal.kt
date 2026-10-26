@@ -111,6 +111,8 @@ class SophiTerminal(
         val toggleLower = toggleKey.lowercaseChar().code
         val toggleUpper = toggleKey.uppercaseChar().code
         val previousAttributes = jlineTerminal.enterRawMode()
+        // Bracketed paste: the terminal wraps a paste in markers, so its newlines don't each send a steer.
+        if (onKey != null) setBracketedPaste(true)
         try {
             val nonBlockingReader = jlineTerminal.reader()
             while (currentCoroutineContext().isActive) {
@@ -138,8 +140,14 @@ class SophiTerminal(
                 }
             }
         } finally {
+            if (onKey != null) setBracketedPaste(false)
             jlineTerminal.attributes = previousAttributes
         }
+    }
+
+    private fun setBracketedPaste(on: Boolean) {
+        jlineTerminal.writer().print(if (on) "\u001b[?2004h" else "\u001b[?2004l")
+        jlineTerminal.writer().flush()
     }
 
     fun close() = jlineTerminal.close()

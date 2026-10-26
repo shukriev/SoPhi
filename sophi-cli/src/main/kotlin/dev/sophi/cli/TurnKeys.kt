@@ -8,6 +8,9 @@ sealed interface TurnKey {
     object Backspace : TurnKey
     object Enter : TurnKey
     object AltEnter : TurnKey
+    /** Bracketed-paste markers: an Enter between them is a newline in the text, not a send. */
+    object PasteStart : TurnKey
+    object PasteEnd : TurnKey
 }
 
 sealed interface KeyAction {
@@ -24,9 +27,14 @@ suspend fun decodeTurnKey(first: Int, next: suspend (timeoutMs: Long) -> Int): K
         13, 10 -> KeyAction.Key(TurnKey.AltEnter)
         '['.code, 'O'.code -> {
             // consume a CSI/SS3 sequence up to its final byte (0x40..0x7E), or until it stalls or EOF
+            val seq = StringBuilder()
             var c = next(30)
-            while (c >= 0 && c !in 0x40..0x7E) c = next(30)
-            KeyAction.Ignore
+            while (c >= 0 && c !in 0x40..0x7E) { seq.append(c.toChar()); c = next(30) }
+            when {
+                b == '['.code && c == '~'.code && seq.toString() == "200" -> KeyAction.Key(TurnKey.PasteStart)
+                b == '['.code && c == '~'.code && seq.toString() == "201" -> KeyAction.Key(TurnKey.PasteEnd)
+                else -> KeyAction.Ignore
+            }
         }
         // a lone ESC, ESC ESC, or EOF interrupts; ESC + byte is Option-as-Meta (Alt+b, Alt+Backspace)
         -2, -1, 27 -> KeyAction.Interrupt

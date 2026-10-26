@@ -43,6 +43,11 @@ class TurnKeysTest : FunSpec({
         decode(27, 'f'.code) shouldBe KeyAction.Ignore
         decode(27, 127) shouldBe KeyAction.Ignore
     }
+    test("bracketed paste markers start and end a paste") {
+        decode(27, '['.code, '2'.code, '0'.code, '0'.code, '~'.code) shouldBe key(TurnKey.PasteStart)
+        decode(27, '['.code, '2'.code, '0'.code, '1'.code, '~'.code) shouldBe key(TurnKey.PasteEnd)
+        decode(27, '['.code, '2'.code, '~'.code) shouldBe KeyAction.Ignore
+    }
     test("other control bytes are ignored") {
         decode(3) shouldBe KeyAction.Ignore
         decode(1) shouldBe KeyAction.Ignore
