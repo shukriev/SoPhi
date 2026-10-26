@@ -96,8 +96,11 @@ private const val MAX_JSON_DEPTH = 200
 // Work charged per key or string on top of its length, so empty values and many short ones still use up the budget.
 private const val WORK_PER_ITEM = 32
 const val UNREDACTABLE = "[unredactable]"
-// JSON structure anywhere in text that didn't parse (a BOM, a ```json fence, a cut JSON string): fail closed.
-private val JSON_INSIDE = Regex("[{\\[]\\s*\\\\?\"")
+// JSON structure anywhere in text that didn't parse (a ```json fence, a cut JSON string, pretty-printed with \n escapes).
+private val JSON_INSIDE = Regex("[{\\[](?:\\s|\\\\[nrt])*\\\\*\"") // any escaping depth: JSON in a string in a string
+// JSON inside a string inside JSON is walked as JSON up to this many levels; deeper fails closed.
+private const val MAX_JSON_IN_STRING = 3
+private const val MAX_NUMBER_LENGTH = 64
 private val JSON_NUMBER = Regex("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
 
 /**
@@ -113,33 +116,44 @@ fun redactWindowed(text: String, window: Int): String {
     return "$out…"
 }
 
+private fun withoutBom(text: String) = text.removePrefix("\uFEFF")
+
+/** Starts with { or [ (after a BOM and whitespace), or holds {" / [" anywhere: JSON that must parse or fail closed. */
+private fun looksLikeJson(text: String): Boolean {
+    val start = withoutBom(text).trimStart().firstOrNull()
+    return start == '{' || start == '[' || JSON_INSIDE.containsMatchIn(text)
+}
+
+private fun parseOrNull(text: String): JsonElement? = try {
+    Json.parseToJsonElement(withoutBom(text))
+} catch (_: Exception) {
+    null
+} catch (_: StackOverflowError) {
+    null
+}
+
 /**
  * For a tool's argument JSON: values under secret-named keys → "[REDACTED]", then redactSecrets on the rest, and token
- * patterns on the keys. The whole JSON is always parsed; [window] caps the text each redaction sees (see
+ * patterns on the keys. A string value that is itself JSON is redacted the same way (up to [MAX_JSON_IN_STRING] levels)
+ * and written back as a string. The whole JSON is always parsed; [window] caps the text each redaction sees (see
  * [redactWindowed]), so a long argument keeps its key redaction. Once [budget] output chars are kept or [work] is used
- * (each key and string costs its windowed length plus [WORK_PER_ITEM]), the rest of each object or array is replaced
- * by one "[…]"; anything nested deeper than [MAX_JSON_DEPTH] is "[…]" too. Only input that isn't JSON-shaped is
- * redacted as text; JSON (or almost-JSON: starts with { or [, or holds {" / [" anywhere) that can't be redacted fails
- * closed to [UNREDACTABLE]. Keys that redact alike are numbered (#2, #3), and unquoted literals are redacted as strings.
+ * (each key, string and number costs its windowed length plus [WORK_PER_ITEM]), the rest of each object or array is
+ * replaced by one "[…]"; so is anything nested deeper than [MAX_JSON_DEPTH] and any number over [MAX_NUMBER_LENGTH]
+ * chars. Only input that doesn't look like JSON (see [looksLikeJson]) is redacted as text; anything that does but can't
+ * be redacted fails closed to [UNREDACTABLE] (the whole argument, or just that string value). Keys that redact alike
+ * are numbered (#2, #3), and unquoted literals are redacted as strings.
  */
 fun redactArguments(
     argumentsJson: String, window: Int = Int.MAX_VALUE, budget: Int = Int.MAX_VALUE, work: Int = Int.MAX_VALUE,
 ): String {
-    val tree = try {
-        Json.parseToJsonElement(argumentsJson)
-    } catch (_: Exception) {
-        val start = argumentsJson.trimStart().firstOrNull()
-        val jsonish = start == '{' || start == '[' || JSON_INSIDE.containsMatchIn(argumentsJson)
-        return if (jsonish) UNREDACTABLE else redactWindowed(argumentsJson, window)
-    } catch (_: StackOverflowError) {
-        return UNREDACTABLE
-    }
+    val tree = parseOrNull(argumentsJson)
+        ?: return if (looksLikeJson(argumentsJson)) UNREDACTABLE else redactWindowed(argumentsJson, window)
     var left = budget
     var workLeft = work
     fun exhausted() = left <= 0 || workLeft <= 0
     fun charge(text: String) { workLeft -= minOf(text.length, window) + WORK_PER_ITEM }
     val cut = JsonPrimitive("[…]")
-    fun JsonElement.redacted(depth: Int): JsonElement = when {
+    fun JsonElement.redacted(depth: Int, nest: Int): JsonElement = when {
         depth > MAX_JSON_DEPTH -> cut
         this is JsonObject -> {
             val out = LinkedHashMap<String, JsonElement>()
@@ -149,7 +163,7 @@ fun redactArguments(
                 var key = redactWindowed(k, window).also { left -= it.length }
                 if (key in out) key = generateSequence(2) { it + 1 }.map { "$key#$it" }.first { it !in out } // two keys redacted alike
                 // A key too long to scan whole is treated as secret-named (a suffix scan would miss the suffix bomb).
-                out[key] = if (k.length > window || SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(depth + 1)
+                out[key] = if (k.length > window || SECRET_KEY.containsMatchIn(k)) JsonPrimitive("[REDACTED]") else v.redacted(depth + 1, nest)
             }
             JsonObject(out)
         }
@@ -157,17 +171,25 @@ fun redactArguments(
             val out = ArrayList<JsonElement>()
             for (v in this) {
                 if (exhausted()) { out += cut; break }
-                out += v.redacted(depth + 1)
+                out += v.redacted(depth + 1, nest)
             }
             JsonArray(out)
         }
-        // The parser also accepts unquoted literals (AKIA..., API_KEY=x); only null, true/false and numbers pass as-is.
-        this is JsonNull || this is JsonPrimitive && !isString && (content == "true" || content == "false" || JSON_NUMBER.matches(content)) -> this
-        this is JsonPrimitive -> if (exhausted()) cut else {
-            charge(content)
-            JsonPrimitive(redactWindowed(content, window)).also { left -= it.content.length }
+        this is JsonNull || this is JsonPrimitive && !isString && (content == "true" || content == "false") -> this
+        exhausted() -> cut
+        // The parser also accepts unquoted literals (AKIA..., API_KEY=x); only real numbers pass as-is, and not huge ones.
+        this is JsonPrimitive && !isString && content.length > MAX_NUMBER_LENGTH -> cut
+        this is JsonPrimitive && !isString && JSON_NUMBER.matches(content) -> also { charge(content); left -= content.length }
+        else -> {
+            val text = (this as JsonPrimitive).content
+            charge(text)
+            val redacted = when {
+                !looksLikeJson(text) -> redactWindowed(text, window)
+                nest >= MAX_JSON_IN_STRING -> UNREDACTABLE
+                else -> parseOrNull(text)?.redacted(depth + 1, nest + 1)?.toString() ?: UNREDACTABLE
+            }
+            JsonPrimitive(redacted).also { left -= redacted.length }
         }
-        else -> this // JsonObject/JsonArray are handled above; kept for exhaustiveness
     }
-    return runCatching { tree.redacted(0).toString() }.getOrDefault(UNREDACTABLE)
+    return runCatching { tree.redacted(0, 0).toString() }.getOrDefault(UNREDACTABLE)
 }

@@ -344,7 +344,9 @@ class SecretsTest : FunSpec({
 
     test("JSON behind a prefix that fails to parse is unredactable; prose and commands stay text-redacted") {
         val body = """{"pin_password":123456,"credentials":{"user":"a","pass":"b"}}"""
-        for (input in listOf("﻿$body", "```json\n$body\n```", """"{\"pin_password\":123456""")) redactArguments(input) shouldBe "[unredactable]"
+        for (input in listOf("```json\n$body\n```", """"{\"pin_password\":123456""")) redactArguments(input) shouldBe "[unredactable]"
+        // A BOM is stripped, so BOM-prefixed JSON that parses is redacted as JSON.
+        redactArguments("\uFEFF$body") shouldBe """{"pin_password":"[REDACTED]","credentials":"[REDACTED]"}"""
         redactArguments("ls -la /tmp && echo password=x") shouldBe "ls -la /tmp && echo password=[REDACTED:secret]"
         redactArguments("Please set the token to abc123 later.") shouldBe "Please set the token to abc123 later."
     }
@@ -359,5 +361,39 @@ class SecretsTest : FunSpec({
         )).jsonObject
         out.keys shouldBe setOf("[REDACTED:github_token]", "[REDACTED:github_token]#2")
         out.values.map { it.jsonPrimitive.content } shouldBe listOf("1", "2")
+    }
+    test("a string value that contains JSON is redacted as JSON") {
+        val nested = redactArguments("""{"body":"{\"pin_password\":123456,\"ok\":\"x\"}"}""")
+        nested shouldNotContain "123456"
+        Json.parseToJsonElement(Json.parseToJsonElement(nested).jsonObject["body"]!!.jsonPrimitive.content)
+            .jsonObject["pin_password"]!!.jsonPrimitive.content shouldBe "[REDACTED]"
+        val bare = redactArguments(""""{\"pin_password\":123456}"""")
+        bare shouldNotContain "123456"
+        Json.parseToJsonElement(bare)
+        // JSON in a string in JSON in a string... past 3 levels it fails closed.
+        var deep = """{"pin_password":123456}"""
+        repeat(5) { deep = Json.encodeToString(kotlinx.serialization.json.JsonPrimitive.serializer(), kotlinx.serialization.json.JsonPrimitive(deep)) }
+        val deepOut = redactArguments("""{"v":$deep}""")
+        deepOut shouldNotContain "123456"
+        Json.parseToJsonElement(deepOut)
+    }
+
+    test("cut, pretty-printed or BOM-prefixed JSON that fails to parse is unredactable") {
+        for (input in listOf(""""{\n  \"pin_password\": 123456""", """"{\r\n\t\"pin_password\": 123456""", "﻿{pin_password: 123456}"))
+            redactArguments(input) shouldBe "[unredactable]"
+        // As a string value: that value fails closed, the rest is kept.
+        val out = Json.parseToJsonElement(redactArguments("""{"body":"{\n  \"pin_password\": 123456","path":"a.json"}""")).jsonObject
+        out["body"]!!.jsonPrimitive.content shouldBe "[unredactable]"
+        out["path"]!!.jsonPrimitive.content shouldBe "a.json"
+        redactArguments("ls -la /tmp && echo password=x") shouldBe "ls -la /tmp && echo password=[REDACTED:secret]"
+        redactArguments("""{"command":"echo token=abc and done"}""") shouldBe """{"command":"echo token=[REDACTED:secret] and done"}"""
+    }
+
+    test("numbers are charged to the budgets and an over-long one is cut") {
+        val out = redactArguments("""{"n":${"9".repeat(100_000)},"m":42}""")
+        out shouldBe """{"n":"[…]","m":42}"""
+        val many = Json.parseToJsonElement(redactArguments(List(10_000) { "1234567890" }.joinToString(",", "[", "]"), 20_000, work = 10_000)).jsonArray
+        many.size shouldBe 240 // each costs 10 + 32: 239 numbers fit before the 10_000 runs out, then the marker
+        many.last().jsonPrimitive.content shouldBe "[…]"
     }
 })
