@@ -6,7 +6,7 @@ data class BashPart(val text: String, val redirects: Boolean)
 private val KEYWORDS = setOf("if", "then", "else", "elif", "do", "while", "until", "fi", "done", "!", "time", "{", "}")
 private val ASSIGNMENT = Regex("^[A-Za-z_][A-Za-z0-9_]*=")
 private val FD_DUP = Regex("^&([0-9]+|-)(?=[\\s;&|)<>]|$)")
-private val REDIRECT_WORD = Regex("^[0-9]*(>>?|<{1,3})[&|]?")
+private val REDIRECT_WORD = Regex("^([0-9]*|&)(>>?|<{1,3})[&|]?")
 private val CASE_WORD = Regex("\\bcase\\b")
 private val NULL_TARGET = Regex("^\\s*/dev/null(?=[\\s;&|)]|$)")
 

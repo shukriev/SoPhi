@@ -27,6 +27,8 @@ class BashSplitTest : FunSpec({
         ">/dev/null rm -f x" to listOf("rm -f x"),
         "> out.txt rm -f x" to listOf("rm -f x"),
         "2>&1 rm x" to listOf("rm x"),
+        "&>/dev/null rm -f x" to listOf("rm -f x"),
+        "&>> log rm -f x" to listOf("rm -f x"),
         "" to emptyList(),
         "  ;  " to emptyList(),
         "echo \"unterminated" to null,
