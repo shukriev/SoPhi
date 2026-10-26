@@ -67,7 +67,9 @@ class SophiRuntime internal constructor(
     /** Null when [RuntimeBuilder.checkpoints] is off. Public so a host running its own loops (/goal, /plan) snapshots too. */
     val checkpointStore: CheckpointStore? = null,
     /** The sink [RuntimeBuilder.auditLog] or [RuntimeBuilder.audit] set, or null when auditing is off. */
-    val auditSink: AuditSink? = null
+    val auditSink: AuditSink? = null,
+    /** The rules [RuntimeBuilder.permissionRules] or [RuntimeBuilder.permissions] set, or null when none were configured. */
+    val permissionRules: dev.sophi.core.permissions.PermissionRules? = null
 ) {
     /** Always present: with [RuntimeBuilder.checkpoints] off it still reverses recorded moves. */
     val fileRestorer: FileRestorer = FileRestorer(checkpointStore)
@@ -260,7 +262,8 @@ class SophiRuntime internal constructor(
             systemPrompt = listOfNotNull(config.systemPrompt, DefaultPrompt.UNATTENDED).joinToString("\n\n"),
             pluginRegistry = pluginRegistry,
             planLog = plansDir?.let { PlanLog(it) },
-            audit = auditSink
+            audit = auditSink,
+            permissions = permissionRules
         )
     }
 }

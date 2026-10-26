@@ -1,5 +1,7 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.permissions.PermissionSubject
+import dev.sophi.core.permissions.pathSubject
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -32,6 +34,9 @@ class FileWriteTool(private val root: Path = Paths.get("").toAbsolutePath()) : T
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+        runCatching { json.decodeFromString<FileWriteArgs>(argumentsJson) }.getOrNull()
+            ?.let { pathSubject(root, root.resolve(it.path).normalize()) }?.let { listOf(it) }
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<FileWriteArgs>(argumentsJson)
         val resolved = root.resolve(args.path).normalize()

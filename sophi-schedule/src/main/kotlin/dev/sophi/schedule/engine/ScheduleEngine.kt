@@ -112,7 +112,9 @@ class ScheduleEngine(
      *  logic doesn't support). */
     private val planLog: PlanLog? = null,
     /** Where each task's tool calls are audited, or null to skip auditing. */
-    private val audit: AuditSink? = null
+    private val audit: AuditSink? = null,
+    /** Null inherits no rules: an unattended run outside a turn enforces nothing unless the host passes them. */
+    private val permissions: dev.sophi.core.permissions.PermissionRules? = null
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
         val due = taskStore.list().filter { it.enabled && it.nextRunAtMs != null && it.nextRunAtMs <= nowMs }
@@ -158,7 +160,7 @@ class ScheduleEngine(
                     confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
                     grants = task.toolGrants,
                     contextWindowTokens = contextWindowTokens,
-                    audit = audit
+                    audit = audit, permissions = permissions
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
                 // Same collectContext path every interactive entry point already uses (SophiRuntime.

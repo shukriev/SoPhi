@@ -1,5 +1,6 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.permissions.PermissionSubject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -39,6 +40,20 @@ class FetchUrlTool(
     """.trimIndent()
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+        runCatching { json.decodeFromString<FetchUrlArgs>(argumentsJson) }.getOrNull()
+            ?.let { urlSubject(it.url) }?.let { listOf(PermissionSubject(it)) }
+
+    // ponytail: URL rules see only the requested URL, not redirect hops (execute follows them); check hops if rules must bind them
+    /** Scheme and host lowercased, userinfo, default port and fragment dropped; path and query as written. Null: not a URL with a host. */
+    private fun urlSubject(url: String): String? {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase() ?: return null
+        val host = uri.host?.lowercase()?.removeSuffix(".") ?: return null
+        val port = uri.port.takeIf { it != -1 && it != (if (scheme == "https") 443 else if (scheme == "http") 80 else -1) }
+        return "$scheme://$host${port?.let { ":$it" } ?: ""}${uri.rawPath.orEmpty()}${uri.rawQuery?.let { "?$it" } ?: ""}"
+    }
 
     override suspend fun execute(argumentsJson: String): String = withContext(Dispatchers.IO) {
         val args = json.decodeFromString<FetchUrlArgs>(argumentsJson)

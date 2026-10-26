@@ -41,12 +41,12 @@ class ScheduleRunDueCommand : CliktCommand(
         val due = TaskStore(Path.of(scheduleDirStr).resolve("tasks.json")).list()
             .any { it.enabled && (it.nextRunAtMs ?: Long.MAX_VALUE) <= now }
         if (!due) return@runBlocking
-        val (engine, _) = buildScheduleEngine(
+        val (engine, _) = exitOnBadPermissionRules { buildScheduleEngine(
             provider.resolveAndWarn(), provider.apiKey,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
             taskTimeoutSeconds, maxTokens,
             llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries
-        )
+        ) }
         engine.tickOnce(now)
     }
 }

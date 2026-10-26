@@ -4,6 +4,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.core.agent.toStreamFlow
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
@@ -90,5 +91,46 @@ class BuildPlanRunnerTest : FunSpec({
 
         outcome.finalStatus shouldBe PlanFinalStatus.Met
         coVerify(exactly = 2) { provider.complete(any()) }
+    }
+
+    test("a /plan step's loop enforces deny rules") {
+        class Rm : dev.sophi.core.tools.Tool {
+            var executed = 0
+            override val name = "rm"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed++; return "ok" }
+        }
+        val rm = Rm()
+        val provider = mockk<LLMProvider>()
+        val rounds = listOf<LLMResponse>(
+            LLMResponse.ToolUse(listOf(dev.sophi.ai.api.ToolCall("c1", "rm", "{}")), TokenUsage(1, 0)),
+            LLMResponse.Text("done", TokenUsage(1, 1))
+        )
+        var n = 0
+        every { provider.stream(any()) } answers { rounds[(n++).coerceAtMost(1)].toStreamFlow() }
+        coEvery { provider.complete(any()) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"rm it"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+        val entries = mutableListOf<dev.sophi.core.audit.AuditEntry>()
+        val runner = buildPlanRunner(
+            provider = provider,
+            registry = ToolRegistry().register(rm),
+            sessionManager = FileSessionManager(createTempDirectory("build-plan-runner-deny")),
+            config = PlanRunnerConfig(model = "test-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW,
+            audit = { entries += it },
+            permissions = dev.sophi.core.permissions.PermissionRules(
+                listOf(dev.sophi.core.permissions.PermissionRule("rm", null, dev.sophi.core.permissions.Effect.DENY)),
+                emptyList(), null, null, emptySet()
+            )
+        )
+        runBlocking { runner.run("parent", "rm it", StopCondition.LlmJudged) }
+
+        rm.executed shouldBe 0
+        entries.single().rule shouldBe "rule:deny"
     }
 })

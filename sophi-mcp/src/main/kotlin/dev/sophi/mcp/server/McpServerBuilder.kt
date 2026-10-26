@@ -3,6 +3,8 @@ package dev.sophi.mcp.server
 import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.audit.auditEntry
 import dev.sophi.core.audit.recordQuietly
+import dev.sophi.core.permissions.Effect
+import dev.sophi.core.permissions.PermissionRules
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import io.modelcontextprotocol.kotlin.sdk.server.Server
@@ -32,6 +34,9 @@ import kotlinx.serialization.json.JsonObject
  * With [audit], every call writes one entry (actor [mcpActor]; rule "safe"
  * or "deny-all"), redacted and capped exactly like AgentLoop's. A failing sink never changes the response.
  *
+ * A [permissions] deny or ask rule refuses a call, SAFE or not (audited as rule:deny / rule:ask): there is
+ * no human here to ask. Allow rules never widen mcp-serve past SAFE tools.
+ *
  * DESTRUCTIVE tools are never executed when called via this server: [Tool.execute] is not invoked
  * for them at all, and the caller instead receives an error [CallToolResult] denying the call.
  *
@@ -44,7 +49,7 @@ import kotlinx.serialization.json.JsonObject
  * [McpJson] (the SDK's own pre-configured `ignoreUnknownKeys = true` instance) is used for parsing
  * since [ToolSchema] declares its `type` property outside the primary constructor.
  */
-fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSink? = null): Server {
+fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSink? = null, permissions: PermissionRules? = null): Server {
     require(exposedNames.isNotEmpty()) { "--expose-tools must name at least one tool" }
     val toolsByName = tools.associateBy { it.name }
     val unknown = exposedNames - toolsByName.keys
@@ -62,11 +67,23 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSin
             val start = System.currentTimeMillis()
             val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
             val risk = tool.riskLevel(argumentsJson)
+            // A tool that throws computing its subjects gets null: R3, fail closed.
+            val effect = permissions?.decide(tool.name, runCatching { tool.permissionSubjects(argumentsJson) }.getOrNull())
+            val ruleDenied = effect == Effect.DENY || effect == Effect.ASK
             fun audit(outcome: String, result: String) = audit?.recordQuietly {
+                val rule = when {
+                    effect == Effect.DENY -> "rule:deny"
+                    effect == Effect.ASK -> "rule:ask"
+                    outcome == "denied" -> "deny-all"
+                    else -> "safe"
+                }
                 auditEntry(mcpActor(server.sessions[sessionId]?.clientVersion?.name), null, "mcp-serve:$sessionId", tool.name, risk, argumentsJson,
-                    if (outcome == "denied") "deny-all" else "safe", outcome, result, start)
+                    rule, outcome, result, start)
             }
-            if (risk != RiskLevel.SAFE) {
+            if (ruleDenied) {
+                audit("denied", "")
+                CallToolResult(isError = true, content = listOf(TextContent("Denied: '${tool.name}' is denied by a permission rule")))
+            } else if (risk != RiskLevel.SAFE) {
                 audit("denied", "")
                 CallToolResult(
                     isError = true,

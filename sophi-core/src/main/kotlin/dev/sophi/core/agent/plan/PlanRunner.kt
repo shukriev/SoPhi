@@ -393,12 +393,14 @@ fun buildPlanRunner(
     contextProvider: suspend (String) -> List<String> = { emptyList() },
     onPlanComplete: suspend (PlanOutcome) -> Unit = {},
     onEvent: suspend (TurnEvent) -> Unit = {},
-    onProgress: suspend (PlanProgressEvent) -> Unit = {}
+    onProgress: suspend (PlanProgressEvent) -> Unit = {},
+    audit: dev.sophi.core.audit.AuditSink? = null,
+    permissions: dev.sophi.core.permissions.PermissionRules? = null
 ): PlanRunner {
     val loop = AgentLoop(
         provider, registry, sessionManager,
         confirmationPolicy = confirmationPolicy, grants = grants,
-        contextWindowTokens = contextWindowTokens
+        contextWindowTokens = contextWindowTokens, audit = audit, permissions = permissions
     )
     return PlanRunner(
         agentLoop = loop,

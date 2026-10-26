@@ -26,7 +26,10 @@ class McpServeCommand : CliktCommand(
     )
 
     override fun run() = runBlocking {
-        val server = builtinMcpServer(exposeTools.toSet(), braveApiKey = braveApiKeyOption)
+        // stdout carries the protocol, so a malformed rules file is reported on stderr and the server never starts
+        val server = exitOnBadPermissionRules(toStderr = true) {
+            builtinMcpServer(exposeTools.toSet(), braveApiKey = braveApiKeyOption)
+        }
         val transport = StdioServerTransport(
             input = System.`in`.asSource().buffered(),
             output = System.out.asSink().buffered()

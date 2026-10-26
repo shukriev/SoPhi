@@ -48,6 +48,8 @@ class PlanCommand(
     private val input: InputSource = NoOpInputSource,
     /** Snapshots before the run, so /undo reverses the whole plan in one step. Null = no checkpoints. */
     private val checkpoints: CheckpointStore? = null,
+    private val audit: dev.sophi.core.audit.AuditSink? = null,
+    private val permissions: dev.sophi.core.permissions.PermissionRules? = null,
     private val echo: (String) -> Unit
 ) {
     suspend fun run(goal: String, session: AgentSession): AgentSession = coroutineScope {
@@ -74,7 +76,9 @@ class PlanCommand(
                 confirmationPolicy = confirmationPolicy,
                 planLog = planLog,
                 onEvent = { event -> onEvent(event); renderer.onTurnEvent(event) },
-                onProgress = renderer::onProgress
+                onProgress = renderer::onProgress,
+                audit = audit,
+                permissions = permissions
             )
             // saved even when the run throws: /undo reloads the session, and the round entry must be there
             val outcome = try {

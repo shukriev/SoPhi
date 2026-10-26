@@ -1,6 +1,7 @@
 package dev.sophi.core.tools
 
 import dev.sophi.core.audit.noteDecision
+import dev.sophi.core.permissions.PermissionRule
 
 @kotlinx.serialization.Serializable
 data class ConfirmationRequest(
@@ -8,7 +9,11 @@ data class ConfirmationRequest(
     val toolName: String,
     val argumentsJson: String,
     val riskLevel: RiskLevel,
-    val preview: String? = null
+    val preview: String? = null,
+    /** The rules "always allow" would write for this call; null = don't offer "always". */
+    val alwaysAllow: List<PermissionRule>? = null,
+    /** An ask rule matched: a person must decide, whatever an auto or threshold policy would say. */
+    val askRule: Boolean = false
 )
 
 fun interface ConfirmationPolicy {

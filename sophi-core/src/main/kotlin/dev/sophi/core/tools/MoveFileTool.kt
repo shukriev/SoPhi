@@ -1,5 +1,7 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.permissions.PermissionSubject
+import dev.sophi.core.permissions.pathSubject
 import dev.sophi.core.undo.FileMove
 import dev.sophi.core.undo.RoundChanges
 import kotlinx.serialization.Serializable
@@ -73,6 +75,13 @@ class MoveFileTool(
     override fun confirmationPreview(argumentsJson: String): String? =
         runCatching { json.decodeFromString<MoveArgs>(argumentsJson) }.getOrNull()?.let { "Move ${it.from} → ${it.to}" }
 
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+        runCatching { json.decodeFromString<MoveArgs>(argumentsJson) }.getOrNull()
+            ?.let { args ->
+                val subjects = listOf(args.from, args.to).map { pathSubject(root, resolveUserPath(root, home, it)) }
+                if (subjects.any { it == null }) null else subjects.filterNotNull()
+            }
+
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<MoveArgs>(argumentsJson)
         val from = resolveUserPath(root, home, args.from)
@@ -104,6 +113,10 @@ class DeleteFileTool(
 
     override fun confirmationPreview(argumentsJson: String): String? =
         runCatching { json.decodeFromString<DeleteArgs>(argumentsJson) }.getOrNull()?.let { "Move ${it.path} to the SoPhi trash" }
+
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+        runCatching { json.decodeFromString<DeleteArgs>(argumentsJson) }.getOrNull()
+            ?.let { pathSubject(root, resolveUserPath(root, home, it.path)) }?.let { listOf(it) }
 
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<DeleteArgs>(argumentsJson)

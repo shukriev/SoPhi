@@ -73,4 +73,46 @@ class TerminalConfirmationPolicyTest : FunSpec({
 
         notes.rules shouldBe mapOf("c1" to "user", "c2" to "user")
     }
+
+    fun rulesAt(file: java.nio.file.Path, home: java.nio.file.Path) =
+        dev.sophi.core.permissions.PermissionRules.load(home.resolve("g.json"), file, home.resolve("trust.json"))
+
+    val gitStatus = dev.sophi.core.permissions.PermissionRule("bash", "git status", dev.sophi.core.permissions.Effect.ALLOW)
+    val alwaysRequest = ConfirmationRequest("c1", "bash", """{"command":"git status"}""", RiskLevel.DESTRUCTIVE, alwaysAllow = listOf(gitStatus))
+
+    test("answering a writes the shown rule and allows the call") {
+        val dir = java.nio.file.Files.createTempDirectory("rules")
+        val file = dir.resolve("p.json")
+        val recorder = TerminalRecorder()
+        val input = ScriptedInputSource(emptyList(), confirmAnswers = listOf(ConfirmAnswer.ALWAYS))
+        val rules = rulesAt(file, dir)
+        val policy = TerminalConfirmationPolicy(Terminal(terminalInterface = recorder), input, rules)
+        runBlocking { policy.confirm(listOf(alwaysRequest)) } shouldBe mapOf("c1" to true)
+        recorder.output() shouldContain "a=always"
+        recorder.output() shouldContain "git status"
+        rulesAt(file, dir).active shouldBe listOf(gitStatus)
+        input.offers shouldBe listOf(true)
+    }
+
+    test("a is not offered when a request has no alwaysAllow") {
+        val dir = java.nio.file.Files.createTempDirectory("rules")
+        val recorder = TerminalRecorder()
+        val input = ScriptedInputSource(emptyList(), listOf(true))
+        val policy = TerminalConfirmationPolicy(Terminal(terminalInterface = recorder), input, rulesAt(dir.resolve("p.json"), dir))
+        runBlocking { policy.confirm(listOf(bashRequest)) } shouldBe mapOf("c1" to true)
+        recorder.output() shouldNotContain "a=always"
+        input.offers shouldBe listOf(false)
+    }
+
+    test("a failed rule write warns and still allows the call") {
+        val dir = java.nio.file.Files.createTempDirectory("rules")
+        val file = dir.resolve("p.json")
+        val rules = rulesAt(file, dir)
+        java.nio.file.Files.writeString(file, "{ not json")
+        val recorder = TerminalRecorder()
+        val input = ScriptedInputSource(emptyList(), confirmAnswers = listOf(ConfirmAnswer.ALWAYS))
+        val policy = TerminalConfirmationPolicy(Terminal(terminalInterface = recorder), input, rules)
+        runBlocking { policy.confirm(listOf(alwaysRequest)) } shouldBe mapOf("c1" to true)
+        recorder.output() shouldContain "Could not save the rule:"
+    }
 })

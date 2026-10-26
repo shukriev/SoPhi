@@ -170,7 +170,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         val inputSource: InputSource =
             if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
 
-        val cli = buildCliRuntime(
+        val cli = exitOnBadPermissionRules { buildCliRuntime(
             opts = CliOptions(
                 model = model,
                 maxTokens = maxTokens,
@@ -205,7 +205,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
                 if (sophiTerminal.isInteractive) sophiTerminal.printAbove(TextColors.yellow(msg).toString())
                 else mordantTerminal.println(TextColors.yellow(msg))
             }
-        )
+        ) }
         val session = cli.session
         val hubClient = cli.hubClient
         val learningPlugin = cli.runtime.learningPlugin
@@ -235,7 +235,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions\n"
         )
         if (godMode) {
             if (autoMode) {
@@ -246,13 +246,18 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             mordantTerminal.println(
                 TextColors.red(
                     "God mode is on — only rule-flagged HIGH_RISK calls will prompt. " +
-                        "Everything else runs unattended."
+                        "Everything else runs unattended. Deny rules in permissions.json still apply."
                 )
             )
         } else if (autoMode) {
             mordantTerminal.println(
                 TextColors.cyan("Auto mode is on — low-risk tool calls run without asking. Toggle with /auto.")
             )
+        }
+        cli.runtime.permissionRules?.untrusted?.size?.takeIf { it > 0 }?.let { n ->
+            mordantTerminal.println(TextColors.yellow(
+                "$n allow rule(s) in .sophi/permissions.json are not trusted yet — /permissions to review, /permissions trust to use them."
+            ))
         }
 
         val liveRegionSink: Appendable = if (sophiTerminal.isInteractive) {
@@ -283,7 +288,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             agentLoop = AgentLoop(
                 provider, cli.registry, cli.runtime.sessionManager,
                 confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
-                audit = cli.runtime.auditSink
+                audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules
             ),
             sessionManager = cli.runtime.sessionManager, provider = provider,
             planner = goalPlanner,
@@ -312,6 +317,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             planLog = cli.planLog,
             fileRestorer = cli.runtime.fileRestorer,
             auditSink = cli.runtime.auditSink,
+            permissions = cli.runtime.permissionRules,
             checkpoints = cli.runtime.checkpointStore,
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
@@ -381,4 +387,13 @@ private class LegacyReadLineInputSource : InputSource {
     // stdin read is safe here — unlike JLineInputSource, there's nothing for it to race against.
     override suspend fun awaitYesNo(): Boolean =
         kotlin.io.readlnOrNull()?.trim()?.equals("y", ignoreCase = true) == true
+
+    override suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer {
+        val line = kotlin.io.readlnOrNull()?.trim()
+        return when {
+            line.equals("y", ignoreCase = true) -> ConfirmAnswer.YES
+            offerAlways && line.equals("a", ignoreCase = true) -> ConfirmAnswer.ALWAYS
+            else -> ConfirmAnswer.NO
+        }
+    }
 }

@@ -21,6 +21,9 @@ import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.context.Elider
 import dev.sophi.core.context.Summariser
 import dev.sophi.core.context.WorkingSet
+import dev.sophi.core.permissions.Effect
+import dev.sophi.core.permissions.PermissionRules
+import dev.sophi.core.permissions.PermissionScope
 import dev.sophi.core.prompt.PromptBuilder
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -44,6 +47,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.coroutines.CoroutineContext
 
 @kotlinx.serialization.Serializable
 private data class ToolCallRecord(val id: String, val name: String, val argumentsJson: String)
@@ -225,7 +229,9 @@ class AgentLoop(
     /** Snapshots the workspace before each round with a DESTRUCTIVE call, so /undo can restore it. Null = no checkpoints. */
     private val checkpoints: CheckpointStore? = null,
     /** Gets one entry per tool call. Null = the enclosing loop's sink (AuditScope), if any. */
-    private val audit: AuditSink? = null
+    private val audit: AuditSink? = null,
+    /** Allow/ask/deny rules checked before the confirmation flow. Null = the enclosing loop's rules (PermissionScope), if any. */
+    private val permissions: PermissionRules? = null
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
@@ -242,9 +248,12 @@ class AgentLoop(
      */
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
-        notes: DecisionNotes, outcome: String, result: String, start: Long
+        effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long
     ) = sink.recordQuietly {
         val rule = when {
+            effect == Effect.DENY -> "rule:deny"
+            effect == Effect.ALLOW -> "rule:allow"
+            effect == Effect.ASK -> notes.rules[req.callId] ?: "policy"
             req.riskLevel == RiskLevel.SAFE -> "safe"
             req.toolName in grants -> "grant"
             else -> notes.rules[req.callId] ?: "policy"
@@ -395,9 +404,12 @@ class AgentLoop(
         val turn = TurnProgress()
         return try {
             // Fresh per turn (and per nested AgentLoop): tool_search activations die with the turn.
-            // A nested loop built without a sink audits to the outer loop's.
+            // A nested loop built without a sink audits to the outer loop's, and obeys its rules.
             val sink = audit ?: currentCoroutineContext()[AuditScope]?.sink
-            val scope = if (sink == null) ActivatedTools() else ActivatedTools() + AuditScope(sink)
+            val rules = permissions ?: currentCoroutineContext()[PermissionScope]?.rules
+            var scope: CoroutineContext = ActivatedTools()
+            if (sink != null) scope += AuditScope(sink)
+            if (rules != null) scope += PermissionScope(rules)
             withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble) }
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
@@ -550,14 +562,26 @@ class AgentLoop(
                 )
             ))
 
+            val rules = currentCoroutineContext()[PermissionScope]?.rules
+            // Rules first: deny > ask > allow; no effect = no rule applies, the tier/grant/policy flow decides.
+            val effects = mutableMapOf<String, Effect>()
             val classified = toolCalls.map { call ->
                 val tool = registry.getOrNull(call.name)
                 val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
                 val preview = tool?.confirmationPreview(call.argumentsJson)
-                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview)
+                // A tool that throws computing its subjects (e.g. a NUL in a path) gets null: R3, fail closed, not a crashed round.
+                val subjects = if (rules == null) null else runCatching { tool?.permissionSubjects(call.argumentsJson) }.getOrNull()
+                val effect = rules?.decide(call.name, subjects)?.also { effects[call.id] = it }
+                // an allow written under an ask rule could never apply (ask beats allow), so "always" isn't offered
+                val always = if (rules == null || effect == Effect.ASK) null else PermissionRules.alwaysAllowRules(call.name, subjects)
+                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always, askRule = effect == Effect.ASK)
             }
             val needsDecision = classified.filter { (_, req) ->
-                req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
+                when (effects[req.callId]) {
+                    Effect.ASK -> true
+                    null -> req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
+                    else -> false
+                }
             }
             val notes = DecisionNotes()
             val decisions = if (needsDecision.isEmpty()) {
@@ -572,9 +596,12 @@ class AgentLoop(
                 }
             }
             val allowedCalls = classified.map { (call, req) ->
-                val allowed = req.riskLevel == RiskLevel.SAFE ||
-                    req.toolName in grants ||
-                    decisions[req.callId] == true
+                val allowed = when (effects[req.callId]) {
+                    Effect.DENY -> false
+                    Effect.ALLOW -> true
+                    Effect.ASK -> decisions[req.callId] == true
+                    null -> req.riskLevel == RiskLevel.SAFE || req.toolName in grants || decisions[req.callId] == true
+                }
                 call to allowed
             }
 
@@ -601,12 +628,13 @@ class AgentLoop(
                         onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
                         val start = System.currentTimeMillis()
                         fun audit(outcome: String, result: String) {
-                            if (auditSink != null) recordAudit(auditSink, actor, session, req, notes, outcome, result, start)
+                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start)
                         }
                         var failed = false
                         val result = if (!allowed) {
                             failed = true
-                            "Error: Tool '${call.name}' execution denied by confirmation policy"
+                            if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
+                            else "Error: Tool '${call.name}' execution denied by confirmation policy"
                         } else {
                             registry.getOrNull(call.name)
                                 ?.let { tool ->

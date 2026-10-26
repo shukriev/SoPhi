@@ -105,6 +105,7 @@ class RuntimeBuilder {
     private var builtinToolsConfig: BuiltinToolsConfig? = null
     private var checkpointsConfig: Pair<Path, (String) -> Unit>? = null
     private var auditSink: AuditSink? = null
+    private var permissionRules: dev.sophi.core.permissions.PermissionRules? = null
     private var contextConfig: Triple<ContextEngine, ProjectOf, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
@@ -184,6 +185,19 @@ class RuntimeBuilder {
 
     /** Sends audit entries to a custom [sink] (retention, export). The last of [auditLog] and this wins. */
     fun audit(sink: AuditSink): RuntimeBuilder = apply { auditSink = sink }
+
+    /**
+     * Loads permission rules from [home] (global) and [projectRoot]/.sophi (project); every loop the runtime builds
+     * enforces them. Loads now, so a malformed file throws PermissionRulesException before [build] is reached.
+     * The last of this and [permissions] wins.
+     */
+    fun permissionRules(
+        projectRoot: Path,
+        home: Path = Path.of(System.getProperty("user.home"), ".sophi")
+    ): RuntimeBuilder = permissions(loadPermissionRules(projectRoot, home))
+
+    /** Enforces already-loaded [rules]. The last of [permissionRules] and this wins. */
+    fun permissions(rules: dev.sophi.core.permissions.PermissionRules): RuntimeBuilder = apply { permissionRules = rules }
 
     /**
      * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
@@ -324,7 +338,7 @@ class RuntimeBuilder {
                 }
             } ?: { _, _ -> },
             checkpoints = checkpointStore,
-            audit = auditSink
+            audit = auditSink, permissions = permissionRules
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
@@ -422,7 +436,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore, auditSink
+            deferOver, checkpointStore, auditSink, permissionRules
         )
     }
 }

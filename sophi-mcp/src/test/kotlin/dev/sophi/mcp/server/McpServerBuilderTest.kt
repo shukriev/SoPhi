@@ -1,6 +1,9 @@
 package dev.sophi.mcp.server
 
 import dev.sophi.core.audit.AuditEntry
+import dev.sophi.core.permissions.Effect
+import dev.sophi.core.permissions.PermissionRule
+import dev.sophi.core.permissions.PermissionRules
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.mcp.StdioMcpConnector
@@ -206,9 +209,47 @@ class McpServerBuilderTest : FunSpec({
         val tools = listOf(fakeTool("grep"), fakeTool("rm", RiskLevel.DESTRUCTIVE), boom)
         val names = setOf("grep", "rm", "boom")
         val quiet = buildMcpServer(tools, names)
-        val throwing = buildMcpServer(tools, names) { throw IllegalStateException("disk full") }
+        val throwing = buildMcpServer(tools, names, audit = { throw IllegalStateException("disk full") })
         for (n in names) callTool(throwing, n) shouldBe callTool(quiet, n)
     }
+    test("a SAFE tool with a deny rule returns an error and is not executed") {
+        val entries = mutableListOf<AuditEntry>()
+        var executed = 0
+        val grep = object : Tool {
+            override val name = "grep"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String { executed++; return "found" }
+        }
+        val rules = PermissionRules(listOf(PermissionRule("grep", null, Effect.DENY)), emptyList(), null, null, emptySet())
+        val server = buildMcpServer(listOf(grep), setOf("grep"), audit = { entries += it }, permissions = rules)
+
+        callTool(server, "grep").isError shouldBe true
+
+        executed shouldBe 0
+        entries.single().rule shouldBe "rule:deny"
+        entries.single().outcome shouldBe "denied"
+    }
+
+    test("a SAFE tool with an ask rule is refused: there is no one to ask") {
+        val entries = mutableListOf<AuditEntry>()
+        var executed = 0
+        val grep = object : Tool {
+            override val name = "grep"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String { executed++; return "found" }
+        }
+        val rules = PermissionRules(listOf(PermissionRule("grep", null, Effect.ASK)), emptyList(), null, null, emptySet())
+        val server = buildMcpServer(listOf(grep), setOf("grep"), audit = { entries += it }, permissions = rules)
+
+        callTool(server, "grep").isError shouldBe true
+
+        executed shouldBe 0
+        entries.single().rule shouldBe "rule:ask"
+        entries.single().outcome shouldBe "denied"
+    }
+
     test("a client's handshake name is prefixed, so it can't pose as the local user") {
         mcpActor("local") shouldBe "mcp:local"
         mcpActor(null) shouldBe "mcp-client"

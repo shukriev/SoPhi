@@ -6,4 +6,5 @@ class JLineInputSource(private val sophiTerminal: SophiTerminal) : InputSource {
     override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) =
         sophiTerminal.awaitControlKeys(toggleKey, onToggle)
     override suspend fun awaitYesNo(): Boolean = sophiTerminal.awaitYesNo()
+    override suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer = sophiTerminal.awaitConfirmation(offerAlways)
 }

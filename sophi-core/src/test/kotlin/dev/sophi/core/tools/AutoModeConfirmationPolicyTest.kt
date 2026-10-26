@@ -122,4 +122,33 @@ class AutoModeConfirmationPolicyTest : FunSpec({
 
         notes.rules shouldBe mapOf("c1" to "auto:rule", "c2" to "auto:classifier")
     }
+
+    test("an ask-rule request reaches the fallback under the god-mode policy") {
+        val registry = ToolRegistry().register(FixedRuleTool("t", RuleVerdict.UNKNOWN))
+        val seen = mutableListOf<String>()
+        val fallback = ConfirmationPolicy { requests -> seen += requests.map { it.callId }; requests.associate { it.callId to false } }
+        val policy = AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, fallback, "allow-all")
+
+        val result = runBlocking { policy.confirm(listOf(ConfirmationRequest("c1", "t", "{}", RiskLevel.SAFE, askRule = true))) }
+
+        result shouldBe mapOf("c1" to false)
+        seen shouldBe listOf("c1")
+    }
+
+    test("an ask-rule request reaches the fallback under auto mode even when rule and classifier say LOW_RISK") {
+        val registry = ToolRegistry().register(FixedRuleTool("low", RuleVerdict.LOW_RISK)).register(FixedRuleTool("unk", RuleVerdict.UNKNOWN))
+        val seen = mutableListOf<String>()
+        val fallback = ConfirmationPolicy { requests -> seen += requests.map { it.callId }; requests.associate { it.callId to false } }
+        val policy = AutoModeConfirmationPolicy(registry, { _, _, _, _ -> RuleVerdict.LOW_RISK }, fallback)
+
+        val result = runBlocking {
+            policy.confirm(listOf(
+                ConfirmationRequest("c1", "low", "{}", RiskLevel.SAFE, askRule = true),
+                ConfirmationRequest("c2", "unk", "{}", RiskLevel.SAFE, askRule = true),
+            ))
+        }
+
+        result shouldBe mapOf("c1" to false, "c2" to false)
+        seen shouldBe listOf("c1", "c2")
+    }
 })

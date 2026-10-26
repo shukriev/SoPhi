@@ -64,7 +64,7 @@ class ScheduleDaemonCommand : CliktCommand(
     override fun run() = runBlocking {
         val resolved = provider.resolveAndWarn()
         val scheduleRuntime = try {
-            buildScheduleEngine(
+            exitOnBadPermissionRules { buildScheduleEngine(
                 resolved, provider.apiKey,
                 Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
                 taskTimeoutSeconds, maxTokens,
@@ -75,7 +75,7 @@ class ScheduleDaemonCommand : CliktCommand(
                 embeddingDimensions = embeddingDimensions,
                 onWarning = { echo(it) },
                 llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries
-            )
+            ) }
         } catch (e: com.arcadedb.exception.DatabaseOperationException) {
             echo(
                 "Cannot start with --memory: another instance in this JVM already has " +

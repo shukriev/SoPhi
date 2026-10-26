@@ -22,6 +22,7 @@ class CalendarCreate(
     private val contextWindowTokens: Int,
     private val description: String,
     private val audit: AuditSink? = null,
+    private val permissions: dev.sophi.core.permissions.PermissionRules? = null,
     private val echo: (String) -> Unit
 ) {
     suspend fun run() {
@@ -30,7 +31,7 @@ class CalendarCreate(
             provider, scopedRegistry, sessionManager,
             confirmationPolicy = confirmationPolicy,
             contextWindowTokens = contextWindowTokens,
-            audit = audit
+            audit = audit, permissions = permissions
         )
         val now = ZonedDateTime.now()
         val systemPrompt = "You create exactly one calendar event from a short shorthand description using the " +

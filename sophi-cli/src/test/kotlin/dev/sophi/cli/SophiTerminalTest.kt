@@ -69,6 +69,20 @@ class SophiTerminalTest : FunSpec({
         controlKeysJob.cancel()
     }
 
+    test("awaitConfirmation(true) resolves ALWAYS on 'a'") {
+        val sophi = SophiTerminal(terminalWithInput("a"))
+        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        sophi.awaitConfirmation(true) shouldBe ConfirmAnswer.ALWAYS
+        controlKeysJob.cancel()
+    }
+
+    test("'a' is ignored when always is not offered") {
+        val sophi = SophiTerminal(terminalWithInput("ay"))
+        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        sophi.awaitConfirmation(false) shouldBe ConfirmAnswer.YES
+        controlKeysJob.cancel()
+    }
+
     // printAbove routes through JLine's own out-of-band message API rather than a raw println,
     // so a message arriving asynchronously (a fire-and-forget background job's warning, say)
     // doesn't get glued onto whatever the active readLine() prompt already rendered.

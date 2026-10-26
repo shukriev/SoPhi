@@ -12,6 +12,7 @@ import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.AgentSession
 import dev.sophi.sdk.Sophi
 import dev.sophi.sdk.SophiRuntime
+import dev.sophi.sdk.loadPermissionRules
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.LlmRiskClassifier
@@ -103,8 +104,11 @@ internal suspend fun buildCliRuntime(
     var hubClient: HubClient? = null
 
     val registry = ToolRegistry()
+    // Loaded before anything else starts: a malformed rules file throws PermissionRulesException (R5), and the
+    // confirmation policy needs the same instance the runtime enforces.
+    val permissionRules = loadPermissionRules(Path.of("").toAbsolutePath())
     val manualConfirmationPolicy: ConfirmationPolicy = RemoteAwareConfirmationPolicy(
-        TerminalConfirmationPolicy(terminal, input),
+        TerminalConfirmationPolicy(terminal, input, permissionRules),
         { hubClient },
         { requireNotNull(session) { "confirmation requested before the session was created" }.id }
     )
@@ -158,6 +162,7 @@ internal suspend fun buildCliRuntime(
         builtinTools(root = Path.of("").toAbsolutePath(), braveApiKey = opts.braveApiKey)
         checkpoints()
         auditLog(onWarning = onWarning)
+        permissions(permissionRules)
         context(contextEngine) { _ -> contextEngine.projectContaining(cwd)?.id }
         agentsDir(agentsDir, onWarning)
         subagentDelegation()

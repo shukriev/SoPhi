@@ -149,6 +149,40 @@ Known limits of the audit log:
 - Calls made through sophi-web are not audited yet.
 - A call cancelled before it starts (e.g. during confirmation) has no entry.
 
+**Permission rules.** `~/.sophi/permissions.json` (global) and `.sophi/permissions.json` (project) hold a JSON list of `{"tool", "pattern", "effect"}`, where `effect` is `allow`, `ask` or `deny`. `tool` and `pattern` are globs: `*` matches anything, including `/`, and `\*` is a literal star. A rule without `pattern` covers every call of that tool.
+
+```json
+[
+  {"tool": "bash", "pattern": "rm *", "effect": "deny"},
+  {"tool": "bash", "pattern": "git status", "effect": "allow"},
+  {"tool": "write_file", "pattern": "secrets/*", "effect": "deny"},
+  {"tool": "read_file", "pattern": "/Users/you/.ssh/*", "effect": "deny"}
+]
+```
+
+The order is deny, then ask, then allow, then the usual risk tiers and confirmation. A deny rule also blocks under `--god-mode` and in `mcp-serve`; an ask rule always sends the call to a person, also in auto mode and under `--god-mode`. What a pattern is matched against:
+
+- `bash`: each part of the command, after splitting on `&&`, `||`, `;`, `|`, newlines, `$( )`, backticks and subshells. A call is allowed only if every part is.
+- `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `move_file`, `delete_file`: the path, relative to the project root when inside it (`./.env` and `src/../.env` both give `.env`), otherwise the absolute path.
+- `fetch_url`: the URL.
+- Other tools have no subject, so only a rule without `pattern` applies.
+
+A project file can come from a cloned repo, so its `allow` rules do nothing until you trust them: `/permissions` lists them, `/permissions trust` activates the current ones (kept in `~/.sophi/permissions-trust.json`). Project `deny` and `ask` rules always apply. When a prompt can offer it, answering `a` (always) appends a project `allow` rule for exactly that command or path to `.sophi/permissions.json`, shows it first, and trusts it. A command with `*` in it is written escaped, so it only matches itself. A malformed rules file stops startup with an error naming the file, because ignoring it would drop deny rules silently.
+
+In the SDK, `RuntimeBuilder.permissionRules(projectRoot)` loads the same files, or `permissions(rules)` takes a `PermissionRules` you built.
+
+Known limits of permission rules:
+
+- Bash matching is textual. A command that can't be split (a heredoc, an unterminated quote), or whose command word is quoted, escaped or a variable (`\rm`, `"rm"`, `r''m`, `$RM`, `{rm,x}`), is treated as unknown: denied when any `bash` deny rule exists. Wrappers and paths are not seen through: `/bin/rm`, `command rm`, `env rm`, `exec rm`, `sudo`, `xargs`, `bash -c` and `eval` must be named in the patterns.
+- A bash part with an output redirect, or with a `NAME=value` prefix (`LD_PRELOAD=x git status`), is never allowed by a rule; it goes to the normal confirmation. Deny rules still see the command after the prefix. Redirects to `/dev/null` and `>&N` don't count, so they don't block an allow rule.
+- `~` is not expanded in rule patterns; write absolute paths.
+- Path subjects resolve symlinks and the on-disk case, so a path is matched as its real path. Patterns for paths outside the project must use the real path: on macOS `/private/etc/*`, not `/etc/*` (same for `/tmp` and `/var`). A symlink to a missing file can't be checked, so it fails closed.
+- URL subjects are normalized (scheme and host lowercase, no userinfo or default port). Only the requested URL is checked, not its redirects.
+- In `mcp-serve` an ask rule refuses the call, since nobody is there to answer.
+- A scheduled daemon takes its project rules from the directory it was started in.
+- sophi-web doesn't apply rules yet.
+- Rules are not a sandbox: the real containment is a sandboxed backend.
+
 **Undo.** Before each tool round that changes files, the CLI snapshots the workspace into a shadow git repo under `~/.sophi/checkpoints` (your own repo is untouched). `/undo` and `/revert` show what they would restore and ask first. `move_file` and `delete_file` are undoable too: deletes go to `~/.sophi/trash`. Bash commands that reach outside the workspace can't be undone and are listed as warnings. In the SDK, `RuntimeBuilder.checkpoints()` (needs `builtinTools`) turns snapshots on and `SophiRuntime.fileRestorer` does the restoring.
 
 The terminal redraws in place while a turn streams, instead of scrolling
