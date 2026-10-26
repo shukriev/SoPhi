@@ -67,7 +67,7 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
             ?.let { splitBashCommand(it) }
             // nothing to match (empty command, bare assignment) is null, never an empty list: that means "no subjects"
             ?.takeIf { it.isNotEmpty() }
-            ?.map { PermissionSubject(it.text, allowable = !it.redirects) }
+            ?.map { PermissionSubject(it.text, allowable = !it.redirects && !it.assigns) }
     override val parametersJson = """
         {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"}},"required":["command"]}
     """.trimIndent()

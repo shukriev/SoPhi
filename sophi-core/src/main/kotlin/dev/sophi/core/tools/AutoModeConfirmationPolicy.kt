@@ -5,7 +5,7 @@ import dev.sophi.core.audit.noteDecision
 /**
  * Auto-mode gate: for each request, consult the tool's own ruleVerdict() first; only fall back
  * to the LLM classifier when the tool has no opinion (UNKNOWN). LOW_RISK auto-approves; anything
- * else (HIGH_RISK, or a missing tool) is forwarded to [fallback] for a real human decision,
+ * else (HIGH_RISK, a missing tool, or an ask-rule request) is forwarded to [fallback] for a real human decision,
  * batched together exactly as ConfirmationPolicy already batches a round's requests.
  * [classifierRule] is the audit rule noted when [classifier] approves (god mode, whose classifier approves everything, says "allow-all").
  */
@@ -30,6 +30,7 @@ class AutoModeConfirmationPolicy(
 
     /** The rule that auto-approved [request] ("auto:rule" or [classifierRule]), or null when a human must decide. */
     private suspend fun resolve(request: ConfirmationRequest): String? {
+        if (request.askRule) return null // the user wrote "ask": no verdict or classifier stands in for them
         val tool = registry.getOrNull(request.toolName) ?: return null
         val ruleVerdict = tool.ruleVerdict(request.argumentsJson)
         return when {

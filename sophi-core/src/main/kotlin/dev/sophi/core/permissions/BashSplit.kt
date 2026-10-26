@@ -1,7 +1,10 @@
 package dev.sophi.core.permissions
 
-/** One simple command out of a compound bash line; [redirects] is true when it writes to a file (not `/dev/null` or an fd dup). */
-data class BashPart(val text: String, val redirects: Boolean)
+/**
+ * One simple command out of a compound bash line; [redirects] is true when it writes to a file (not `/dev/null` or an fd dup),
+ * [assigns] when a leading `NAME=value` was stripped from [text] (`LD_PRELOAD=x git status` must not count as `git status`).
+ */
+data class BashPart(val text: String, val redirects: Boolean, val assigns: Boolean = false)
 
 private val KEYWORDS = setOf("if", "then", "else", "elif", "do", "while", "until", "fi", "done", "!", "time", "{", "}")
 private val ASSIGNMENT = Regex("^[A-Za-z_][A-Za-z0-9_]*=")
@@ -9,11 +12,14 @@ private val FD_DUP = Regex("^&([0-9]+|-)(?=[\\s;&|)<>]|$)")
 private val REDIRECT_WORD = Regex("^([0-9]*|&)(>>?|<{1,3})[&|]?")
 private val CASE_WORD = Regex("\\bcase\\b")
 private val NULL_TARGET = Regex("^\\s*/dev/null(?=[\\s;&|)]|$)")
+private val BACKTICK_ESCAPE = Regex("""\\([\\`$])""")
+private val UNMATCHABLE_WORD_CHARS = "\\'\"$`{"
 
 /**
  * Splits a command on `; & | newline ( )` outside quotes and recurses into `$(..)`, backticks and `<(..)`/`>(..)`,
  * so a deny rule can't be dodged with compound syntax. Returns null when it can't split safely (unterminated quote
- * or substitution, heredoc, `$'..'`, `case` inside a substitution, stray `)`); callers apply R3: deny if any deny rule
+ * or substitution, heredoc, `$'..'`, `case` inside a substitution, stray `)`, or a command word that is quoted, escaped
+ * or expanded, like `\rm`, `"rm"`, `$RM`, `{rm,x}`); callers apply R3: deny if any deny rule
  * exists for the tool, else ask if any ask rule exists, else no rule applies.
  * ponytail: hand-rolled scanner covers common shell; tree-sitter-bash is the upgrade path for full grammar.
  */
@@ -24,15 +30,17 @@ fun splitBashCommand(command: String): List<BashPart>? {
     val cur = StringBuilder()
     var redirects = false
     var sawRedirect = false
+    var unmatchable = false
     var quote = ' '
     var groups = 0
     var i = 0
 
     fun flush() {
         val raw = cur.toString().trim()
-        val text = stripLeading(raw)
+        val (text, assigns) = stripLeading(raw)
+        if (text.substring(0, wordEnd(text)).any { it in UNMATCHABLE_WORD_CHARS }) unmatchable = true
         // a redirect-only part (`> ~/.bashrc`) must not vanish: it is kept as written so rules can see it
-        if (text.isNotEmpty()) out += BashPart(text, redirects) else if (sawRedirect) out += BashPart(raw, redirects)
+        if (text.isNotEmpty()) out += BashPart(text, redirects, assigns) else if (sawRedirect) out += BashPart(raw, redirects, assigns)
         out += pending
         pending.clear()
         cur.clear()
@@ -47,7 +55,8 @@ fun splitBashCommand(command: String): List<BashPart>? {
         if (close < 0) return -1
         val inner = s.substring(opener + openLen, close)
         if (!backtick && CASE_WORD.containsMatchIn(inner)) return -1 // case arms contain a bare `)`
-        pending += splitBashCommand(inner) ?: return -1
+        // bash un-escapes \` \$ \\ in a backtick body before running it: `echo \`rm x\`` runs rm
+        pending += splitBashCommand(if (backtick) inner.replace(BACKTICK_ESCAPE, "$1") else inner) ?: return -1
         cur.append(s, opener, close + 1)
         return close + 1
     }
@@ -101,21 +110,24 @@ fun splitBashCommand(command: String): List<BashPart>? {
     }
     if (quote != ' ') return null
     flush()
-    return out
+    return out.takeUnless { unmatchable }
 }
 
-/** Drops leading shell keywords, `NAME=value` assignments and redirections, leaving the command word first. */
-private fun stripLeading(text: String): String {
+/** Drops leading shell keywords (and `time -p`), `NAME=value` assignments and redirections, leaving the command word first; true when an assignment was dropped. */
+private fun stripLeading(text: String): Pair<String, Boolean> {
     var t = text
+    var assigns = false
     while (true) {
         val word = t.substring(0, wordEnd(t))
         val rest = t.substring(word.length).trimStart()
         when {
-            word in KEYWORDS || ASSIGNMENT.containsMatchIn(word) -> t = rest
+            word == "time" && rest.substring(0, wordEnd(rest)) == "-p" -> t = rest.substring(2).trimStart()
+            word in KEYWORDS -> t = rest
+            ASSIGNMENT.containsMatchIn(word) -> { t = rest; assigns = true }
             REDIRECT_WORD.containsMatchIn(word) && !word.startsWith("<(") && !word.startsWith(">(") ->
                 // a bare operator takes the next word as its target
                 t = if (REDIRECT_WORD.replaceFirst(word, "").isEmpty()) rest.substring(wordEnd(rest)).trimStart() else rest
-            else -> return t
+            else -> return t to assigns
         }
     }
 }

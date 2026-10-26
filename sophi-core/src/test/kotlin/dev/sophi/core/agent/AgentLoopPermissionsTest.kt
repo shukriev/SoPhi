@@ -198,13 +198,40 @@ class AgentLoopPermissionsTest : FunSpec({
         val policy = ConfirmationPolicy { reqs -> seen += reqs; reqs.associate { it.callId to false } }
         val root = createTempDirectory("perm-always")
         val (provider, sm) = scripted(
-            use(ToolCall("a", "bash", """{"command":"ls *.kt"}"""), ToolCall("b", "bash", """{"command":"a > b"}""")), done)
-        // ls is SAFE: the ask rule sends it to the policy
-        loop(provider, sm, BashTool(root), policy = policy, permissions = rules(PermissionRule("bash", "ls *", Effect.ASK)))
+            use(ToolCall("a", "bash", """{"command":"touch *.kt"}"""), ToolCall("b", "bash", """{"command":"a > b"}""")), done)
+        loop(provider, sm, BashTool(root), policy = policy, permissions = rules(deny("bash", "rm *")))
             .turn(AgentSession(id = "s"), "go", config)
 
         val byId = seen.associateBy { it.callId }
-        byId.getValue("a").alwaysAllow shouldBe listOf(PermissionRule("bash", "ls \\*.kt", Effect.ALLOW))
+        byId.getValue("a").alwaysAllow shouldBe listOf(PermissionRule("bash", "touch \\*.kt", Effect.ALLOW))
         byId.getValue("b").alwaysAllow shouldBe null
+    }
+
+    test("an ask-matched request is marked askRule and never offers always") {
+        val seen = mutableListOf<ConfirmationRequest>()
+        val policy = ConfirmationPolicy { reqs -> seen += reqs; reqs.associate { it.callId to false } }
+        val (provider, sm) = scripted(use(ToolCall("a", "bash", """{"command":"ls *.kt"}""")), done)
+        // the written allow could never apply: ask beats allow
+        loop(provider, sm, BashTool(createTempDirectory("perm-ask")), policy = policy,
+            permissions = rules(PermissionRule("bash", "ls *", Effect.ASK)))
+            .turn(AgentSession(id = "s"), "go", config)
+
+        seen.single().askRule shouldBe true
+        seen.single().alwaysAllow shouldBe null
+    }
+
+    test("an ask rule reaches a person under god mode") {
+        val root = createTempDirectory("perm-god")
+        val marker = root.resolve("marker").also { it.writeText("x") }
+        val registry = ToolRegistry().register(BashTool(root))
+        val asked = mutableListOf<String>()
+        val human = ConfirmationPolicy { reqs -> asked += reqs.map { it.toolName }; reqs.associate { it.callId to false } }
+        val (provider, sm) = scripted(use(bash("rm marker")), done)
+        loop(provider, sm, policy = AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, human, "allow-all"),
+            registry = registry, permissions = rules(PermissionRule("bash", "rm *", Effect.ASK)))
+            .turn(AgentSession(id = "s"), "go", config)
+
+        asked shouldBe listOf("bash")
+        marker.exists() shouldBe true
     }
 })

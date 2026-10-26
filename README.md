@@ -160,7 +160,7 @@ Known limits of the audit log:
 ]
 ```
 
-The order is deny, then ask, then allow, then the usual risk tiers and confirmation. A deny rule also blocks under `--god-mode` and in `mcp-serve`; an ask rule sends the call to the confirmation prompt even when it would have run unattended. What a pattern is matched against:
+The order is deny, then ask, then allow, then the usual risk tiers and confirmation. A deny rule also blocks under `--god-mode` and in `mcp-serve`; an ask rule always sends the call to a person, also in auto mode and under `--god-mode`. What a pattern is matched against:
 
 - `bash`: each part of the command, after splitting on `&&`, `||`, `;`, `|`, newlines, `$( )`, backticks and subshells. A call is allowed only if every part is.
 - `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `move_file`, `delete_file`: the path, relative to the project root when inside it (`./.env` and `src/../.env` both give `.env`), otherwise the absolute path.
@@ -173,8 +173,8 @@ In the SDK, `RuntimeBuilder.permissionRules(projectRoot)` loads the same files, 
 
 Known limits of permission rules:
 
-- Bash matching is textual. `\rm`, `r''m`, `sudo`, `xargs`, `bash -c` and `eval` are not seen through, so name them in the patterns. A command that can't be split (a heredoc, an unterminated quote) is denied when any `bash` deny rule exists.
-- A bash part with an output redirect is never allowed by a rule; it goes to the normal confirmation. Redirects to `/dev/null` and `>&N` don't count, so they don't block an allow rule.
+- Bash matching is textual. A command that can't be split (a heredoc, an unterminated quote), or whose command word is quoted, escaped or a variable (`\rm`, `"rm"`, `r''m`, `$RM`, `{rm,x}`), is treated as unknown: denied when any `bash` deny rule exists. Wrappers and paths are not seen through: `/bin/rm`, `command rm`, `env rm`, `exec rm`, `sudo`, `xargs`, `bash -c` and `eval` must be named in the patterns.
+- A bash part with an output redirect, or with a `NAME=value` prefix (`LD_PRELOAD=x git status`), is never allowed by a rule; it goes to the normal confirmation. Deny rules still see the command after the prefix. Redirects to `/dev/null` and `>&N` don't count, so they don't block an allow rule.
 - `~` is not expanded in rule patterns; write absolute paths.
 - Path subjects resolve symlinks and the on-disk case, so a path is matched as its real path. Patterns for paths outside the project must use the real path: on macOS `/private/etc/*`, not `/etc/*` (same for `/tmp` and `/var`). A symlink to a missing file can't be checked, so it fails closed.
 - URL subjects are normalized (scheme and host lowercase, no userinfo or default port). Only the requested URL is checked, not its redirects.

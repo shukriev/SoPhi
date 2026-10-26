@@ -106,4 +106,13 @@ class ThresholdConfirmationPolicyTest : FunSpec({
 
         notes.rules shouldBe mapOf("c1" to "threshold:DESTRUCTIVE")
     }
+
+    test("an ask-rule request below the threshold still reaches the fallback") {
+        val fallback = ConfirmationPolicy { requests -> requests.associate { it.callId to false } }
+        val policy = ThresholdConfirmationPolicy(RiskLevel.DESTRUCTIVE, fallback)
+
+        val result = runBlocking { policy.confirm(listOf(ConfirmationRequest("c1", "t", "{}", RiskLevel.SAFE, askRule = true))) }
+
+        result shouldBe mapOf("c1" to false)
+    }
 })

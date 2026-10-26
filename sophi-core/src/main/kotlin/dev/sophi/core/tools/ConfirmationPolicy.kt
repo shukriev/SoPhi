@@ -11,7 +11,9 @@ data class ConfirmationRequest(
     val riskLevel: RiskLevel,
     val preview: String? = null,
     /** The rules "always allow" would write for this call; null = don't offer "always". */
-    val alwaysAllow: List<PermissionRule>? = null
+    val alwaysAllow: List<PermissionRule>? = null,
+    /** An ask rule matched: a person must decide, whatever an auto or threshold policy would say. */
+    val askRule: Boolean = false
 )
 
 fun interface ConfirmationPolicy {

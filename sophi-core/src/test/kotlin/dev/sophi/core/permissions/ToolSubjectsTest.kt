@@ -31,6 +31,12 @@ class ToolSubjectsTest : FunSpec({
         test("unparseable command is null") {
             bash.permissionSubjects("""{"command":"echo \"x"}""") shouldBe null
         }
+        test("a part with a NAME=value prefix is not allowable") {
+            val subjects = bash.permissionSubjects("""{"command":"GIT_EXTERNAL_DIFF=evil git diff"}""")
+            subjects!!.single().allowable shouldBe false
+            PermissionRules(listOf(PermissionRule("bash", "git diff*", Effect.ALLOW)), emptyList(), null, null, emptySet())
+                .decide("bash", subjects) shouldBe null
+        }
         test("bad json is null") { bash.permissionSubjects("{bad") shouldBe null }
         test("nothing to match is null, not empty") {
             bash.permissionSubjects("""{"command":""}""") shouldBe null

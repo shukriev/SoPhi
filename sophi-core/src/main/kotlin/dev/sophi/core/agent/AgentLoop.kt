@@ -571,9 +571,10 @@ class AgentLoop(
                 val preview = tool?.confirmationPreview(call.argumentsJson)
                 // A tool that throws computing its subjects (e.g. a NUL in a path) gets null: R3, fail closed, not a crashed round.
                 val subjects = if (rules == null) null else runCatching { tool?.permissionSubjects(call.argumentsJson) }.getOrNull()
-                rules?.decide(call.name, subjects)?.let { effects[call.id] = it }
-                val always = if (rules == null) null else PermissionRules.alwaysAllowRules(call.name, subjects)
-                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always)
+                val effect = rules?.decide(call.name, subjects)?.also { effects[call.id] = it }
+                // an allow written under an ask rule could never apply (ask beats allow), so "always" isn't offered
+                val always = if (rules == null || effect == Effect.ASK) null else PermissionRules.alwaysAllowRules(call.name, subjects)
+                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always, askRule = effect == Effect.ASK)
             }
             val needsDecision = classified.filter { (_, req) ->
                 when (effects[req.callId]) {
