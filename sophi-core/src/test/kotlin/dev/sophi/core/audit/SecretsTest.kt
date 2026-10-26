@@ -396,4 +396,15 @@ class SecretsTest : FunSpec({
         many.size shouldBe 240 // each costs 10 + 32: 239 numbers fit before the 10_000 runs out, then the marker
         many.last().jsonPrimitive.content shouldBe "[…]"
     }
+    test("code content with inline JSON stays readable; a JSON document value is still redacted structurally") {
+        fun content(args: String) = Json.parseToJsonElement(redactArguments(args)).jsonObject["content"]!!.jsonPrimitive.content
+        val ts = content("""{"path":"a.ts","content":"const x = {\"a\": 1}\nconst token = \"abc123\"\n"}""")
+        ts shouldContain """const x = {"a": 1}"""
+        ts shouldContain "const token = \"[REDACTED:secret]\""
+        val doc = content("""{"path":"c.json","content":"{\"password\":\"x\",\"port\":8080}"}""")
+        Json.parseToJsonElement(doc).jsonObject["password"]!!.jsonPrimitive.content shouldBe "[REDACTED]"
+        content("""{"path":"c.json","content":"{\"password\": \"x"}""") shouldBe "[unredactable]"
+        content("""{"path":"c.json","content":"```json\n{\"pin_password\": 123456\n```"}""") shouldBe "[unredactable]"
+        content("""{"path":"c.json","content":"  ﻿[{\"pin_password\": 123"}""") shouldBe "[unredactable]"
+    }
 })

@@ -141,7 +141,7 @@ Known limits of the audit log:
 - Redaction is pattern-based and best effort.
 - `args` and `result` keep a bounded sample (4,000 and 500 chars) and redaction work per entry is capped. Past the cap, the rest of each object or array, keys and values alike, is replaced by one `"…": "[…]"` (or `"[…]"`) marker.
 - Arguments that aren't JSON get the weaker text redaction, so numeric secrets and secrets under unfamiliar key names can survive.
-- A string value that is itself JSON is redacted as JSON (up to 3 levels deep). Any argument or string value that contains `{"` or `["` but doesn't parse, such as a raw `curl -d '{...}'` or a cut JSON document, is logged as `[unredactable]`.
+- A string value that starts with `{` or `[` (after whitespace, a BOM or a code fence) is redacted as JSON, up to 3 levels deep; if it doesn't parse (a cut JSON document) it is logged as `[unredactable]`. Other strings, such as code containing `{"a": 1}`, keep text redaction. A whole argument that isn't JSON but contains `{"` or `["`, such as a raw `curl -d '{...}'`, is logged as `[unredactable]`.
 - A numeric secret under an ordinary key name (e.g. `{"pin":123456}`) is logged as-is; numbers over 64 digits show as `[…]`.
 - Keys that redact to the same text (two GitHub tokens used as keys, say) are numbered `#2`, `#3`, so no value is lost.
 - A value that can't be redacted safely is logged as `[unredactable]`.

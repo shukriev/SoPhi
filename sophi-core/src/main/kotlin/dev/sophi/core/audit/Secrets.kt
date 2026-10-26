@@ -124,6 +124,23 @@ private fun looksLikeJson(text: String): Boolean {
     return start == '{' || start == '[' || JSON_INSIDE.containsMatchIn(text)
 }
 
+private val FENCE_OPEN = Regex("^```[A-Za-z0-9_-]*[ \\t]*\\r?\\n")
+// An opener after any run of (escaped) quotes: a JSON string that encodes JSON. Possessive, so a long run can't recurse.
+private val JSON_OPENER = Regex("^(?:\\\\*+\")*+\\\\*+[{\\[]")
+
+/** A string value's text without a BOM, surrounding whitespace, or a ``` fence around it. */
+private fun unwrapped(text: String): String {
+    val t = withoutBom(text.trimStart()).trimStart()
+    val open = FENCE_OPEN.find(t) ?: return t
+    return t.substring(open.range.last + 1).trimEnd().removeSuffix("```").trim()
+}
+
+/**
+ * A string value is JSON-ish only when it starts with an opener ({, [, {\", or a quoted JSON string) after whitespace,
+ * a BOM or a fence, so code that merely contains {" keeps its text redaction.
+ */
+private fun valueLooksLikeJson(text: String) = JSON_OPENER.containsMatchIn(unwrapped(text))
+
 private fun parseOrNull(text: String): JsonElement? = try {
     Json.parseToJsonElement(withoutBom(text))
 } catch (_: Exception) {
@@ -139,8 +156,9 @@ private fun parseOrNull(text: String): JsonElement? = try {
  * [redactWindowed]), so a long argument keeps its key redaction. Once [budget] output chars are kept or [work] is used
  * (each key, string and number costs its windowed length plus [WORK_PER_ITEM]), the rest of each object or array is
  * replaced by one "[…]"; so is anything nested deeper than [MAX_JSON_DEPTH] and any number over [MAX_NUMBER_LENGTH]
- * chars. Only input that doesn't look like JSON (see [looksLikeJson]) is redacted as text; anything that does but can't
- * be redacted fails closed to [UNREDACTABLE] (the whole argument, or just that string value). Keys that redact alike
+ * chars. Only input that doesn't look like JSON (see [looksLikeJson]; for string values, [valueLooksLikeJson]) is
+ * redacted as text; anything that does but can't be redacted fails closed to [UNREDACTABLE] (the whole argument, or
+ * just that string value). Keys that redact alike
  * are numbered (#2, #3), and unquoted literals are redacted as strings.
  */
 fun redactArguments(
@@ -184,9 +202,9 @@ fun redactArguments(
             val text = (this as JsonPrimitive).content
             charge(text)
             val redacted = when {
-                !looksLikeJson(text) -> redactWindowed(text, window)
+                !valueLooksLikeJson(text) -> redactWindowed(text, window)
                 nest >= MAX_JSON_IN_STRING -> UNREDACTABLE
-                else -> parseOrNull(text)?.redacted(depth + 1, nest + 1)?.toString() ?: UNREDACTABLE
+                else -> parseOrNull(unwrapped(text))?.redacted(depth + 1, nest + 1)?.toString() ?: UNREDACTABLE
             }
             JsonPrimitive(redacted).also { left -= redacted.length }
         }
