@@ -122,7 +122,7 @@ internal suspend fun buildCliRuntime(
         )
     }
     val confirmationPolicy: ConfirmationPolicy = toggleableConfirmationPolicy
-        ?: AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, manualConfirmationPolicy)
+        ?: AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, manualConfirmationPolicy, classifierRule = "allow-all")
     val loopGuardPolicy = TerminalLoopGuardPolicy(terminal, input)
 
     val agentsDir = Path.of(opts.agentsDir)
@@ -157,6 +157,7 @@ internal suspend fun buildCliRuntime(
         toolRegistry(registry)
         builtinTools(root = Path.of("").toAbsolutePath(), braveApiKey = opts.braveApiKey)
         checkpoints()
+        auditLog(onWarning = onWarning)
         context(contextEngine) { _ -> contextEngine.projectContaining(cwd)?.id }
         agentsDir(agentsDir, onWarning)
         subagentDelegation()

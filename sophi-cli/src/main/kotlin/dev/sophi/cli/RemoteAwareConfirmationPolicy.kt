@@ -1,5 +1,6 @@
 package dev.sophi.cli
 
+import dev.sophi.core.audit.noteDecision
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.hub.HubClient
@@ -47,7 +48,7 @@ class RemoteAwareConfirmationPolicy(
                     }
                     remoteAnswer.onAwait { response ->
                         terminalAnswer.cancel()
-                        requests.associate { it.callId to response.approved }
+                        requests.associate { noteDecision(it.callId, "user"); it.callId to response.approved }
                     }
                 }
             }

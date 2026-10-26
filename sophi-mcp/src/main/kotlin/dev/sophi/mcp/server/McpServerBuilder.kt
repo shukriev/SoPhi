@@ -1,5 +1,8 @@
 package dev.sophi.mcp.server
 
+import dev.sophi.core.audit.AuditSink
+import dev.sophi.core.audit.auditEntry
+import dev.sophi.core.audit.recordQuietly
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import io.modelcontextprotocol.kotlin.sdk.server.Server
@@ -10,6 +13,7 @@ import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -25,6 +29,9 @@ import kotlinx.serialization.json.JsonObject
  * `JsonObject?` directly (delegating to `CallToolRequestParams.arguments`) — the same shape
  * assumed by the task brief, so no deviation was needed here.
  *
+ * With [audit], every call writes one entry (actor [mcpActor]; rule "safe"
+ * or "deny-all"), redacted and capped exactly like AgentLoop's. A failing sink never changes the response.
+ *
  * DESTRUCTIVE tools are never executed when called via this server: [Tool.execute] is not invoked
  * for them at all, and the caller instead receives an error [CallToolResult] denying the call.
  *
@@ -37,7 +44,7 @@ import kotlinx.serialization.json.JsonObject
  * [McpJson] (the SDK's own pre-configured `ignoreUnknownKeys = true` instance) is used for parsing
  * since [ToolSchema] declares its `type` property outside the primary constructor.
  */
-fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
+fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSink? = null): Server {
     require(exposedNames.isNotEmpty()) { "--expose-tools must name at least one tool" }
     val toolsByName = tools.associateBy { it.name }
     val unknown = exposedNames - toolsByName.keys
@@ -52,8 +59,15 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
         val tool = toolsByName.getValue(name)
         val inputSchema = McpJson.decodeFromString<ToolSchema>(tool.parametersJson)
         server.addTool(name = tool.name, description = tool.description, inputSchema = inputSchema) { request ->
+            val start = System.currentTimeMillis()
             val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
-            if (tool.riskLevel(argumentsJson) != RiskLevel.SAFE) {
+            val risk = tool.riskLevel(argumentsJson)
+            fun audit(outcome: String, result: String) = audit?.recordQuietly {
+                auditEntry(mcpActor(server.sessions[sessionId]?.clientVersion?.name), null, "mcp-serve:$sessionId", tool.name, risk, argumentsJson,
+                    if (outcome == "denied") "deny-all" else "safe", outcome, result, start)
+            }
+            if (risk != RiskLevel.SAFE) {
+                audit("denied", "")
                 CallToolResult(
                     isError = true,
                     content = listOf(
@@ -62,8 +76,12 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
                 )
             } else {
                 try {
-                    CallToolResult(content = listOf(TextContent(tool.execute(argumentsJson))))
+                    val result = tool.execute(argumentsJson)
+                    audit(if (result.startsWith("Error: ")) "error" else "ok", result)
+                    CallToolResult(content = listOf(TextContent(result)))
                 } catch (e: Exception) {
+                    if (e is CancellationException) { audit("cancelled", ""); throw e }
+                    audit("error", "Error: ${e.message}")
                     CallToolResult(isError = true, content = listOf(TextContent("Error: ${e.message}")))
                 }
             }
@@ -71,3 +89,6 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>): Server {
     }
     return server
 }
+
+/** The audit actor for an MCP client: its handshake name, prefixed so a client can't pose as "local". */
+internal fun mcpActor(clientName: String?): String = clientName?.takeIf { it.isNotBlank() }?.let { "mcp:$it" } ?: "mcp-client"

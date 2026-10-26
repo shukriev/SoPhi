@@ -25,6 +25,8 @@ import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.agent.plan.PlanProgressEvent
+import dev.sophi.core.audit.AuditSink
+import dev.sophi.core.audit.JsonlAuditSink
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.Tool
@@ -102,6 +104,7 @@ class RuntimeBuilder {
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
     private var checkpointsConfig: Pair<Path, (String) -> Unit>? = null
+    private var auditSink: AuditSink? = null
     private var contextConfig: Triple<ContextEngine, ProjectOf, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
@@ -169,6 +172,18 @@ class RuntimeBuilder {
         home: Path = Path.of(System.getProperty("user.home"), ".sophi", "checkpoints"),
         onWarning: (String) -> Unit = { System.err.println(it) }
     ): RuntimeBuilder = apply { checkpointsConfig = if (enabled) home to onWarning else null }
+
+    /**
+     * Appends every tool call, approved or denied, to a JSONL file with actor, rule and result
+     * (secrets redacted). Scheduled tasks audit to the same sink. [onWarning] fires when a write fails.
+     */
+    fun auditLog(
+        path: Path = Path.of(System.getProperty("user.home"), ".sophi", "audit.jsonl"),
+        onWarning: (String) -> Unit = { System.err.println(it) }
+    ): RuntimeBuilder = audit(JsonlAuditSink(path, onWarning))
+
+    /** Sends audit entries to a custom [sink] (retention, export). The last of [auditLog] and this wins. */
+    fun audit(sink: AuditSink): RuntimeBuilder = apply { auditSink = sink }
 
     /**
      * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
@@ -308,7 +323,8 @@ class RuntimeBuilder {
                     java.nio.file.Files.writeString(path, line + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
                 }
             } ?: { _, _ -> },
-            checkpoints = checkpointStore
+            checkpoints = checkpointStore,
+            audit = auditSink
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
@@ -406,7 +422,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore
+            deferOver, checkpointStore, auditSink
         )
     }
 }

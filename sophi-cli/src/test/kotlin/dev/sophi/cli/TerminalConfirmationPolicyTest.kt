@@ -2,6 +2,7 @@ package dev.sophi.cli
 
 import com.github.ajalt.mordant.terminal.Terminal
 import com.github.ajalt.mordant.terminal.TerminalRecorder
+import dev.sophi.core.audit.DecisionNotes
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
@@ -9,6 +10,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 class TerminalConfirmationPolicyTest : FunSpec({
     val bashRequest = ConfirmationRequest("c1", "bash", """{"command":"ls"}""", RiskLevel.DESTRUCTIVE)
@@ -60,5 +62,15 @@ class TerminalConfirmationPolicyTest : FunSpec({
 
         recorder.output() shouldContain "Write skill 'site-x' (new skill)"
         recorder.output() shouldNotContain "huge blob"
+    }
+
+    test("confirm() notes rule user for every call it answers, yes or no") {
+        val requests = listOf(bashRequest, ConfirmationRequest("c2", "write_file", "{}", RiskLevel.DESTRUCTIVE))
+        val notes = DecisionNotes()
+        val policy = TerminalConfirmationPolicy(Terminal(), ScriptedInputSource(emptyList(), listOf(false)))
+
+        runBlocking { withContext(notes) { policy.confirm(requests) } }
+
+        notes.rules shouldBe mapOf("c1" to "user", "c2" to "user")
     }
 })

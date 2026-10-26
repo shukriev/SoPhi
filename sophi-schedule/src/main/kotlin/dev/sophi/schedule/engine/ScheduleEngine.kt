@@ -14,6 +14,7 @@ import dev.sophi.core.agent.plan.PlanRunnerConfig
 import dev.sophi.core.agent.plan.StepCritic
 import dev.sophi.core.agent.plan.TreePlanner
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
@@ -109,7 +110,9 @@ class ScheduleEngine(
      *  (matches every existing caller's behavior — no live observation here, only history:
      *  scheduled runs use allowParallelSteps = true, which the chat path's live-attachment
      *  logic doesn't support). */
-    private val planLog: PlanLog? = null
+    private val planLog: PlanLog? = null,
+    /** Where each task's tool calls are audited, or null to skip auditing. */
+    private val audit: AuditSink? = null
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
         val due = taskStore.list().filter { it.enabled && it.nextRunAtMs != null && it.nextRunAtMs <= nowMs }
@@ -154,7 +157,8 @@ class ScheduleEngine(
                     provider, scopedRegistry, sessionManager,
                     confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
                     grants = task.toolGrants,
-                    contextWindowTokens = contextWindowTokens
+                    contextWindowTokens = contextWindowTokens,
+                    audit = audit
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
                 // Same collectContext path every interactive entry point already uses (SophiRuntime.

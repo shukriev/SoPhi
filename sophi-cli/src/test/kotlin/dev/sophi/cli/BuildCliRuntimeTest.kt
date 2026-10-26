@@ -2,7 +2,12 @@ package dev.sophi.cli
 
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.core.audit.AuditEntry
+import dev.sophi.core.audit.DecisionNotes
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
+import dev.sophi.core.tools.ConfirmationRequest
+import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.sdk.DefaultPrompt
 import io.kotest.assertions.throwables.shouldThrow
@@ -16,7 +21,9 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.mockk
 import java.nio.file.Path
+import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
+import kotlinx.coroutines.withContext
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
@@ -164,5 +171,42 @@ class BuildCliRuntimeTest : FunSpec({
         val cli = build()
         cli.session.id.isNotBlank() shouldBe true
         shouldThrow<IllegalArgumentException> { cli.runtime.sessionManager.load(cli.session.id) }
+    }
+    test("god mode notes its approvals as allow-all, not as a classifier verdict") {
+        val cli = build(godMode = true)
+        cli.registry.register(object : Tool {
+            override val name = "fake_write"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String) = "ok"
+        })
+        val notes = DecisionNotes()
+        withContext(notes) {
+            cli.confirmationPolicy.confirm(listOf(ConfirmationRequest("c1", "fake_write", "{}", RiskLevel.DESTRUCTIVE)))
+        } shouldBe mapOf("c1" to true)
+        notes.rules shouldBe mapOf("c1" to "allow-all")
+    }
+
+    test("an audit write failure reaches buildCliRuntime's onWarning") {
+        val home = tempdir().toPath()
+        home.resolve(".sophi/audit.jsonl").createDirectories() // a directory where the file should be: the write fails
+        val warnings = mutableListOf<String>()
+        val original = System.getProperty("user.home")
+        System.setProperty("user.home", home.toString())
+        try {
+            val dir = tempdir().toPath()
+            val cli = autoClose(buildCliRuntime(
+                opts = optionsFor(dir), provider = mockk<LLMProvider>(relaxed = true), terminal = Terminal(),
+                input = ScriptedInputSource(emptyList()), onWarning = { warnings.add(it) }
+            ))
+            cli.runtime.auditSink.shouldNotBeNull().record(
+                AuditEntry(ts = 0, actor = "local", session = "s", tool = "t", risk = RiskLevel.SAFE, args = "{}",
+                    decision = "allowed", rule = "safe", outcome = "ok", result = "", durationMs = 0)
+            )
+        } finally {
+            System.setProperty("user.home", original)
+        }
+        warnings.any { it.startsWith("audit log write failed") } shouldBe true
     }
 })

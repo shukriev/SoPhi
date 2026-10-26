@@ -46,4 +46,18 @@ class RedactorTest : FunSpec({
         r.redact("code SECRET-1234 here") shouldNotContain "SECRET-1234"
         r.hitsByType.getValue("custom") shouldBe 1
     }
+
+    test("redacted tool-call arguments stay parseable JSON") {
+        val r = Redactor()
+        for (args in listOf(
+            """{"command":"ls","max_tokens":4096}""",
+            """{"token":true,"x":"Bearer abc123xyz"}""",
+            """{"password":"a\"b","u":1}""",
+            """{"content":"API_KEY=hunter2secretvalue","k":"sk-ant-api03-AbCdEfGhIjKlMnOpQrSt"}""",
+        )) {
+            val out = r.redact(args)
+            kotlinx.serialization.json.Json.parseToJsonElement(out)
+        }
+        r.redact("""{"max_tokens":4096,"token":true,"password":"a\"b"}""") shouldBe """{"max_tokens":4096,"token":true,"password":"a\"b"}"""
+    }
 })

@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context hint gate: the top-1/top-2 ratio threshold rises from 1.0 to 1.25 — live E1 negatives showed the old gate firing on 6 of 10 chit-chat messages against the SoPhi index, the new one on none; live E1/E5 results on a small local model recorded in `evals/context/RESULTS.md` (ADR-041)
 
 ### Added
+- Audit log: every tool call, approved or denied, is appended to ~/.sophi/audit.jsonl with actor, rule and result; secrets are redacted.
 - Undo for file changes: workspace checkpoints, move_file/delete_file with a SoPhi trash, /undo, /revert, /checkout --files.
 - `tool_search` and deferred MCP tools: a server that lists more than 10 tools (`deferToolsOver` at the top of `.sophi/mcp.json`, or `RuntimeBuilder.deferToolsOver(n)` in the SDK) keeps its schemas out of the prompt; the model sees the names and loads the ones it needs with `tool_search`. Applies to the CLI, the SDK and sophi-web
 - Local models first-class: `sophi-ai` recovers tool calls written into the text (Hermes `<tool_call>`, Mistral `[TOOL_CALLS][…]`), splits `<think>` reasoning out of the answer, and returns malformed tool arguments to the model as a tool error it can retry

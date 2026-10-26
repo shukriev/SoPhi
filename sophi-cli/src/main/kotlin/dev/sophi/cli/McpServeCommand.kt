@@ -4,8 +4,7 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.options.split
-import dev.sophi.mcp.server.buildMcpServer
-import dev.sophi.sdk.buildBuiltinTools
+import dev.sophi.sdk.builtinMcpServer
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
@@ -27,8 +26,7 @@ class McpServeCommand : CliktCommand(
     )
 
     override fun run() = runBlocking {
-        val tools = buildBuiltinTools(braveApiKey = braveApiKeyOption)
-        val server = buildMcpServer(tools, exposeTools.toSet())
+        val server = builtinMcpServer(exposeTools.toSet(), braveApiKey = braveApiKeyOption)
         val transport = StdioServerTransport(
             input = System.`in`.asSource().buffered(),
             output = System.out.asSink().buffered()

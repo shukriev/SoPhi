@@ -48,6 +48,7 @@ internal fun buildScheduleEngine(
         contextWindowTokens(contextWindowTokens)
         toolRegistry(registry)
         agentsDir(agentsDir)
+        auditLog()
         tool(dev.sophi.schedule.tools.ProposeImprovementTool())
         plugin(dev.sophi.schedule.tools.ProposalPlugin(proposalStore))
         if (memoryHome != null) {

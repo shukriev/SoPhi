@@ -7,6 +7,7 @@ import dev.sophi.core.agent.AgentDefinition
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.plan.PlanLog
+import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
@@ -64,7 +65,9 @@ class SophiRuntime internal constructor(
     val compactionMode: dev.sophi.core.context.CompactionMode = dev.sophi.core.context.CompactionMode.STRUCTURED,
     private val deferToolsOver: Int = dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER,
     /** Null when [RuntimeBuilder.checkpoints] is off. Public so a host running its own loops (/goal, /plan) snapshots too. */
-    val checkpointStore: CheckpointStore? = null
+    val checkpointStore: CheckpointStore? = null,
+    /** The sink [RuntimeBuilder.auditLog] or [RuntimeBuilder.audit] set, or null when auditing is off. */
+    val auditSink: AuditSink? = null
 ) {
     /** Always present: with [RuntimeBuilder.checkpoints] off it still reverses recorded moves. */
     val fileRestorer: FileRestorer = FileRestorer(checkpointStore)
@@ -256,7 +259,8 @@ class SophiRuntime internal constructor(
             maxTokens = maxTokens,
             systemPrompt = listOfNotNull(config.systemPrompt, DefaultPrompt.UNATTENDED).joinToString("\n\n"),
             pluginRegistry = pluginRegistry,
-            planLog = plansDir?.let { PlanLog(it) }
+            planLog = plansDir?.let { PlanLog(it) },
+            audit = auditSink
         )
     }
 }

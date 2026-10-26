@@ -9,6 +9,7 @@ import dev.sophi.calendar.model.CalendarEventPatch
 import dev.sophi.calendar.model.CalendarInfo
 import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.agent.AgentConfig
+import dev.sophi.core.audit.AuditEntry
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import io.kotest.core.spec.style.FunSpec
@@ -114,5 +115,26 @@ class CalendarCreateCommandTest : FunSpec({
         ) {}.run()
 
         calendarProvider.created shouldBe emptyList()
+    }
+
+    test("run() audits the create_calendar_event call to the given sink") {
+        val provider = mockk<LLMProvider>()
+        var round = 0
+        every { provider.stream(any()) } answers {
+            if (++round == 1)
+                flowOf(StreamEvent.ToolCallsReady(listOf(
+                    ToolCall("c1", "create_calendar_event", """{"title":"A","all_day":true,"start_date":"2026-09-24","end_date":"2026-09-24"}""")
+                )))
+            else
+                flowOf(StreamEvent.Content("ok"))
+        }
+        val entries = mutableListOf<AuditEntry>()
+
+        CalendarCreate(
+            provider, FakeCreateOnlyCalendarProvider(), FileSessionManager(createTempDirectory("calendar-create-test")),
+            ConfirmationPolicy.ALLOW_ALL, config, TEST_CONTEXT_WINDOW, "Anniversary 2026-09-24", { entries += it }
+        ) {}.run()
+
+        entries.single().tool shouldBe "create_calendar_event"
     }
 })

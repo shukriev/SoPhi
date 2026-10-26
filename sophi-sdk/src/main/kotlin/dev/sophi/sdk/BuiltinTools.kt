@@ -1,6 +1,8 @@
 package dev.sophi.sdk
 
 import dev.sophi.ai.providers.BraveSearchProvider
+import dev.sophi.core.audit.AuditSink
+import dev.sophi.core.audit.JsonlAuditSink
 import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.DeleteFileTool
 import dev.sophi.core.tools.EditTool
@@ -14,6 +16,8 @@ import dev.sophi.core.tools.MoveFileTool
 import dev.sophi.core.tools.RunClaudeCodeTool
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.WebSearchTool
+import dev.sophi.mcp.server.buildMcpServer
+import io.modelcontextprotocol.kotlin.sdk.server.Server
 import java.nio.file.Path
 
 /**
@@ -35,3 +39,14 @@ fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: St
     }
     return tools
 }
+
+/**
+ * The `mcp-serve` server: [exposedNames] of the builtin tools over MCP, every call audited to [audit]
+ * (by default the same ~/.sophi/audit.jsonl as the CLI, warnings on stderr since stdout carries the protocol).
+ */
+fun builtinMcpServer(
+    exposedNames: Set<String>,
+    root: Path = Path.of("").toAbsolutePath(),
+    braveApiKey: String? = null,
+    audit: AuditSink? = JsonlAuditSink(),
+): Server = buildMcpServer(buildBuiltinTools(root, braveApiKey), exposedNames, audit)

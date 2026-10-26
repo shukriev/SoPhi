@@ -14,6 +14,7 @@ import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.cli.goal.GoalController
 import dev.sophi.cli.goal.GoalRunResult
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.FileRestorer
 import dev.sophi.core.undo.RestorePlan
@@ -43,6 +44,7 @@ class SlashHandler(
     private val toolRegistry: ToolRegistry? = null,
     private val planLog: PlanLog? = null,
     private val fileRestorer: FileRestorer? = null,
+    private val auditSink: AuditSink? = null,
     private val checkpoints: CheckpointStore? = null,
     /**
      * Total context window of `config.model`, in tokens. Optional here for the same reason
@@ -251,7 +253,7 @@ class SlashHandler(
                 if (subArg.isNullOrEmpty()) output("Usage: /calendar create <description>")
                 else CalendarCreate(
                     llmProvider, calProvider, sessionManager, confirmationPolicy, config,
-                    window, subArg, output
+                    window, subArg, auditSink, output
                 ).run()
             }
             else -> output("Unknown /calendar subcommand: $sub  Available: list get delete calendars create")
