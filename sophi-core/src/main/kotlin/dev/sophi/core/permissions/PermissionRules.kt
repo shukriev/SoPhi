@@ -11,6 +11,8 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
 import kotlin.io.path.readText
@@ -28,6 +30,11 @@ data class PermissionRule(val tool: String, val pattern: String? = null, val eff
 
 /** What a call touches, for matching: a bash part, a path, a URL. [allowable] = false: no allow rule may match it (R4). */
 data class PermissionSubject(val text: String, val allowable: Boolean = true)
+
+/** The rules of the outermost loop, so nested loops (subagents, plan steps) obey the same ones. */
+class PermissionScope(val rules: PermissionRules) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<PermissionScope>
+}
 
 class PermissionRulesException(val path: Path, message: String) : RuntimeException("$path: $message")
 
