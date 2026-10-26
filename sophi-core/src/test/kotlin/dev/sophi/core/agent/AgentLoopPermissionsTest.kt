@@ -101,7 +101,8 @@ class AgentLoopPermissionsTest : FunSpec({
         val look = FakeTool("look")
         val rm = FakeTool("rm", RiskLevel.DESTRUCTIVE)
         val (provider, sm) = scripted(use(ToolCall("c1", "look", "{}"), ToolCall("c2", "rm", "{}")), done)
-        loop(provider, sm, look, rm, grants = setOf("rm"), permissions = rules(deny("look"), deny("rm")))
+        loop(provider, sm, look, rm, policy = ConfirmationPolicy.DENY_ALL, grants = setOf("rm"),
+            permissions = rules(deny("look"), deny("rm")))
             .turn(AgentSession(id = "s"), "go", config)
 
         look.executed shouldBe 0
@@ -139,6 +140,16 @@ class AgentLoopPermissionsTest : FunSpec({
 
     fun godMode(registry: ToolRegistry) =
         AutoModeConfirmationPolicy(registry, RiskClassifier.ALWAYS_LOW_RISK, ConfirmationPolicy.DENY_ALL, "allow-all")
+
+    test("control: god mode runs rm without a rule") {
+        val root = createTempDirectory("perm-god")
+        val marker = root.resolve("marker").also { it.writeText("x") }
+        val registry = ToolRegistry().register(BashTool(root))
+        val (provider, sm) = scripted(use(bash("rm marker")), done)
+        loop(provider, sm, policy = godMode(registry), registry = registry).turn(AgentSession(id = "s"), "go", config)
+
+        marker.exists() shouldBe false
+    }
 
     test("a deny rule beats god mode") {
         val root = createTempDirectory("perm-god")

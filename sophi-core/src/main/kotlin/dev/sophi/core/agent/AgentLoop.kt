@@ -569,7 +569,8 @@ class AgentLoop(
                 val tool = registry.getOrNull(call.name)
                 val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
                 val preview = tool?.confirmationPreview(call.argumentsJson)
-                val subjects = if (rules == null) null else tool?.permissionSubjects(call.argumentsJson)
+                // A tool that throws computing its subjects (e.g. a NUL in a path) gets null: R3, fail closed, not a crashed round.
+                val subjects = if (rules == null) null else runCatching { tool?.permissionSubjects(call.argumentsJson) }.getOrNull()
                 rules?.decide(call.name, subjects)?.let { effects[call.id] = it }
                 val always = if (rules == null) null else PermissionRules.alwaysAllowRules(call.name, subjects)
                 call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always)

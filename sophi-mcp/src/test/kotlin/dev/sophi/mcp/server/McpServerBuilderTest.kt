@@ -231,6 +231,25 @@ class McpServerBuilderTest : FunSpec({
         entries.single().outcome shouldBe "denied"
     }
 
+    test("a SAFE tool with an ask rule is refused: there is no one to ask") {
+        val entries = mutableListOf<AuditEntry>()
+        var executed = 0
+        val grep = object : Tool {
+            override val name = "grep"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String { executed++; return "found" }
+        }
+        val rules = PermissionRules(listOf(PermissionRule("grep", null, Effect.ASK)), emptyList(), null, null, emptySet())
+        val server = buildMcpServer(listOf(grep), setOf("grep"), audit = { entries += it }, permissions = rules)
+
+        callTool(server, "grep").isError shouldBe true
+
+        executed shouldBe 0
+        entries.single().rule shouldBe "rule:ask"
+        entries.single().outcome shouldBe "denied"
+    }
+
     test("a client's handshake name is prefixed, so it can't pose as the local user") {
         mcpActor("local") shouldBe "mcp:local"
         mcpActor(null) shouldBe "mcp-client"

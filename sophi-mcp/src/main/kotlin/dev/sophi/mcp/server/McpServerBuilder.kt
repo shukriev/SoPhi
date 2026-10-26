@@ -34,8 +34,8 @@ import kotlinx.serialization.json.JsonObject
  * With [audit], every call writes one entry (actor [mcpActor]; rule "safe"
  * or "deny-all"), redacted and capped exactly like AgentLoop's. A failing sink never changes the response.
  *
- * A [permissions] deny rule refuses a call, SAFE or not (audited as rule:deny). Only deny rules apply here:
- * allow rules never widen mcp-serve past SAFE tools.
+ * A [permissions] deny or ask rule refuses a call, SAFE or not (audited as rule:deny / rule:ask): there is
+ * no human here to ask. Allow rules never widen mcp-serve past SAFE tools.
  *
  * DESTRUCTIVE tools are never executed when called via this server: [Tool.execute] is not invoked
  * for them at all, and the caller instead receives an error [CallToolResult] denying the call.
@@ -67,9 +67,16 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSin
             val start = System.currentTimeMillis()
             val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
             val risk = tool.riskLevel(argumentsJson)
-            val ruleDenied = permissions?.decide(tool.name, tool.permissionSubjects(argumentsJson)) == Effect.DENY
+            // A tool that throws computing its subjects gets null: R3, fail closed.
+            val effect = permissions?.decide(tool.name, runCatching { tool.permissionSubjects(argumentsJson) }.getOrNull())
+            val ruleDenied = effect == Effect.DENY || effect == Effect.ASK
             fun audit(outcome: String, result: String) = audit?.recordQuietly {
-                val rule = if (ruleDenied) "rule:deny" else if (outcome == "denied") "deny-all" else "safe"
+                val rule = when {
+                    effect == Effect.DENY -> "rule:deny"
+                    effect == Effect.ASK -> "rule:ask"
+                    outcome == "denied" -> "deny-all"
+                    else -> "safe"
+                }
                 auditEntry(mcpActor(server.sessions[sessionId]?.clientVersion?.name), null, "mcp-serve:$sessionId", tool.name, risk, argumentsJson,
                     rule, outcome, result, start)
             }
