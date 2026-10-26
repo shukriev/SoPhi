@@ -41,9 +41,9 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
         .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
         .build()
 
-    fun readLine(prompt: String): String? =
+    fun readLine(prompt: String, prefill: String = ""): String? =
         try {
-            reader.readLine(prompt)
+            reader.readLine(prompt, null as Char?, prefill)
                 ?.split("\n")
                 ?.joinToString("\n") { it.removeSuffix("\\") }
         } catch (e: EndOfFileException) {
@@ -96,7 +96,7 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
         }
     }
 
-    suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
+    suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)? = null) {
         val toggleLower = toggleKey.lowercaseChar().code
         val toggleUpper = toggleKey.uppercaseChar().code
         val previousAttributes = jlineTerminal.enterRawMode()
@@ -114,8 +114,15 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
                     continue
                 }
                 when (ch) {
-                    27 -> return
                     toggleLower, toggleUpper -> onToggle()
+                    -2 -> {}
+                    else -> if (onKey == null) {
+                        if (ch == 27) return
+                    } else when (val action = decodeTurnKey(ch) { t -> withContext(Dispatchers.IO) { nonBlockingReader.read(t) } }) {
+                        KeyAction.Interrupt -> return
+                        is KeyAction.Key -> onKey(action.key)
+                        KeyAction.Ignore -> {}
+                    }
                 }
             }
         } finally {

@@ -138,9 +138,9 @@ class TuiEngineTest : FunSpec({
         val input = object : InputSource {
             // Never returns — simulates the user not typing anything, so the hub message must
             // be what actually drives the loop forward.
-            override suspend fun readLine(): String? { delay(Long.MAX_VALUE); return null }
+            override suspend fun readLine(prefill: String): String? { delay(Long.MAX_VALUE); return null }
             override suspend fun awaitEsc() { delay(Long.MAX_VALUE) }
-            override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) { delay(Long.MAX_VALUE) }
+            override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)?) { delay(Long.MAX_VALUE) }
             override suspend fun awaitYesNo(): Boolean = false
         }
         val turnController = TurnController(runtime, input, LiveRegion(StringBuilder()) { 80 }) {}

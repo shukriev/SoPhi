@@ -21,7 +21,7 @@ class TurnController(
     private val onEvent: suspend (TurnEvent) -> Unit = {},
     // Keyboard shortcut that toggles the live region between the spinner+stats view and the
     // raw token stream. Default view is the spinner; press again to switch back.
-    private val tokenViewKey: Char = 'T',
+    private val tokenViewKey: Char = DEFAULT_TOKEN_VIEW_KEY,
     // When a tool call finishes and generation resumes, reset token view back to the spinner
     // rather than carrying the toggle across the tool-call boundary.
     private val autoExitTokenView: Boolean = true,
@@ -66,10 +66,10 @@ class TurnController(
                 }
             }
             val controlKeysDeferred = async {
-                input.awaitControlKeys(tokenViewKey) {
+                input.awaitControlKeys(tokenViewKey, onToggle = {
                     presenter.toggleTokenView()
                     render()
-                }
+                })
             }
 
             fun outputReasoningIfAny() {

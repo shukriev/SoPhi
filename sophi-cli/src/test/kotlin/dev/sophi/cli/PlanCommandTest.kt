@@ -41,14 +41,14 @@ private const val TEST_CONTEXT_WINDOW = 100_000
  */
 private class ConfirmationRelayInputSource : InputSource {
     private val pending = AtomicReference<CompletableDeferred<Boolean>?>(null)
-    override suspend fun readLine(): String? = null
+    override suspend fun readLine(prefill: String): String? = null
     override suspend fun awaitEsc() {}
     override suspend fun awaitYesNo(): Boolean {
         val deferred = CompletableDeferred<Boolean>()
         pending.set(deferred)
         return deferred.await()
     }
-    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
+    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)?) {
         while (currentCoroutineContext().isActive) {
             delay(10)
             pending.getAndSet(null)?.complete(true)

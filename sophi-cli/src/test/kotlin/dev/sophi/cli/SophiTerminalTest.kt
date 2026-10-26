@@ -45,7 +45,7 @@ class SophiTerminalTest : FunSpec({
     // the SAME awaitControlKeys() call (not a second reader) is what delivers the answer.
     test("awaitYesNo() is resolved by the concurrently-running awaitControlKeys loop reading 'y'") {
         val sophi = SophiTerminal(terminalWithInput("y"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         val answer = sophi.awaitYesNo()
         answer shouldBe true
         controlKeysJob.cancel()
@@ -53,7 +53,7 @@ class SophiTerminalTest : FunSpec({
 
     test("awaitYesNo() resolves false when the awaitControlKeys loop reads 'n'") {
         val sophi = SophiTerminal(terminalWithInput("n"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         val answer = sophi.awaitYesNo()
         answer shouldBe false
         controlKeysJob.cancel()
@@ -62,7 +62,7 @@ class SophiTerminalTest : FunSpec({
     test("awaitYesNo() does not consume a byte that doesn't answer it, and doesn't trigger the toggle") {
         var toggled = false
         val sophi = SophiTerminal(terminalWithInput("qy"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') { toggled = true } }
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = { toggled = true }) }
         val answer = sophi.awaitYesNo()
         answer shouldBe true
         toggled shouldBe false
@@ -71,14 +71,14 @@ class SophiTerminalTest : FunSpec({
 
     test("awaitConfirmation(true) resolves ALWAYS on 'a'") {
         val sophi = SophiTerminal(terminalWithInput("a"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         sophi.awaitConfirmation(true) shouldBe ConfirmAnswer.ALWAYS
         controlKeysJob.cancel()
     }
 
     test("'a' is ignored when always is not offered") {
         val sophi = SophiTerminal(terminalWithInput("ay"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         sophi.awaitConfirmation(false) shouldBe ConfirmAnswer.YES
         controlKeysJob.cancel()
     }

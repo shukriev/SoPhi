@@ -123,8 +123,8 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
     ).int()
     private val tokenViewKey: String by option(
         "--token-view-key",
-        help = "Keyboard shortcut to toggle token visibility during streaming (default: T)"
-    ).default("T")
+        help = "Keyboard shortcut to toggle token visibility during streaming (default: Ctrl+T; a printable key can no longer be typed into a steer)"
+    ).default(DEFAULT_TOKEN_VIEW_KEY.toString())
     private val autoExitTokenView: Boolean by option(
         "--auto-exit-token-view",
         help = "Automatically exit token view when LLM finishes (default: true)"
@@ -299,7 +299,7 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             ),
             planLog = cli.planLog,
             input = inputSource, liveRegion = liveRegion, interactive = sophiTerminal.isInteractive,
-            tokenViewKey = tokenViewKey.singleOrNull() ?: 'T', autoExitTokenView = autoExitTokenView,
+            tokenViewKey = tokenViewKey.singleOrNull() ?: DEFAULT_TOKEN_VIEW_KEY, autoExitTokenView = autoExitTokenView,
             learning = learningPlugin,
             checkpoints = cli.runtime.checkpointStore,
             onEvent = onEvent,
@@ -327,11 +327,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         ) { mordantTerminal.println(it) }
         if (tokenViewKey.length != 1) {
             mordantTerminal.println(TextColors.yellow(
-                "token view: --token-view-key must be a single character, got \"$tokenViewKey\" — using default 'T'"))
+                "token view: --token-view-key must be a single character, got \"$tokenViewKey\" — using default Ctrl+T"))
         }
         val turnController = TurnController(
             cli.runtime, inputSource, liveRegion, onEvent = onEvent,
-            tokenViewKey = tokenViewKey.singleOrNull() ?: 'T',
+            tokenViewKey = tokenViewKey.singleOrNull() ?: DEFAULT_TOKEN_VIEW_KEY,
             autoExitTokenView = autoExitTokenView
         ) {
             mordantTerminal.println(it)
@@ -376,11 +376,11 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
 }
 
 private class LegacyReadLineInputSource : InputSource {
-    override suspend fun readLine(): String? = kotlin.io.readLine()
+    override suspend fun readLine(prefill: String): String? = kotlin.io.readLine()
     override suspend fun awaitEsc() {
         kotlinx.coroutines.delay(Long.MAX_VALUE)
     }
-    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
+    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)?) {
         kotlinx.coroutines.delay(Long.MAX_VALUE)
     }
     // No raw-mode reader loop is running in this (non-interactive) mode, so a plain, independent
