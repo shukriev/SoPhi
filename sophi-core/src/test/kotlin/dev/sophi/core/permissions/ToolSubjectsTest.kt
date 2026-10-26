@@ -72,9 +72,44 @@ class ToolSubjectsTest : FunSpec({
         }
     }
 
-    test("fetch_url gives the url as written") {
-        texts(FetchUrlTool().permissionSubjects("""{"url":"https://Example.com/a"}""")) shouldBe listOf("https://Example.com/a")
-        FetchUrlTool().permissionSubjects("{bad") shouldBe null
+    context("fetch_url") {
+        fun url(u: String) = texts(FetchUrlTool().permissionSubjects("""{"url":"$u"}"""))
+        test("normalizes scheme, host, userinfo and default port") {
+            url("HTTPS://EVIL.com:443/x") shouldBe listOf("https://evil.com/x")
+            url("https://user@evil.com/x") shouldBe listOf("https://evil.com/x")
+            url("http://a.com:80/Path?Q=1") shouldBe listOf("http://a.com/Path?Q=1")
+        }
+        test("keeps a non-default port") { url("http://a.com:8080/") shouldBe listOf("http://a.com:8080/") }
+        test("unparseable is null") {
+            url("not a url") shouldBe null
+            FetchUrlTool().permissionSubjects("{bad") shouldBe null
+        }
+    }
+
+    context("real paths") {
+        val write = FileWriteTool(root)
+        fun subject(p: String) = texts(write.permissionSubjects("""{"path":"$p","content":"x"}"""))
+        test("a symlink to .env gives .env") {
+            Files.writeString(root.resolve(".env"), "s")
+            Files.createSymbolicLink(root.resolve("link"), root.resolve(".env"))
+            subject("link") shouldBe listOf(".env")
+        }
+        test("a new file under a symlinked dir resolves through the link") {
+            Files.createDirectories(root.resolve("secrets"))
+            Files.createSymbolicLink(root.resolve("sl"), root.resolve("secrets"))
+            subject("sl/new.txt") shouldBe listOf("secrets/new.txt")
+        }
+        test("case-insensitive filesystem: .ENV is .env") {
+            Files.writeString(root.resolve("ci.txt"), "x")
+            if (Files.exists(root.resolve("CI.TXT"))) {
+                Files.writeString(root.resolve(".env"), "s")
+                subject(".ENV") shouldBe listOf(".env")
+            }
+        }
+        test("root given through a symlink still gives relative subjects") {
+            val viaLink = Files.createTempDirectory("l").resolve("r").also { Files.createSymbolicLink(it, root) }
+            texts(FileReadTool(viaLink).permissionSubjects("""{"path":"x"}""")) shouldBe listOf("x")
+        }
     }
 
     test("a tool that does not override has no subjects") {
