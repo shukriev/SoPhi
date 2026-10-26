@@ -31,6 +31,7 @@
     </modules>
 
     <properties>
+        <test.tmpdir>${java.io.tmpdir}/sophi-tests${maven.multiModuleProjectDirectory}/${project.artifactId}</test.tmpdir>
         <kotlin.version>2.4.0</kotlin.version>
         <spring-boot.version>4.0.5</spring-boot.version>
         <spring-ai.version>2.0.0-RC1</spring-ai.version>
@@ -262,6 +263,25 @@
                     </dependency>
                 </dependencies>
             </plugin>
+            <!-- Tests write temp files into one folder per checkout and module, emptied before every run, so they never pile up in the system temp folder. It stays outside the checkout: project detection walks up to a git root -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>fresh-test-tmp</id>
+                        <phase>process-test-classes</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <delete dir="${test.tmpdir}" quiet="true"/>
+                                <mkdir dir="${test.tmpdir}"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
@@ -269,6 +289,9 @@
                 <configuration>
                     <includes><include>**/*Test</include></includes>
                     <excludes><exclude>**/*IT</exclude></excludes>
+                    <!-- on the command line: the JDK caches java.io.tmpdir before surefire sets its properties -->
+                    <argLine>-Djava.io.tmpdir=${test.tmpdir}</argLine>
+                    <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR></environmentVariables>
                 </configuration>
             </plugin>
             <plugin>
@@ -280,6 +303,8 @@
                     <systemPropertyVariables>
                         <spring.profiles.active>it</spring.profiles.active>
                     </systemPropertyVariables>
+                    <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR></environmentVariables>
+                    <argLine>-Djava.io.tmpdir=${test.tmpdir}</argLine>
                     <skipITs>${skipITs}</skipITs>
                 </configuration>
                 <executions>
