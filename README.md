@@ -155,7 +155,8 @@ Known limits of the audit log:
 [
   {"tool": "bash", "pattern": "rm *", "effect": "deny"},
   {"tool": "bash", "pattern": "git status", "effect": "allow"},
-  {"tool": "write_file", "pattern": "/etc/*", "effect": "deny"}
+  {"tool": "write_file", "pattern": "secrets/*", "effect": "deny"},
+  {"tool": "read_file", "pattern": "/Users/you/.ssh/*", "effect": "deny"}
 ]
 ```
 
@@ -173,9 +174,9 @@ In the SDK, `RuntimeBuilder.permissionRules(projectRoot)` loads the same files, 
 Known limits of permission rules:
 
 - Bash matching is textual. `\rm`, `r''m`, `sudo`, `xargs`, `bash -c` and `eval` are not seen through, so name them in the patterns. A command that can't be split (a heredoc, an unterminated quote) is denied when any `bash` deny rule exists.
-- A bash part with an output redirect (other than to `/dev/null`) is never allowed by a rule; it goes to the normal confirmation.
+- A bash part with an output redirect is never allowed by a rule; it goes to the normal confirmation. Redirects to `/dev/null` and `>&N` don't count, so they don't block an allow rule.
 - `~` is not expanded in rule patterns; write absolute paths.
-- Path subjects resolve symlinks and the on-disk case. A symlink to a missing file can't be checked, so it fails closed.
+- Path subjects resolve symlinks and the on-disk case, so a path is matched as its real path. Patterns for paths outside the project must use the real path: on macOS `/private/etc/*`, not `/etc/*` (same for `/tmp` and `/var`). A symlink to a missing file can't be checked, so it fails closed.
 - URL subjects are normalized (scheme and host lowercase, no userinfo or default port). Only the requested URL is checked, not its redirects.
 - In `mcp-serve` an ask rule refuses the call, since nobody is there to answer.
 - A scheduled daemon takes its project rules from the directory it was started in.
