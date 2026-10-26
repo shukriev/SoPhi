@@ -1,5 +1,7 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.permissions.PermissionSubject
+
 @kotlinx.serialization.Serializable
 enum class RiskLevel { SAFE, CAUTION, DESTRUCTIVE }
 
@@ -27,5 +29,11 @@ interface Tool {
      * e.g. a diff or a content summary. Returning null (the default) keeps today's raw-JSON display.
      */
     fun confirmationPreview(argumentsJson: String): String? = null
+    /**
+     * What permission rule patterns match for this call (bash parts, paths, URLs). The default, an empty list,
+     * means the tool has no subjects, so only tool-wide rules apply. Null: a subject-based tool could not read
+     * the call (unparseable arguments, nothing to match); never an empty list in that case.
+     */
+    fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? = emptyList()
     suspend fun execute(argumentsJson: String): String
 }

@@ -1,5 +1,7 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.permissions.PermissionSubject
+import dev.sophi.core.permissions.splitBashCommand
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
@@ -60,6 +62,12 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         }
         return RuleVerdict.UNKNOWN
     }
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+        runCatching { json.decodeFromString<BashArgs>(argumentsJson).command }.getOrNull()
+            ?.let { splitBashCommand(it) }
+            // nothing to match (empty command, bare assignment) is null, never an empty list: that means "no subjects"
+            ?.takeIf { it.isNotEmpty() }
+            ?.map { PermissionSubject(it.text, allowable = !it.redirects) }
     override val parametersJson = """
         {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"}},"required":["command"]}
     """.trimIndent()

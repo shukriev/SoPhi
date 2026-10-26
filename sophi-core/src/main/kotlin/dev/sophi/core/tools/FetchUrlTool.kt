@@ -1,5 +1,6 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.permissions.PermissionSubject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -39,6 +40,10 @@ class FetchUrlTool(
     """.trimIndent()
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+        runCatching { json.decodeFromString<FetchUrlArgs>(argumentsJson) }.getOrNull()
+            ?.let { listOf(PermissionSubject(it.url)) }
 
     override suspend fun execute(argumentsJson: String): String = withContext(Dispatchers.IO) {
         val args = json.decodeFromString<FetchUrlArgs>(argumentsJson)

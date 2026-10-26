@@ -1,5 +1,7 @@
 package dev.sophi.core.tools
 
+import dev.sophi.core.permissions.PermissionSubject
+import dev.sophi.core.permissions.pathSubject
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -23,6 +25,9 @@ class GlobTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+        runCatching { json.decodeFromString<GlobArgs>(argumentsJson) }.getOrNull()
+            ?.let { listOf(pathSubject(root, root.resolve(it.path ?: ".").normalize())) }
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<GlobArgs>(argumentsJson)
         val searchRoot = root.resolve(args.path ?: ".").normalize()
