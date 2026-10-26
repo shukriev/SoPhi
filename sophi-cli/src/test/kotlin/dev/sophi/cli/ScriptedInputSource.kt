@@ -6,7 +6,8 @@ import kotlinx.coroutines.selects.select
 
 class ScriptedInputSource(
     private val lines: List<String>,
-    private val yesNoAnswers: List<Boolean> = emptyList()
+    private val yesNoAnswers: List<Boolean> = emptyList(),
+    private val confirmAnswers: List<ConfirmAnswer> = emptyList()
 ) : InputSource {
     private var index = 0
     private var yesNoIndex = 0
@@ -15,6 +16,14 @@ class ScriptedInputSource(
 
     override suspend fun readLine(): String? =
         if (index < lines.size) lines[index++] else null
+
+    val offers = mutableListOf<Boolean>()
+    private var confirmIndex = 0
+
+    override suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer {
+        offers += offerAlways
+        return confirmAnswers.getOrNull(confirmIndex++) ?: super.awaitConfirmation(offerAlways)
+    }
 
     override suspend fun awaitYesNo(): Boolean = yesNoAnswers.getOrElse(yesNoIndex++) { false }
 

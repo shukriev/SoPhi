@@ -160,10 +160,11 @@ class SlashHandler(
                 }
             }
             "auto" -> { handleAuto(); session }
+            "permissions" -> { handlePermissions(arg); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions"
                 )
                 session
             }
@@ -319,6 +320,23 @@ class SlashHandler(
             contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = planLog,
             onEvent = onEvent, liveRegion = liveRegion, input = input, checkpoints = checkpoints, audit = auditSink, permissions = permissions, echo = output
         ).run(arg, session)
+    }
+
+    private fun handlePermissions(arg: String?) {
+        val rules = permissions
+        if (rules == null) { output("Permission rules are off."); return }
+        if (arg?.trim() == "trust") {
+            val n = rules.untrusted.size
+            try { rules.trustProject() } catch (e: Exception) { output("Could not save trust: ${e.message}"); return }
+            output("Trusted $n project allow rule(s).")
+            return
+        }
+        fun line(r: dev.sophi.core.permissions.PermissionRule, where: String) =
+            "${r.effect.name.lowercase()} ${r.tool} ${r.pattern ?: "(any call)"}  ($where)"
+        val global = rules.global
+        val lines = rules.active.map { line(it, if (it in global) "global" else "project") } +
+            rules.untrusted.map { line(it, "project, untrusted — /permissions trust") }
+        output(if (lines.isEmpty()) "No permission rules." else lines.joinToString("\n"))
     }
 
     private fun handleAuto() {

@@ -36,12 +36,12 @@ class GoalRunCommand : CliktCommand(name = "run", help = "Run a task immediately
     ).int().default(4096)
 
     override fun run() = runBlocking {
-        val (engine, _) = buildScheduleEngine(
+        val (engine, _) = exitOnBadPermissionRules { buildScheduleEngine(
             provider.resolveAndWarn(), provider.apiKey,
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
             taskTimeoutSeconds, maxTokens,
             llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries
-        )
+        ) }
         val record = engine.runNow(id)
         if (record == null) echo("No task found with id $id") else echo("${record.outcome::class.simpleName}: ${record.summary}")
     }

@@ -67,10 +67,14 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
     // Only awaitControlKeys' loop may read raw bytes off the terminal while a turn is active. A
     // pending confirmation registers here instead of opening its own stdin read, which would
     // otherwise race that loop for the same keystrokes and could starve forever.
-    private val pendingConfirmation = AtomicReference<CompletableDeferred<Boolean>?>(null)
+    private val pendingConfirmation = AtomicReference<CompletableDeferred<ConfirmAnswer>?>(null)
+    @Volatile private var alwaysOffered = false
 
-    suspend fun awaitYesNo(): Boolean {
-        val deferred = CompletableDeferred<Boolean>()
+    suspend fun awaitYesNo(): Boolean = awaitConfirmation(false) == ConfirmAnswer.YES
+
+    suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer {
+        val deferred = CompletableDeferred<ConfirmAnswer>()
+        alwaysOffered = offerAlways
         check(pendingConfirmation.compareAndSet(null, deferred)) { "a confirmation is already pending" }
         try {
             return deferred.await()
@@ -103,8 +107,9 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
                 val confirmation = pendingConfirmation.get()
                 if (confirmation != null) {
                     when (ch) {
-                        'y'.code, 'Y'.code -> confirmation.complete(true)
-                        'n'.code, 'N'.code, 13, 10, 27 -> confirmation.complete(false)
+                        'y'.code, 'Y'.code -> confirmation.complete(ConfirmAnswer.YES)
+                        'a'.code, 'A'.code -> if (alwaysOffered) confirmation.complete(ConfirmAnswer.ALWAYS)
+                        'n'.code, 'N'.code, 13, 10, 27 -> confirmation.complete(ConfirmAnswer.NO)
                     }
                     continue
                 }

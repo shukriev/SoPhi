@@ -1,5 +1,7 @@
 package dev.sophi.cli
 
+enum class ConfirmAnswer { YES, NO, ALWAYS }
+
 interface InputSource {
     suspend fun readLine(): String?
     suspend fun awaitEsc()
@@ -18,4 +20,8 @@ interface InputSource {
      * keystrokes and could starve forever waiting for one that the other already consumed.
      */
     suspend fun awaitYesNo(): Boolean
+
+    /** Like [awaitYesNo], but `a` answers [ConfirmAnswer.ALWAYS] when [offerAlways] is true (and is ignored otherwise). */
+    suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer =
+        if (awaitYesNo()) ConfirmAnswer.YES else ConfirmAnswer.NO
 }

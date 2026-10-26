@@ -4,8 +4,6 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.options.split
-import com.github.ajalt.clikt.core.ProgramResult
-import dev.sophi.core.permissions.PermissionRulesException
 import dev.sophi.sdk.builtinMcpServer
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
 import kotlinx.coroutines.CompletableDeferred
@@ -29,11 +27,8 @@ class McpServeCommand : CliktCommand(
 
     override fun run() = runBlocking {
         // stdout carries the protocol, so a malformed rules file is reported on stderr and the server never starts
-        val server = try {
+        val server = exitOnBadPermissionRules(toStderr = true) {
             builtinMcpServer(exposeTools.toSet(), braveApiKey = braveApiKeyOption)
-        } catch (e: PermissionRulesException) {
-            System.err.println("Error: ${e.message}")
-            throw ProgramResult(1)
         }
         val transport = StdioServerTransport(
             input = System.`in`.asSource().buffered(),
