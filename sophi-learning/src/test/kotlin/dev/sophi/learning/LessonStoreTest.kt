@@ -87,4 +87,17 @@ class LessonStoreTest : FunSpec({
         s.add(lesson("les_p", scope = "/p")); s.add(lesson("les_g", scope = "*"))
         s.activeIncludingGlobal("/p").map { it.id }.sorted() shouldBe listOf("les_g", "les_p")
     }
+
+    test("a forgotten lesson leaves active and is listed as forgotten, global ones too") {
+        val s = store()
+        s.add(lesson("les_1"))
+        s.add(lesson("les_g", scope = "*"))
+        s.forget("les_1") shouldBe true
+        s.forget("les_g") shouldBe true
+        s.forget("les_1") shouldBe false
+        s.active("/p") shouldBe emptyList()
+        s.archived("/p") shouldBe emptyList()
+        s.forgotten("/p").map { it.id }.toSet() shouldBe setOf("les_1", "les_g")
+    }
+
 })

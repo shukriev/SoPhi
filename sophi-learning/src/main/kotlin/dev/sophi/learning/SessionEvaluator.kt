@@ -47,7 +47,8 @@ class SessionEvaluator(
             outcomesLog.append(json.encodeToString(SessionOutcome.serializer(),
                 mechanical.copy(ts = System.currentTimeMillis(),
                     judgment = verdict.judgment, reason = verdict.reason)))
-            verdict.lessons.forEach { vl ->
+            val forgotten = lessons.forgotten(config.scope)
+            verdict.lessons.filterNot { vl -> forgotten.any { sameLesson(it.text, vl.text) } }.forEach { vl ->
                 vl.supersedes?.let { lessons.archive(it) }
                 lessons.add(Lesson(
                     id = "les_" + UUID.randomUUID(), ts = System.currentTimeMillis(),
@@ -61,7 +62,14 @@ class SessionEvaluator(
                 // Pass 1: add every record first, tracking the id assigned to each entryIndex in
                 // this batch — this makes the second pass below independent of array order.
                 val idByEntryIndex = mutableMapOf<Int, String>()
+                // A chat is looked back at again after each quiet spell; a correction already
+                // recorded must not count twice (corroborationThreshold would read it as two).
+                val earlier = preferences.forSession(sessionId).filter { it.source == "implicit" }
                 filtered.forEach { fb ->
+                    earlier.firstOrNull { it.entryIndex == fb.entryIndex && it.polarity == fb.polarity }?.let {
+                        idByEntryIndex[fb.entryIndex] = it.id
+                        return@forEach
+                    }
                     val id = "pref_" + UUID.randomUUID()
                     preferences.add(PreferenceRecord(
                         id = id, ts = System.currentTimeMillis(),
@@ -105,6 +113,11 @@ class SessionEvaluator(
                 active.joinToString("\n") { "- [${it.id}] ${it.text}" }.ifEmpty { "(none)" })
             appendLine("\n## Archived (do not re-emit)\n" +
                 archivedTexts.joinToString("\n") { "- ${it.text}" }.ifEmpty { "(none)" })
+            val forgotten = lessons.forgotten(config.scope)
+            if (forgotten.isNotEmpty()) {
+                appendLine("\n## Forgotten by the user (never re-emit these, not even reworded)\n" +
+                    forgotten.joinToString("\n") { "- ${it.text}" })
+            }
             if (preferences != null) {
                 appendLine("\n## Recent user feedback (for preference lessons)")
                 val recent = preferences.active(config.scope).takeLast(20)
@@ -162,4 +175,13 @@ in "entryIndex" and "retryOf" — do not invent indices.""")
             json.decodeFromString(EvaluatorVerdict.serializer(), text.substring(start, end + 1))
         }.getOrNull()
     }
+}
+
+/** Whether two lesson texts say the same thing: equal once case and punctuation go, or nearly all words shared. */
+internal fun sameLesson(a: String, b: String): Boolean {
+    fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotBlank() }
+    val wa = words(a); val wb = words(b)
+    if (wa == wb) return true
+    val sa = wa.toSet(); val sb = wb.toSet()
+    return sa.isNotEmpty() && (sa intersect sb).size.toDouble() / (sa union sb).size >= 0.8
 }

@@ -30,6 +30,13 @@ class LessonsArchive(private val home: Path, private val id: String, private val
     }
 }
 
+/** Like archive, and SoPhi won't learn the lesson again (it's listed to the evaluator as forgotten). */
+class LessonsForget(private val home: Path, private val id: String, private val echo: (String) -> Unit) {
+    fun run() {
+        if (store(home).forget(id)) echo("Forgot $id. SoPhi won't learn it again.") else echo("No active lesson found with id $id")
+    }
+}
+
 class LessonsCommand : CliktCommand(name = "lessons", help = "Inspect and manage learned lessons") {
     override fun run() = Unit
 }
@@ -43,4 +50,9 @@ class LessonsListCommand : CliktCommand(name = "list") {
 class LessonsArchiveCommand : CliktCommand(name = "archive") {
     private val id by argument()
     override fun run() = LessonsArchive(defaultHome, id) { echo(it) }.run()
+}
+
+class LessonsForgetCommand : CliktCommand(name = "forget", help = "Forget a lesson for good: SoPhi won't learn it again") {
+    private val id by argument()
+    override fun run() = LessonsForget(defaultHome, id) { echo(it) }.run()
 }

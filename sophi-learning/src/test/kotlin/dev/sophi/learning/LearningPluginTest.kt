@@ -174,4 +174,17 @@ class LearningPluginTest : FunSpec({
         val sections = p.promptSections("/p")
         (sections == null || !sections.contains("a distinctive lesson string")) shouldBe true
     }
+
+    test("ambient turns and tool calls never touch the learning logs") {
+        val home = tempdir().toPath()
+        val p = plugin(home)
+        runBlocking {
+            hook(p, HookPoint.AFTER_TURN).invoke(HookContext("ambient", ambient = true))
+            hook(p, HookPoint.AFTER_TOOL).invoke(HookContext("ambient", toolName = "x", success = true, ambient = true))
+            hook(p, HookPoint.ON_ERROR).invoke(HookContext("ambient", ambient = true))
+        }
+        JsonlLog(home.resolve("session-outcomes.jsonl")).readAll() shouldBe emptyList()
+        JsonlLog(home.resolve("tool-events.jsonl")).readAll() shouldBe emptyList()
+    }
+
 })

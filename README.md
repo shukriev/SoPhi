@@ -440,7 +440,8 @@ Everything the agent has learned is inspectable and revocable:
 
 ```bash
 sophi lessons list [--all] [--scope <dir>]   # what it believes about this project
-sophi lessons archive <id>                   # retract a lesson
+sophi lessons archive <id>                   # retract a lesson (it may be learned again)
+sophi lessons forget <id>                    # retract it for good: it is never learned again
 sophi feedback list [--scope <dir>]          # your ratings + detected signals
 sophi feedback delete <id>                   # revoke feedback
 sophi export --out ./dataset   # build SFT/DPO training files

@@ -50,7 +50,9 @@ class LearningPlugin(
         runCatching { lessonsSection.render(config.scope, sessionId, userInput) }.getOrNull()
 
     override fun hooks(): List<AgentHook> = listOf(
+        // Ambient speech isn't a session the user ran: it would only fill the logs and a never-ended accumulator.
         hook(HookPoint.AFTER_TOOL) { ctx: HookContext ->
+            if (ctx.ambient) return@hook
             val acc = accs.getOrPut(ctx.sessionId) { Acc() }
             acc.toolCalls.incrementAndGet()
             if (ctx.success == false) acc.toolErrors.incrementAndGet()
@@ -62,11 +64,12 @@ class LearningPlugin(
             )))
         },
         hook(HookPoint.AFTER_TURN) { ctx: HookContext ->
+            if (ctx.ambient) return@hook
             val acc = accs.getOrPut(ctx.sessionId) { Acc() }
             acc.turns.incrementAndGet()
             writeOutcome(ctx.sessionId, "open", acc)
         },
-        hook(HookPoint.ON_ERROR) { ctx: HookContext -> accs.getOrPut(ctx.sessionId) { Acc() }.errored = true }
+        hook(HookPoint.ON_ERROR) { ctx: HookContext -> if (!ctx.ambient) accs.getOrPut(ctx.sessionId) { Acc() }.errored = true }
     )
 
     /**
