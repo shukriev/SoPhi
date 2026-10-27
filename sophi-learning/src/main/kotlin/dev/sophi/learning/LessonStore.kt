@@ -25,6 +25,10 @@ class LessonStore(
     fun archived(scope: String): List<Lesson> =
         fold().values.filter { it.scope == scope && it.status == "archived" }
 
+    /** Lessons the user forgot, in [scope] and global: the evaluator must never learn them again. */
+    fun forgotten(scope: String): List<Lesson> =
+        fold().values.filter { (it.scope == scope || it.scope == "*") && it.status == "forgotten" }.sortedBy { it.ts }
+
     fun add(lesson: Lesson) {
         append(lesson)
         recordVersion(lesson, ProducedBy.REFLECTION)
@@ -41,6 +45,20 @@ class LessonStore(
         val archived = current.copy(status = "archived", ts = System.currentTimeMillis())
         append(archived)
         recordVersion(archived, ProducedBy.HUMAN)
+        return true
+    }
+
+    /**
+     * The user's Forget: like [archive] it stops recall, but it is also a standing "don't learn
+     * this", which archive (also used by corrections and the cap) is not.
+     * @return true if [id] matched an active lesson; false if it was unknown or not active.
+     */
+    fun forget(id: String): Boolean {
+        val current = fold()[id] ?: return false
+        if (current.status != "active") return false
+        val forgotten = current.copy(status = "forgotten", ts = System.currentTimeMillis())
+        append(forgotten)
+        recordVersion(forgotten, ProducedBy.HUMAN)
         return true
     }
 

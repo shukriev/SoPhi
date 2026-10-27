@@ -15,7 +15,7 @@ fun main(args: Array<String>) {
         .subcommands(
             McpServeCommand(),
             MemoryCommand(),
-            LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand()),
+            LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand(), LessonsForgetCommand()),
             FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand()),
             ContextCommand().subcommands(ContextAddCommand(), ContextListCommand(), ContextRemoveCommand(), ContextGlobalCommand(), ContextResetCommand(), ContextEvalCommand()),
             ExportCommand(),
