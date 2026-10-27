@@ -3,6 +3,9 @@ package dev.sophi.mcp
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.ktor.client.HttpClient
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -18,6 +21,18 @@ import java.util.concurrent.TimeUnit
  * a misbehaving server could reintroduce a narrower process-leak bug.
  */
 class SdkMcpSessionTest : FunSpec({
+
+    test("a remote isError result comes back as an \"Error: \" result, so the loop counts it failed") {
+        val client = mockk<io.modelcontextprotocol.kotlin.sdk.client.Client>()
+        coEvery { client.callTool(any<CallToolRequest>(), any()) } returnsMany listOf(
+            CallToolResult(isError = true, content = listOf(TextContent("no such tab"))),
+            CallToolResult(isError = true, content = listOf(TextContent("Error: no such tab"))),
+            CallToolResult(content = listOf(TextContent("clicked")))
+        )
+        val session = SdkMcpSession(client, null)
+        runBlocking { List(3) { session.callTool("click", "{}") } } shouldBe
+            listOf("Error: no such tab", "Error: no such tab", "clicked")
+    }
 
     test("close destroys the process even if client.close() throws") {
         val process = ProcessBuilder("sleep", "30").start()
