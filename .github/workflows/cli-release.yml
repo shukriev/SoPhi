@@ -60,6 +60,14 @@ jobs:
           - os: macos-15-intel
             arch: x64
     runs-on: ${{ matrix.os }}
+    # Signs and notarizes once the Apple Developer ID credentials exist: secrets
+    # MACOS_CERTIFICATES_P12 (base64 .p12 holding the Developer ID Application and Installer
+    # certificates), MACOS_CERTIFICATES_PASSWORD, APPLE_ID, APPLE_APP_PASSWORD; variables
+    # APPLE_TEAM_ID and APPLE_SIGNING_NAME ("Name (TEAMID)"). Until then it builds an unsigned .pkg.
+    env:
+      SIGN: ${{ vars.APPLE_TEAM_ID != '' }}
+      PKG: out/sophi-macos-${{ matrix.arch }}.pkg
+      KEYCHAIN: ${{ github.workspace }}/../signing.keychain-db
     steps:
       - uses: actions/checkout@v4
 
@@ -73,23 +81,80 @@ jobs:
           name: sophi-jar
           path: dist
 
-      # packaging/macos/postinstall puts a `sophi` wrapper in /usr/local/bin. Unsigned: users
-      # approve it once under System Settings > Privacy & Security. Signing needs an Apple
-      # Developer ID (--mac-sign plus notarytool).
+      - name: Import the Developer ID certificates
+        if: env.SIGN == 'true'
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATES_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+        run: |
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "$keychain_password" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$KEYCHAIN"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          security import "$RUNNER_TEMP/certs.p12" -P "$P12_PASSWORD" -A -f pkcs12 -k "$KEYCHAIN"
+          rm "$RUNNER_TEMP/certs.p12"
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+      # Notarization also inspects native libraries packed inside jars and rejects unsigned ones,
+      # and jpackage only signs the app bundle. So sign them in place. The 32-bit Intel copies are
+      # dropped: no current macOS can load them, and their old SDK fails notarization anyway.
+      - name: Sign native libraries inside the jar
+        if: env.SIGN == 'true'
+        run: |
+          zip -q -d dist/sophi.jar '*/Mac/x86/*'
+          mkdir natives && cd natives
+          unzip -q ../dist/sophi.jar '*.dylib' '*.jnilib'
+          find . -type f | sed 's|^\./||' > ../natives.txt
+          while read -r lib; do
+            codesign --force --timestamp --options runtime --keychain "$KEYCHAIN" \
+              -s "Developer ID Application: ${{ vars.APPLE_SIGNING_NAME }}" "$lib"
+          done < ../natives.txt
+          zip -q ../dist/sophi.jar -@ < ../natives.txt
+
+      # packaging/macos/postinstall puts a `sophi` wrapper in /usr/local/bin.
       - name: Build .pkg
         run: |
+          sign_args=()
+          if [ "$SIGN" = "true" ]; then
+            sign_args=(--mac-sign --mac-signing-keychain "$KEYCHAIN"
+                       --mac-signing-key-user-name "${{ vars.APPLE_SIGNING_NAME }}")
+          fi
           jpackage --type pkg --name sophi --app-version ${{ needs.jar.outputs.version }} \
             --vendor SoPhi --description "SoPhi agent CLI" \
             --input dist --main-jar sophi.jar \
             --java-options --enable-native-access=ALL-UNNAMED \
             --mac-package-identifier dev.sophi.cli \
             --resource-dir packaging/macos \
+            "${sign_args[@]}" \
             --dest out
-          mv out/sophi-*.pkg out/sophi-macos-${{ matrix.arch }}.pkg
+          mv out/sophi-*.pkg "$PKG"
+
+      - name: Notarize and staple
+        if: env.SIGN == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          auth=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+          result="$(xcrun notarytool submit "$PKG" "${auth[@]}" --wait --output-format json)"
+          echo "$result"
+          status="$(echo "$result" | python3 -c 'import sys, json; print(json.load(sys.stdin)["status"])')"
+          if [ "$status" != "Accepted" ]; then
+            id="$(echo "$result" | python3 -c 'import sys, json; print(json.load(sys.stdin)["id"])')"
+            xcrun notarytool log "$id" "${auth[@]}"
+            exit 1
+          fi
+          xcrun stapler staple "$PKG"
+          spctl --assess --type install -vv "$PKG"
 
       - name: Install and run it
         run: |
-          sudo installer -pkg out/sophi-macos-${{ matrix.arch }}.pkg -target /
+          sudo installer -pkg "$PKG" -target /
           /usr/local/bin/sophi --help
 
       - uses: actions/upload-artifact@v4
@@ -163,6 +228,39 @@ jobs:
           & (Join-Path $dir 'sophi.exe') --help
           if ($LASTEXITCODE) { exit 1 }
 
+      # SignPath Foundation signs the .msi once secret SIGNPATH_API_TOKEN and variables
+      # SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG and SIGNPATH_SIGNING_POLICY_SLUG exist.
+      # Tag builds only: every release-signing request waits for a manual
+      # approval in SignPath, which a trial run shouldn't need.
+      - name: Upload the unsigned .msi for signing
+        id: unsigned
+        if: github.ref_type == 'tag' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows-msi
+          path: out/sophi-windows-x64.msi
+          retention-days: 1
+
+      - name: Sign with SignPath
+        if: steps.unsigned.outcome == 'success'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - name: Verify the signature
+        if: steps.unsigned.outcome == 'success'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature signed/sophi-windows-x64.msi
+          if ($signature.Status -ne 'Valid') { throw "Signed .msi did not verify: $($signature.StatusMessage)" }
+          Move-Item signed/sophi-windows-x64.msi out/sophi-windows-x64.msi -Force
+
       - uses: actions/upload-artifact@v4
         with:
           name: sophi-windows-x64
@@ -179,6 +277,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: sophi-*
           merge-multiple: true
 
       - name: Create release

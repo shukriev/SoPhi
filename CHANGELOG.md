@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Type while a turn runs: Enter steers the running turn (read before its next step), Alt+Enter queues a follow-up turn, the queue shows under the spinner, ESC returns unsent text to the prompt (kept even if a companion message arrives first), and a multi-line paste stays one message. The token-view toggle moves to Ctrl+T. SDK: `SophiRuntime.streamTurn(…, inbox = TurnInbox())`, with `TurnEvent.SteerApplied` and `TurnEvent.FollowUpStarted`
+- `sophi lessons forget <id>` and `/lessons forget <id>`: retract a lesson for good. `LessonStore.forget` marks it `forgotten`; every look-back lists forgotten lessons (this scope and global) as never to re-emit, and a lesson with the same words is dropped. `archive` still only stops recall.
 - Permission rules: `~/.sophi/permissions.json` and `.sophi/permissions.json` hold `allow`/`ask`/`deny` rules per tool and pattern (deny beats ask beats allow, also under `--god-mode` and in `mcp-serve`; an ask rule always reaches a person, in auto and god mode too). Project `allow` rules need `/permissions trust`; answering `a` at a confirmation prompt writes one. `/permissions` lists them; a malformed file stops startup. SDK: `RuntimeBuilder.permissionRules()`. See the README for the known limits.
 - Audit log: every tool call, approved or denied, is appended to ~/.sophi/audit.jsonl with actor, rule and result; secrets are redacted.
 - Undo for file changes: workspace checkpoints, move_file/delete_file with a SoPhi trash, /undo, /revert, /checkout --files.
@@ -59,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `onEvent: (TurnEvent)` seam is unchanged (ADR-025)
 
 ### Fixed
+- Learning: a look-back at the same session no longer re-records a correction it already recorded, so one correction can't corroborate a preference lesson on its own
+- Learning: ambient turns no longer write `session-outcomes.jsonl`/`tool-events.jsonl` lines or keep a per-session counter that never ended
 - `sophi-cli`: a session started before `sophi-companion` never appeared in the companion's Sessions tab, even after the companion started — `HubClient.connect()` was only attempted once, at CLI startup. The CLI now retries the hub connection on a timer for the life of the session (ADR-023)
 - Ambient listening could write overheard speech down as facts about the user. Provenance left unstated by the encoder defaulted to `USER_DIRECT` — the one value that opens the ADR-035 commitment gate — so an omitted field became a user commitment; it now resolves to `THIRD_PARTY` on ambient turns. Profile evidence was written from ambient turns unconditionally, so a guest's remark could become one of the user's stable traits; ambient turns now write none. The ambient encoder prompt also rejects broadcast media (TV, podcasts, lyrics, ads), which a microphone cannot distinguish from people in the room (ADR-037)
 

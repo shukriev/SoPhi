@@ -731,7 +731,7 @@ class AgentLoopTest : FunSpec({
 
         events shouldBe listOf(
             TurnEvent.ToolCallStarted("calculator", "{}"),
-            TurnEvent.ToolCallFinished("calculator", "42"),
+            TurnEvent.ToolCallFinished("calculator", "42", argsJson = "{}"),
             TurnEvent.Token("The answer is 42")
         )
     }
@@ -762,7 +762,7 @@ class AgentLoopTest : FunSpec({
         // durationMillis is wall-clock (0 or 1 ms here), so it's zeroed before comparing — it made this test flaky.
         events.map { if (it is TurnEvent.ToolCallFinished) it.copy(durationMillis = 0) else it } shouldBe listOf(
             TurnEvent.ToolCallStarted("broken", "{}"),
-            TurnEvent.ToolCallFinished("broken", "Error: disk full", isError = true),
+            TurnEvent.ToolCallFinished("broken", "Error: disk full", isError = true, argsJson = "{}"),
             TurnEvent.Token("recovered")
         )
     }

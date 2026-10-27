@@ -28,6 +28,21 @@ class ToolStatsStoreTest : FunSpec({
         store.stats("/p").containsKey("bash") shouldBe false
     }
 
+    test("failures that repeat an identical earlier call are counted apart") {
+        val stats = ToolStatsStore(log(
+            ev("fetch_url", false), ev("fetch_url", false).copy(repeat = 2),
+            ev("fetch_url", false).copy(repeat = 3), ev("fetch_url", true).copy(repeat = 4)
+        ), ttlMillis = 0).stats("/p").getValue("fetch_url")
+        stats.failures shouldBe 3
+        stats.repeatedFailures shouldBe 2
+    }
+
+    test("events written before repeat was recorded read as first calls") {
+        val l = JsonlLog(tempdir().toPath().resolve("e.jsonl"))
+        l.append("""{"ts":1,"scope":"/p","sessionId":"s","tool":"grep","success":false,"durationMillis":1}""")
+        ToolStatsStore(l, ttlMillis = 0).stats("/p").getValue("grep").repeatedFailures shouldBe 0
+    }
+
     test("torn lines are skipped, not fatal") {
         val l = log(ev("grep", true)); l.append("{not json")
         ToolStatsStore(l, ttlMillis = 0).stats("/p").getValue("grep").attempts shouldBe 1

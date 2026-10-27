@@ -282,7 +282,9 @@ class SlashHandler(
             "list" -> LessonsList(learningHome, subArg ?: System.getProperty("user.dir"), output).run()
             "archive" -> if (subArg.isNullOrEmpty()) output("Usage: /lessons archive <id>")
                 else LessonsArchive(learningHome, subArg, output).run()
-            else -> output("Unknown /lessons subcommand: $sub  Available: list archive")
+            "forget" -> if (subArg.isNullOrEmpty()) output("Usage: /lessons forget <id>")
+                else LessonsForget(learningHome, subArg, output).run()
+            else -> output("Unknown /lessons subcommand: $sub  Available: list archive forget")
         }
     }
 

@@ -43,6 +43,9 @@ class LearningPlugin(
         val toolErrors = AtomicInteger(0)
         @Volatile var errored: Boolean = false
         val planningNotes = java.util.Collections.synchronizedList(mutableListOf<String>())
+        // Digest of tool + arguments -> times called. Only the digest is kept, and never written: a
+        // write_file call's content would otherwise sit in memory for the rest of the session.
+        val calls = ConcurrentHashMap<String, Int>()
     }
     private val accs = ConcurrentHashMap<String, Acc>()
 
@@ -50,23 +53,28 @@ class LearningPlugin(
         runCatching { lessonsSection.render(config.scope, sessionId, userInput) }.getOrNull()
 
     override fun hooks(): List<AgentHook> = listOf(
+        // Ambient speech isn't a session the user ran: it would only fill the logs and a never-ended accumulator.
         hook(HookPoint.AFTER_TOOL) { ctx: HookContext ->
+            if (ctx.ambient) return@hook
             val acc = accs.getOrPut(ctx.sessionId) { Acc() }
             acc.toolCalls.incrementAndGet()
             if (ctx.success == false) acc.toolErrors.incrementAndGet()
+            val tool = ctx.toolName ?: "unknown"
             append(toolEvents, json.encodeToString(ToolEvent.serializer(), ToolEvent(
                 ts = System.currentTimeMillis(), scope = config.scope, sessionId = ctx.sessionId,
-                tool = ctx.toolName ?: "unknown", success = ctx.success != false,
+                tool = tool, success = ctx.success != false,
                 durationMillis = ctx.durationMillis ?: 0,
-                errorSnippet = if (ctx.success == false) ctx.toolResult?.take(200) else null
+                errorSnippet = if (ctx.success == false) ctx.toolResult?.let(::toolOutputSnippet) else null,
+                repeat = acc.calls.merge(callDigest(tool, ctx.argumentsJson.orEmpty()), 1, Int::plus)!!
             )))
         },
         hook(HookPoint.AFTER_TURN) { ctx: HookContext ->
+            if (ctx.ambient) return@hook
             val acc = accs.getOrPut(ctx.sessionId) { Acc() }
             acc.turns.incrementAndGet()
             writeOutcome(ctx.sessionId, "open", acc)
         },
-        hook(HookPoint.ON_ERROR) { ctx: HookContext -> accs.getOrPut(ctx.sessionId) { Acc() }.errored = true }
+        hook(HookPoint.ON_ERROR) { ctx: HookContext -> if (!ctx.ambient) accs.getOrPut(ctx.sessionId) { Acc() }.errored = true }
     )
 
     /**
@@ -137,3 +145,8 @@ class LearningPlugin(
             override suspend fun invoke(context: HookContext) { runCatching { body(context) } }
         }
 }
+
+private fun callDigest(tool: String, argumentsJson: String): String =
+    java.security.MessageDigest.getInstance("SHA-256")
+        .digest((tool + "\u0000" + argumentsJson.trim()).toByteArray())
+        .joinToString("") { "%02x".format(it) }

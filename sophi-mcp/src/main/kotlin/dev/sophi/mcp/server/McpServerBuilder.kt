@@ -7,6 +7,7 @@ import dev.sophi.core.permissions.Effect
 import dev.sophi.core.permissions.PermissionRules
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
+import dev.sophi.core.tools.isToolError
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
@@ -94,8 +95,10 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSin
             } else {
                 try {
                     val result = tool.execute(argumentsJson)
-                    audit(if (result.startsWith("Error: ")) "error" else "ok", result)
-                    CallToolResult(content = listOf(TextContent(result)))
+                    val failed = isToolError(result)
+                    audit(if (failed) "error" else "ok", result)
+                    // A client reads isError, not our text convention.
+                    CallToolResult(isError = failed, content = listOf(TextContent(result)))
                 } catch (e: Exception) {
                     if (e is CancellationException) { audit("cancelled", ""); throw e }
                     audit("error", "Error: ${e.message}")

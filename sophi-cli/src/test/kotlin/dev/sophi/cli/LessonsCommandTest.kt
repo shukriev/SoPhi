@@ -53,4 +53,15 @@ class LessonsCommandTest : FunSpec({
         LessonsList(home) { withAll.appendLine(it) }.run(all = true)
         withAll.toString() shouldContain "les_global"
     }
+
+    test("forget marks a lesson forgotten, so SoPhi won't learn it again") {
+        val home = tempdir().toPath()
+        val store = LessonStore(JsonlLog(home.resolve("lessons.jsonl")))
+        store.add(Lesson("les_1", 1L, System.getProperty("user.dir"), "s", "remember X", "approach"))
+        val out = StringBuilder()
+        LessonsForget(home, "les_1") { out.appendLine(it) }.run()
+        out.toString() shouldContain "Forgot les_1"
+        store.forgotten(System.getProperty("user.dir")).single().id shouldBe "les_1"
+    }
+
 })

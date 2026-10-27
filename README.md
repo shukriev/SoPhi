@@ -52,8 +52,8 @@ one-line change, not a rewrite.
 
 **Installers (no Java needed).** Download from the newest `cli-v*`
 [release](../../releases): `sophi-macos-arm64.pkg` (Apple Silicon), `sophi-macos-x64.pkg`
-(Intel) or `sophi-windows-x64.msi`, open it, then run `sophi` in a new terminal. They are not
-code-signed yet: on macOS approve the package once under System Settings → Privacy & Security;
+(Intel) or `sophi-windows-x64.msi`, open it, then run `sophi` in a new terminal. Until code signing is set up,
+they are unsigned: on macOS approve the package once under System Settings → Privacy & Security;
 on Windows choose "More info → Run anyway". To uninstall on macOS, delete `/Applications/sophi.app`
 and `/usr/local/bin/sophi`; on Windows use Apps & features.
 
@@ -441,7 +441,8 @@ Everything the agent has learned is inspectable and revocable:
 
 ```bash
 sophi lessons list [--all] [--scope <dir>]   # what it believes about this project
-sophi lessons archive <id>                   # retract a lesson
+sophi lessons archive <id>                   # retract a lesson (it may be learned again)
+sophi lessons forget <id>                    # retract it for good: it is never learned again
 sophi feedback list [--scope <dir>]          # your ratings + detected signals
 sophi feedback delete <id>                   # revoke feedback
 sophi export --out ./dataset   # build SFT/DPO training files

@@ -34,6 +34,7 @@ import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.ActivatedTools
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.isToolError
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.RoundChanges
 import kotlinx.coroutines.CancellationException
@@ -675,10 +676,10 @@ class AgentLoop(
                         // Tools signal a handled failure by returning an "Error: "-prefixed string
                         // just as often as by throwing (every built-in tool's own validation follows
                         // this convention) — count both the same way for loop-guard/reliability purposes.
-                        failed = failed || result.startsWith("Error: ")
+                        failed = failed || isToolError(result)
                         // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
                         audit(if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
-                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
+                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start, call.argumentsJson))
                         ToolCallOutcome(
                             call,
                             Message(

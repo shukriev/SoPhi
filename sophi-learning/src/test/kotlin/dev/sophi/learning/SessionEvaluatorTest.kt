@@ -182,4 +182,35 @@ class SessionEvaluatorTest : FunSpec({
         captured.captured.reasoningEffort shouldBe "none"
         captured.captured.judgment shouldBe dev.sophi.ai.system1.Judgments.EVALUATOR
     }
+
+    test("a correction already recorded for this chat isn't recorded again on the next look-back") {
+        val reply = """{"judgment":"success","reason":"ok","lessons":[],
+            "feedback":[{"entryIndex":3,"polarity":"negative","signal":"user_corrected","evidence":"no, the OTHER file","retryOf":null}]}"""
+        val (eval, _, _, prefs) = fixtureWithPrefs(LLMResponse.Text(reply, TokenUsage(1, 1)), LLMResponse.Text(reply, TokenUsage(1, 1)))
+        runBlocking {
+            eval.evaluate("s1", emptyList(), mechanical)
+            eval.evaluate("s1", emptyList(), mechanical)
+        }
+        prefs.forSession("s1").size shouldBe 1
+    }
+
+    test("lessons the user forgot are all listed as never to re-emit, and a repeat of one is dropped") {
+        val (eval, lessons, _) = fixture(LLMResponse.Text(
+            """{"judgment":"success","reason":"ok","lessons":[
+               {"text":"Write to Anna in Bulgarian!","kind":"preference","global":false},
+               {"text":"Use -pl targeting","kind":"environment","global":false}]}""", TokenUsage(1, 1)))
+        repeat(12) { lessons.add(Lesson("les_a$it", 1L, "/p", "s0", "archived $it", "approach")); lessons.archive("les_a$it") }
+        lessons.add(Lesson("les_f", 1L, "/p", "s0", "write to Anna in Bulgarian", "preference"))
+        lessons.add(Lesson("les_fg", 1L, "*", "s0", "Always answer in English", "preference"))
+        lessons.forget("les_f"); lessons.forget("les_fg")
+
+        val prompt = eval.buildPrompt(emptyList(), mechanical)
+        prompt shouldContain "## Forgotten by the user"
+        prompt shouldContain "write to Anna in Bulgarian"
+        prompt shouldContain "Always answer in English"
+
+        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        lessons.active("/p").map { it.text } shouldBe listOf("Use -pl targeting")
+    }
+
 })

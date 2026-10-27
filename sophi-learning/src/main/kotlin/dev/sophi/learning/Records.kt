@@ -10,7 +10,9 @@ data class ToolEvent(
     val tool: String,
     val success: Boolean,
     val durationMillis: Long,
-    val errorSnippet: String? = null
+    val errorSnippet: String? = null,
+    /** How many times this session has made this exact call (same tool, same arguments); 1 = the first. */
+    val repeat: Int = 1
 )
 
 @Serializable
