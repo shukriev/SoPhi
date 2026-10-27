@@ -654,7 +654,7 @@ class AgentLoop(
                         failed = failed || result.startsWith("Error: ")
                         // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
                         audit(if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
-                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start))
+                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start, call.argumentsJson))
                         ToolCallOutcome(
                             call,
                             Message(

@@ -83,6 +83,7 @@ class AgentLoopToolEventTest : FunSpec({
             .filterIsInstance<TurnEvent.ToolCallFinished>().single()
         finished.isError.shouldBeFalse()
         finished.durationMillis shouldBeGreaterThanOrEqual 0L
+        finished.argsJson shouldBe "{}"   // the recorder needs the arguments to spot identical retries
     }
 
     test("tool returning an 'Error: '-prefixed string (without throwing) emits ToolCallFinished with isError=true") {
