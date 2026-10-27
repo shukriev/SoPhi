@@ -7,6 +7,14 @@ enum class RiskLevel { SAFE, CAUTION, DESTRUCTIVE }
 
 enum class RuleVerdict { LOW_RISK, HIGH_RISK, UNKNOWN }
 
+/**
+ * A tool reports a handled failure by returning text that starts with this (or by throwing).
+ * The agent loop, mcp-serve and the MCP client all read failures through [isToolError].
+ */
+const val TOOL_ERROR_PREFIX = "Error: "
+
+fun isToolError(result: String): Boolean = result.startsWith(TOOL_ERROR_PREFIX)
+
 interface Tool {
     val name: String
     val description: String

@@ -7,7 +7,9 @@ data class ToolStats(
     val failures: Int,
     val streak: Int,
     val meanDurationMillis: Long,
-    val lastErrors: List<String>
+    val lastErrors: List<String>,
+    /** Failures that repeated an identical earlier call in the same session: the model stuck, not the tool flaky. */
+    val repeatedFailures: Int = 0
 )
 
 class ToolStatsStore(
@@ -40,7 +42,8 @@ class ToolStatsStore(
                     failures = evs.count { !it.success },
                     streak = streak,
                     meanDurationMillis = if (evs.isEmpty()) 0 else evs.sumOf { it.durationMillis } / evs.size,
-                    lastErrors = evs.filter { !it.success }.takeLast(3).mapNotNull { it.errorSnippet }
+                    lastErrors = evs.filter { !it.success }.takeLast(3).mapNotNull { it.errorSnippet },
+                    repeatedFailures = evs.count { !it.success && it.repeat > 1 }
                 )
             }
         }

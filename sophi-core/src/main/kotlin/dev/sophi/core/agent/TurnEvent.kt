@@ -8,7 +8,8 @@ sealed class TurnEvent {
         val name: String,
         val result: String,
         val isError: Boolean = false,
-        val durationMillis: Long = 0
+        val durationMillis: Long = 0,
+        val argsJson: String = ""
     ) : TurnEvent()
     /**
      * Fired around a confirmationPolicy.confirm() call that's actually needed (at least one

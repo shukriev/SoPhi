@@ -93,7 +93,7 @@ class McpServerBuilderTest : FunSpec({
 
         remoteTools.map { it.name } shouldBe listOf("echo", "danger", "careful")
         echoReply shouldBe """{"text":"hi"}"""
-        dangerReply shouldBe "Denied: 'danger' is not a SAFE tool and cannot be called via mcp-serve"
+        dangerReply shouldBe "Error: Denied: 'danger' is not a SAFE tool and cannot be called via mcp-serve"
         // The genuine proof: DangerTool.execute() was never invoked, so it never wrote the marker.
         Files.exists(markerFile) shouldBe false
     }
@@ -121,7 +121,7 @@ class McpServerBuilderTest : FunSpec({
             reply
         }
 
-        carefulReply shouldBe "Denied: 'careful' is not a SAFE tool and cannot be called via mcp-serve"
+        carefulReply shouldBe "Error: Denied: 'careful' is not a SAFE tool and cannot be called via mcp-serve"
         Files.exists(carefulMarkerFile) shouldBe false
     }
 
@@ -212,6 +212,18 @@ class McpServerBuilderTest : FunSpec({
         val throwing = buildMcpServer(tools, names, audit = { throw IllegalStateException("disk full") })
         for (n in names) callTool(throwing, n) shouldBe callTool(quiet, n)
     }
+    test("a tool's \"Error: \" result reaches the client as isError, the flag MCP clients read") {
+        val failing = object : Tool {
+            override val name = "grep"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "Error: path is outside the workspace"
+        }
+        val entries = mutableListOf<AuditEntry>()
+        callTool(buildMcpServer(listOf(failing), setOf("grep"), audit = { entries += it }), "grep").isError shouldBe true
+        entries.single().outcome shouldBe "error"
+    }
+
     test("a SAFE tool with a deny rule returns an error and is not executed") {
         val entries = mutableListOf<AuditEntry>()
         var executed = 0

@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
@@ -48,7 +49,7 @@ class BashToolTest : FunSpec({
 
     test("execute() returns an error when the command times out") {
         val result = runBlocking { tool.execute("""{"command":"sleep 5","timeoutSeconds":1}""") }
-        result shouldContain "timed out after 1s"
+        result shouldStartWith "Error: command timed out after 1s"   // the loop counts only a leading "Error: " as failed
     }
 
     test("name is bash") {

@@ -105,7 +105,7 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val output = outputDeferred.await()
 
         if (!finished) {
-            "$output\nError: command timed out after ${timeoutSeconds}s"
+            "Error: command timed out after ${timeoutSeconds}s\n$output"
         } else {
             val exitCode = process.exitValue()
             if (exitCode != 0) "$output\nCommand exited with code $exitCode" else output

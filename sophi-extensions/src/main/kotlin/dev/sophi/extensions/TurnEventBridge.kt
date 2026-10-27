@@ -11,7 +11,7 @@ fun PluginRegistry.turnEventBridge(sessionId: String): suspend (TurnEvent) -> Un
         is TurnEvent.ToolCallFinished -> dispatch(
             HookPoint.AFTER_TOOL,
             HookContext(
-                sessionId, toolName = event.name, toolResult = event.result,
+                sessionId, toolName = event.name, argumentsJson = event.argsJson, toolResult = event.result,
                 success = !event.isError, durationMillis = event.durationMillis
             )
         )

@@ -23,7 +23,7 @@ class TurnEventBridgeTest : FunSpec({
         val bridge = PluginRegistry().register(plugin).turnEventBridge("sess-1")
 
         bridge(TurnEvent.ToolCallStarted("grep", """{"pattern":"x"}"""))
-        bridge(TurnEvent.ToolCallFinished("grep", "Error: boom", isError = true, durationMillis = 42))
+        bridge(TurnEvent.ToolCallFinished("grep", "Error: boom", isError = true, durationMillis = 42, argsJson = """{"pattern":"x"}"""))
         bridge(TurnEvent.Token("ignored"))
 
         val before = plugin.contexts.getValue(HookPoint.BEFORE_TOOL).single()
@@ -36,6 +36,7 @@ class TurnEventBridgeTest : FunSpec({
         after.toolResult shouldBe "Error: boom"
         after.success shouldBe false
         after.durationMillis shouldBe 42L
+        after.argumentsJson shouldBe """{"pattern":"x"}"""
     }
 
     test("bridge marks AFTER_TOOL success true for a non-error ToolCallFinished") {

@@ -1,5 +1,7 @@
 package dev.sophi.mcp
 
+import dev.sophi.core.tools.TOOL_ERROR_PREFIX
+import dev.sophi.core.tools.isToolError
 import io.ktor.client.HttpClient
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
@@ -45,7 +47,9 @@ class SdkMcpSession(
         val arguments = Json.parseToJsonElement(argumentsJson).jsonObject
         val request = CallToolRequest(CallToolRequestParams(name = name, arguments = arguments))
         val result = client.callTool(request)
-        return result.content.filterIsInstance<TextContent>().joinToString("\n") { it.text }
+        val text = result.content.filterIsInstance<TextContent>().joinToString("\n") { it.text }
+        // The server's isError is the failure signal; carry it over in the loop's own convention.
+        return if (result.isError == true && !isToolError(text)) "$TOOL_ERROR_PREFIX$text" else text
     }
 
     override suspend fun close() {
