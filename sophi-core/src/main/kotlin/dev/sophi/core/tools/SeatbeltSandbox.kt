@@ -19,11 +19,12 @@ class SeatbeltSandbox(writable: List<Path>) {
     /** Symlinks resolved: the sandbox matches real paths (/var/folders is /private/var/folders). */
     val writable: List<Path> = writable.map { runCatching { it.toRealPath() }.getOrDefault(it.toAbsolutePath().normalize()) }
 
-    /** [command] (a program and its arguments) run inside the sandbox. */
-    fun wrap(command: List<String>): List<String> {
+    /** [command] (a program and its arguments) run inside the sandbox; [network] false blocks IP traffic (Unix sockets still work). */
+    fun wrap(command: List<String>, network: Boolean = true): List<String> {
         val params = writable.flatMapIndexed { i, p -> listOf("-D", "W$i=$p") }
         val rules = writable.indices.joinToString(" ") { "(subpath (param \"W$it\"))" }
-        val profile = "(version 1)(allow default)(deny file-write*)(allow file-write* (subpath \"/dev\") $rules)"
+        val profile = "(version 1)(allow default)(deny file-write*)(allow file-write* (subpath \"/dev\") $rules)" +
+            if (network) "" else "(deny network-outbound (remote ip))"
         return listOf(SANDBOX_EXEC) + params + listOf("-p", profile) + command
     }
 

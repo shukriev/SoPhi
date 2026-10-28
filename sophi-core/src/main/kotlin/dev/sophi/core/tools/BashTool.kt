@@ -34,10 +34,10 @@ private val SINGLE_FILE_RM = Regex("""^rm\s+(\S+)$""")
 @Serializable
 private data class BashArgs(val command: String, val timeoutSeconds: Long? = null)
 
-/** [sandbox]: when set (and `sandbox-exec` is on this Mac), every command runs inside it. */
+/** [sandbox]: where each command runs; a host can switch it while the session runs. */
 class BashTool(
     private val root: Path = Paths.get("").toAbsolutePath(),
-    private val sandbox: SeatbeltSandbox? = null,
+    private val sandbox: BashSandbox? = null,
 ) : Tool {
 
     override val name = "bash"
@@ -83,7 +83,7 @@ class BashTool(
         val timeoutSeconds = (args.timeoutSeconds ?: DEFAULT_TIMEOUT_SECONDS).coerceAtMost(MAX_TIMEOUT_SECONDS)
 
         val process = shellProcess(args.command)
-            .apply { sandbox?.takeIf { SeatbeltSandbox.available }?.let { command(it.wrap(command())) } }
+            .apply { sandbox?.let { command(it.wrap(command())) } }
             .directory(root.toFile())
             .redirectErrorStream(true)
             .start()
