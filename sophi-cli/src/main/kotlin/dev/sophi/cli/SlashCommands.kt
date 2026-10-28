@@ -303,6 +303,7 @@ class SlashHandler(
             output("Unknown skill: $sub. Run /skill list to see available skills.")
         } else {
             session.append(EntryRole.TOOL_RESULT, skill.body)
+            sessionManager.save(session)
             output("Injected skill: $sub")
         }
     }

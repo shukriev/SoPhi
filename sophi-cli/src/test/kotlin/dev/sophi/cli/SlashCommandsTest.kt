@@ -318,6 +318,16 @@ class SlashCommandsTest : FunSpec({
         output shouldBe listOf("Injected skill: code-review")
     }
 
+    test("/skill <id> saves the session, so exiting right after keeps the skill") {
+        val dir = tempdir().toPath()
+        dir.resolve("code-review.md").writeText("---\ntitle: Code Review\n---\n\nFollow these steps.")
+        val registry = SkillRegistry.load(dir.resolve("no-global"), dir)
+        val handler = SlashHandler(sessionManager, null, config, skillRegistry = registry) { output.add(it) }
+        val session = AgentSession(id = "s1")
+        handler.handle("/skill code-review", session)
+        verify(exactly = 1) { sessionManager.save(session) }
+    }
+
     test("/skill <unknown-id> reports an error without touching the session") {
         val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
         val session = AgentSession(id = "s1")
