@@ -17,6 +17,7 @@ class SteerEditor(private val inbox: TurnInbox) {
             }
             TurnKey.Enter -> send(inbox::steer)
             TurnKey.AltEnter -> send(inbox::followUp)
+            TurnKey.Up, TurnKey.Down -> {}
         }
     }
 

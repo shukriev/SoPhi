@@ -158,6 +158,7 @@ In-session slash commands:
 /skill [list|<id>]   list installed skills, or load one into the session
 /auto       toggle auto mode: low-risk tool calls run without asking (not under --god-mode)
 /permissions [trust]   list permission rules; trust activates the project's allow rules
+/settings [key [value]] open the settings menu, or show or set one setting
 /feedback [list|delete <id>]   inspect and manage explicit feedback records
 /lessons [list|archive <id>|forget <id>]   inspect and manage learned lessons
 /memory [list|show <id>|threads|profile|why]   browse Jane's Theory memory (needs --memory)
@@ -214,6 +215,10 @@ Known limits of permission rules:
 - Rules are not a sandbox: the real containment is a sandboxed backend.
 
 **Sessions.** Each session is a JSONL file under `~/.sophi/sessions` that only grows: a save appends the entries that are new or changed, so saving a long session costs the same as a short one. A crash mid-write loses at most the last, partial line. The checked-out entry is saved too, so `--session <id>` resumes where `/checkout` left you, not at the last entry.
+
+**Settings.** `/settings` opens a menu of every `sophi` start flag: ↑↓ moves, Enter flips an on/off setting, steps through a choice or edits a value in place, `d` resets one to its default, Esc closes. Each change is saved to `~/.sophi/settings.json` and used as that flag's default from then on; a flag you type still wins for that run, and each row says whether its value came from a flag, the file or the default. The sandbox, network, Docker image and auto mode change the running session at once; the rest are marked "(next start)". API keys and `--session` are never saved. Without a terminal, `/settings` lists them, and `/settings <key> <value>` sets one.
+
+**Sandbox.** `bash` runs unsandboxed by default. `--sandbox seatbelt` (or the `sandbox` setting) runs each command in macOS's sandbox: it can read anywhere but write only to the workspace, temp folders and tool caches. `--sandbox docker` runs commands in one container per session that shares only the workspace (mounted at the same path), with all capabilities dropped and CPU, memory and process limits; `--docker-image` picks the image (default `buildpack-deps:bookworm-scm`). `--no-network` blocks the network in either. Switching to Docker starts the container straight away, so the first image pull happens then. A mode this machine can't run is refused with the reason. Path checks that flag commands reaching outside the workspace still apply in every mode. In the SDK, `SophiRuntime.bashSandbox.set(...)` switches it.
 
 **Undo.** Before each tool round that changes files, the CLI snapshots the workspace into a shadow git repo under `~/.sophi/checkpoints` (your own repo is untouched). `/undo` and `/revert` show what they would restore and ask first. `move_file` and `delete_file` are undoable too: deletes go to `~/.sophi/trash`. Bash commands that reach outside the workspace can't be undone and are listed as warnings. In the SDK, `RuntimeBuilder.checkpoints()` (needs `builtinTools`) turns snapshots on and `SophiRuntime.fileRestorer` does the restoring.
 

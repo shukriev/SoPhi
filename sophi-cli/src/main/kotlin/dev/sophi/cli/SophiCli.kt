@@ -257,7 +257,7 @@ class SophiCli(
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings\n"
         )
         cli.runtime.bashSandbox?.let { sb ->
             val mode = SandboxMode.valueOf(sandboxMode.uppercase())
@@ -350,6 +350,11 @@ class SophiCli(
             auditSink = cli.runtime.auditSink,
             permissions = cli.runtime.permissionRules,
             checkpoints = cli.runtime.checkpointStore,
+            settings = SettingsController(
+                settings, currentContext.originalArgv, effectiveValues(),
+                registeredOptions().associate { o -> o.names.maxBy { it.length }.removePrefix("--") to o.optionHelp(currentContext) },
+                cli.runtime.bashSandbox, cli.autoModeToggle, interactive = sophiTerminal.isInteractive
+            ),
             contextWindowTokens = contextWindowTokens,
             liveRegion = liveRegion,
             onEvent = onEvent,
