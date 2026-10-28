@@ -160,8 +160,8 @@ class RuntimeBuilder {
         apply { agentsDirConfig = AgentsDirConfig(dir, onWarning) }
 
     /** Registers the standard file/shell/search/date tool set — see [buildBuiltinTools]. */
-    fun builtinTools(root: Path, braveApiKey: String? = null): RuntimeBuilder =
-        apply { builtinToolsConfig = BuiltinToolsConfig(root, braveApiKey) }
+    fun builtinTools(root: Path, braveApiKey: String? = null, sandboxed: Boolean = false): RuntimeBuilder =
+        apply { builtinToolsConfig = BuiltinToolsConfig(root, braveApiKey, sandboxed) }
 
     /**
      * Shadow-git snapshots of the [builtinTools] root before each round that changes files, so
@@ -278,7 +278,7 @@ class RuntimeBuilder {
         val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
             store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
         }
-        builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey).forEach { registry.register(it) } }
+        builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey, cfg.sandboxed).forEach { registry.register(it) } }
         contextConfig?.let { (engine, project, _) ->
             contextTools(engine, project, knob("SOPHI_CONTEXT_TOOLS", "all", "core", "none")).forEach { registry.register(it) }
             plugins.add(ContextPlugin(engine, project))
@@ -446,7 +446,7 @@ private class DescriptionOverrideTool(private val delegate: Tool, override val d
 
 private data class AgentsDirConfig(val dir: Path, val onWarning: (String) -> Unit)
 
-private data class BuiltinToolsConfig(val root: Path, val braveApiKey: String?)
+private data class BuiltinToolsConfig(val root: Path, val braveApiKey: String?, val sandboxed: Boolean)
 
 private data class MemoryConfig(
     val embeddingModel: String,

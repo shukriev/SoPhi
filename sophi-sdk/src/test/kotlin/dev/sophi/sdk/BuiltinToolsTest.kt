@@ -56,4 +56,17 @@ class BuiltinToolsTest : FunSpec({
         entries.single().tool shouldBe "get_current_datetime"
         entries.single().rule shouldBe "safe"
     }
+
+    test("sandboxed, bash can't write outside the workspace; unsandboxed it can").config(enabled = dev.sophi.core.tools.SeatbeltSandbox.available) {
+        val root = tempdir().toPath()
+        val name = ".sophi-sdk-sandbox-test-${System.nanoTime()}"
+        val target = java.nio.file.Path.of(System.getProperty("user.home"), name)
+        fun bash(sandboxed: Boolean) = buildBuiltinTools(root, sandboxed = sandboxed).single { it.name == "bash" }
+        try {
+            runBlocking { bash(sandboxed = true).execute("""{"command":"touch \"${'$'}HOME/$name\""}""") }
+            target.toFile().exists() shouldBe false
+            runBlocking { bash(sandboxed = false).execute("""{"command":"touch \"${'$'}HOME/$name\""}""") }
+            target.toFile().exists() shouldBe true
+        } finally { target.toFile().delete() }
+    }
 })
