@@ -14,6 +14,7 @@ import dev.sophi.core.tools.GlobTool
 import dev.sophi.core.tools.GrepTool
 import dev.sophi.core.tools.MoveFileTool
 import dev.sophi.core.tools.RunClaudeCodeTool
+import dev.sophi.core.tools.SeatbeltSandbox
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.core.permissions.PermissionRules
@@ -26,11 +27,13 @@ import java.nio.file.Path
  * [root] scopes every filesystem-touching tool (read/write/grep/glob/edit/bash); defaults to the
  * process's current directory, matching those tools' own constructor defaults. Falls back to the
  * `BRAVE_SEARCH_API_KEY` environment variable when [braveApiKey] is null; omit both to leave
- * `web_search` unregistered.
+ * `web_search` unregistered. [sandboxed]: `bash` runs in [SeatbeltSandbox.forWorkspace] of [root]
+ * on a Mac that has it (writes outside the workspace, temp and tool caches fail).
  */
-fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: String? = null): List<Tool> {
+fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: String? = null, sandboxed: Boolean = false): List<Tool> {
     val tools = mutableListOf<Tool>(
-        FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), BashTool(root),
+        FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root),
+        BashTool(root, SeatbeltSandbox.forWorkspace(root).takeIf { sandboxed }),
         MoveFileTool(root), DeleteFileTool(root),
         FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool()
     )

@@ -34,7 +34,11 @@ private val SINGLE_FILE_RM = Regex("""^rm\s+(\S+)$""")
 @Serializable
 private data class BashArgs(val command: String, val timeoutSeconds: Long? = null)
 
-class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
+/** [sandbox]: when set (and `sandbox-exec` is on this Mac), every command runs inside it. */
+class BashTool(
+    private val root: Path = Paths.get("").toAbsolutePath(),
+    private val sandbox: SeatbeltSandbox? = null,
+) : Tool {
 
     override val name = "bash"
     override val description = "Run a shell command in the working directory. To delete, move or rename files use delete_file / move_file instead: those can be undone."
@@ -79,6 +83,7 @@ class BashTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
         val timeoutSeconds = (args.timeoutSeconds ?: DEFAULT_TIMEOUT_SECONDS).coerceAtMost(MAX_TIMEOUT_SECONDS)
 
         val process = shellProcess(args.command)
+            .apply { sandbox?.takeIf { SeatbeltSandbox.available }?.let { command(it.wrap(command())) } }
             .directory(root.toFile())
             .redirectErrorStream(true)
             .start()
