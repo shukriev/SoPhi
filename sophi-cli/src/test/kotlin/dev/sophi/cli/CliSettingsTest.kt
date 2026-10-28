@@ -22,7 +22,7 @@ private class Sub : CliktCommand(name = "sub") {
 private class Root(store: CliSettingsStore) : CliktCommand(name = "root", invokeWithoutSubcommand = true) {
     init { readSettingsFrom(store) }
     val maxTokens by option("--max-tokens").int().default(4096)
-    val auto by option("--auto").flag(default = false)
+    val auto by option("--auto").flag("--no-auto", default = false)
     override fun run() = Unit
 }
 
@@ -43,6 +43,29 @@ class CliSettingsTest : FunSpec({
     test("a saved boolean flag is read") {
         Root(store("""{"auto":"true"}""")).apply { parse(emptyList()) }.auto shouldBe true
         Root(store("""{"auto":"false"}""")).apply { parse(emptyList()) }.auto shouldBe false
+    }
+
+    test("a saved on-flag can be switched off for one run") {
+        Root(store("""{"auto":"true"}""")).apply { parse(listOf("--no-auto")) }.auto shouldBe false
+    }
+
+    test("every on/off start flag has an opposite, so a saved value can be overridden for one run") {
+        val bools = CLI_SETTINGS.filter { it.kind == SettingKind.Bool }.map { "--${it.key}" }.toSet()
+        SophiCli(Path.of("/nonexistent/settings.json")).registeredOptions()
+            .filter { o -> o.names.any { it in bools } && o.secondaryNames.isEmpty() }
+            .map { it.names }.shouldBeEmpty()
+    }
+
+    test("a bad or unknown saved value is dropped with a warning; the rest still apply, so sophi still starts") {
+        val warnings = mutableListOf<String>()
+        val s = store("""{"max-tokens":"abc","auto":"true","god-mode":"true","model":null}""", warnings)
+        Root(s).apply { parse(emptyList()) }.let { it.maxTokens shouldBe 4096; it.auto shouldBe true }
+        s.usable() shouldBe mapOf("auto" to "true")
+        warnings.any { "max-tokens" in it } shouldBe true
+    }
+
+    test("god mode is never a saved setting") {
+        CLI_SETTINGS.none { it.key == "god-mode" } shouldBe true
     }
 
     test("a subcommand's option of the same name doesn't read the file") {

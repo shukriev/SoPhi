@@ -8,10 +8,10 @@ import com.github.ajalt.clikt.sources.MapValueSource
 import dev.sophi.core.tools.BashSandbox
 import dev.sophi.core.tools.SandboxMode
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -48,7 +48,6 @@ val CLI_SETTINGS: List<Setting> = listOf(
     next("llm-timeout-seconds", SettingKind.Int),
     next("llm-max-retries", SettingKind.Int),
     next("system", SettingKind.Text),
-    next("god-mode", SettingKind.Bool),
     next("goal-escalation-model", SettingKind.Text),
     next("memory", SettingKind.Bool),
     next("embedding-model", SettingKind.Text),
@@ -65,16 +64,39 @@ val CLI_SETTINGS: List<Setting> = listOf(
     next("no-remote", SettingKind.Bool),
 )
 
-/** Per-run (`session`) or secret (API keys stay in env vars or flags, never in a plain file). */
-val EXCLUDED_FROM_SETTINGS = setOf("session", "api-key", "brave-api-key")
+/**
+ * Per-run (`session`), secret (API keys stay in env vars or flags, never in a plain file), or too
+ * dangerous to switch on for every later run by one key press (`god-mode`).
+ */
+val EXCLUDED_FROM_SETTINGS = setOf("session", "api-key", "brave-api-key", "god-mode")
 
 /** `~/.sophi/settings.json`: a flat object from setting key to string value. Keys it doesn't know are kept. */
 class CliSettingsStore(val file: Path = DEFAULT_SETTINGS_FILE, private val onWarning: (String) -> Unit) {
     fun saved(): Map<String, String> {
         if (!file.exists()) return emptyMap()
-        return runCatching { Json.parseToJsonElement(file.readText()).jsonObject.mapValues { it.value.jsonPrimitive.content } }
+        return runCatching {
+            Json.parseToJsonElement(file.readText()).jsonObject
+                .mapNotNull { (k, v) -> (v as? JsonPrimitive)?.takeUnless { it is JsonNull }?.let { k to it.content } }.toMap()
+        }
             .getOrElse { onWarning("settings: $file isn't valid JSON (${it.message?.lineSequence()?.first()}) — using defaults"); emptyMap() }
     }
+
+    /**
+     * What `sophi` reads at start: known settings whose value fits, booleans normalised. Anything
+     * else is warned about and skipped, so a hand-edited value can't stop every `sophi` command.
+     */
+    fun usable(): Map<String, String> = saved().mapNotNull { (key, value) ->
+        val setting = CLI_SETTINGS.firstOrNull { it.key == key }
+        when {
+            key in EXCLUDED_FROM_SETTINGS -> null.also { onWarning("settings: $key isn't read from $file — pass --$key when you want it") }
+            setting == null -> null // a newer version's setting
+            else -> {
+                val problem = validate(setting, value)
+                if (problem != null) { onWarning("settings: ignoring $key in $file: $problem"); null }
+                else key to normalise(setting, value)
+            }
+        }
+    }.toMap()
 
     /** Why [value] doesn't fit [setting], or null. */
     fun validate(setting: Setting, value: String): String? = when (val kind = setting.kind) {
@@ -110,7 +132,7 @@ class CliSettingsStore(val file: Path = DEFAULT_SETTINGS_FILE, private val onWar
  */
 @OptIn(ExperimentalValueSourceApi::class)
 fun CliktCommand.readSettingsFrom(store: CliSettingsStore) {
-    context { valueSource = MapValueSource(store.saved()) }
+    context { valueSource = MapValueSource(store.usable()) }
 }
 
 /** After parsing: each option's value this run, by long name without `--` (null as ""). */

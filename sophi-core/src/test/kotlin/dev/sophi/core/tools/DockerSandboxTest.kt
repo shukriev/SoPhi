@@ -1,5 +1,6 @@
 package dev.sophi.core.tools
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainInOrder
 import io.kotest.matchers.collections.shouldNotContain
@@ -43,7 +44,26 @@ class DockerSandboxTest : FunSpec({
         sandbox.mode shouldBe SandboxMode.OFF
     }
 
+    test("a closed DockerSandbox can't start again") {
+        val sandbox = DockerSandbox(createTempDirectory("ws"))
+        sandbox.close()
+        shouldThrow<IllegalStateException> { sandbox.start() }
+    }
+
+    test("an image name starting with '-' is refused, so it can't pass docker an option") {
+        val sandbox = BashSandbox(createTempDirectory("ws"))
+        sandbox.set(image = "--privileged") shouldBe "a Docker image name can't start with '-'"
+        sandbox.image shouldBe DEFAULT_DOCKER_IMAGE
+    }
+
     context("with Docker").config(enabled = DockerSandbox.available) {
+        test("after close, a docker-mode command is refused instead of running on the host") {
+            val sandbox = BashSandbox(createTempDirectory("ws"))
+            sandbox.set(SandboxMode.DOCKER) shouldBe null
+            sandbox.close()
+            shouldThrow<IllegalStateException> { sandbox.wrap(listOf("sh", "-c", "x")) }
+        }
+
         test("acceptance: /etc can't be written, a workspace write shows on the host, no network means no curl") {
             val ws = createTempDirectory("ws")
             BashSandbox(ws).use { sandbox ->

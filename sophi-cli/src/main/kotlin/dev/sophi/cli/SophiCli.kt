@@ -115,7 +115,7 @@ class SophiCli(
         "--memory",
         help = "Enable Jane's Theory long-term memory (experimental). Requires --embedding-model " +
             "and an OpenAI-compatible embeddings endpoint (Ollama works: nomic-embed-text)."
-    ).flag(default = false)
+    ).flag("--no-memory", default = false)
     private val embeddingModel: String? by option(
         "--embedding-model",
         help = "Embedding model name for --memory, e.g. nomic-embed-text (Ollama) or text-embedding-3-small"
@@ -136,19 +136,19 @@ class SophiCli(
     private val autoExitTokenView: Boolean by option(
         "--auto-exit-token-view",
         help = "Automatically exit token view when LLM finishes (default: true)"
-    ).flag(default = true)
+    ).flag("--no-auto-exit-token-view", default = true)
     private val autoMode: Boolean by option(
         "--auto",
         help = "Start with auto mode enabled: low-risk tool calls (per rule + LLM classifier) run " +
             "without a confirmation prompt. Toggle anytime with /auto."
-    ).flag(default = false)
+    ).flag("--no-auto", default = false)
     private val godMode: Boolean by option(
         "--god-mode",
         help = "Skip the LLM classifier entirely: trust only each tool's own rule checks. Prompts " +
             "only for calls a rule explicitly flags HIGH_RISK; everything else (including anything " +
             "a rule has no opinion on) runs unattended for the whole session. Fixed once set — no " +
             "/auto toggle while in this mode. Overrides --auto if both are passed."
-    ).flag(default = false)
+    ).flag("--no-god-mode", default = false)
     private val goalEscalationModel: String? by option(
         "--goal-escalation-model",
         help = "Stronger model /goal escalates a plan step to when its confidence is below " +
@@ -178,7 +178,7 @@ class SophiCli(
         "--no-remote",
         help = "Do not register this session with a running companion's hub — stays fully " +
             "local, same as every sophi-cli release before this flag existed."
-    ).flag(default = false)
+    ).flag("--remote", default = false)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking

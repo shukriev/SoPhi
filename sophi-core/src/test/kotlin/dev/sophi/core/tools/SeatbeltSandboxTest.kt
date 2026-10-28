@@ -72,6 +72,18 @@ class SeatbeltSandboxTest : FunSpec({
             tool.run("cat /etc/hosts") shouldContain "localhost"
         }
 
+        test("the Docker socket can't be reached, so docker can't step outside the sandbox").config(enabled = Path.of("/var/run/docker.sock").exists()) {
+            val ws = createTempDirectory("ws")
+            val tool = BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT) shouldBe null })
+            tool.run("curl -sS -m 5 --unix-socket /var/run/docker.sock http://x/version").contains("ApiVersion") shouldBe false
+        }
+
+        test("with the network off, names don't resolve") {
+            val ws = createTempDirectory("ws")
+            val tool = BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT, network = false) shouldBe null })
+            tool.run("dscacheutil -q host -a name example.org").contains("address:") shouldBe false
+        }
+
         test("with the network off, curl fails") {
             val ws = createTempDirectory("ws")
             val tool = BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT, network = false) shouldBe null })

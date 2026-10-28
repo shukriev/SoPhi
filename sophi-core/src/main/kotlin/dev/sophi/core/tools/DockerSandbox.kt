@@ -32,6 +32,7 @@ class DockerSandbox(
 ) : AutoCloseable {
     val name = "sophi-" + UUID.randomUUID().toString().take(8)
     private var started = false
+    private var closed = false
     private val hook = Thread { remove() }
 
     fun runArgs(): List<String> {
@@ -46,6 +47,7 @@ class DockerSandbox(
     /** Starts the container once (the first run pulls the image); throws with Docker's message when it can't. */
     @Synchronized
     fun start() {
+        check(!closed) { "this Docker sandbox is closed" }
         if (started) return
         removeOrphans()
         val (code, out) = docker(runArgs().drop(1), timeoutSeconds = 300)
@@ -61,6 +63,7 @@ class DockerSandbox(
 
     @Synchronized
     override fun close() {
+        closed = true
         if (!started) return
         started = false
         runCatching { Runtime.getRuntime().removeShutdownHook(hook) }
