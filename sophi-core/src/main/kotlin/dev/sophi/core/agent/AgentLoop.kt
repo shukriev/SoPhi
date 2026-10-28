@@ -394,10 +394,9 @@ class AgentLoop(
     ) {
         val texts = inbox?.drainSteers().orEmpty()
         if (texts.isEmpty()) return
-        texts.forEach {
-            messages.add(Message(MessageRole.USER, it))
-            pendingRounds.add(PendingEntry(EntryRole.USER, it, mapOf("steer" to "true")))
-        }
+        // One message for the request, the way replay merges them: strict templates (Gemma) reject adjacent user turns.
+        messages.add(Message(MessageRole.USER, texts.joinToString("\n\n")))
+        texts.forEach { pendingRounds.add(PendingEntry(EntryRole.USER, it, mapOf("steer" to "true"))) }
         onEvent(TurnEvent.SteerApplied(texts))
     }
 

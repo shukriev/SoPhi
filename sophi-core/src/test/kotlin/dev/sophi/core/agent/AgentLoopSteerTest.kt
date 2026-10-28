@@ -74,6 +74,18 @@ class AgentLoopSteerTest : FunSpec({
         events.filterIsInstance<TurnEvent.SteerApplied>().single().texts shouldBe listOf("use port 8080")
     }
 
+    test("several steers queued in one round go to the model as one user message") {
+        val inbox = TurnInbox()
+        val (provider, sm) = scripted(use(), text("done"))
+        loop(provider, sm) { inbox.steer("use port 8080"); inbox.steer("and log it") }
+            .turn(AgentSession(id = "s"), "go", config, inbox = inbox)
+
+        requests[1].messages.takeLast(2).map { it.role } shouldBe listOf(MessageRole.TOOL, MessageRole.USER)
+        requests[1].messages.last().content shouldBe "use port 8080\n\nand log it"
+        saved.single().branch().filter { it.metadata["steer"] == "true" }.map { it.content } shouldBe
+            listOf("use port 8080", "and log it")
+    }
+
     test("steers are saved with the turn, in order, and replay next turn") {
         val inbox = TurnInbox()
         val (provider, sm) = scripted(use(), text("done"))

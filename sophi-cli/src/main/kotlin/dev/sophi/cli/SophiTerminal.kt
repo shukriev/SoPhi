@@ -29,8 +29,9 @@ private class ContinuationParser : DefaultParser() {
 }
 
 /**
- * Keys read this soon after a confirmation appears are dropped, not taken as its answer: someone
- * mid-way through typing a steer would otherwise approve a call with `y` or write an allow rule with `a`.
+ * A confirmation takes no answer until this long has passed with no key: someone mid-way through
+ * typing a steer would otherwise approve a call with `y` or write an allow rule with `a`. Each
+ * dropped key restarts the wait.
  */
 const val CONFIRMATION_GRACE_MS = 500L
 
@@ -127,7 +128,8 @@ class SophiTerminal(
                     val action = if (toggle) KeyAction.Ignore else decoder.decode(ch, read)
                     if (confirmation != null) {
                         // pasted text and the paste markers never answer a confirmation; nor does the toggle key
-                        if (pasted || toggle || now() - confirmationSince < CONFIRMATION_GRACE_MS) continue
+                        val t = now()
+                        if (pasted || toggle || t - confirmationSince < CONFIRMATION_GRACE_MS) { confirmationSince = t; continue }
                         answer(confirmation, action)
                         continue
                     }
@@ -139,7 +141,10 @@ class SophiTerminal(
                     continue
                 }
                 if (confirmation != null) {
-                    if (ch >= 0 && now() - confirmationSince < CONFIRMATION_GRACE_MS) continue
+                    if (ch >= 0) {
+                        val t = now()
+                        if (t - confirmationSince < CONFIRMATION_GRACE_MS) { confirmationSince = t; continue }
+                    }
                     when (ch) {
                         'y'.code, 'Y'.code -> confirmation.complete(ConfirmAnswer.YES)
                         'a'.code, 'A'.code -> if (alwaysOffered) confirmation.complete(ConfirmAnswer.ALWAYS)

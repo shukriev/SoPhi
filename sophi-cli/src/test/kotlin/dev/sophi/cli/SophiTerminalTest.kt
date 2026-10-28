@@ -97,6 +97,16 @@ class SophiTerminalTest : FunSpec({
         controlKeysJob.cancel()
     }
 
+    // The wait restarts on every key, so someone still typing well past the first window can't answer it.
+    test("keys keep the confirmation closed while typing goes on") {
+        for (onKey in listOf<(suspend (TurnKey) -> Unit)?>(null, {})) {
+            val sophi = SophiTerminal(terminalWithInput("aay"), now = clock(0, 300, 600, 600 + CONFIRMATION_GRACE_MS))
+            val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}, onKey = onKey) }
+            sophi.awaitConfirmation(true) shouldBe ConfirmAnswer.YES
+            controlKeysJob.cancel()
+        }
+    }
+
     // A paste arriving while a confirmation is up must not answer it: its markers start with ESC
     // (which would mean "no") and the pasted text may hold an answer key.
     test("a paste during a confirmation doesn't answer it") {
