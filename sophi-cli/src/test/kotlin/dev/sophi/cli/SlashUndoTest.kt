@@ -25,7 +25,7 @@ class SlashUndoTest : FunSpec({
     fun AgentSession.round(vararg moves: FileMove) =
         append(EntryRole.ASSISTANT, "", mapOf("toolCalls" to "[]", "moves" to Json.encodeToString(moves.toList())))
 
-    class Fixture(val dir: Path, val session: AgentSession, val handler: SlashHandler, val original: Path, val moved: Path)
+    class Fixture(val dir: Path, val session: AgentSession, val handler: SlashHandler, val original: Path, val moved: Path, val sm: FileSessionManager)
 
     fun fixture(vararg answers: Boolean, withRestorer: Boolean = true): Fixture {
         val dir = tempdir().toPath()
@@ -41,7 +41,7 @@ class SlashUndoTest : FunSpec({
             fileRestorer = if (withRestorer) FileRestorer(null) else null,
             input = ScriptedInputSource(emptyList(), answers.toList())
         ) { output.add(it) }
-        return Fixture(dir, session, handler, original, moved)
+        return Fixture(dir, session, handler, original, moved, sm)
     }
 
     test("/undo shows the plan and restores on yes") {
@@ -101,5 +101,13 @@ class SlashUndoTest : FunSpec({
         output.first() shouldBe "Checked out entry $first"
         output.last() shouldBe "Restored."
         f.original.exists() shouldBe true
+    }
+
+    test("/checkout --files keeps the new tip after a resume even when the restore is declined") {
+        val f = fixture(false)
+        val first = f.session.branch().first().id
+        f.handler.handle("/checkout $first --files", f.session)
+        output.last() shouldBe "Left as is."
+        f.sm.load("s1").tip?.id shouldBe first
     }
 })

@@ -110,6 +110,19 @@ class SlashCommandsTest : FunSpec({
         output[0] shouldBe "Checked out entry $targetId"
     }
 
+    test("/checkout saves the session so a resume lands on the checked-out entry") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val session = makeSession(pairs = 2)
+        handler.handle("/checkout ${session.branch().first().id}", session)
+        verify(exactly = 1) { sessionManager.save(session) }
+    }
+
+    test("/checkout with a bad id saves nothing") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        handler.handle("/checkout nope", makeSession(pairs = 1))
+        verify(exactly = 0) { sessionManager.save(any()) }
+    }
+
     test("/checkout with no argument shows usage message") {
         val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
         handler.handle("/checkout", AgentSession(id = "s1"))
@@ -303,6 +316,16 @@ class SlashCommandsTest : FunSpec({
         session.tip?.role shouldBe EntryRole.TOOL_RESULT
         session.tip?.content shouldBe "Follow these steps."
         output shouldBe listOf("Injected skill: code-review")
+    }
+
+    test("/skill <id> saves the session, so exiting right after keeps the skill") {
+        val dir = tempdir().toPath()
+        dir.resolve("code-review.md").writeText("---\ntitle: Code Review\n---\n\nFollow these steps.")
+        val registry = SkillRegistry.load(dir.resolve("no-global"), dir)
+        val handler = SlashHandler(sessionManager, null, config, skillRegistry = registry) { output.add(it) }
+        val session = AgentSession(id = "s1")
+        handler.handle("/skill code-review", session)
+        verify(exactly = 1) { sessionManager.save(session) }
     }
 
     test("/skill <unknown-id> reports an error without touching the session") {
