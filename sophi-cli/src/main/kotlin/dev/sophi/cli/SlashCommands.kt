@@ -84,6 +84,7 @@ class SlashHandler(
                 } else {
                     try {
                         session.checkout(arg)
+                        sessionManager.save(session) // the tip is saved, so a resume lands here
                         output("Checked out entry $arg")
                     } catch (e: Exception) {
                         output("Error: ${e.message}")
@@ -190,6 +191,7 @@ class SlashHandler(
                 // The plan has to come first: after the checkout the later rounds are off the branch.
                 val plan = branch.getOrNull(at + 1)?.takeIf { at >= 0 }?.let { restorer.plan(current, it.id) }
                 current.checkout(id)
+                sessionManager.save(current)
                 output("Checked out entry $id")
                 if (plan != null) confirmAndApply(restorer, current, plan)
             } catch (e: Exception) {

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Session files are append-only: a save appends only new or changed entries instead of rewriting the file, so its cost no longer grows with the session. A crash mid-write loses at most the last, partial line. The checked-out tip is saved in `.meta.json`, and `/checkout` saves it, so resuming returns to that entry. Two copies of one session saved in turn no longer drop each other's entries. Old session files load as before.
 - **Breaking:** local models are the default. `--provider` defaults to `local`, which finds llama.cpp (:8080), LM Studio (:1234) or Ollama (:11434), picks a model the server has loaded, and reads the context window it was loaded with. No surface defaults to a Claude model any more:
   - `--model` is required with `--provider claude` and `--provider openai-compat`;
   - a `--base-url` user now also passes `--model`, or switches to `--provider local`, which reads the model from the server;

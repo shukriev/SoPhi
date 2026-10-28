@@ -213,6 +213,8 @@ Known limits of permission rules:
 - sophi-web doesn't apply rules yet.
 - Rules are not a sandbox: the real containment is a sandboxed backend.
 
+**Sessions.** Each session is a JSONL file under `~/.sophi/sessions` that only grows: a save appends the entries that are new or changed, so saving a long session costs the same as a short one. A crash mid-write loses at most the last, partial line. The checked-out entry is saved too, so `--session <id>` resumes where `/checkout` left you, not at the last entry.
+
 **Undo.** Before each tool round that changes files, the CLI snapshots the workspace into a shadow git repo under `~/.sophi/checkpoints` (your own repo is untouched). `/undo` and `/revert` show what they would restore and ask first. `move_file` and `delete_file` are undoable too: deletes go to `~/.sophi/trash`. Bash commands that reach outside the workspace can't be undone and are listed as warnings. In the SDK, `RuntimeBuilder.checkpoints()` (needs `builtinTools`) turns snapshots on and `SophiRuntime.fileRestorer` does the restoring.
 
 The terminal redraws in place while a turn streams, instead of scrolling

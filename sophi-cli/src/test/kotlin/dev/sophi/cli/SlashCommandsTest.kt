@@ -110,6 +110,19 @@ class SlashCommandsTest : FunSpec({
         output[0] shouldBe "Checked out entry $targetId"
     }
 
+    test("/checkout saves the session so a resume lands on the checked-out entry") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val session = makeSession(pairs = 2)
+        handler.handle("/checkout ${session.branch().first().id}", session)
+        verify(exactly = 1) { sessionManager.save(session) }
+    }
+
+    test("/checkout with a bad id saves nothing") {
+        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        handler.handle("/checkout nope", makeSession(pairs = 1))
+        verify(exactly = 0) { sessionManager.save(any()) }
+    }
+
     test("/checkout with no argument shows usage message") {
         val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
         handler.handle("/checkout", AgentSession(id = "s1"))
