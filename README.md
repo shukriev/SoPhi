@@ -153,8 +153,13 @@ In-session slash commands:
 /bad [reason]   rate the last reply as bad, optionally saying why
 /schedule [list|log|pause <id>|resume <id>|remove <id>]   manage scheduled/goal tasks
 /goal [--check "<command>"] <task>   explicit multi-step planning, with a preview before running
+/plan <goal>   break a goal into steps and run them one by one
+/calendar [list [days]|get <id>|create <description>|delete <id>|calendars]   manage calendar events (macOS)
+/skill [list|<id>]   list installed skills, or load one into the session
+/auto       toggle auto mode: low-risk tool calls run without asking (not under --god-mode)
+/permissions [trust]   list permission rules; trust activates the project's allow rules
 /feedback [list|delete <id>]   inspect and manage explicit feedback records
-/lessons [list|archive <id>]   inspect and manage learned lessons
+/lessons [list|archive <id>|forget <id>]   inspect and manage learned lessons
 /memory [list|show <id>|threads|profile|why]   browse Jane's Theory memory (needs --memory)
 exit / quit  end the session
 ```

@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `onEvent: (TurnEvent)` seam is unchanged (ADR-025)
 
 ### Fixed
+- Steering: a confirmation now waits until you stop typing for half a second, not just half a second after it appeared, so a steer typed past that point can't answer it
+- Steering: several steers queued in one round go to the model as one user message; strict chat templates such as Gemma's rejected the request before
 - Learning: a look-back at the same session no longer re-records a correction it already recorded, so one correction can't corroborate a preference lesson on its own
 - Learning: ambient turns no longer write `session-outcomes.jsonl`/`tool-events.jsonl` lines or keep a per-session counter that never ended
 - `sophi-cli`: a session started before `sophi-companion` never appeared in the companion's Sessions tab, even after the companion started — `HubClient.connect()` was only attempted once, at CLI startup. The CLI now retries the hub connection on a timer for the life of the session (ADR-023)
