@@ -1,6 +1,9 @@
 package dev.sophi.cli
 
+import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.api.Message
+import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.AgentSession
@@ -9,6 +12,9 @@ import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.extensions.AgentHook
+import dev.sophi.extensions.HookContext
+import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.SophiPlugin
 import dev.sophi.learning.JsonlLog
 import dev.sophi.sdk.Sophi
@@ -24,13 +30,22 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val TEST_CONTEXT_WINDOW = 100_000
+
+private fun keys(text: String) = text.map { TurnKey.Text(it) }.toTypedArray()
+
+/** Waits until the live region has drawn [text], i.e. the typed keys reached the editor. */
+private suspend fun StringBuilder.awaitDrawn(text: String) = withTimeout(5000) {
+    while (text !in this@awaitDrawn.toString()) delay(10)
+}
 
 class TurnControllerTest : FunSpec({
     val provider = mockk<LLMProvider>()
@@ -210,5 +225,111 @@ class TurnControllerTest : FunSpec({
 
         result shouldBe session
         rendered shouldBe listOf(ResponseRenderer.renderText("") + " [error: stream error]")
+    }
+
+    test("typing Enter during a turn steers it and prints the steer") {
+        val toolStarted = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(object : Tool {
+            override val name = "wait"
+            override val description = "Waits"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String { toolStarted.complete(Unit); gate.await(); return "ok" }
+        })
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            requests += firstArg<CompletionRequest>()
+            if (requests.size == 1) flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "wait", "{}"))))
+            else flowOf(StreamEvent.Content("done"))
+        }
+        val input = ScriptedInputSource(emptyList())
+        val screen = StringBuilder()
+        val rendered = mutableListOf<String>()
+        val controller = TurnController(runtimeFor(registry = toolRegistry), input, LiveRegion(screen) { 80 }) { rendered.add(it) }
+
+        coroutineScope {
+            val turn = async { controller.runTurn(AgentSession(id = "s1"), "start") }
+            toolStarted.await()
+            input.type(*keys("use X"), TurnKey.Enter)
+            screen.awaitDrawn("↳ use X")
+            gate.complete(Unit)
+            turn.await()
+        }
+
+        requests.last().messages.last() shouldBe Message(MessageRole.USER, "use X")
+        rendered shouldBe listOf(
+            ResponseRenderer.renderToolCall("wait", "{}", "ok"),
+            "You: use X",
+            ResponseRenderer.renderText("done")
+        )
+    }
+
+    test("Alt+Enter runs the follow-up after the answer; both answers are printed separately") {
+        val input = ScriptedInputSource(emptyList())
+        val screen = StringBuilder()
+        var round = 0
+        every { provider.stream(any()) } answers {
+            round++
+            if (round == 1) flow {
+                emit(StreamEvent.Content("first"))
+                input.type(*keys("more"), TurnKey.AltEnter)
+                screen.awaitDrawn("⏎ more (next turn)")
+            } else flowOf(StreamEvent.Content("second"))
+        }
+        val rendered = mutableListOf<String>()
+        val controller = TurnController(runtimeFor(), input, LiveRegion(screen) { 80 }) { rendered.add(it) }
+
+        controller.runTurn(AgentSession(id = "s1"), "hi")
+
+        rendered shouldBe listOf(
+            ResponseRenderer.renderText("first"),
+            "You: more",
+            ResponseRenderer.renderText("second")
+        )
+    }
+
+    test("ESC returns unsent text to the editor") {
+        val input = ScriptedInputSource(emptyList())
+        val screen = StringBuilder()
+        every { provider.stream(any()) } returns flow {
+            emit(StreamEvent.Content("partial"))
+            input.type(*keys("steer text"), TurnKey.Enter, *keys("follow text"), TurnKey.AltEnter, *keys("half"))
+            screen.awaitDrawn("› half")
+            input.signalEsc()
+            delay(Long.MAX_VALUE)
+        }
+        val controller = TurnController(runtimeFor(), input, LiveRegion(screen) { 80 }) {}
+
+        controller.runTurn(AgentSession(id = "s1"), "hi")
+
+        controller.takeDraft() shouldBe "steer text\nfollow text\nhalf"
+        controller.takeDraft() shouldBe ""
+    }
+
+    // ESC while a follow-up's BEFORE_TURN hook runs: the runtime puts it back in the inbox as the
+    // cancelled turn settles, so the draft must be taken after that, not right after the select.
+    test("ESC before a follow-up's turn starts returns it to the editor") {
+        val input = ScriptedInputSource(emptyList())
+        val screen = StringBuilder()
+        val stall = object : SophiPlugin {
+            override val name = "stall"
+            override fun hooks() = listOf(object : AgentHook {
+                override val point = HookPoint.BEFORE_TURN
+                override suspend fun invoke(context: HookContext) {
+                    if (context.userInput == "more") { input.signalEsc(); awaitCancellation() }
+                }
+            })
+        }
+        every { provider.stream(any()) } returns flow {
+            emit(StreamEvent.Content("first"))
+            input.type(*keys("more"), TurnKey.AltEnter)
+            screen.awaitDrawn("⏎ more (next turn)")
+        }
+        val controller = TurnController(runtimeFor(extraPlugin = stall), input, LiveRegion(screen) { 80 }) {}
+
+        controller.runTurn(AgentSession(id = "s1"), "hi")
+
+        controller.takeDraft() shouldBe "more"
     }
 })

@@ -18,6 +18,11 @@ class SophiTerminalTest : FunSpec({
     fun terminalWithInput(input: String): Terminal =
         DumbTerminal(ByteArrayInputStream(input.toByteArray()), ByteArrayOutputStream())
 
+    /** A clock that returns [times] in order, then repeats the last one. */
+    fun clock(vararg times: Long): () -> Long { var i = 0; return { times[minOf(i++, times.lastIndex)] } }
+    // Each key arrives well after the confirmation appeared, so none falls in the grace window.
+    fun pastGrace(): () -> Long { var t = 0L; return { t.also { t += CONFIRMATION_GRACE_MS } } }
+
     test("readLine() returns a single submitted line") {
         val sophi = SophiTerminal(terminalWithInput("hello\n"))
         sophi.readLine("> ") shouldBe "hello"
@@ -44,16 +49,16 @@ class SophiTerminalTest : FunSpec({
     // one active reader loop resolves it — proven here by feeding a single 'y' byte and asserting
     // the SAME awaitControlKeys() call (not a second reader) is what delivers the answer.
     test("awaitYesNo() is resolved by the concurrently-running awaitControlKeys loop reading 'y'") {
-        val sophi = SophiTerminal(terminalWithInput("y"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val sophi = SophiTerminal(terminalWithInput("y"), now = pastGrace())
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         val answer = sophi.awaitYesNo()
         answer shouldBe true
         controlKeysJob.cancel()
     }
 
     test("awaitYesNo() resolves false when the awaitControlKeys loop reads 'n'") {
-        val sophi = SophiTerminal(terminalWithInput("n"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val sophi = SophiTerminal(terminalWithInput("n"), now = pastGrace())
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         val answer = sophi.awaitYesNo()
         answer shouldBe false
         controlKeysJob.cancel()
@@ -61,8 +66,8 @@ class SophiTerminalTest : FunSpec({
 
     test("awaitYesNo() does not consume a byte that doesn't answer it, and doesn't trigger the toggle") {
         var toggled = false
-        val sophi = SophiTerminal(terminalWithInput("qy"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') { toggled = true } }
+        val sophi = SophiTerminal(terminalWithInput("qy"), now = pastGrace())
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = { toggled = true }) }
         val answer = sophi.awaitYesNo()
         answer shouldBe true
         toggled shouldBe false
@@ -70,16 +75,34 @@ class SophiTerminalTest : FunSpec({
     }
 
     test("awaitConfirmation(true) resolves ALWAYS on 'a'") {
-        val sophi = SophiTerminal(terminalWithInput("a"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val sophi = SophiTerminal(terminalWithInput("a"), now = pastGrace())
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         sophi.awaitConfirmation(true) shouldBe ConfirmAnswer.ALWAYS
         controlKeysJob.cancel()
     }
 
     test("'a' is ignored when always is not offered") {
-        val sophi = SophiTerminal(terminalWithInput("ay"))
-        val controlKeysJob = async { sophi.awaitControlKeys('T') {} }
+        val sophi = SophiTerminal(terminalWithInput("ay"), now = pastGrace())
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
         sophi.awaitConfirmation(false) shouldBe ConfirmAnswer.YES
+        controlKeysJob.cancel()
+    }
+
+    // Typing a steer when a confirmation pops up must not answer it: 'a' would write an allow
+    // rule, 'y' approve a destructive call. Keys inside the grace window are dropped.
+    test("a key typed within the grace window after a confirmation appears does not answer it") {
+        val sophi = SophiTerminal(terminalWithInput("ay"), now = clock(0, 10, CONFIRMATION_GRACE_MS + 10))
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}) }
+        sophi.awaitConfirmation(true) shouldBe ConfirmAnswer.YES
+        controlKeysJob.cancel()
+    }
+
+    // A paste arriving while a confirmation is up must not answer it: its markers start with ESC
+    // (which would mean "no") and the pasted text may hold an answer key.
+    test("a paste during a confirmation doesn't answer it") {
+        val sophi = SophiTerminal(terminalWithInput("\u001b[200~n a\u001b[201~y"), now = pastGrace())
+        val controlKeysJob = async { sophi.awaitControlKeys('T', onToggle = {}, onKey = {}) }
+        sophi.awaitConfirmation(true) shouldBe ConfirmAnswer.YES
         controlKeysJob.cancel()
     }
 

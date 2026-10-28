@@ -13,6 +13,10 @@ import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import dev.sophi.core.session.AgentSession
+import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionManager
+import dev.sophi.extensions.HookContext
 import kotlin.io.path.createTempDirectory
 
 class SessionTitlerTest : FunSpec({
@@ -71,5 +75,22 @@ class SessionTitlerTest : FunSpec({
         runBlocking { rt.turn(id, "hello") }
         Thread.sleep(300)
         rt.sessionManager.load(id).title shouldBe null
+    }
+
+    test("a steer in the first turn does not stop the session being titled") {
+        val session = AgentSession(id = "s")
+        session.append(EntryRole.USER, "Plan the migration")
+        session.append(EntryRole.USER, "use port 8080", mapOf("steer" to "true"))
+        session.append(EntryRole.ASSISTANT, "Here's the plan.")
+        val sm = mockk<SessionManager>()
+        every { sm.load("s") } returns session
+        every { sm.rename("s", any()) } returns Unit
+        val p = provider { LLMResponse.Text("Migration plan", TokenUsage(1, 1)) }
+        val titled = CompletableDeferred<String>()
+        val plugin = SessionTitlePlugin(p, "m", sm, { _, t -> titled.complete(t) })
+        runBlocking {
+            plugin.hooks().single().invoke(HookContext("s", userInput = "Plan the migration", assistantReply = "Here's the plan."))
+            withTimeout(5_000) { titled.await() } shouldBe "Migration plan"
+        }
     }
 })

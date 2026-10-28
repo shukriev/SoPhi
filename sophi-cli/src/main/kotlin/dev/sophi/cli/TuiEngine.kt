@@ -15,6 +15,10 @@ class TuiEngine(
     // is not lost — it's simply picked up the next time this loop is idle here.
     private val hubMessages: ReceiveChannel<String>? = null
 ) {
+    // Unsent text from the last turn, kept until the user's own prompt takes it: a companion
+    // message winning the prompt race must not drop it.
+    private var draft = ""
+
     private companion object {
         val EXIT_COMMANDS = setOf("exit", "quit")
     }
@@ -35,12 +39,14 @@ class TuiEngine(
     }
 
     private suspend fun nextLine(): String? {
-        val hub = hubMessages ?: return input.readLine()
+        // Whatever the user typed during the last turn and never sent comes back at the prompt.
+        draft = listOf(draft, turnController.takeDraft()).filter { it.isNotEmpty() }.joinToString("\n")
+        val hub = hubMessages ?: return input.readLine(draft).also { draft = "" }
         return coroutineScope {
-            val local = async { input.readLine() }
+            val local = async { input.readLine(draft) }
             val remote = async { hub.receive() }
             select<String?> {
-                local.onAwait { line -> remote.cancel(); line }
+                local.onAwait { line -> remote.cancel(); draft = ""; line }
                 remote.onAwait { text -> local.cancel(); text }
             }
         }

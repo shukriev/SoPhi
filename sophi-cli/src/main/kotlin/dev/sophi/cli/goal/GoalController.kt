@@ -99,7 +99,7 @@ class GoalController(
 
         val outcome: Result<PlanOutcome>? = undoableRound(session, checkpoints, "goal") { coroutineScope {
             val runDeferred = async { runCatching { runner.run(session.id, args.task, stopCondition, initialPlan = plan) } }
-            val escDeferred = async { input.awaitControlKeys(tokenViewKey) { renderer.toggleTokenView() } }
+            val escDeferred = async { input.awaitControlKeys(tokenViewKey, onToggle = { renderer.toggleTokenView() }) }
             select {
                 runDeferred.onAwait { result -> escDeferred.cancel(); result }
                 escDeferred.onAwait { runDeferred.cancel(); null }

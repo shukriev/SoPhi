@@ -3,6 +3,7 @@ package dev.sophi.cli
 import dev.sophi.cli.streaming.StreamingTurnPresenter
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.TurnInbox
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionIdContext
 import kotlinx.coroutines.async
@@ -21,18 +22,45 @@ class TurnController(
     private val onEvent: suspend (TurnEvent) -> Unit = {},
     // Keyboard shortcut that toggles the live region between the spinner+stats view and the
     // raw token stream. Default view is the spinner; press again to switch back.
-    private val tokenViewKey: Char = 'T',
+    private val tokenViewKey: Char = DEFAULT_TOKEN_VIEW_KEY,
     // When a tool call finishes and generation resumes, reset token view back to the spinner
     // rather than carrying the toggle across the tool-call boundary.
     private val autoExitTokenView: Boolean = true,
     private val output: (String) -> Unit
 ) {
-    suspend fun runTurn(session: AgentSession, userInput: String): AgentSession =
-        coroutineScope {
-            val presenter = StreamingTurnPresenter(autoExitTokenView)
+    private var draft = ""
 
-            fun render() = liveRegion.update(presenter.renderFrame())
+    /** Text the user typed during the last turn that never reached the model; "" once read. */
+    fun takeDraft(): String = draft.also { draft = "" }
+
+    suspend fun runTurn(session: AgentSession, userInput: String): AgentSession {
+        val inbox = TurnInbox()
+        val editor = SteerEditor(inbox)
+        // The draft is taken once coroutineScope returns, i.e. after a cancelled turn has settled:
+        // a follow-up cancelled before its loop started is put back in the inbox only then.
+        return coroutineScope {
+            var presenter = StreamingTurnPresenter(autoExitTokenView)
+
+            fun render() {
+                val queue = editor.render()
+                liveRegion.update(presenter.renderFrame() + if (queue.isEmpty()) "" else "\n" + queue)
+            }
             render()
+
+            fun outputReasoningIfAny() {
+                presenter.reasoningText()?.let { output(ResponseRenderer.renderReasoning(it)) }
+            }
+
+            // A steer or follow-up starts a new stretch of the reply: settle what streamed so far,
+            // print the user's words where they landed in the conversation, then stream afresh.
+            fun startSegment(texts: List<String>) {
+                liveRegion.clear()
+                outputReasoningIfAny()
+                presenter.finalText().takeIf { it.isNotEmpty() }?.let { output(ResponseRenderer.renderText(it)) }
+                texts.forEach { output("You: $it") }
+                presenter = StreamingTurnPresenter(autoExitTokenView)
+                render()
+            }
 
             // Sole writer to liveRegion while a phase is active: ticks on a fixed cadence instead of
             // once per token, so a fast token stream doesn't repaint the terminal hundreds of times.
@@ -48,17 +76,21 @@ class TurnController(
             // animationJob never touch it.
             val turnDeferred = async(SessionIdContext(session.id)) {
                 try {
-                    runtime.streamTurn(session, userInput) { event ->
+                    runtime.streamTurn(session, userInput, inbox) { event ->
                         onEvent(event)
-                        when (val rendered = presenter.feed(event)) {
-                            is StreamingTurnPresenter.Rendered.Cleared -> liveRegion.clear()
-                            is StreamingTurnPresenter.Rendered.Redraw -> render()
-                            is StreamingTurnPresenter.Rendered.ToolLine -> {
-                                liveRegion.clear()
-                                output(rendered.text)
-                                render()
+                        when (event) {
+                            is TurnEvent.SteerApplied -> startSegment(event.texts)
+                            is TurnEvent.FollowUpStarted -> startSegment(listOf(event.text))
+                            else -> when (val rendered = presenter.feed(event)) {
+                                is StreamingTurnPresenter.Rendered.Cleared -> liveRegion.clear()
+                                is StreamingTurnPresenter.Rendered.Redraw -> render()
+                                is StreamingTurnPresenter.Rendered.ToolLine -> {
+                                    liveRegion.clear()
+                                    output(rendered.text)
+                                    render()
+                                }
+                                null -> Unit
                             }
-                            null -> Unit
                         }
                     } to null
                 } catch (e: Exception) {
@@ -66,14 +98,13 @@ class TurnController(
                 }
             }
             val controlKeysDeferred = async {
-                input.awaitControlKeys(tokenViewKey) {
+                input.awaitControlKeys(tokenViewKey, onToggle = {
                     presenter.toggleTokenView()
                     render()
-                }
-            }
-
-            fun outputReasoningIfAny() {
-                presenter.reasoningText()?.let { output(ResponseRenderer.renderReasoning(it)) }
+                }, onKey = {
+                    editor.key(it)
+                    if (!presenter.confirmationPending) render()
+                })
             }
 
             select<AgentSession> {
@@ -101,5 +132,6 @@ class TurnController(
                     session
                 }
             }
-        }
+        }.also { draft = editor.takeDraft() }
+    }
 }

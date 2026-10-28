@@ -19,4 +19,5 @@ fun TurnEvent.toHubEvent(sessionId: String, timestamp: Long = System.currentTime
     is TurnEvent.ToolCallFinished -> HubEvent.ToolCallFinished(sessionId, name, result, isError, timestamp)
     is TurnEvent.ConfirmationStarted -> null
     TurnEvent.ConfirmationFinished -> null
+    is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted -> null
 }

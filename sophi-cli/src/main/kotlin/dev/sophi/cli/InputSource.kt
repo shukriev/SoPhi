@@ -3,15 +3,15 @@ package dev.sophi.cli
 enum class ConfirmAnswer { YES, NO, ALWAYS }
 
 interface InputSource {
-    suspend fun readLine(): String?
+    suspend fun readLine(prefill: String = ""): String?
     suspend fun awaitEsc()
 
     /**
      * Watches for [toggleKey] presses (invoking [onToggle] for each one) and returns when ESC
-     * is pressed. A single reader loop handles both keys so callers never run two concurrent
+     * is pressed. When [onKey] is set, other typed keys are decoded and delivered to it (and a lone ESC still returns). A single reader loop handles both keys so callers never run two concurrent
      * raw-mode readers against the same terminal.
      */
-    suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit)
+    suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)? = null)
 
     /**
      * Asks whichever reader loop currently owns the terminal (see [awaitControlKeys]) to treat

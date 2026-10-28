@@ -215,6 +215,7 @@ line by line:
 
 - **Live output** — streamed tokens and tool-call status update a single in-place region.
 - **ESC to interrupt** — cancel a turn mid-stream; the partial reply is kept, tagged `[interrupted]`, and the prompt returns immediately.
+- **Type while it works** — Enter sends a steer Sophi reads before its next step; Alt+Enter queues a follow-up for after it answers; ESC puts unsent text back at the prompt. Ctrl+T toggles the token view. A multi-line paste stays one message. Steering from the companion or the web comes later.
 - **Multi-line input** — end a line with `\` to continue on the next line, same convention as bash.
 - **Non-interactive fallback** — piped stdin or non-TTY output drops to plain line-mode automatically, so scripted usage still works.
 

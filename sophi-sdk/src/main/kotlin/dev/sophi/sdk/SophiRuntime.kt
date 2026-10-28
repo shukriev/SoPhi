@@ -6,6 +6,7 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinition
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.TurnInbox
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.session.AgentSession
@@ -101,7 +102,7 @@ class SophiRuntime internal constructor(
     suspend fun turn(sessionId: String, input: String): String = streamTurn(sessionId, input) { }
 
     suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String =
-        streamTurn(sessionManager.load(sessionId), input, onEvent).lastAssistantReply()
+        streamTurn(sessionManager.load(sessionId), input, onEvent = onEvent).lastAssistantReply()
 
     /**
      * Runs a turn against an already-loaded [session] and returns the updated one. Prefer this
@@ -111,7 +112,33 @@ class SophiRuntime internal constructor(
     suspend fun streamTurn(
         session: AgentSession,
         input: String,
+        inbox: TurnInbox? = null,
         onEvent: suspend (TurnEvent) -> Unit
+    ): AgentSession {
+        var current = oneTurn(session, input, inbox, onEvent)
+        // Follow-ups (and steers that arrived too late for the loop) each get a turn of their own.
+        // Cancellation and errors propagate out of oneTurn, leaving the inbox as it is.
+        while (inbox != null) {
+            val next = inbox.drainSteers().takeIf { it.isNotEmpty() }?.joinToString("\n") ?: inbox.takeFollowUp() ?: break
+            var looping = false
+            try {
+                onEvent(TurnEvent.FollowUpStarted(next))
+                current = oneTurn(current, next, inbox, onEvent) { looping = true }
+            } catch (e: CancellationException) {
+                // Cancelled before AgentLoop started (hooks, recall): nothing saved it, so it goes back.
+                if (!looping) inbox.putBack(next)
+                throw e
+            }
+        }
+        return current
+    }
+
+    private suspend fun oneTurn(
+        session: AgentSession,
+        input: String,
+        inbox: TurnInbox?,
+        onEvent: suspend (TurnEvent) -> Unit,
+        onLoopStart: () -> Unit = {}
     ): AgentSession {
         pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(session.id, userInput = input))
         // BEFORE_TURN fires first so a plugin can prime state that its own contribute() then reads.
@@ -128,7 +155,8 @@ class SophiRuntime internal constructor(
         // assistantReply and the hooks that encode the exchange drop the turn.
         val partial = StringBuilder()
         return try {
-            val updated = agentLoop.streamTurn(session, input, turnConfig, preamble) { event ->
+            onLoopStart()
+            val updated = agentLoop.streamTurn(session, input, turnConfig, preamble, inbox) { event ->
                 if (event is TurnEvent.Token) partial.append(event.text)
                 bridge(event)
                 onEvent(event)

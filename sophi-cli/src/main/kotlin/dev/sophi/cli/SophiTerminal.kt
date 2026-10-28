@@ -28,7 +28,16 @@ private class ContinuationParser : DefaultParser() {
     }
 }
 
-class SophiTerminal(private val jlineTerminal: Terminal) {
+/**
+ * Keys read this soon after a confirmation appears are dropped, not taken as its answer: someone
+ * mid-way through typing a steer would otherwise approve a call with `y` or write an allow rule with `a`.
+ */
+const val CONFIRMATION_GRACE_MS = 500L
+
+class SophiTerminal(
+    private val jlineTerminal: Terminal,
+    private val now: () -> Long = System::currentTimeMillis
+) {
     private val reader: LineReader = LineReaderBuilder.builder()
         .terminal(jlineTerminal)
         .history(DefaultHistory())
@@ -41,9 +50,9 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
         .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
         .build()
 
-    fun readLine(prompt: String): String? =
+    fun readLine(prompt: String, prefill: String = ""): String? =
         try {
-            reader.readLine(prompt)
+            reader.readLine(prompt, null as Char?, prefill)
                 ?.split("\n")
                 ?.joinToString("\n") { it.removeSuffix("\\") }
         } catch (e: EndOfFileException) {
@@ -69,12 +78,14 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
     // otherwise race that loop for the same keystrokes and could starve forever.
     private val pendingConfirmation = AtomicReference<CompletableDeferred<ConfirmAnswer>?>(null)
     @Volatile private var alwaysOffered = false
+    @Volatile private var confirmationSince = 0L
 
     suspend fun awaitYesNo(): Boolean = awaitConfirmation(false) == ConfirmAnswer.YES
 
     suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer {
         val deferred = CompletableDeferred<ConfirmAnswer>()
         alwaysOffered = offerAlways
+        confirmationSince = now()
         check(pendingConfirmation.compareAndSet(null, deferred)) { "a confirmation is already pending" }
         try {
             return deferred.await()
@@ -96,16 +107,39 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
         }
     }
 
-    suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
+    suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)? = null) {
         val toggleLower = toggleKey.lowercaseChar().code
         val toggleUpper = toggleKey.uppercaseChar().code
         val previousAttributes = jlineTerminal.enterRawMode()
+        // Bracketed paste: the terminal wraps a paste in markers, so its newlines don't each send a steer.
+        if (onKey != null) setBracketedPaste(true)
         try {
             val nonBlockingReader = jlineTerminal.reader()
+            val read: suspend (Long) -> Int = { t -> withContext(Dispatchers.IO) { nonBlockingReader.read(t) } }
+            val decoder = onKey?.let { TurnKeyDecoder() }
             while (currentCoroutineContext().isActive) {
-                val ch = withContext(Dispatchers.IO) { nonBlockingReader.read(100) }
+                val ch = read(100)
                 val confirmation = pendingConfirmation.get()
+                if (decoder != null) {
+                    if (ch == -2) { decoder.idle(); continue }
+                    val pasted = decoder.pasting
+                    val toggle = !pasted && (ch == toggleLower || ch == toggleUpper)
+                    val action = if (toggle) KeyAction.Ignore else decoder.decode(ch, read)
+                    if (confirmation != null) {
+                        // pasted text and the paste markers never answer a confirmation; nor does the toggle key
+                        if (pasted || toggle || now() - confirmationSince < CONFIRMATION_GRACE_MS) continue
+                        answer(confirmation, action)
+                        continue
+                    }
+                    when {
+                        toggle -> onToggle()
+                        action == KeyAction.Interrupt -> return
+                        action is KeyAction.Key -> onKey?.invoke(action.key)
+                    }
+                    continue
+                }
                 if (confirmation != null) {
+                    if (ch >= 0 && now() - confirmationSince < CONFIRMATION_GRACE_MS) continue
                     when (ch) {
                         'y'.code, 'Y'.code -> confirmation.complete(ConfirmAnswer.YES)
                         'a'.code, 'A'.code -> if (alwaysOffered) confirmation.complete(ConfirmAnswer.ALWAYS)
@@ -114,13 +148,31 @@ class SophiTerminal(private val jlineTerminal: Terminal) {
                     continue
                 }
                 when (ch) {
-                    27 -> return
                     toggleLower, toggleUpper -> onToggle()
+                    -2 -> {}
+                    27 -> return
                 }
             }
         } finally {
+            // A paste still arriving when the turn ends lands at the next prompt, where JLine reads it as a paste too.
+            if (onKey != null) setBracketedPaste(false)
             jlineTerminal.attributes = previousAttributes
         }
+    }
+
+    private fun answer(confirmation: CompletableDeferred<ConfirmAnswer>, action: KeyAction) {
+        val ch = ((action as? KeyAction.Key)?.key as? TurnKey.Text)?.ch?.lowercaseChar()
+        when {
+            ch == 'y' -> confirmation.complete(ConfirmAnswer.YES)
+            ch == 'a' -> if (alwaysOffered) confirmation.complete(ConfirmAnswer.ALWAYS)
+            ch == 'n' || action == KeyAction.Interrupt || action == KeyAction.Key(TurnKey.Enter) ->
+                confirmation.complete(ConfirmAnswer.NO)
+        }
+    }
+
+    private fun setBracketedPaste(on: Boolean) {
+        jlineTerminal.writer().print(if (on) "\u001b[?2004h" else "\u001b[?2004l")
+        jlineTerminal.writer().flush()
     }
 
     fun close() = jlineTerminal.close()

@@ -44,7 +44,7 @@ internal class SessionTitlePlugin(
             if (context.ambient) return
             val input = context.userInput ?: return
             val session = runCatching { sessionManager.load(context.sessionId) }.getOrNull() ?: return
-            if (session.title != null || session.branch().count { it.role == EntryRole.USER } != 1) return
+            if (session.title != null || session.branch().count { it.role == EntryRole.USER && it.metadata["steer"] != "true" } != 1) return
             val reply = context.assistantReply.orEmpty()
             scope.launch {
                 val title = runCatching { generate(input, reply) }.getOrNull() ?: return@launch

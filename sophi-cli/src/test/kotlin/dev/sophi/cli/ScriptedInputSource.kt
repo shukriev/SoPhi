@@ -14,8 +14,13 @@ class ScriptedInputSource(
     private val escSignal = CompletableDeferred<Unit>()
     private val toggleSignal = Channel<Unit>(Channel.UNLIMITED)
 
-    override suspend fun readLine(): String? =
-        if (index < lines.size) lines[index++] else null
+    val prefills = mutableListOf<String>()
+    private val keySignal = Channel<TurnKey>(Channel.UNLIMITED)
+
+    override suspend fun readLine(prefill: String): String? {
+        prefills += prefill
+        return if (index < lines.size) lines[index++] else null
+    }
 
     val offers = mutableListOf<Boolean>()
     private var confirmIndex = 0
@@ -31,17 +36,22 @@ class ScriptedInputSource(
         escSignal.await()
     }
 
-    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) {
+    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)?) {
         loop@ while (true) {
             select<Boolean> {
                 escSignal.onAwait { false }
                 toggleSignal.onReceive { onToggle(); true }
+                keySignal.onReceive { onKey?.invoke(it); true }
             } || break@loop
         }
     }
 
     fun signalEsc() {
         escSignal.complete(Unit)
+    }
+
+    fun type(vararg keys: TurnKey) {
+        keys.forEach { keySignal.trySend(it) }
     }
 
     fun signalToggle() {

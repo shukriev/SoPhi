@@ -22,9 +22,9 @@ import kotlinx.coroutines.launch
 
 /** Default for callers (mainly tests) with no real terminal — never answers a confirmation. */
 internal object NoOpInputSource : InputSource {
-    override suspend fun readLine(): String? = null
+    override suspend fun readLine(prefill: String): String? = null
     override suspend fun awaitEsc() {}
-    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit) = awaitCancellation()
+    override suspend fun awaitControlKeys(toggleKey: Char, onToggle: suspend () -> Unit, onKey: (suspend (TurnKey) -> Unit)?) = awaitCancellation()
     override suspend fun awaitYesNo(): Boolean = false
 }
 
@@ -60,7 +60,7 @@ class PlanCommand(
         // ever satisfy it (see InputSource.awaitYesNo's doc). TurnController races this same
         // loop against a normal chat turn; a /plan run needs the identical loop running for its
         // whole duration, or every confirmation hangs forever no matter what the user types.
-        val controlKeysJob = launch { input.awaitControlKeys('\u0000') {} }
+        val controlKeysJob = launch { input.awaitControlKeys('\u0000', onToggle = {}) }
         try {
             val runner = buildPlanRunner(
                 provider = provider,

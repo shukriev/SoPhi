@@ -387,19 +387,35 @@ class AgentLoop(
     private fun toolChars(messages: List<Message>, from: Int): Int =
         (from until messages.size).sumOf { if (messages[it].role == MessageRole.TOOL) messages[it].content.length else 0 }
 
+    /** Moves the user's queued mid-turn messages into this turn, so the next request carries them. */
+    private suspend fun applySteers(
+        inbox: TurnInbox?, messages: MutableList<Message>, pendingRounds: MutableList<PendingEntry>,
+        onEvent: suspend (TurnEvent) -> Unit,
+    ) {
+        val texts = inbox?.drainSteers().orEmpty()
+        if (texts.isEmpty()) return
+        texts.forEach {
+            messages.add(Message(MessageRole.USER, it))
+            pendingRounds.add(PendingEntry(EntryRole.USER, it, mapOf("steer" to "true")))
+        }
+        onEvent(TurnEvent.SteerApplied(texts))
+    }
+
     suspend fun turn(
         session: AgentSession,
         userInput: String,
         config: AgentConfig,
         turnPreamble: String? = null,
+        inbox: TurnInbox? = null,
         onEvent: suspend (TurnEvent) -> Unit = {}
-    ): AgentSession = streamTurn(session, userInput, config, turnPreamble, onEvent)
+    ): AgentSession = streamTurn(session, userInput, config, turnPreamble, inbox, onEvent)
 
     suspend fun streamTurn(
         session: AgentSession,
         userInput: String,
         config: AgentConfig,
         turnPreamble: String? = null,
+        inbox: TurnInbox? = null,
         onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
         val turn = TurnProgress()
@@ -411,7 +427,7 @@ class AgentLoop(
             var scope: CoroutineContext = ActivatedTools()
             if (sink != null) scope += AuditScope(sink)
             if (rules != null) scope += PermissionScope(rules)
-            withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble) }
+            withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble, inbox) }
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
             throw e
@@ -455,6 +471,7 @@ class AgentLoop(
         onEvent: suspend (TurnEvent) -> Unit,
         turn: TurnProgress,
         turnPreamble: String? = null,
+        inbox: TurnInbox? = null,
     ): AgentSession {
         val messages = PromptBuilder.build(session.branch()).toMutableList()
         // Volatile context (hints, recall) rides on this turn's request only: prefixed to the user
@@ -523,6 +540,13 @@ class AgentLoop(
                         if (truncated) TurnStopReason.OutputTruncated else TurnStopReason.EmptyResponse,
                         onEvent
                     )
+                }
+                if (inbox != null && inbox.snapshot().any { !it.followUp }) {
+                    val reply = contentBuf.toString()
+                    messages.add(Message(MessageRole.ASSISTANT, reply))
+                    pendingRounds.add(PendingEntry(EntryRole.ASSISTANT, reply, emptyMap()))
+                    applySteers(inbox, messages, pendingRounds, onEvent)
+                    continue
                 }
                 // "I'll open Gmail now." with no tool call ends the turn having done nothing. One
                 // nudge per turn; a second announcement is taken as the answer.
@@ -689,6 +713,7 @@ class AgentLoop(
                 ))
             }
             toolRound++
+            applySteers(inbox, messages, pendingRounds, onEvent)
 
             val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
             if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
