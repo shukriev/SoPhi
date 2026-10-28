@@ -1,5 +1,9 @@
 package dev.sophi.cli
 
+import dev.sophi.core.tools.DEFAULT_DOCKER_IMAGE
+import dev.sophi.core.tools.SandboxMode
+import com.github.ajalt.clikt.parameters.types.choice
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.options.default
@@ -62,7 +66,11 @@ internal fun chooseEmbedding(
         EmbeddingChoice(resolved.embeddingModel, resolved.baseUrl, dimensions ?: 768)
     else EmbeddingChoice(model, baseUrl, dimensions ?: 1536)
 
-class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness", invokeWithoutSubcommand = true) {
+class SophiCli(
+    private val settingsFile: Path = DEFAULT_SETTINGS_FILE
+) : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness", invokeWithoutSubcommand = true) {
+    private val settings = CliSettingsStore(settingsFile) { System.err.println(TextColors.yellow(it)) }
+    init { readSettingsFrom(settings) }
 
     private val sessionId: String? by option(
         "--session", "-s",
@@ -152,6 +160,20 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
         help = "Port a running sophi-companion's hub listens on. This session registers with " +
             "it automatically if reachable; unreachable is silent, not an error."
     ).int().default(8765)
+    private val sandboxMode: String by option(
+        "--sandbox",
+        help = "Where bash runs: off (default), seatbelt (macOS sandbox: writes only to the workspace, temp " +
+            "and tool caches) or docker (a locked-down container sharing only the workspace). Change it " +
+            "mid-session with /settings."
+    ).choice("off", "seatbelt", "docker").default("off")
+    private val network: Boolean by option(
+        "--network",
+        help = "Let sandboxed bash use the network (default on; --no-network blocks it). No effect with --sandbox off."
+    ).flag("--no-network", default = true)
+    private val dockerImage: String by option(
+        "--docker-image",
+        help = "Image for --sandbox docker (default $DEFAULT_DOCKER_IMAGE: Debian with git, curl and ssh)."
+    ).default(DEFAULT_DOCKER_IMAGE)
     private val noRemote: Boolean by option(
         "--no-remote",
         help = "Do not register this session with a running companion's hub — stays fully " +
@@ -237,6 +259,15 @@ class SophiCli : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent har
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
                 "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions\n"
         )
+        cli.runtime.bashSandbox?.let { sb ->
+            val mode = SandboxMode.valueOf(sandboxMode.uppercase())
+            if (mode == SandboxMode.DOCKER) mordantTerminal.println("Starting a container (the first run pulls the image)…")
+            sb.set(mode, network, dockerImage)?.let { reason ->
+                sb.set(SandboxMode.OFF, network, dockerImage) // kept, so a later switch uses them
+                mordantTerminal.println(TextColors.yellow("sandbox: $reason — bash runs unsandboxed"))
+            }
+            if (sb.mode != SandboxMode.OFF) mordantTerminal.println(TextColors.cyan(sandboxStatus(sb)))
+        }
         if (godMode) {
             if (autoMode) {
                 mordantTerminal.println(
