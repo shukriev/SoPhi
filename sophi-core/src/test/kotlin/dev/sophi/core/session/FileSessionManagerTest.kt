@@ -360,4 +360,36 @@ class FileSessionManagerTest : FunSpec({
         manager.load(session.id).branch().map { it.id } shouldBe listOf("sum", r.id)
         manager.list().single { it.id == session.id }.entryCount shouldBe 3
     }
+
+    test("a crash that cuts a line inside a multi-byte character still loads, lists and saves") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "héllo 🎉")
+        manager.save(session)
+        val file = sessionsDir.resolve("${session.id}.jsonl")
+        val torn = "{\"id\":\"half\",\"content\":\"🎉".toByteArray(Charsets.UTF_8).let { it.copyOf(it.size - 2) }
+        Files.write(file, torn, StandardOpenOption.APPEND)
+        manager.load(session.id).entries.map { it.content } shouldBe listOf("héllo 🎉")
+        manager.list().single().entryCount shouldBe 1
+        val fresh = FileSessionManager(sessionsDir)
+        val reloaded = fresh.load(session.id).also { it.append(EntryRole.ASSISTANT, "ok") }
+        fresh.save(reloaded)
+        manager.load(session.id).entries.map { it.content } shouldBe listOf("héllo 🎉", "ok")
+    }
+
+    test("with no usable tip, a compacted session resumes at its newest leaf, not the summary") {
+        val session = manager.create()
+        session.append(EntryRole.USER, "q")
+        session.append(EntryRole.ASSISTANT, "a")
+        val q2 = session.append(EntryRole.USER, "q2")
+        val tip = session.append(EntryRole.ASSISTANT, "a2")
+        manager.save(session)
+        val later = tip.timestamp + 1
+        val sum = SessionEntry("sum", null, EntryRole.USER, "summary", later, mapOf("_compacted" to "true"))
+        val ack = SessionEntry("ack", "sum", EntryRole.ASSISTANT, "ok", later, mapOf("_compacted" to "true"))
+        val rewritten = session.entries.map { if (it.id == q2.id) it.copy(parentId = "ack") else it }
+        manager.save(AgentSession(session.id, initialEntries = listOf(sum, ack) + rewritten, initialTipId = tip.id))
+        sessionsDir.resolve("${session.id}.meta.json").writeText("""{"tip":"not-written-yet"}""")
+        manager.load(session.id).branch().map { it.id } shouldBe listOf("sum", "ack", q2.id, tip.id)
+    }
 })
+
