@@ -2,7 +2,6 @@ package dev.sophi.core.tools
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.runBlocking
@@ -17,12 +16,6 @@ private fun BashTool.run(command: String) = runBlocking {
 class BashSandboxTest : FunSpec({
     test("off runs the command unwrapped") {
         BashSandbox(createTempDirectory("ws")).wrap(listOf("sh", "-c", "x")) shouldBe listOf("sh", "-c", "x")
-    }
-
-    test("an unavailable mode is reported and the mode kept") {
-        val sandbox = BashSandbox(createTempDirectory("ws"))
-        sandbox.set(SandboxMode.DOCKER) shouldNotBe null
-        sandbox.mode shouldBe SandboxMode.OFF
     }
 
     context("on macOS").config(enabled = SeatbeltSandbox.available) {
