@@ -121,6 +121,7 @@ class GoalController(
             outcome.isFailure -> {
                 val msg = outcome.exceptionOrNull()?.message ?: "unknown error"
                 session.append(EntryRole.ASSISTANT, "[goal failed: $msg]", emptyMap())
+                if (outcome.exceptionOrNull() is dev.sophi.ai.api.BudgetExceededException) output(dev.sophi.cli.BUDGET_HINT)
                 runCatching { sessionManager.save(session) }
                 onTurnSettled(args.task, "", outcome.exceptionOrNull())
                 GoalRunResult.Ran(session)

@@ -77,6 +77,11 @@ class RuntimeBuilder {
     /** The catalog provider to prefer when an id is listed by several (`anthropic`, `openrouter`, …). */
     var catalogProvider: String? = null
     private var maxUsd: Double? = null
+    /**
+     * A meter the host already put under its own wrappers (e.g. System 1, so locally served judgments
+     * aren't billed): [provider] is then used as is and this one counts. Null = the builder wraps [provider].
+     */
+    var metered: MeteredProvider? = null
     /** Stops the session's work once it has cost [maxUsd] dollars: the turn ends with TurnStopReason.BudgetExceeded. */
     fun budget(maxUsd: Double): RuntimeBuilder = apply { this.maxUsd = maxUsd }
     var maxTokens: Int = 4096
@@ -275,9 +280,12 @@ class RuntimeBuilder {
     fun build(): SophiRuntime {
         val model = requireNotNull(model) { "model must be set before calling build()" }
         // Innermost of the wrappers, so a judgment System 1 serves locally is never billed or refused.
-        val metered = MeteredProvider.wrap(requireNotNull(provider) { "provider must be set before calling build()" },
-            model, modelCatalog, priced, catalogProvider).also { m -> maxUsd?.let { m.meter.maxUsd = it } }
-        val p = metered.let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
+        val given = requireNotNull(provider) { "provider must be set before calling build()" }
+        val hostMeter = metered
+        val metered = hostMeter ?: MeteredProvider.wrap(given, model, modelCatalog, priced, catalogProvider)
+        maxUsd?.let { metered.meter.maxUsd = it }
+        val inner: LLMProvider = if (hostMeter != null) given else metered
+        val p = inner.let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
         val window = requireNotNull(contextWindowTokens) {
             "contextWindowTokens must be set before calling build() — pass the total context " +
                 "window (in tokens) of the model you configured"
@@ -419,7 +427,8 @@ class RuntimeBuilder {
                     sessionManager = sm,
                     parentConfig = effectiveConfig,
                     contextWindowTokens = window,
-                    confirmationPolicy = confirmationPolicy
+                    confirmationPolicy = confirmationPolicy,
+                    currentWindow = { loop.contextWindowTokens },
                 )
             )
         }
@@ -433,7 +442,8 @@ class RuntimeBuilder {
                     contextWindowTokens = window,
                     planLog = PlanLog(dir),
                     confirmationPolicy = confirmationPolicy,
-                    onProgress = goalDecompositionOnProgress
+                    onProgress = goalDecompositionOnProgress,
+                    currentWindow = { loop.contextWindowTokens },
                 )
             )
         }

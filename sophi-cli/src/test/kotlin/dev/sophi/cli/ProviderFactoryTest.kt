@@ -60,4 +60,15 @@ class ProviderFactoryTest : FunSpec({
         val provider = buildProvider(rp("openai-compat", "http://localhost:11434/v1", "qwen2.5:7b"), null, sophiHome = tempdir().toPath())
         (provider is DualSystemProvider) shouldBe false
     }
+
+    test("the meter goes inside System 1, so a judgment the local student serves is never billed") {
+        val home = tempdir().toPath()
+        Files.writeString(home.resolve("system1.json"), """{"baseUrl":"http://localhost:1234/v1","model":"small"}""")
+        var wrapped: dev.sophi.ai.api.LLMProvider? = null
+        val provider = buildProvider(rp("openai-compat", "http://localhost:11434/v1", "qwen2.5:7b"), null, sophiHome = home,
+            inner = { p -> wrapped = p; p })
+        provider.shouldBeInstanceOf<DualSystemProvider>()
+        (wrapped is DualSystemProvider) shouldBe false
+        wrapped!!.name shouldBe "openai-compat"
+    }
 })

@@ -71,4 +71,23 @@ class ProviderOptionsCatalogTest : FunSpec({
         opts("--provider", "openai-compat", "--model", "m", "--base-url", "https://api.openai.com/v1").resolve(catalog = CATALOG)
             .catalogProvider shouldBe "openai"
     }
+
+    test("tailnet addresses and bare LAN names are local") {
+        isLocalHost("100.101.2.3") shouldBe true
+        isLocalHost("gpu-box") shouldBe true
+        isLocalHost("host.docker.internal") shouldBe true
+        isLocalHost("api.together.xyz") shouldBe false
+        isLocalHost("8.8.8.8") shouldBe false
+    }
+
+    test("a model switch on a local openai-compat server never takes the catalog's window") {
+        val r = opts("--provider", "openai-compat", "--model", "m", "--base-url", "http://192.168.1.5:8080/v1").resolve(catalog = CATALOG)
+        modelSwitchWindow(r, CATALOG, "claude-x", current = 8_000) shouldBe ModelSwitch(window = 8_000)
+        val cloud = opts("--provider", "claude", "--model", "claude-x").resolve(catalog = CATALOG)
+        modelSwitchWindow(cloud, CATALOG, "claude-x", current = 8_000) shouldBe ModelSwitch(window = 123456)
+        modelSwitchWindow(cloud, CATALOG, "unknown", current = 8_000) shouldBe ModelSwitch(window = 8_000)
+        val local = r.copy(server = LocalServer(LocalServerKind.LLAMA_CPP, "http://127.0.0.1:1/v1", listOf("a")))
+        modelSwitchWindow(local, CATALOG, "b", current = 8_000).error shouldBe "b isn't on the server at http://127.0.0.1:1/v1"
+        modelSwitchWindow(local, CATALOG, "a", current = 8_000, detect = { _, _ -> 4_096 }) shouldBe ModelSwitch(window = 4_096)
+    }
 })

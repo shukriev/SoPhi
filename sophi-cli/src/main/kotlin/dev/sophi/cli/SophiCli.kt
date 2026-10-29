@@ -205,10 +205,12 @@ class SophiCli(
         val model = resolved.model
         val contextWindowTokens = resolved.contextWindowTokens
         // One metered provider for everything this session asks a model: chat, /goal, /plan, /compact, the
-        // auto-mode classifier. So all of it counts toward --max-cost-usd and follows /model.
-        val provider = dev.sophi.sdk.MeteredProvider.wrap(
-            providerOptions.buildProvider(resolved), model, catalog, resolved.cloud, resolved.catalogProvider
-        )
+        // auto-mode classifier. So all of it counts toward --max-cost-usd and follows /model. The meter sits
+        // under System 1, so a judgment the local student answers is never billed or refused.
+        var metered: dev.sophi.sdk.MeteredProvider? = null
+        val provider = providerOptions.buildProvider(resolved) { plain ->
+            dev.sophi.sdk.MeteredProvider.wrap(plain, model, catalog, resolved.cloud, resolved.catalogProvider).also { metered = it }
+        }
         val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
@@ -242,6 +244,7 @@ class SophiCli(
                 maxCostUsd = maxCostUsd,
             ),
             provider = provider,
+            metered = metered,
             terminal = mordantTerminal,
             input = inputSource,
             // Encoding runs fire-and-forget on AFTER_TURN (MemoryPlugin), so this warning can
@@ -350,16 +353,12 @@ class SophiCli(
         )
         // /goal's planner, critic and runner keep the start model's id; the metered provider sends it to the active model.
         val switchModel: suspend (String) -> String? = { id ->
-            val server = resolved.server
-            if (server != null && id !in server.models) "$id isn't on the server at ${server.baseUrl}"
-            else {
-                // Local: the server's window for that model; cloud: the catalog's; else keep the current one.
-                val window = (if (server != null) dev.sophi.ai.providers.detectContextWindow(server, id)?.tokens
-                    else catalog.find(id, resolved.catalogProvider)?.contextTokens) ?: cli.runtime.contextWindowTokens
+            val switch = modelSwitchWindow(resolved, catalog, id, cli.runtime.contextWindowTokens)
+            switch.window?.let { window ->
                 cli.runtime.switchModel(id, window)
                 goalLoop.contextWindowTokens = window
-                null
             }
+            switch.error
         }
         val goalController = dev.sophi.cli.goal.GoalController(
             agentLoop = goalLoop,

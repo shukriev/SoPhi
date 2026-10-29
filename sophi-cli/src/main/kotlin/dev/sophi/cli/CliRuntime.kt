@@ -97,7 +97,9 @@ internal suspend fun buildCliRuntime(
     provider: LLMProvider,
     terminal: Terminal,
     input: InputSource,
-    onWarning: (String) -> Unit = {}
+    onWarning: (String) -> Unit = {},
+    /** The cost meter already inside [provider] (under System 1); null = the runtime meters [provider] itself. */
+    metered: dev.sophi.sdk.MeteredProvider? = null,
 ): CliRuntime {
     // Assigned once the runtime exists (below). The confirmation policy reads them lazily, which
     // is what breaks the cycle: the policy must exist before the runtime that owns the
@@ -153,6 +155,7 @@ internal suspend fun buildCliRuntime(
 
     val runtime = try { Sophi.runtime {
         this.provider = provider
+        this.metered = metered
         model = opts.model
         maxTokens = opts.maxTokens
         contextWindowTokens(opts.contextWindowTokens)

@@ -36,7 +36,9 @@ class SubagentTool(
     private val contextWindowTokens: Int,
     private val depth: Int = 0,
     private val maxDelegationDepth: Int = 3,
-    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL
+    private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+    /** The parent's window now, when a host can switch model mid-session; null = [contextWindowTokens]. */
+    private val currentWindow: (() -> Int)? = null,
 ) : Tool {
 
     override val name = DELEGATE_TOOL_NAME
@@ -81,7 +83,8 @@ class SubagentTool(
                     contextWindowTokens = contextWindowTokens,
                     depth = depth + 1,
                     maxDelegationDepth = maxDelegationDepth,
-                    confirmationPolicy = confirmationPolicy
+                    confirmationPolicy = confirmationPolicy,
+                    currentWindow = currentWindow,
                 )
             )
         }
@@ -90,7 +93,7 @@ class SubagentTool(
             provider, scopedRegistry, sessionManager,
             confirmationPolicy = confirmationPolicy,
             grants = scopedRegistry.safeGrantsFrom(args.expectedTools),
-            contextWindowTokens = contextWindowTokens
+            contextWindowTokens = currentWindow?.invoke() ?: contextWindowTokens
         )
         val subSession = sessionManager.create(
             title = "subagent:${definition.name}",

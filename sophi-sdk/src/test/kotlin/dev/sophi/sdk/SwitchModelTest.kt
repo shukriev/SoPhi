@@ -85,4 +85,17 @@ class SwitchModelTest : FunSpec({
         shouldThrow<BudgetExceededException> { runBlocking { rt.provider!!.complete(req) } }
         rt.close()
     }
+
+    test("a host's own meter under a wrapper counts each request once") {
+        val p = RecordingProvider()
+        val m = MeteredProvider.wrap(p, "a", PRICEY, priced = true, catalogProvider = null)
+        val outer = object : LLMProvider by m {} // stands in for the System-1 wrapper
+        val rt = runtime(outer) { metered = m }
+        runBlocking { rt.streamTurn(rt.sessionManager.create(), "one") {} }
+        (rt.costMeter === m.meter) shouldBe true
+        rt.costMeter.totalUsd shouldBe 1.0
+        rt.switchModel("b", 16_000)
+        m.activeModel shouldBe "b"
+        rt.close()
+    }
 })

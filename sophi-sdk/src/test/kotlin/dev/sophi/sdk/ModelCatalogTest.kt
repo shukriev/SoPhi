@@ -97,15 +97,24 @@ class ModelCatalogTest : FunSpec({
         val cache = tempdir().toPath().resolve("sub/models.json")
         var calls = 0
         val fetch = { calls++; FIXTURE }
-        ModelCatalog.refreshIfStale(cache, fetch = fetch) shouldBe true
+        ModelCatalog.refreshIfStale(cache, minModels = 1, fetch = fetch) shouldBe true
         ModelCatalog.parse(Files.readString(cache)).find("claude-x")!!.contextTokens shouldBe 200000
-        ModelCatalog.refreshIfStale(cache, fetch = fetch) shouldBe false
+        ModelCatalog.refreshIfStale(cache, minModels = 1, fetch = fetch) shouldBe false
         calls shouldBe 1
         Files.setLastModifiedTime(cache, FileTime.from(Instant.now().minus(Duration.ofDays(2))))
-        ModelCatalog.refreshIfStale(cache, fetch = fetch) shouldBe true
+        ModelCatalog.refreshIfStale(cache, minModels = 1, fetch = fetch) shouldBe true
         calls shouldBe 2
         val before = Files.readString(cache)
         ModelCatalog.refreshIfStale(cache, maxAge = Duration.ZERO, fetch = { error("offline") }) shouldBe false
+        Files.readString(cache) shouldBe before
+    }
+
+    test("a refresh that yields too few models keeps the old file") {
+        val cache = tempdir().toPath().resolve("models.json")
+        ModelCatalog.refreshIfStale(cache, minModels = 1, fetch = { FIXTURE }) shouldBe true
+        val before = Files.readString(cache)
+        ModelCatalog.refreshIfStale(cache, maxAge = Duration.ZERO, fetch = { "{}" }) shouldBe false
+        ModelCatalog.refreshIfStale(cache, maxAge = Duration.ZERO, fetch = { FIXTURE }) shouldBe false
         Files.readString(cache) shouldBe before
     }
 })

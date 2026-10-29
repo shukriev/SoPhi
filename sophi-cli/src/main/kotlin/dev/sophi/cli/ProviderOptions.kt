@@ -71,14 +71,20 @@ data class ResolvedProvider(
 
 private val IP_LITERAL = Regex("""[0-9.]+|[0-9a-f:]+""")
 
-/** Hosts that are this machine or its network: `localhost`, `*.local`, and loopback, site-local or link-local IPs. */
+/**
+ * Hosts that are this machine or its network: `localhost`, `*.local`, `*.internal`, a bare name with no
+ * dot (`gpu-box`), and loopback, site-local, link-local or tailnet (100.64.0.0/10) IPs.
+ */
 internal fun isLocalHost(host: String?): Boolean {
     val h = host?.lowercase()?.removeSurrounding("[", "]") ?: return true
-    if (h == "localhost" || h.endsWith(".local") || h.endsWith(".localhost")) return true
+    if (h == "localhost" || h.endsWith(".local") || h.endsWith(".localhost") || h.endsWith(".internal")) return true
+    if (!IP_LITERAL.matches(h) && '.' !in h) return true
     // Only IP literals are checked; a name is never resolved here, so it counts as public.
     if (!IP_LITERAL.matches(h) || h.none { it == '.' || it == ':' }) return false
     val a = runCatching { InetAddress.getByName(h) }.getOrNull() ?: return false
-    return a.isLoopbackAddress || a.isSiteLocalAddress || a.isLinkLocalAddress || a.isAnyLocalAddress
+    val b = a.address
+    val tailnet = b.size == 4 && (b[0].toInt() and 0xff) == 100 && (b[1].toInt() and 0xc0) == 64 // CGNAT, used by Tailscale
+    return a.isLoopbackAddress || a.isSiteLocalAddress || a.isLinkLocalAddress || a.isAnyLocalAddress || tailnet
 }
 
 /** `claude` → `anthropic`; an openai-compat base URL's host → the catalog provider that serves it. */
@@ -139,5 +145,28 @@ internal fun ResolvedProvider.windowAtMost(cap: Int): Int = minOf(contextWindowT
 internal fun ProviderOptions.resolveAndWarn(catalog: ModelCatalog = ModelCatalog.bundled()): ResolvedProvider =
     resolve(catalog).also { r -> r.warnings.forEach { System.err.println(it) } }
 
-internal fun ProviderOptions.buildProvider(resolved: ResolvedProvider): LLMProvider =
-    buildProvider(resolved, apiKey, timeoutSeconds, maxRetries)
+internal fun ProviderOptions.buildProvider(resolved: ResolvedProvider, inner: (LLMProvider) -> LLMProvider = { it }): LLMProvider =
+    buildProvider(resolved, apiKey, timeoutSeconds, maxRetries, inner = inner)
+
+/** What `/model <id>` switches to: the new window, or why it can't switch. */
+data class ModelSwitch(val window: Int? = null, val error: String? = null)
+
+/**
+ * The window for switching to [id]: a local server's own (and it must list [id]), the catalog's for a
+ * cloud model, else [current] — never the catalog's for a local model, whose real window may be far smaller.
+ */
+internal fun modelSwitchWindow(
+    resolved: ResolvedProvider,
+    catalog: ModelCatalog,
+    id: String,
+    current: Int,
+    detect: (LocalServer, String) -> Int? = { server, model -> detectContextWindow(server, model)?.tokens },
+): ModelSwitch {
+    val server = resolved.server
+    if (server != null) {
+        if (id !in server.models) return ModelSwitch(error = "$id isn't on the server at ${server.baseUrl}")
+        return ModelSwitch(window = detect(server, id) ?: current)
+    }
+    if (!resolved.cloud) return ModelSwitch(window = current)
+    return ModelSwitch(window = catalog.find(id, resolved.catalogProvider)?.contextTokens ?: current)
+}

@@ -175,13 +175,25 @@ class ModelCatalog(private val entries: List<ModelInfo>) {
             if (b is JsonObject && v is JsonObject) merge(b, v) else v
         })
 
-        /** Fetches and writes [cache] when it's missing or older than [maxAge]; true when it wrote. Never throws. */
-        fun refreshIfStale(cache: Path, maxAge: Duration = Duration.ofDays(1), fetch: () -> String = ::fetchModelsDev): Boolean {
+        /**
+         * Fetches and writes [cache] when it's missing or older than [maxAge]; true when it wrote. Never throws.
+         * A download with fewer than [minModels] models (models.dev changed shape) keeps the old file.
+         */
+        fun refreshIfStale(
+            cache: Path,
+            maxAge: Duration = Duration.ofDays(1),
+            minModels: Int = 1000,
+            fetch: () -> String = ::fetchModelsDev,
+        ): Boolean {
             val fresh = runCatching {
                 Files.exists(cache) && Files.getLastModifiedTime(cache).toInstant().isAfter(Instant.now().minus(maxAge))
             }.getOrDefault(false)
             if (fresh) return false
-            return runCatching { writeAtomically(cache, trim(fetch()).toByteArray()) }.isSuccess
+            return runCatching {
+                val trimmed = trim(fetch())
+                check(parse(trimmed).size() >= minModels) { "too few models" }
+                writeAtomically(cache, trimmed.toByteArray())
+            }.isSuccess
         }
 
         /** Writes via a temp file and an atomic move, so a killed write never leaves half a file. */
