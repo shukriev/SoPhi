@@ -43,11 +43,14 @@ class StreamingTurnPresenter(private val autoExitTokenView: Boolean = true) {
             Rendered.Redraw
         }
         is TurnEvent.ToolCallStarted -> {
+            // ask_user prints its question and reads a typed line: keep the spinner off it, as for a confirmation
+            if (event.name == "ask_user") confirmationPending = true
             pendingArgs[event.name] = event.argsJson
             currentPhase = StreamingPhase.ExecutingTool(event.name)
             Rendered.Cleared
         }
         is TurnEvent.ToolCallFinished -> {
+            if (event.name == "ask_user") confirmationPending = false
             val args = pendingArgs.remove(event.name) ?: ""
             if (autoExitTokenView) tokenViewState = TokenViewToggleState()
             currentPhase = StreamingPhase.Generating(tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount)

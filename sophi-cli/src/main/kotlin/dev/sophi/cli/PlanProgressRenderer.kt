@@ -63,8 +63,11 @@ class PlanProgressRenderer(
             is TurnEvent.ToolCallStarted -> {
                 pendingArgs[event.name] = event.argsJson
                 currentPhase = StreamingPhase.ExecutingTool(event.name)
+                // ask_user prints its question and reads a typed line: keep the spinner off it
+                if (event.name == "ask_user") { confirmationPending = true; liveRegion.clear() }
             }
             is TurnEvent.ToolCallFinished -> {
+                if (event.name == "ask_user") confirmationPending = false
                 liveRegion.clear()
                 val args = pendingArgs.remove(event.name) ?: ""
                 output(ResponseRenderer.renderToolCall(event.name, args, event.result))

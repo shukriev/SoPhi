@@ -14,6 +14,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -66,7 +67,8 @@ class BuildCliRuntimeTest : FunSpec({
     suspend fun build(
         autoMode: Boolean = false,
         godMode: Boolean = false,
-        writeMcpConfig: Boolean = false
+        writeMcpConfig: Boolean = false,
+        interactive: Boolean = false,
     ): CliRuntime {
         val dir = tempdir().toPath()
         val mcpPath = dir.resolve("mcp.json")
@@ -75,8 +77,14 @@ class BuildCliRuntimeTest : FunSpec({
             opts = optionsFor(dir, autoMode = autoMode, godMode = godMode),
             provider = mockk<LLMProvider>(relaxed = true),
             terminal = Terminal(),
-            input = ScriptedInputSource(emptyList())
+            input = ScriptedInputSource(emptyList()),
+            interactive = interactive,
         ))
+    }
+
+    test("ask_user is registered only in an interactive terminal") {
+        build(interactive = true).registry.names() shouldContain "ask_user"
+        build(interactive = false).registry.names() shouldNotContain "ask_user"
     }
 
     test("registers the builtin, calendar, schedule and goal-decomposition tools") {

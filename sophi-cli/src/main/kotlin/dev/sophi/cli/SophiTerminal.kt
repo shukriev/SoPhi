@@ -95,6 +95,35 @@ class SophiTerminal(
         }
     }
 
+    private val pendingAnswer = AtomicReference<CompletableDeferred<String?>?>(null)
+    private val answerBuffer = StringBuilder()
+
+    /** A typed line for ask_user, read by [awaitControlKeys]' loop: Enter finishes it, Esc gives null. */
+    suspend fun awaitAnswer(): String? {
+        val deferred = CompletableDeferred<String?>()
+        synchronized(answerBuffer) { answerBuffer.clear() }
+        check(pendingAnswer.compareAndSet(null, deferred)) { "an answer is already pending" }
+        try {
+            return deferred.await()
+        } finally {
+            pendingAnswer.set(null)
+        }
+    }
+
+    /** Feeds one key to a pending answer, echoing what's typed. */
+    private fun answerKey(answer: CompletableDeferred<String?>, key: TurnKey?, esc: Boolean) {
+        val w = jlineTerminal.writer()
+        synchronized(answerBuffer) {
+            when {
+                esc -> { w.println(); answer.complete(null) }
+                key == TurnKey.Enter -> { w.println(); answer.complete(answerBuffer.toString()) }
+                key == TurnKey.Backspace -> if (answerBuffer.isNotEmpty()) { answerBuffer.setLength(answerBuffer.length - 1); w.print("\b \b") }
+                key is TurnKey.Text -> { answerBuffer.append(key.ch); w.print(key.ch) }
+            }
+        }
+        w.flush()
+    }
+
     suspend fun awaitEsc() {
         val previousAttributes = jlineTerminal.enterRawMode()
         try {
@@ -121,11 +150,18 @@ class SophiTerminal(
             while (currentCoroutineContext().isActive) {
                 val ch = read(100)
                 val confirmation = pendingConfirmation.get()
+                val answer = pendingAnswer.get()
                 if (decoder != null) {
                     if (ch == -2) { decoder.idle(); continue }
                     val pasted = decoder.pasting
                     val toggle = !pasted && (ch == toggleLower || ch == toggleUpper)
                     val action = if (toggle) KeyAction.Ignore else decoder.decode(ch, read)
+                    if (answer != null && confirmation == null) {
+                        // a pasted newline doesn't send the answer
+                        val key = (action as? KeyAction.Key)?.key?.let { if (pasted && it == TurnKey.Enter) TurnKey.Text(' ') else it }
+                        answerKey(answer, key, action == KeyAction.Interrupt)
+                        continue
+                    }
                     if (confirmation != null) {
                         // pasted text and the paste markers never answer a confirmation; nor does the toggle key
                         val t = now()
@@ -137,6 +173,15 @@ class SophiTerminal(
                         toggle -> onToggle()
                         action == KeyAction.Interrupt -> return
                         action is KeyAction.Key -> onKey?.invoke(action.key)
+                    }
+                    continue
+                }
+                if (answer != null && confirmation == null) {
+                    when {
+                        ch == 27 -> answerKey(answer, null, esc = true)
+                        ch == 13 || ch == 10 -> answerKey(answer, TurnKey.Enter, esc = false)
+                        ch == 127 || ch == 8 -> answerKey(answer, TurnKey.Backspace, esc = false)
+                        ch >= 32 -> answerKey(answer, TurnKey.Text(ch.toChar()), esc = false)
                     }
                     continue
                 }

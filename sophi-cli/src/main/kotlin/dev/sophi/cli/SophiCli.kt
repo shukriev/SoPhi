@@ -245,6 +245,7 @@ class SophiCli(
             ),
             provider = provider,
             metered = metered,
+            interactive = sophiTerminal.isInteractive,
             terminal = mordantTerminal,
             input = inputSource,
             // Encoding runs fire-and-forget on AFTER_TURN (MemoryPlugin), so this warning can

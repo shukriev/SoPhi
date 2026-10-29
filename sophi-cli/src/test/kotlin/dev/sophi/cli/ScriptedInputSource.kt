@@ -7,8 +7,19 @@ import kotlinx.coroutines.selects.select
 class ScriptedInputSource(
     private val lines: List<String>,
     private val yesNoAnswers: List<Boolean> = emptyList(),
-    private val confirmAnswers: List<ConfirmAnswer> = emptyList()
+    private val confirmAnswers: List<ConfirmAnswer> = emptyList(),
+    /** Lines `awaitAnswer` returns in order (null = Esc); once spent it waits forever, like nobody answering. */
+    private val answers: List<String?> = emptyList(),
+    private val answerDelayMs: Long = 0,
 ) : InputSource {
+    private var answerIndex = 0
+
+    override suspend fun awaitAnswer(): String? {
+        if (answerIndex >= answers.size) kotlinx.coroutines.awaitCancellation()
+        kotlinx.coroutines.delay(answerDelayMs)
+        return answers[answerIndex++]
+    }
+
     private var index = 0
     private var yesNoIndex = 0
     private val escSignal = CompletableDeferred<Unit>()
