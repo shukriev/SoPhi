@@ -1,5 +1,8 @@
 package dev.sophi.cli
 
+import dev.sophi.core.tools.currentTodos
+import dev.sophi.core.tools.renderTodos
+
 import dev.sophi.cli.streaming.StreamingTurnPresenter
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.core.agent.TurnEvent
@@ -59,6 +62,7 @@ class TurnController(
             var presenter = StreamingTurnPresenter(autoExitTokenView)
             val rounds = mutableListOf<TurnEvent.RoundUsage>()
             val usdBefore = runtime.costMeter.totalUsd
+            val todosBefore = currentTodos(session)
 
             fun render() {
                 val queue = editor.render()
@@ -139,6 +143,7 @@ class TurnController(
                     } else {
                         output(ResponseRenderer.renderText(presenter.finalText()))
                         printUsage(rounds, usdBefore, result)
+                        currentTodos(result)?.takeIf { it != todosBefore }?.let { output(TextColors.gray(renderTodos(it))) }
                         result
                     }
                 }

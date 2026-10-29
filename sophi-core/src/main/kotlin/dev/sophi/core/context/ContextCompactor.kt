@@ -61,6 +61,8 @@ class ContextCompactor(
         val fresh = WorkingSet.fromEntries(entries.takeWhile { it.id != firstKeptId })
         val workingSet = previous?.merge(fresh) ?: fresh
         val summary = summariser.summarise(transcript, workingSet, config.model, onUsage)
+        // Carried in the summary itself, so the system prompt (and a local server's KV cache) never changes per update.
+        val todos = dev.sophi.core.tools.currentTodos(session)?.takeIf { it.isNotEmpty() }
 
         // Replace only the compacted prefix of the active branch: the summary pair becomes a new
         // root and the first kept entry is re-parented onto it. Entries on other branches
@@ -70,9 +72,11 @@ class ContextCompactor(
             id = UUID.randomUUID().toString(),
             parentId = null,
             role = EntryRole.USER,
-            content = "Summary of the conversation so far:\n$summary",
+            content = "Summary of the conversation so far:\n$summary" +
+                (todos?.let { "\n\nCurrent todo list:\n" + dev.sophi.core.tools.renderTodos(it) } ?: ""),
             timestamp = now,
-            metadata = mapOf("_compacted" to "true", "_workingSet" to Json.encodeToString(workingSet))
+            metadata = mapOf("_compacted" to "true", "_workingSet" to Json.encodeToString(workingSet)) +
+                (todos?.let { mapOf("_todo" to Json.encodeToString(it)) } ?: emptyMap())
         )
         val ackEntry = SessionEntry(
             id = UUID.randomUUID().toString(),

@@ -81,7 +81,7 @@ class BuildCliRuntimeTest : FunSpec({
 
     test("registers the builtin, calendar, schedule and goal-decomposition tools") {
         build().registry.names() shouldContainAll listOf(
-            "read_file", "write_file", "grep", "glob", "edit_file", "apply_patch", "bash", "fetch_url",
+            "read_file", "write_file", "grep", "glob", "edit_file", "apply_patch", "bash", "todo", "fetch_url",
             "get_current_datetime", "manage_scheduled_task",
             "create_calendar_event", "list_calendar_events", "get_calendar_event",
             "update_calendar_event", "delete_calendar_event", "list_calendars",

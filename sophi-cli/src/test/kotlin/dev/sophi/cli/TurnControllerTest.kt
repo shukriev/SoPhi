@@ -123,6 +123,20 @@ class TurnControllerTest : FunSpec({
         )
     }
 
+    test("a turn that changed the todo list prints it under the reply") {
+        val toolRegistry = ToolRegistry().register(dev.sophi.core.tools.TodoTool())
+        var round = 0
+        every { provider.stream(any()) } answers {
+            round++
+            if (round == 1) flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "todo", """{"items":[{"text":"a","status":"in_progress"}]}"""))))
+            else flowOf(StreamEvent.Content("done"))
+        }
+        val rendered = mutableListOf<String>()
+        val controller = TurnController(runtimeFor(registry = toolRegistry), ScriptedInputSource(emptyList()), LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+        controller.runTurn(AgentSession(id = "s1"), "plan")
+        rendered.last() shouldBe com.github.ajalt.mordant.rendering.TextColors.gray("[>] a")
+    }
+
     // The CLI no longer dispatches AFTER_TURN itself — SophiRuntime.streamTurn does — so this
     // now verifies the real path: a plugin registered on the runtime records the turn.
     test("a turn dispatches AFTER_TURN so a runtime-registered plugin records it") {

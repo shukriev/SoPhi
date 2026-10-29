@@ -7,6 +7,7 @@ import dev.sophi.core.tools.BashJobs
 import dev.sophi.core.tools.BashKillTool
 import dev.sophi.core.tools.BashOutputTool
 import dev.sophi.core.tools.BashTool
+import dev.sophi.core.tools.TodoTool
 import dev.sophi.core.tools.DeleteFileTool
 import dev.sophi.core.tools.ApplyPatchTool
 import dev.sophi.core.tools.EditTool
@@ -44,7 +45,7 @@ fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: St
         FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), ApplyPatchTool(root),
         BashTool(root, sandbox, jobs),
         MoveFileTool(root), DeleteFileTool(root),
-        FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool()
+        FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool(), TodoTool()
     )
     if (jobs != null) tools += listOf(BashOutputTool(jobs), BashKillTool(jobs))
     val key = braveApiKey ?: System.getenv("BRAVE_SEARCH_API_KEY")
