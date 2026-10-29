@@ -149,7 +149,7 @@ class AgentLoopTest : FunSpec({
         every { sessionManager.save(any()) } just Runs
 
         val events = mutableListOf<TurnEvent>()
-        val result = loop.turn(session, "Hi", config) { events.add(it) }
+        val result = loop.turn(session, "Hi", config) { if (it !is TurnEvent.RoundUsage) events.add(it) }
 
         events shouldBe listOf(TurnEvent.Token("Hello!"))
         result.branch().last().content shouldBe "Hello!"
@@ -702,7 +702,7 @@ class AgentLoopTest : FunSpec({
         every { sessionManager.save(any()) } just Runs
 
         val events = mutableListOf<TurnEvent>()
-        loop.turn(session, "Hi", config) { events.add(it) }
+        loop.turn(session, "Hi", config) { if (it !is TurnEvent.RoundUsage) events.add(it) }
 
         events shouldBe listOf(TurnEvent.Token("Hello!"))
     }
@@ -727,7 +727,7 @@ class AgentLoopTest : FunSpec({
         every { sessionManager.save(any()) } just Runs
 
         val events = mutableListOf<TurnEvent>()
-        loopWithTool.turn(session, "What is 6 times 7?", config) { events.add(it) }
+        loopWithTool.turn(session, "What is 6 times 7?", config) { if (it !is TurnEvent.RoundUsage) events.add(it) }
 
         events shouldBe listOf(
             TurnEvent.ToolCallStarted("calculator", "{}"),
@@ -757,7 +757,7 @@ class AgentLoopTest : FunSpec({
         every { sessionManager.save(any()) } just Runs
 
         val events = mutableListOf<TurnEvent>()
-        loopWithTool.turn(session, "test", config) { events.add(it) }
+        loopWithTool.turn(session, "test", config) { if (it !is TurnEvent.RoundUsage) events.add(it) }
 
         // durationMillis is wall-clock (0 or 1 ms here), so it's zeroed before comparing — it made this test flaky.
         events.map { if (it is TurnEvent.ToolCallFinished) it.copy(durationMillis = 0) else it } shouldBe listOf(

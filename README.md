@@ -43,7 +43,7 @@ app — same core, three ways to run it.
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
 | 🖥️ `sophi-companion` | *(moved)* OS tray / menu-bar desktop app — now a commercial, direct-sale product built on `sophi-sdk`/`sophi-hub`. Last open-source snapshot: tag [`companion-last-oss`](../../tree/companion-last-oss/sophi-companion). |
-| 🏗️ `sophi-infra` | Ready-made plugins and trackers: `BudgetTracker`, `MetricsPlugin` |
+| 🏗️ `sophi-infra` | Ready-made plugins: `MetricsPlugin` |
 
 They all sit on the same core, so switching between them later is a
 one-line change, not a rewrite.
@@ -383,10 +383,11 @@ Steps to deploy...
 
 **Plugins** (`sophi-extensions`) hook into the turn lifecycle
 (`BEFORE_TURN` / `AFTER_TURN` / `BEFORE_TOOL` / `AFTER_TOOL` / `ON_ERROR`).
-`sophi-infra` ships two ready to use:
+`sophi-infra` ships one ready to use:
 
 - `MetricsPlugin(meterRegistry)` — emits Micrometer counters for turns started/completed/errored
-- `BudgetTracker` — a standalone tracker (not a `SophiPlugin`) that throws `BudgetExceededException` once a token budget is exceeded; call `record()`/`used()` directly rather than registering it
+
+A dollar budget for a session is `RuntimeBuilder.budget(maxUsd)`, not a plugin (see **Models and cost.**).
 
 Tool permissioning is no longer a plugin — `AgentLoop`'s `riskLevel`/`ConfirmationPolicy`/`grants` mechanism (ADR-016) is the one gate; see `RuntimeBuilder.grants(names)` below for the SDK-embedding equivalent of the old allowlist.
 
