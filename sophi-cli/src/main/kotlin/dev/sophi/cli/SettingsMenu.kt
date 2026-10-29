@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import dev.sophi.core.tools.BashSandbox
+import dev.sophi.sdk.CostMeter
 import dev.sophi.core.tools.DEFAULT_DOCKER_IMAGE
 import dev.sophi.core.tools.SandboxMode
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
@@ -11,7 +12,7 @@ import kotlinx.coroutines.withContext
 private const val VISIBLE_ROWS = 12
 
 /** What the built-in default is for the live settings, so `d` can put the session back. */
-private val LIVE_DEFAULTS = mapOf("sandbox" to "off", "network" to "true", "docker-image" to DEFAULT_DOCKER_IMAGE, "auto" to "false")
+private val LIVE_DEFAULTS = mapOf("sandbox" to "off", "network" to "true", "docker-image" to DEFAULT_DOCKER_IMAGE, "auto" to "false", "max-cost-usd" to "0")
 
 /**
  * Reads and changes the CLI's settings: live ones ([Setting.live]) change this session at once,
@@ -29,6 +30,12 @@ class SettingsController(
     val settings: List<Setting> = CLI_SETTINGS,
     /** False: no raw-mode terminal, so `/settings` lists instead of opening the menu. */
     val interactive: Boolean = false,
+    /** The session's cost and budget; `max-cost-usd` sets [CostMeter.maxUsd]. */
+    private val costMeter: CostMeter? = null,
+    /** The model turns run with now. */
+    private val currentModel: (() -> String)? = null,
+    /** Switches the session to a model; the reason when it can't, and then nothing changed. */
+    private val switchModel: (suspend (String) -> String?)? = null,
 ) {
     /** Changed or reset in this session: their origin is no longer what the command line said. */
     private val touched = mutableSetOf<String>()
@@ -40,6 +47,8 @@ class SettingsController(
         "network" -> bashSandbox?.network?.toString()
         "docker-image" -> bashSandbox?.image
         "auto" -> autoToggle?.autoModeEnabled?.toString()
+        "model" -> currentModel?.invoke()
+        "max-cost-usd" -> costMeter?.let { m -> m.maxUsd?.let { usdText(it) } ?: "0" }
         else -> null
     } ?: store.saved()[s.key] ?: if (s.key in touched) "(default)" else thisRun[s.key] ?: ""
 
@@ -67,7 +76,8 @@ class SettingsController(
     /** Back to the built-in default: removed from the file, and a live setting applied now. */
     suspend fun reset(s: Setting): String? {
         store.cannotSave()?.let { return it }
-        if (s.live) apply(s.key, LIVE_DEFAULTS.getValue(s.key))?.let { return it }
+        // No model is "the default" mid-session: a reset only stops saving it, the running model stays.
+        if (s.live && s.key != "model") apply(s.key, LIVE_DEFAULTS.getValue(s.key))?.let { return it }
         store.reset(s.key)?.let { return it }
         touched += s.key
         return null
@@ -75,6 +85,15 @@ class SettingsController(
 
     // set() may start a Docker container, which can take minutes on the first pull
     private suspend fun apply(key: String, value: String): String? = withContext(Dispatchers.IO) {
+        if (key == "model") {
+            val switch = switchModel ?: return@withContext "the model can't change in this session"
+            return@withContext switch(value)
+        }
+        if (key == "max-cost-usd") {
+            val meter = costMeter ?: return@withContext "there's no cost meter in this session"
+            meter.maxUsd = value.toDouble().takeIf { it > 0 }
+            return@withContext null
+        }
         if (key == "auto") {
             val toggle = autoToggle ?: return@withContext "auto mode is fixed under --god-mode"
             toggle.autoModeEnabled = value.toBoolean()
@@ -169,3 +188,6 @@ suspend fun runSettingsMenu(menu: SettingsMenu, input: InputSource, liveRegion: 
     }
     liveRegion.clear()
 }
+
+/** 2.0 → `2`, 0.5 → `0.5`: dollars as the user would type them. */
+private fun usdText(v: Double): String = if (v == Math.floor(v) && !v.isInfinite()) v.toLong().toString() else v.toString()

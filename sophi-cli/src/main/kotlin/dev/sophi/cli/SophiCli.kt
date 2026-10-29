@@ -3,6 +3,7 @@ package dev.sophi.cli
 import dev.sophi.core.tools.DEFAULT_DOCKER_IMAGE
 import dev.sophi.core.tools.SandboxMode
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.types.double
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
@@ -184,6 +185,11 @@ class SophiCli(
         help = "Refresh the model catalog (windows, prices, capabilities) from models.dev in the background, " +
             "at most once a day (default on; --no-catalog-refresh never goes online for it)."
     ).flag("--no-catalog-refresh", default = true)
+    private val maxCostUsd: Double? by option(
+        "--max-cost-usd",
+        help = "Stop the session once its model requests have cost this many US dollars (cloud providers; 0 = no budget). " +
+            "Change it mid-session with /settings max-cost-usd."
+    ).double()
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
@@ -198,7 +204,11 @@ class SophiCli(
         )
         val model = resolved.model
         val contextWindowTokens = resolved.contextWindowTokens
-        val provider = providerOptions.buildProvider(resolved)
+        // One metered provider for everything this session asks a model: chat, /goal, /plan, /compact, the
+        // auto-mode classifier. So all of it counts toward --max-cost-usd and follows /model.
+        val provider = dev.sophi.sdk.MeteredProvider.wrap(
+            providerOptions.buildProvider(resolved), model, catalog, resolved.cloud, resolved.catalogProvider
+        )
         val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
@@ -228,7 +238,8 @@ class SophiCli(
                 llmTimeoutSeconds = providerOptions.timeoutSeconds,
                 hubPort = hubPort,
                 noRemote = noRemote,
-                sessionIdToResume = sessionId
+                sessionIdToResume = sessionId,
+                maxCostUsd = maxCostUsd,
             ),
             provider = provider,
             terminal = mordantTerminal,
@@ -270,7 +281,7 @@ class SophiCli(
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model\n"
         )
         // containers a killed sophi left behind; off the start path, since asking Docker can take seconds
         kotlin.concurrent.thread(isDaemon = true, name = "sophi-docker-orphans") {
@@ -332,12 +343,26 @@ class SophiCli(
             provider, model,
             contextProvider = { goalPrompt -> cli.runtime.contextFor(session.id, goalPrompt) }
         )
+        val goalLoop = AgentLoop(
+            provider, cli.registry, cli.runtime.sessionManager,
+            confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
+            audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules
+        )
+        // /goal's planner, critic and runner keep the start model's id; the metered provider sends it to the active model.
+        val switchModel: suspend (String) -> String? = { id ->
+            val server = resolved.server
+            if (server != null && id !in server.models) "$id isn't on the server at ${server.baseUrl}"
+            else {
+                // Local: the server's window for that model; cloud: the catalog's; else keep the current one.
+                val window = (if (server != null) dev.sophi.ai.providers.detectContextWindow(server, id)?.tokens
+                    else catalog.find(id, resolved.catalogProvider)?.contextTokens) ?: cli.runtime.contextWindowTokens
+                cli.runtime.switchModel(id, window)
+                goalLoop.contextWindowTokens = window
+                null
+            }
+        }
         val goalController = dev.sophi.cli.goal.GoalController(
-            agentLoop = AgentLoop(
-                provider, cli.registry, cli.runtime.sessionManager,
-                confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
-                audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules
-            ),
+            agentLoop = goalLoop,
             sessionManager = cli.runtime.sessionManager, provider = provider,
             planner = goalPlanner,
             critic = dev.sophi.core.agent.plan.LlmStepCritic(provider, model),
@@ -370,9 +395,11 @@ class SophiCli(
             settings = SettingsController(
                 settings, currentContext.originalArgv, effectiveValues(),
                 registeredOptions().associate { o -> o.names.maxBy { it.length }.removePrefix("--") to o.optionHelp(currentContext) },
-                cli.runtime.bashSandbox, cli.autoModeToggle, interactive = sophiTerminal.isInteractive
+                cli.runtime.bashSandbox, cli.autoModeToggle, interactive = sophiTerminal.isInteractive,
+                costMeter = cli.runtime.costMeter, currentModel = { cli.runtime.config.model }, switchModel = switchModel,
             ),
             contextWindowTokens = contextWindowTokens,
+            live = { cli.runtime.config to cli.runtime.contextWindowTokens },
             liveRegion = liveRegion,
             onEvent = onEvent,
             input = inputSource,
@@ -385,7 +412,8 @@ class SophiCli(
         val turnController = TurnController(
             cli.runtime, inputSource, liveRegion, onEvent = onEvent,
             tokenViewKey = tokenViewKey.singleOrNull() ?: DEFAULT_TOKEN_VIEW_KEY,
-            autoExitTokenView = autoExitTokenView
+            autoExitTokenView = autoExitTokenView,
+            usageLine = true, cloud = resolved.cloud,
         ) {
             mordantTerminal.println(it)
         }

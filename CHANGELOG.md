@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `BudgetTracker` (sophi-infra), a token counter nothing used; `RuntimeBuilder.budget(maxUsd)` replaces it
+
 ### Changed
 - Session files are append-only: a save appends only new or changed entries instead of rewriting the file, so its cost no longer grows with the session. A crash mid-write loses at most the last, partial line. The checked-out tip is saved in `.meta.json`, and `/checkout` saves it, so resuming returns to that entry. Two copies of one session saved in turn no longer drop each other's entries. Old session files load as before.
 - **Breaking:** local models are the default. `--provider` defaults to `local`, which finds llama.cpp (:8080), LM Studio (:1234) or Ollama (:11434), picks a model the server has loaded, and reads the context window it was loaded with. No surface defaults to a Claude model any more:
@@ -26,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context hint gate: the top-1/top-2 ratio threshold rises from 1.0 to 1.25 — live E1 negatives showed the old gate firing on 6 of 10 chit-chat messages against the SoPhi index, the new one on none; live E1/E5 results on a small local model recorded in `evals/context/RESULTS.md` (ADR-041)
 
 ### Added
+- Model catalog, cost and budget. Each reply ends with its tokens and, on cloud providers, what the turn and the session cost; local models show tokens/second instead.
+  - Prices, windows and capabilities come from a bundled [models.dev](https://models.dev) snapshot, refreshed in the background at most daily into `~/.sophi/models.json` (`--no-catalog-refresh` to stay offline), with `~/.sophi/models.local.json` overriding entries. `sophi models <query>` looks one up and `sophi models --refresh` refreshes now.
+  - Cloud windows come from the catalog instead of a 200000/8192 guess. A local model's window still comes from its server, and the catalog warns when its base model can't call tools.
+  - `--max-cost-usd` and the live `max-cost-usd` setting stop the session once it has cost that much, counting `/goal`, `/plan`, subagents and compaction. `/model <id>` switches the model mid-session.
+  - SDK: `ModelCatalog`, `RuntimeBuilder.modelCatalog/priced/catalogProvider/budget(maxUsd)`, `SophiRuntime.costMeter/switchModel/provider`, `MeteredProvider`, `TurnStopReason.BudgetExceeded`, `TurnEvent.RoundUsage`
 - `/settings`: a menu for every `sophi` start flag, saved to `~/.sophi/settings.json` as that flag's default (a typed flag still wins). The sandbox, network, Docker image and auto mode change the running session at once; the rest apply at the next start. `/settings <key> <value>` sets one without the menu. API keys, `--session` and `--god-mode` are never saved; a value that doesn't fit is skipped with a warning. `--no-auto`, `--no-memory`, `--no-auto-exit-token-view`, `--no-god-mode` and `--remote` switch a saved on-flag off for one run
 - `bash` sandbox modes: `--sandbox seatbelt` (macOS) or `--sandbox docker` (one locked-down container per session sharing only the workspace; `--docker-image`), with `--no-network` to block the network and name lookups. Seatbelt also blocks Docker's socket. Path checks still apply. SDK: `SophiRuntime.bashSandbox`, `BashSandbox.set(mode, network, image)`
 - Type while a turn runs: Enter steers the running turn (read before its next step), Alt+Enter queues a follow-up turn, the queue shows under the spinner, ESC returns unsent text to the prompt (kept even if a companion message arrives first), and a multi-line paste stays one message. The token-view toggle moves to Ctrl+T. SDK: `SophiRuntime.streamTurn(…, inbox = TurnInbox())`, with `TurnEvent.SteerApplied` and `TurnEvent.FollowUpStarted`

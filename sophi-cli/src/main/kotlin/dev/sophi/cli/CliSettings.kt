@@ -25,6 +25,8 @@ sealed interface SettingKind {
     object Bool : SettingKind
     data class Choice(val values: List<String>) : SettingKind
     object Int : SettingKind
+    /** A number >= 0, e.g. dollars. */
+    object Decimal : SettingKind
     object Text : SettingKind
 }
 
@@ -40,8 +42,9 @@ val CLI_SETTINGS: List<Setting> = listOf(
     live("network", SettingKind.Bool),
     live("docker-image", SettingKind.Text),
     live("auto", SettingKind.Bool),
+    live("model", SettingKind.Text),
+    live("max-cost-usd", SettingKind.Decimal),
     next("provider", SettingKind.Choice(listOf("local", "openai-compat", "claude"))),
-    next("model", SettingKind.Text),
     next("base-url", SettingKind.Text),
     next("context-window-tokens", SettingKind.Int),
     next("max-tokens", SettingKind.Int),
@@ -117,6 +120,7 @@ class CliSettingsStore(val file: Path = DEFAULT_SETTINGS_FILE, private val onWar
         SettingKind.Bool -> if (value.lowercase() in BOOLS) null else "${setting.key} is on or off"
         is SettingKind.Choice -> if (value in kind.values) null else "${setting.key} is one of ${kind.values.joinToString("|")}"
         SettingKind.Int -> if ((value.toIntOrNull() ?: -1) >= 0) null else "${setting.key} is a whole number"
+        SettingKind.Decimal -> if ((value.toDoubleOrNull() ?: -1.0) >= 0) null else "${setting.key} is a number, 0 or more"
         SettingKind.Text -> null
     }
 

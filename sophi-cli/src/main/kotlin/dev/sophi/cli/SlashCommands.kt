@@ -30,7 +30,7 @@ import java.nio.file.Path
 class SlashHandler(
     private val sessionManager: SessionManager,
     private val compactor: ContextCompactor?,
-    private val config: AgentConfig,
+    config: AgentConfig,
     private val learning: LearningPlugin? = null,
     private val scheduleDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
     private val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
@@ -54,12 +54,19 @@ class SlashHandler(
      * `provider` and `toolRegistry` are: a SlashHandler built without the full agent wiring
      * simply reports the affected commands as unavailable rather than guessing a value.
      */
-    private val contextWindowTokens: Int? = null,
+    contextWindowTokens: Int? = null,
+    /** The model and window turns run with now (after `/model`); null = the values given above. */
+    private val live: (() -> Pair<AgentConfig, Int>)? = null,
     private val liveRegion: LiveRegion = LiveRegion(StringBuilder()) { 80 },
     private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val input: InputSource = NoOpInputSource,
     private val output: (String) -> Unit
 ) {
+    private val startConfig = config
+    private val startWindow = contextWindowTokens
+    private val config: AgentConfig get() = live?.invoke()?.first ?: startConfig
+    private val contextWindowTokens: Int? get() = live?.invoke()?.second ?: startWindow
+
     suspend fun handle(line: String, session: AgentSession): AgentSession {
         val parts = line.trimStart('/').split(" ", limit = 2)
         val cmd = parts[0].lowercase()
@@ -165,6 +172,7 @@ class SlashHandler(
             "auto" -> { handleAuto(); session }
             "permissions" -> { handlePermissions(arg); session }
             "settings" -> { handleSettings(arg); session }
+            "model" -> { handleModel(arg); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
@@ -344,6 +352,15 @@ class SlashHandler(
         if (ctl.startsContainer(setting, value)) output("Starting a container (the first run pulls the image)…")
         val reason = ctl.commit(setting, value)
         output(if (reason != null) "✗ ${setting.key} unchanged: $reason" else ctl.row(setting))
+    }
+
+    /** `/model` shows the model turns run with; `/model <id>` switches to it, as `/settings model <id>` does. */
+    private suspend fun handleModel(arg: String?) {
+        val window = contextWindowTokens?.let { " ($it tokens)" } ?: ""
+        val id = arg?.trim().orEmpty()
+        if (id.isEmpty()) return output("model: ${config.model}$window  —  /model <id> switches")
+        if (settings == null) return output("The model can't change in this session.")
+        handleSettings("model $id")
     }
 
     private fun handlePermissions(arg: String?) {

@@ -61,7 +61,9 @@ data class CliOptions(
     val llmTimeoutSeconds: Long = 60,
     val hubPort: Int = 8765,
     val noRemote: Boolean = false,
-    val sessionIdToResume: String? = null
+    val sessionIdToResume: String? = null,
+    /** Session budget in USD; null or 0 = none. */
+    val maxCostUsd: Double? = null,
 )
 
 /**
@@ -154,6 +156,7 @@ internal suspend fun buildCliRuntime(
         model = opts.model
         maxTokens = opts.maxTokens
         contextWindowTokens(opts.contextWindowTokens)
+        opts.maxCostUsd?.takeIf { it > 0 }?.let { budget(it) }
         sessionsDir = Path.of(opts.sessionsDir)
         // The learning and memory prompt sections are both appended by the builder; only the
         // caller's own system prompt goes here.

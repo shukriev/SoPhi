@@ -111,9 +111,9 @@ class SettingsMenuTest : FunSpec({
 
     test("an empty text value resets the setting") {
         val f = Fixture()
-        val model = CLI_SETTINGS.single { it.key == "model" }
-        runBlocking { f.controller.commit(model, "gemma-4") } shouldBe null
-        runBlocking { f.controller.commit(model, "") } shouldBe null
+        val system = CLI_SETTINGS.single { it.key == "system" }
+        runBlocking { f.controller.commit(system, "be brief") } shouldBe null
+        runBlocking { f.controller.commit(system, "") } shouldBe null
         f.store.saved() shouldBe emptyMap()
     }
 
@@ -172,5 +172,75 @@ class SettingsMenuTest : FunSpec({
         val handler = SlashHandler(mockk<SessionManager>(relaxed = true), null, AgentConfig(model = "m"), settings = f.controller) { out += it }
         runBlocking { handler.handle("/settings", AgentSession(id = "s")) }
         out.joinToString("\n") shouldContain "max-tokens"
+    }
+
+    class ModelFixture(switchResult: String? = null) {
+        val store = CliSettingsStore(tempdir().toPath().resolve("settings.json")) {}
+        var model = "a"
+        val switched = mutableListOf<String>()
+        val meter = dev.sophi.sdk.CostMeter({ m ->
+            dev.sophi.sdk.ModelInfo("anthropic", m, null, null, 1_000_000.0, 0.0, null, false, false, false, null)
+        }, maxUsd = 0.5)
+        val modelRow = CLI_SETTINGS.single { it.key == "model" }
+        val budgetRow = CLI_SETTINGS.single { it.key == "max-cost-usd" }
+        val controller = SettingsController(
+            store, argv = emptyList(), thisRun = emptyMap(), help = emptyMap(),
+            bashSandbox = null, autoToggle = null, settings = listOf(modelRow, budgetRow),
+            costMeter = meter, currentModel = { model },
+            switchModel = { id -> switchResult ?: null.also { switched += id; model = id } },
+        )
+    }
+
+    test("a model switch goes through switchModel and is saved") {
+        val f = ModelFixture()
+        runBlocking { f.controller.commit(f.modelRow, "b") } shouldBe null
+        f.switched shouldBe listOf("b")
+        f.store.saved()["model"] shouldBe "b"
+        f.controller.current(f.modelRow) shouldBe "b"
+    }
+
+    test("a failed switch saves nothing") {
+        val f = ModelFixture(switchResult = "b isn't on the server")
+        runBlocking { f.controller.commit(f.modelRow, "b") } shouldBe "b isn't on the server"
+        f.store.saved().containsKey("model") shouldBe false
+    }
+
+    test("resetting model removes it from the file without switching") {
+        val f = ModelFixture()
+        runBlocking { f.controller.commit(f.modelRow, "b") }
+        runBlocking { f.controller.reset(f.modelRow) } shouldBe null
+        f.store.saved().containsKey("model") shouldBe false
+        f.switched shouldBe listOf("b")
+        f.model shouldBe "b"
+    }
+
+    test("raising max-cost-usd lets the next turn run") {
+        val f = ModelFixture()
+        f.meter.record("a", dev.sophi.ai.api.TokenUsage(1, 0))
+        (f.meter.overBudget() != null) shouldBe true
+        f.controller.current(f.budgetRow) shouldBe "0.5"
+        runBlocking { f.controller.commit(f.budgetRow, "2") } shouldBe null
+        f.meter.overBudget() shouldBe null
+        f.store.saved()["max-cost-usd"] shouldBe "2"
+        runBlocking { f.controller.commit(f.budgetRow, "0") } shouldBe null
+        f.meter.maxUsd shouldBe null
+    }
+
+    test("/model shows the live model and window, and /model <id> switches") {
+        val f = ModelFixture()
+        var window = 32_000
+        val out = mutableListOf<String>()
+        val handler = SlashHandler(mockk<SessionManager>(relaxed = true), null, AgentConfig(model = "a"),
+            settings = f.controller, contextWindowTokens = window,
+            live = { AgentConfig(model = f.model) to window }) { out += it }
+        runBlocking {
+            handler.handle("/model", AgentSession(id = "s"))
+            window = 16_000
+            handler.handle("/model b", AgentSession(id = "s"))
+            handler.handle("/model", AgentSession(id = "s"))
+        }
+        out.first() shouldContain "model: a (32000 tokens)"
+        f.switched shouldBe listOf("b")
+        out.last() shouldContain "model: b (16000 tokens)"
     }
 })
