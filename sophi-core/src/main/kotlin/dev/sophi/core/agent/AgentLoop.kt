@@ -1,5 +1,6 @@
 package dev.sophi.core.agent
 
+import dev.sophi.ai.api.BudgetExceededException
 import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
@@ -112,7 +113,7 @@ private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
  * to one that actually finished.
  */
 enum class TurnStopReason {
-    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped, Error
+    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped, Error, BudgetExceeded
 }
 
 /** OpenAI's finish_reason for "ran out of output tokens", shared by every compatible server. */
@@ -219,8 +220,9 @@ class AgentLoop(
      * Total context window of the model this loop will call, in tokens. Required: there is
      * deliberately no per-model registry, because the caller who already picks `model` is the
      * only one who can say what that model's window is, and guessing wrong is worse than asking.
+     * A host that switches model mid-session sets it; each turn reads it once, at its start.
      */
-    private val contextWindowTokens: Int,
+    @Volatile var contextWindowTokens: Int,
     /** Tuning knob, not a per-model fact: compact once this fraction of the window is used. */
     private val compactionThreshold: Double = 0.8,
     /** Called once per model request with that request's usage and kind ("turn" | "summarise" | "elide"); failures never reach the loop. */
@@ -238,8 +240,8 @@ class AgentLoop(
 
     /** Scaled to [contextWindowTokens] so no single tool result can claim more than
      *  [MAX_TOOL_RESULT_FRACTION_OF_WINDOW] of whatever window this loop's model actually has. */
-    private fun truncateToolResult(result: String): String {
-        val maxChars = (contextWindowTokens * MAX_TOOL_RESULT_FRACTION_OF_WINDOW * CHARS_PER_TOKEN_ESTIMATE).toInt()
+    private fun truncateToolResult(result: String, windowTokens: Int): String {
+        val maxChars = (windowTokens * MAX_TOOL_RESULT_FRACTION_OF_WINDOW * CHARS_PER_TOKEN_ESTIMATE).toInt()
         return if (result.length <= maxChars) result else result.take(maxChars) + "\n... output truncated"
     }
 
@@ -430,6 +432,14 @@ class AgentLoop(
         } catch (e: CancellationException) {
             if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
             throw e
+        } catch (e: BudgetExceededException) {
+            // A typed stop, not an error: the rounds so far are kept and the host can say how to raise the budget.
+            val message = e.message ?: "[Stopped: the session's budget is spent]"
+            if (!turn.persisted) {
+                onEvent(TurnEvent.Token(message))
+                saveStopped(session, userInput, turn, "the budget", message, TurnStopReason.BudgetExceeded)
+            }
+            session
         } catch (e: Exception) {
             // A provider/network error after a tool round must not lose it: its files changed, and /undo needs its metadata.
             if (!turn.persisted && turn.pendingRounds.isNotEmpty()) runCatching {
@@ -483,7 +493,8 @@ class AgentLoop(
         // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
         val turnStartIndex = messages.size
 
-        val compactionTriggerTokens = (contextWindowTokens * compactionThreshold).toInt()
+        val window = contextWindowTokens // one value for the whole turn, even if a host switches model mid-turn
+        val compactionTriggerTokens = (window * compactionThreshold).toInt()
         var compactionsWithoutRelief = 0
         var toolRound = 0
         val pendingRounds = turn.pendingRounds
@@ -504,7 +515,9 @@ class AgentLoop(
             var pendingToolCalls: List<ToolCall>? = null
             var roundUsage: TokenUsage? = null
             var finishReason: String? = null
+            var firstEventAt = 0L
             provider.stream(request).collect { event ->
+                if (firstEventAt == 0L && event !is StreamEvent.Usage && event !is StreamEvent.Finish) firstEventAt = System.nanoTime()
                 when (event) {
                     is StreamEvent.Content -> {
                         contentBuf.append(event.text)
@@ -518,7 +531,11 @@ class AgentLoop(
                 }
             }
 
-            roundUsage?.let { u -> runCatching { onUsage(u, "turn") } }
+            roundUsage?.let { u ->
+                runCatching { onUsage(u, "turn") }
+                val generationMillis = if (firstEventAt == 0L) 0L else (System.nanoTime() - firstEventAt) / 1_000_000
+                onEvent(TurnEvent.RoundUsage(u, generationMillis))
+            }
             val toolCalls = pendingToolCalls
             if (toolCalls == null) {
                 // A round with no tool calls AND no text isn't an answer — it's the model stopping
@@ -561,7 +578,7 @@ class AgentLoop(
                 session.append(EntryRole.ASSISTANT, contentBuf.toString())
                 sessionManager.save(session)
 
-                return if (compactor != null && compactor.needsCompaction(session, config, contextWindowTokens)) {
+                return if (compactor != null && compactor.needsCompaction(session, config, window)) {
                     compactor.compact(session, config, onUsage = { runCatching { onUsage(it, "summarise") } }).also { sessionManager.save(it) }
                 } else {
                     session
@@ -683,7 +700,7 @@ class AgentLoop(
                             call,
                             Message(
                                 role = MessageRole.TOOL,
-                                content = truncateToolResult(result),
+                                content = truncateToolResult(result, window),
                                 toolCallId = call.id,
                                 toolName = call.name
                             ),

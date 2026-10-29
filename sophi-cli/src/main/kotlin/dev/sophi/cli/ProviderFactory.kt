@@ -14,7 +14,9 @@ internal fun buildProvider(
     apiKeyOverride: String?,
     requestTimeoutSeconds: Long = 60,
     maxRetries: Int = 2,
-    sophiHome: Path = Path.of(System.getProperty("user.home"), ".sophi")
+    sophiHome: Path = Path.of(System.getProperty("user.home"), ".sophi"),
+    /** Wraps the plain provider before System 1 does, e.g. a cost meter that must not bill locally served judgments. */
+    inner: (LLMProvider) -> LLMProvider = { it },
 ): LLMProvider {
     val s2 = try {
         buildProviderFromType(
@@ -27,5 +29,5 @@ internal fun buildProvider(
     } catch (e: ProviderConfigException) {
         throw UsageError(e.message ?: "Invalid provider configuration")
     }
-    return system1FromHome(s2, sophiHome) { System.err.println(it) }
+    return system1FromHome(inner(s2), sophiHome) { System.err.println(it) }
 }

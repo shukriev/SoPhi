@@ -38,7 +38,9 @@ class DecomposeGoalTool(
     private val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
     private val depth: Int = 0,
     private val maxToolDepth: Int = 1,
-    private val onProgress: suspend (PlanProgressEvent) -> Unit = {}
+    private val onProgress: suspend (PlanProgressEvent) -> Unit = {},
+    /** The parent's window now, when a host can switch model mid-session; null = [contextWindowTokens]. */
+    private val currentWindow: (() -> Int)? = null,
 ) : Tool {
 
     override val name = DECOMPOSE_GOAL_TOOL_NAME
@@ -76,7 +78,8 @@ class DecomposeGoalTool(
                     confirmationPolicy = confirmationPolicy,
                     depth = depth + 1,
                     maxToolDepth = maxToolDepth,
-                    onProgress = onProgress
+                    onProgress = onProgress,
+                    currentWindow = currentWindow,
                 )
             )
         }
@@ -91,7 +94,7 @@ class DecomposeGoalTool(
                 systemPrompt = parentConfig.systemPrompt,
                 allowParallelSteps = false
             ),
-            contextWindowTokens = contextWindowTokens,
+            contextWindowTokens = currentWindow?.invoke() ?: contextWindowTokens,
             confirmationPolicy = confirmationPolicy,
             grants = fullRegistry.safeGrantsFrom(args.expectedTools),
             planLog = planLog,

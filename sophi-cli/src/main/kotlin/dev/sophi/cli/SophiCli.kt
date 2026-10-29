@@ -3,6 +3,7 @@ package dev.sophi.cli
 import dev.sophi.core.tools.DEFAULT_DOCKER_IMAGE
 import dev.sophi.core.tools.SandboxMode
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.types.double
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.groups.provideDelegate
@@ -179,13 +180,37 @@ class SophiCli(
         help = "Do not register this session with a running companion's hub — stays fully " +
             "local, same as every sophi-cli release before this flag existed."
     ).flag("--remote", default = false)
+    private val catalogRefresh: Boolean by option(
+        "--catalog-refresh",
+        help = "Refresh the model catalog (windows, prices, capabilities) from models.dev in the background, " +
+            "at most once a day (default on; --no-catalog-refresh never goes online for it)."
+    ).flag("--no-catalog-refresh", default = true)
+    private val maxCostUsd: Double? by option(
+        "--max-cost-usd",
+        help = "Stop the session once its model requests have cost this many US dollars (cloud providers; 0 = no budget). " +
+            "Change it mid-session with /settings max-cost-usd."
+    ).double()
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
-        val resolved = providerOptions.resolveAndWarn()
+        val catalog = loadModelCatalog()
+        // Off the critical path: this run uses what was loaded above; a fresh file applies from the next start.
+        if (catalogRefresh) kotlin.concurrent.thread(isDaemon = true, name = "sophi-catalog-refresh") {
+            dev.sophi.sdk.ModelCatalog.refreshIfStale(DEFAULT_MODELS_CACHE)
+        }
+        val resolved = providerOptions.resolveAndWarn(catalog)
+        if (resolved.info?.tools == false) System.err.println(
+            "${resolved.model}: the model catalog says it has no tool calling, so Sophi's tools may not work with it"
+        )
         val model = resolved.model
         val contextWindowTokens = resolved.contextWindowTokens
-        val provider = providerOptions.buildProvider(resolved)
+        // One metered provider for everything this session asks a model: chat, /goal, /plan, /compact, the
+        // auto-mode classifier. So all of it counts toward --max-cost-usd and follows /model. The meter sits
+        // under System 1, so a judgment the local student answers is never billed or refused.
+        var metered: dev.sophi.sdk.MeteredProvider? = null
+        val provider = providerOptions.buildProvider(resolved) { plain ->
+            dev.sophi.sdk.MeteredProvider.wrap(plain, model, catalog, resolved.cloud, resolved.catalogProvider).also { metered = it }
+        }
         val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
@@ -215,9 +240,11 @@ class SophiCli(
                 llmTimeoutSeconds = providerOptions.timeoutSeconds,
                 hubPort = hubPort,
                 noRemote = noRemote,
-                sessionIdToResume = sessionId
+                sessionIdToResume = sessionId,
+                maxCostUsd = maxCostUsd,
             ),
             provider = provider,
+            metered = metered,
             terminal = mordantTerminal,
             input = inputSource,
             // Encoding runs fire-and-forget on AFTER_TURN (MemoryPlugin), so this warning can
@@ -257,7 +284,7 @@ class SophiCli(
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model\n"
         )
         // containers a killed sophi left behind; off the start path, since asking Docker can take seconds
         kotlin.concurrent.thread(isDaemon = true, name = "sophi-docker-orphans") {
@@ -319,12 +346,22 @@ class SophiCli(
             provider, model,
             contextProvider = { goalPrompt -> cli.runtime.contextFor(session.id, goalPrompt) }
         )
+        val goalLoop = AgentLoop(
+            provider, cli.registry, cli.runtime.sessionManager,
+            confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
+            audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules
+        )
+        // /goal's planner, critic and runner keep the start model's id; the metered provider sends it to the active model.
+        val switchModel: suspend (String) -> String? = { id ->
+            val switch = modelSwitchWindow(resolved, catalog, id, cli.runtime.contextWindowTokens)
+            switch.window?.let { window ->
+                cli.runtime.switchModel(id, window)
+                goalLoop.contextWindowTokens = window
+            }
+            switch.error
+        }
         val goalController = dev.sophi.cli.goal.GoalController(
-            agentLoop = AgentLoop(
-                provider, cli.registry, cli.runtime.sessionManager,
-                confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
-                audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules
-            ),
+            agentLoop = goalLoop,
             sessionManager = cli.runtime.sessionManager, provider = provider,
             planner = goalPlanner,
             critic = dev.sophi.core.agent.plan.LlmStepCritic(provider, model),
@@ -357,9 +394,11 @@ class SophiCli(
             settings = SettingsController(
                 settings, currentContext.originalArgv, effectiveValues(),
                 registeredOptions().associate { o -> o.names.maxBy { it.length }.removePrefix("--") to o.optionHelp(currentContext) },
-                cli.runtime.bashSandbox, cli.autoModeToggle, interactive = sophiTerminal.isInteractive
+                cli.runtime.bashSandbox, cli.autoModeToggle, interactive = sophiTerminal.isInteractive,
+                costMeter = cli.runtime.costMeter, currentModel = { cli.runtime.config.model }, switchModel = switchModel,
             ),
             contextWindowTokens = contextWindowTokens,
+            live = { cli.runtime.config to cli.runtime.contextWindowTokens },
             liveRegion = liveRegion,
             onEvent = onEvent,
             input = inputSource,
@@ -372,7 +411,8 @@ class SophiCli(
         val turnController = TurnController(
             cli.runtime, inputSource, liveRegion, onEvent = onEvent,
             tokenViewKey = tokenViewKey.singleOrNull() ?: DEFAULT_TOKEN_VIEW_KEY,
-            autoExitTokenView = autoExitTokenView
+            autoExitTokenView = autoExitTokenView,
+            usageLine = true, cloud = resolved.cloud,
         ) {
             mordantTerminal.println(it)
         }

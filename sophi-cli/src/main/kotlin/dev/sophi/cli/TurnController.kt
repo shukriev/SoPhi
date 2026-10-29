@@ -4,6 +4,8 @@ import dev.sophi.cli.streaming.StreamingTurnPresenter
 import dev.sophi.sdk.SophiRuntime
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.TurnInbox
+import dev.sophi.core.agent.TurnStopReason
+import com.github.ajalt.mordant.rendering.TextColors
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionIdContext
 import kotlinx.coroutines.async
@@ -26,8 +28,23 @@ class TurnController(
     // When a tool call finishes and generation resumes, reset token view back to the spinner
     // rather than carrying the toggle across the tool-call boundary.
     private val autoExitTokenView: Boolean = true,
+    /** After each reply, a gray line with its tokens and cost (or tok/s when local); [cloud] picks which. */
+    private val usageLine: Boolean = false,
+    private val cloud: Boolean = false,
     private val output: (String) -> Unit
 ) {
+    private fun printUsage(rounds: List<TurnEvent.RoundUsage>, usdBefore: Double, settled: AgentSession) {
+        if (!usageLine) return
+        val meter = runtime.costMeter
+        val line = turnUsageLine(
+            runtime.config.model, rounds, cloud,
+            turnUsd = if (meter.priced(runtime.config.model)) meter.totalUsd - usdBefore else null,
+            sessionUsd = meter.totalUsd, maxUsd = meter.maxUsd,
+        )
+        if (line.isNotEmpty()) output(TextColors.gray(line))
+        if (settled.branch().lastOrNull()?.metadata?.get("stopReason") == TurnStopReason.BudgetExceeded.name) output(BUDGET_HINT)
+    }
+
     private var draft = ""
 
     /** Text the user typed during the last turn that never reached the model; "" once read. */
@@ -40,6 +57,8 @@ class TurnController(
         // a follow-up cancelled before its loop started is put back in the inbox only then.
         return coroutineScope {
             var presenter = StreamingTurnPresenter(autoExitTokenView)
+            val rounds = mutableListOf<TurnEvent.RoundUsage>()
+            val usdBefore = runtime.costMeter.totalUsd
 
             fun render() {
                 val queue = editor.render()
@@ -78,6 +97,7 @@ class TurnController(
                 try {
                     runtime.streamTurn(session, userInput, inbox) { event ->
                         onEvent(event)
+                        if (event is TurnEvent.RoundUsage) rounds += event
                         when (event) {
                             is TurnEvent.SteerApplied -> startSegment(event.texts)
                             is TurnEvent.FollowUpStarted -> startSegment(listOf(event.text))
@@ -118,6 +138,7 @@ class TurnController(
                         session
                     } else {
                         output(ResponseRenderer.renderText(presenter.finalText()))
+                        printUsage(rounds, usdBefore, result)
                         result
                     }
                 }
@@ -129,6 +150,7 @@ class TurnController(
                     // No hook dispatch here: cancelling turnDeferred makes SophiRuntime.streamTurn
                     // settle the turn itself, under NonCancellable, with the partial reply.
                     output(ResponseRenderer.renderText(presenter.finalText()) + " [interrupted]")
+                    printUsage(rounds, usdBefore, session)
                     session
                 }
             }

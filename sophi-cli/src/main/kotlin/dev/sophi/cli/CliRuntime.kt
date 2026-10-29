@@ -61,7 +61,9 @@ data class CliOptions(
     val llmTimeoutSeconds: Long = 60,
     val hubPort: Int = 8765,
     val noRemote: Boolean = false,
-    val sessionIdToResume: String? = null
+    val sessionIdToResume: String? = null,
+    /** Session budget in USD; null or 0 = none. */
+    val maxCostUsd: Double? = null,
 )
 
 /**
@@ -95,7 +97,9 @@ internal suspend fun buildCliRuntime(
     provider: LLMProvider,
     terminal: Terminal,
     input: InputSource,
-    onWarning: (String) -> Unit = {}
+    onWarning: (String) -> Unit = {},
+    /** The cost meter already inside [provider] (under System 1); null = the runtime meters [provider] itself. */
+    metered: dev.sophi.sdk.MeteredProvider? = null,
 ): CliRuntime {
     // Assigned once the runtime exists (below). The confirmation policy reads them lazily, which
     // is what breaks the cycle: the policy must exist before the runtime that owns the
@@ -151,9 +155,11 @@ internal suspend fun buildCliRuntime(
 
     val runtime = try { Sophi.runtime {
         this.provider = provider
+        this.metered = metered
         model = opts.model
         maxTokens = opts.maxTokens
         contextWindowTokens(opts.contextWindowTokens)
+        opts.maxCostUsd?.takeIf { it > 0 }?.let { budget(it) }
         sessionsDir = Path.of(opts.sessionsDir)
         // The learning and memory prompt sections are both appended by the builder; only the
         // caller's own system prompt goes here.

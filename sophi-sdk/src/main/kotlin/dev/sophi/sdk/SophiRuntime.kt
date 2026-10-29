@@ -46,7 +46,7 @@ class SophiRuntime internal constructor(
     internal val agentLoop: AgentLoop,
     val sessionManager: SessionManager,
     internal val pluginRegistry: PluginRegistry,
-    val config: AgentConfig,
+    config: AgentConfig,
     private val mcpClientManager: McpClientManager? = null,
     /**
      * The learning plugin registered via [RuntimeBuilder.learning], if any. Exposed so embedders
@@ -55,8 +55,9 @@ class SophiRuntime internal constructor(
      */
     val learningPlugin: LearningPlugin? = null,
     internal val toolRegistry: ToolRegistry = ToolRegistry(),
-    internal val provider: LLMProvider? = null,
-    private val contextWindowTokens: Int = 0,
+    /** Every model request of the session goes through this one: metered, budgeted, and following [switchModel]. */
+    val provider: LLMProvider? = null,
+    contextWindowTokens: Int = 0,
     private val skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
     val memoryPlugin: MemoryPlugin? = null,
     internal val agentDefinitions: List<AgentDefinition> = emptyList(),
@@ -72,8 +73,33 @@ class SophiRuntime internal constructor(
     /** The rules [RuntimeBuilder.permissionRules] or [RuntimeBuilder.permissions] set, or null when none were configured. */
     val permissionRules: dev.sophi.core.permissions.PermissionRules? = null,
     /** Where `bash` runs; a host switches it with [dev.sophi.core.tools.BashSandbox.set]. Null without [RuntimeBuilder.builtinTools]. */
-    val bashSandbox: dev.sophi.core.tools.BashSandbox? = null
+    val bashSandbox: dev.sophi.core.tools.BashSandbox? = null,
+    private val metered: MeteredProvider? = null,
 ) {
+    /** The model and prompt turns run with; [switchModel] changes the model. */
+    @Volatile var config: AgentConfig = config
+        private set
+
+    /** The current model's context window, in tokens. */
+    @Volatile var contextWindowTokens: Int = contextWindowTokens
+        private set
+
+    /** What this session's requests have cost, and its budget ([CostMeter.maxUsd]). */
+    val costMeter: CostMeter = metered?.meter ?: CostMeter({ null })
+
+    /**
+     * Switches to [model] with window [contextWindowTokens]. Requests for the start model go to [model]
+     * from the next request on, even mid-turn; ones naming another model keep theirs. The window
+     * applies from the next turn (a running turn keeps the one it started with).
+     */
+    fun switchModel(model: String, contextWindowTokens: Int) {
+        require(contextWindowTokens > 0) { "contextWindowTokens must be positive" }
+        config = config.copy(model = model)
+        metered?.activeModel = model
+        agentLoop.contextWindowTokens = contextWindowTokens
+        this.contextWindowTokens = contextWindowTokens
+    }
+
     /** Always present: with [RuntimeBuilder.checkpoints] off it still reverses recorded moves. */
     val fileRestorer: FileRestorer = FileRestorer(checkpointStore)
     private val skillInstaller = SkillInstaller()

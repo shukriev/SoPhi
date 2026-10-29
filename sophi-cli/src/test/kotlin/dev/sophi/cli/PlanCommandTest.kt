@@ -256,4 +256,14 @@ class PlanCommandTest : FunSpec({
 
         runBlocking { sm.load("s1") }.entries.map { it.content } shouldContain "[plan file changes]"
     }
+
+    test("a spent budget ends /plan with the hint, not by ending the session") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } throws dev.sophi.ai.api.BudgetExceededException("[Stopped: over budget]")
+        every { provider.stream(any()) } returns kotlinx.coroutines.flow.flow { throw dev.sophi.ai.api.BudgetExceededException("[Stopped: over budget]") }
+        val session = AgentSession(id = "s")
+        val result = runBlocking { command(provider).run("do a thing", session) }
+        result.id shouldBe "s"
+        output.joinToString("\n") shouldContain BUDGET_HINT
+    }
 })

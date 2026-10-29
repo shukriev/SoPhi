@@ -53,7 +53,7 @@ class StreamingTurnPresenter(private val autoExitTokenView: Boolean = true) {
             currentPhase = StreamingPhase.Generating(tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount)
             Rendered.ToolLine(ResponseRenderer.renderToolCall(event.name, args, event.result))
         }
-        is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted -> null
+        is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage -> null
     }
 
     private fun bumpGenerating() {

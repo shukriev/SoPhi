@@ -17,6 +17,7 @@ import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.Generation
 import org.springframework.ai.chat.messages.AssistantMessage
 import org.springframework.ai.chat.prompt.Prompt
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import reactor.core.publisher.Flux
 
@@ -203,10 +204,8 @@ class ClaudeProviderTest : FunSpec({
         val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
         val events = provider.stream(req).toList()
 
-        events shouldBe listOf(
-            StreamEvent.Content("hi"),
-            StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
-        )
+        events.first() shouldBe StreamEvent.Content("hi")
+        events.last() shouldBe StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
     }
 
     test("stream() reports max cache-read tokens and normalises input to include them") {
@@ -245,5 +244,16 @@ class ClaudeProviderTest : FunSpec({
 
         val options = capturedPrompt.captured.options as org.springframework.ai.model.tool.ToolCallingChatOptions
         options.toolCallbacks shouldBe emptyList()
+    }
+
+    test("a stream cut off mid-way has already reported its usage, so it can still be billed") {
+        every { mockChatModel.stream(any<Prompt>()) } returns
+            Flux.just(streamChunk("a", promptTokens = 120, completionTokens = 10),
+                      streamChunk("b", promptTokens = 120, completionTokens = 20),
+                      streamChunk("c", promptTokens = 120, completionTokens = 30))
+        val req = CompletionRequest(listOf(Message(MessageRole.USER, "hi")), "claude-opus-4-8")
+        val firstTwo = provider.stream(req).take(2).toList()
+        firstTwo shouldBe listOf(StreamEvent.Content("a"), StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 10)))
+        provider.stream(req).toList().last() shouldBe StreamEvent.Usage(TokenUsage(inputTokens = 120, outputTokens = 30))
     }
 })

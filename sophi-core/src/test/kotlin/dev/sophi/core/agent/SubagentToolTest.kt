@@ -487,4 +487,27 @@ class SubagentToolTest : FunSpec({
 
         executed shouldBe false
     }
+
+    test("the nested loop uses the parent's current window") {
+        val big = object : Tool {
+            override val name = "read_file"
+            override val description = "Reads a file"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "x".repeat(3_000)
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            LLMResponse.ToolUse(listOf(ToolCall("c1", "read_file", "{}")), TokenUsage(1, 1)).toStreamFlow(),
+            LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow(),
+        )
+        val sessionManager = FileSessionManager(createTempDirectory("subagent-test"))
+        val tool = SubagentTool(
+            definitions = listOf(explore), provider = provider, fullRegistry = ToolRegistry().register(big),
+            sessionManager = sessionManager, parentConfig = AgentConfig(model = "parent-model"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW, currentWindow = { 3_000 },
+        )
+        runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"explore","prompt":"read"}""") }
+        val sub = sessionManager.load(sessionManager.list().single().id)
+        sub.branch().first { it.role == dev.sophi.core.session.EntryRole.TOOL_RESULT }.content shouldContain "output truncated"
+    }
 })

@@ -83,6 +83,10 @@ class PlanCommand(
             // saved even when the run throws: /undo reloads the session, and the round entry must be there
             val outcome = try {
                 undoableRound(session, checkpoints, "plan") { runner.run(session.id, goal, StopCondition.LlmJudged) }
+            } catch (e: dev.sophi.ai.api.BudgetExceededException) {
+                // The planner or the judge was refused: end /plan with what was saved, not the whole session.
+                echo("${e.message}\n$BUDGET_HINT")
+                return@coroutineScope session
             } finally {
                 runCatching { sessionManager.save(session) }
             }

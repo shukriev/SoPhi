@@ -70,7 +70,7 @@ class PlanProgressRenderer(
                 output(ResponseRenderer.renderToolCall(event.name, args, event.result))
                 currentPhase = StreamingPhase.Generating(tokenCount, reasoningTokenCount)
             }
-            is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted -> Unit
+            is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage -> Unit
         }
     }
 

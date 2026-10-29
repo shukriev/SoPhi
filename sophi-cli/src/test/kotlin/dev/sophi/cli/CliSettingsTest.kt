@@ -132,4 +132,15 @@ class CliSettingsTest : FunSpec({
         origin("model", emptyList(), s) shouldBe "saved"
         origin("max-tokens", emptyList(), s) shouldBe "default"
     }
+
+    test("max-cost-usd takes a number >= 0") {
+        val store = CliSettingsStore(Path.of("/nonexistent/settings.json")) {}
+        val s = CLI_SETTINGS.single { it.key == "max-cost-usd" }
+        (store.validate(s, "-1") != null) shouldBe true
+        (store.validate(s, "abc") != null) shouldBe true
+        store.validate(s, "0") shouldBe null
+        store.validate(s, "2.5") shouldBe null
+        s.live shouldBe true
+        CLI_SETTINGS.single { it.key == "model" }.live shouldBe true
+    }
 })

@@ -70,6 +70,20 @@ class RuntimeBuilder {
     var contextGlobalInstructions: Path? = Orientation.defaultGlobal()
     /** Required before [build]: SoPhi never picks a model for you. */
     var model: String? = null
+    /** Prices, windows and capabilities; with [priced] true, each request's cost is counted from it. */
+    var modelCatalog: ModelCatalog? = null
+    /** Whether this provider bills (a cloud API); false for a local server, whose requests cost nothing. */
+    var priced: Boolean = false
+    /** The catalog provider to prefer when an id is listed by several (`anthropic`, `openrouter`, …). */
+    var catalogProvider: String? = null
+    private var maxUsd: Double? = null
+    /**
+     * A meter the host already put under its own wrappers (e.g. System 1, so locally served judgments
+     * aren't billed): [provider] is then used as is and this one counts. Null = the builder wraps [provider].
+     */
+    var metered: MeteredProvider? = null
+    /** Stops the session's work once it has cost [maxUsd] dollars: the turn ends with TurnStopReason.BudgetExceeded. */
+    fun budget(maxUsd: Double): RuntimeBuilder = apply { this.maxUsd = maxUsd }
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
     var systemPrompt: String? = null
@@ -264,9 +278,19 @@ class RuntimeBuilder {
     }
 
     fun build(): SophiRuntime {
-        val p = requireNotNull(provider) { "provider must be set before calling build()" }
-            .let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
         val model = requireNotNull(model) { "model must be set before calling build()" }
+        // Innermost of the wrappers, so a judgment System 1 serves locally is never billed or refused.
+        val given = requireNotNull(provider) { "provider must be set before calling build()" }
+        val hostMeter = metered
+        // A budget nothing is priced against would never trip: say so now, not after the bill.
+        if (maxUsd != null && hostMeter == null) {
+            check(priced) { "budget(maxUsd) needs priced = true: a provider that isn't priced costs nothing, so the budget never trips" }
+            check(modelCatalog != null) { "budget(maxUsd) needs a modelCatalog to price requests against (ModelCatalog.bundled())" }
+        }
+        val metered = hostMeter ?: MeteredProvider.wrap(given, model, modelCatalog, priced, catalogProvider)
+        maxUsd?.let { metered.meter.maxUsd = it }
+        val inner: LLMProvider = if (hostMeter != null) given else metered
+        val p = inner.let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
         val window = requireNotNull(contextWindowTokens) {
             "contextWindowTokens must be set before calling build() — pass the total context " +
                 "window (in tokens) of the model you configured"
@@ -335,7 +359,7 @@ class RuntimeBuilder {
             contextWindowTokens = window,
             onUsage = usageLogPath?.let { path ->
                 { u: dev.sophi.ai.api.TokenUsage, kind: String ->
-                    val line = """{"ts":${System.currentTimeMillis()},"model":${Json.encodeToString(model)},"kind":"$kind","input":${u.inputTokens},"output":${u.outputTokens},"cacheRead":${u.cacheReadTokens}}"""
+                    val line = """{"ts":${System.currentTimeMillis()},"model":${Json.encodeToString(metered.activeModel)},"kind":"$kind","input":${u.inputTokens},"output":${u.outputTokens},"cacheRead":${u.cacheReadTokens}}"""
                     path.parent?.let { java.nio.file.Files.createDirectories(it) }
                     java.nio.file.Files.writeString(path, line + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
                 }
@@ -408,7 +432,8 @@ class RuntimeBuilder {
                     sessionManager = sm,
                     parentConfig = effectiveConfig,
                     contextWindowTokens = window,
-                    confirmationPolicy = confirmationPolicy
+                    confirmationPolicy = confirmationPolicy,
+                    currentWindow = { loop.contextWindowTokens },
                 )
             )
         }
@@ -422,7 +447,8 @@ class RuntimeBuilder {
                     contextWindowTokens = window,
                     planLog = PlanLog(dir),
                     confirmationPolicy = confirmationPolicy,
-                    onProgress = goalDecompositionOnProgress
+                    onProgress = goalDecompositionOnProgress,
+                    currentWindow = { loop.contextWindowTokens },
                 )
             )
         }
@@ -439,7 +465,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox
+            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered
         )
     }
 }
