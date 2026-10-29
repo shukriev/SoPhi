@@ -55,7 +55,9 @@ class TurnKeysTest : FunSpec({
     test("escape sequences") {
         decode(27, 13) shouldBe key(TurnKey.AltEnter)
         decode(27, -2) shouldBe KeyAction.Interrupt
-        decode(27, '['.code, 'A'.code) shouldBe KeyAction.Ignore
+        decode(27, '['.code, 'A'.code) shouldBe key(TurnKey.Up)
+        decode(27, '['.code, 'B'.code) shouldBe key(TurnKey.Down)
+        decode(27, '['.code, 'C'.code) shouldBe KeyAction.Ignore
         decode(27, '['.code, '1'.code, ';'.code, '5'.code, 'C'.code) shouldBe KeyAction.Ignore
         decode(27, 'O'.code, 'P'.code) shouldBe KeyAction.Ignore
         decode(27, '['.code, '1'.code, tail = -1) shouldBe KeyAction.Ignore

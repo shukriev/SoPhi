@@ -33,7 +33,7 @@ class SeatbeltSandboxTest : FunSpec({
         test("a write outside the writable places fails; inside it works; reading anywhere works") {
             val ws = createTempDirectory("ws")
             val elsewhere = createTempDirectory("elsewhere")
-            val tool = BashTool(ws, SeatbeltSandbox(listOf(ws)))
+            val tool = BashTool(ws, BashSandbox(ws, SeatbeltSandbox(listOf(ws))).apply { set(SandboxMode.SEATBELT) })
             tool.run("touch '$elsewhere/x'") shouldContain "Operation not permitted"
             elsewhere.resolve("x").exists() shouldBe false
             tool.run("touch inside && echo made")  shouldContain "made"
@@ -46,7 +46,7 @@ class SeatbeltSandboxTest : FunSpec({
             val name = ".sophi-seatbelt-test-${System.nanoTime()}"
             val target = Path.of(System.getProperty("user.home"), name)
             try {
-                BashTool(ws, SeatbeltSandbox.forWorkspace(ws)).run("touch \"\$HOME/$name\"") shouldContain "Operation not permitted"
+                BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT) }).run("touch \"\$HOME/$name\"") shouldContain "Operation not permitted"
                 target.exists() shouldBe false
             } finally { target.deleteIfExists() }
         }
@@ -54,10 +54,42 @@ class SeatbeltSandboxTest : FunSpec({
         test("a workspace path with quotes, spaces and parentheses can't break out of the profile") {
             val ws = createTempDirectory("ws").resolve("a \" ) (allow file-write* (subpath \"/\") ;b\\").createDirectories()
             val elsewhere = createTempDirectory("elsewhere")
-            val tool = BashTool(ws, SeatbeltSandbox(listOf(ws)))
+            val tool = BashTool(ws, BashSandbox(ws, SeatbeltSandbox(listOf(ws))).apply { set(SandboxMode.SEATBELT) })
             tool.run("touch inside && echo made") shouldContain "made"
             tool.run("touch '$elsewhere/x'") shouldContain "Operation not permitted"
             elsewhere.resolve("x").exists() shouldBe false
+        }
+        test("acceptance: ~/Desktop can't be written, the workspace can, /etc/hosts can be read") {
+            val ws = createTempDirectory("ws")
+            val name = "sophi-x-${System.nanoTime()}"
+            val desktop = Path.of(System.getProperty("user.home"), "Desktop", name)
+            val tool = BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT) shouldBe null })
+            try {
+                tool.run("touch \"\$HOME/Desktop/$name\"") shouldContain "Operation not permitted"
+                desktop.exists() shouldBe false
+            } finally { desktop.deleteIfExists() }
+            tool.run("echo hi > made && cat made") shouldContain "hi"
+            tool.run("cat /etc/hosts") shouldContain "localhost"
+        }
+
+        test("the Docker socket can't be reached, so docker can't step outside the sandbox").config(enabled = Path.of("/var/run/docker.sock").exists()) {
+            val ws = createTempDirectory("ws")
+            val tool = BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT) shouldBe null })
+            tool.run("curl -sS -m 5 --unix-socket /var/run/docker.sock http://x/version").contains("ApiVersion") shouldBe false
+        }
+
+        test("with the network off, names don't resolve") {
+            val ws = createTempDirectory("ws")
+            val tool = BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT, network = false) shouldBe null })
+            tool.run("dscacheutil -q host -a name example.org").contains("address:") shouldBe false
+        }
+
+        test("with the network off, curl fails") {
+            val ws = createTempDirectory("ws")
+            val tool = BashTool(ws, BashSandbox(ws).apply { set(SandboxMode.SEATBELT, network = false) shouldBe null })
+            val out = tool.run("curl -sS -m 5 https://example.com")
+            out shouldContain "Command exited with code"
+            out.contains("<html") shouldBe false
         }
     }
 })

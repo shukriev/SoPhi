@@ -47,6 +47,8 @@ class SlashHandler(
     private val auditSink: AuditSink? = null,
     private val permissions: dev.sophi.core.permissions.PermissionRules? = null,
     private val checkpoints: CheckpointStore? = null,
+    /** Null: `/settings` reports it isn't available (a handler built without the CLI's wiring). */
+    private val settings: SettingsController? = null,
     /**
      * Total context window of `config.model`, in tokens. Optional here for the same reason
      * `provider` and `toolRegistry` are: a SlashHandler built without the full agent wiring
@@ -162,10 +164,11 @@ class SlashHandler(
             }
             "auto" -> { handleAuto(); session }
             "permissions" -> { handlePermissions(arg); session }
+            "settings" -> { handleSettings(arg); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings"
                 )
                 session
             }
@@ -325,6 +328,22 @@ class SlashHandler(
             contextWindowTokens = window, confirmationPolicy = confirmationPolicy, planLog = planLog,
             onEvent = onEvent, liveRegion = liveRegion, input = input, checkpoints = checkpoints, audit = auditSink, permissions = permissions, echo = output
         ).run(arg, session)
+    }
+
+    private suspend fun handleSettings(arg: String?) {
+        val ctl = settings ?: return output("Settings are not available in this session.")
+        val parts = arg?.split(" ", limit = 2)?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+        if (parts.isEmpty()) {
+            if (ctl.interactive) runSettingsMenu(SettingsMenu(ctl) { liveRegion.update(it) }, input, liveRegion)
+            else ctl.settings.forEach { output(ctl.row(it)) }
+            return
+        }
+        val setting = ctl.settings.firstOrNull { it.key == parts[0] }
+            ?: return output("Unknown setting: ${parts[0]}  Usage: /settings [<key> [<value>]] — /settings alone lists them")
+        val value = parts.getOrNull(1) ?: return output(ctl.row(setting))
+        if (ctl.startsContainer(setting, value)) output("Starting a container (the first run pulls the image)…")
+        val reason = ctl.commit(setting, value)
+        output(if (reason != null) "✗ ${setting.key} unchanged: $reason" else ctl.row(setting))
     }
 
     private fun handlePermissions(arg: String?) {

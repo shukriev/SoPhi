@@ -8,6 +8,8 @@ sealed interface TurnKey {
     object Backspace : TurnKey
     object Enter : TurnKey
     object AltEnter : TurnKey
+    object Up : TurnKey
+    object Down : TurnKey
 }
 
 sealed interface KeyAction {
@@ -70,6 +72,8 @@ class TurnKeyDecoder {
             while (c >= 0 && c !in 0x40..0x7E) { seq.append(c.toChar()); c = next(SEQUENCE_WAIT_MS) }
             if (b == '['.code && c == '~'.code && seq.toString() == "200") pasting = true
             if (b == '['.code && c == '~'.code && seq.toString() == "201") pasting = false
+            if (!pasting && seq.isEmpty() && c == 'A'.code) return KeyAction.Key(TurnKey.Up)
+            if (!pasting && seq.isEmpty() && c == 'B'.code) return KeyAction.Key(TurnKey.Down)
             return KeyAction.Ignore
         }
         // pasted noise; a second ESC may start the end marker, so decode it as one

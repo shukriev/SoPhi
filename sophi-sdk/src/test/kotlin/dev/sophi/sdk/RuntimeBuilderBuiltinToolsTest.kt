@@ -5,6 +5,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 
 private const val TEST_CONTEXT_WINDOW = 100_000
@@ -21,6 +22,15 @@ class RuntimeBuilderBuiltinToolsTest : FunSpec({
         }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.builtinTools(root).build()
 
         runtime.toolNames() shouldContain "read_file"
+    }
+
+    test("the runtime exposes its bash sandbox, off by default") {
+        val runtime = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            sessionsDir = tempdir().toPath()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.builtinTools(tempdir().toPath()).build()
+
+        runtime.bashSandbox!!.mode shouldBe dev.sophi.core.tools.SandboxMode.OFF
     }
 
     test("builtinTools() only registers web_search when a Brave API key is given") {

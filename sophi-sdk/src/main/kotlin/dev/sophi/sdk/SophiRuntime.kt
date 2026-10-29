@@ -70,7 +70,9 @@ class SophiRuntime internal constructor(
     /** The sink [RuntimeBuilder.auditLog] or [RuntimeBuilder.audit] set, or null when auditing is off. */
     val auditSink: AuditSink? = null,
     /** The rules [RuntimeBuilder.permissionRules] or [RuntimeBuilder.permissions] set, or null when none were configured. */
-    val permissionRules: dev.sophi.core.permissions.PermissionRules? = null
+    val permissionRules: dev.sophi.core.permissions.PermissionRules? = null,
+    /** Where `bash` runs; a host switches it with [dev.sophi.core.tools.BashSandbox.set]. Null without [RuntimeBuilder.builtinTools]. */
+    val bashSandbox: dev.sophi.core.tools.BashSandbox? = null
 ) {
     /** Always present: with [RuntimeBuilder.checkpoints] off it still reverses recorded moves. */
     val fileRestorer: FileRestorer = FileRestorer(checkpointStore)
@@ -81,6 +83,7 @@ class SophiRuntime internal constructor(
         mcpClientManager?.close()
         memoryPlugin?.close()
         contextEngine?.close()
+        bashSandbox?.close()
     }
 
     fun toolNames(): List<String> = toolRegistry.names()

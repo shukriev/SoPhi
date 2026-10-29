@@ -278,7 +278,10 @@ class RuntimeBuilder {
         val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
             store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
         }
-        builtinToolsConfig?.let { cfg -> buildBuiltinTools(cfg.root, cfg.braveApiKey, cfg.sandboxed).forEach { registry.register(it) } }
+        val bashSandbox = builtinToolsConfig?.let { cfg ->
+            dev.sophi.core.tools.BashSandbox(cfg.root).apply { if (cfg.sandboxed) set(dev.sophi.core.tools.SandboxMode.SEATBELT) }
+                .also { s -> buildBuiltinTools(cfg.root, cfg.braveApiKey, sandbox = s).forEach { registry.register(it) } }
+        }
         contextConfig?.let { (engine, project, _) ->
             contextTools(engine, project, knob("SOPHI_CONTEXT_TOOLS", "all", "core", "none")).forEach { registry.register(it) }
             plugins.add(ContextPlugin(engine, project))
@@ -436,7 +439,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore, auditSink, permissionRules
+            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox
         )
     }
 }
