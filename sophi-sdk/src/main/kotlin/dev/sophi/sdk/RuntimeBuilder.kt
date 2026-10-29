@@ -215,6 +215,14 @@ class RuntimeBuilder {
     /** Enforces already-loaded [rules]. The last of [permissionRules] and this wins. */
     fun permissions(rules: dev.sophi.core.permissions.PermissionRules): RuntimeBuilder = apply { permissionRules = rules }
 
+    private var userAsker: dev.sophi.core.tools.UserAsker? = null
+
+    /**
+     * Registers `ask_user`, answered through [asker] (the CLI's terminal, the companion's bubble). Without it the tool
+     * isn't registered, so a host nobody can answer from (MCP serve, a non-interactive run) never offers it.
+     */
+    fun askUser(asker: dev.sophi.core.tools.UserAsker): RuntimeBuilder = apply { userAsker = asker }
+
     /**
      * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
      * if [agentsDir] was never called or found no definitions, matching [SubagentTool]'s own
@@ -317,6 +325,7 @@ class RuntimeBuilder {
                 globalInstructions = contextGlobalInstructions))
             plugins.add(HintPlugin(engine, project, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
         }
+        userAsker?.let { registry.register(dev.sophi.core.tools.AskUserTool(it)) }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
             registry.register(SkillTool(loadSkills, topK = harnessConfig?.topKSkills))

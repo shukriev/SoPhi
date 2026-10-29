@@ -24,6 +24,15 @@ class RuntimeBuilderBuiltinToolsTest : FunSpec({
         runtime.toolNames() shouldContain "read_file"
     }
 
+    test("builder registers ask_user only with an asker") {
+        fun build(ask: Boolean) = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            sessionsDir = tempdir().toPath()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model"; if (ask) askUser { _, _ -> dev.sophi.core.tools.Answer.Dismissed } }.build()
+        build(true).toolNames() shouldContain "ask_user"
+        build(false).toolNames() shouldNotContain "ask_user"
+    }
+
     test("background jobs are wired and close() kills them") {
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()
