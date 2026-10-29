@@ -179,10 +179,23 @@ class SophiCli(
         help = "Do not register this session with a running companion's hub — stays fully " +
             "local, same as every sophi-cli release before this flag existed."
     ).flag("--remote", default = false)
+    private val catalogRefresh: Boolean by option(
+        "--catalog-refresh",
+        help = "Refresh the model catalog (windows, prices, capabilities) from models.dev in the background, " +
+            "at most once a day (default on; --no-catalog-refresh never goes online for it)."
+    ).flag("--no-catalog-refresh", default = true)
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
-        val resolved = providerOptions.resolveAndWarn()
+        val catalog = loadModelCatalog()
+        // Off the critical path: this run uses what was loaded above; a fresh file applies from the next start.
+        if (catalogRefresh) kotlin.concurrent.thread(isDaemon = true, name = "sophi-catalog-refresh") {
+            dev.sophi.sdk.ModelCatalog.refreshIfStale(DEFAULT_MODELS_CACHE)
+        }
+        val resolved = providerOptions.resolveAndWarn(catalog)
+        if (resolved.info?.tools == false) System.err.println(
+            "${resolved.model}: the model catalog says it has no tool calling, so Sophi's tools may not work with it"
+        )
         val model = resolved.model
         val contextWindowTokens = resolved.contextWindowTokens
         val provider = providerOptions.buildProvider(resolved)

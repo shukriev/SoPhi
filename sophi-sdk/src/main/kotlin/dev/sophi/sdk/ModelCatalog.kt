@@ -147,6 +147,9 @@ class ModelCatalog(private val entries: List<ModelInfo>) {
         }
         private val bundledCatalog: ModelCatalog by lazy { fromObject(bundledJson) }
 
+        /** How many models a gzipped snapshot file holds. */
+        fun bundledSize(gz: Path): Int = Files.newInputStream(gz).use { s -> parse(GZIPInputStream(s).readBytes().decodeToString()).size() }
+
         /** The snapshot shipped in the jar; empty when it's missing. */
         fun bundled(): ModelCatalog = bundledCatalog
 

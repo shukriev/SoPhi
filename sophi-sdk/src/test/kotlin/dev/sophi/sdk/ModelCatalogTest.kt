@@ -69,6 +69,11 @@ class ModelCatalogTest : FunSpec({
         catalog.base("llama-9z") shouldBe null
     }
 
+    test("the bundled snapshot loads") {
+        (ModelCatalog.bundled().size() > 1000) shouldBe true
+        ModelCatalog.bundled().find("claude-fable-5-1", "anthropic")!!.contextTokens shouldBe 1_000_000
+    }
+
     test("a corrupt cache falls back to the snapshot") {
         val cache = tempdir().toPath().resolve("models.json")
         Files.writeString(cache, """{"anthropic":""")

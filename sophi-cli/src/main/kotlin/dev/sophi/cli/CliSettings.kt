@@ -62,6 +62,7 @@ val CLI_SETTINGS: List<Setting> = listOf(
     next("plans-dir", SettingKind.Text),
     next("hub-port", SettingKind.Int),
     next("no-remote", SettingKind.Bool),
+    next("catalog-refresh", SettingKind.Bool),
 )
 
 /**

@@ -13,6 +13,10 @@ import dev.sophi.ai.providers.detectContextWindow
 import dev.sophi.ai.providers.discoverLocalServer
 import dev.sophi.ai.providers.isChatModel
 import dev.sophi.ai.providers.loadedChatModels
+import dev.sophi.sdk.ModelCatalog
+import dev.sophi.sdk.ModelInfo
+import java.net.InetAddress
+import java.net.URI
 import java.time.Duration
 
 /** The model-provider options every command that talks to a model shares. */
@@ -43,7 +47,7 @@ class ProviderOptions : OptionGroup("Model provider") {
     val contextWindowTokens: Int? by option(
         "--context-window-tokens",
         help = "Context window of --model, in tokens. Earlier tool rounds are summarised once 80% of it " +
-            "is used. Default: read from a local server, else 8192 (openai-compat) or 200000 (claude)."
+            "is used. Default: read from a local server, else the model catalog, else 8192 (openai-compat) or 200000 (claude)."
     ).int()
 }
 
@@ -54,10 +58,43 @@ data class ResolvedProvider(
     val model: String,
     val contextWindowTokens: Int,
     val embeddingModel: String?,
-    val warnings: List<String>
+    val warnings: List<String>,
+    /** A billing API: `claude`, or `openai-compat` on a public host. Local servers are free. */
+    val cloud: Boolean = false,
+    /** The catalog provider whose entry to prefer (`anthropic`, `openrouter`, `openai`), when known. */
+    val catalogProvider: String? = null,
+    /** What the catalog says about [model]: its own entry for cloud, its base model's capabilities for local. */
+    val info: ModelInfo? = null,
+    /** The local server [model] runs on, so a later `/model` can ask it for a window. */
+    val server: LocalServer? = null,
 )
 
-fun ProviderOptions.resolve(discover: () -> LocalServer? = { discoverLocalServer() }): ResolvedProvider =
+private val IP_LITERAL = Regex("""[0-9.]+|[0-9a-f:]+""")
+
+/** Hosts that are this machine or its network: `localhost`, `*.local`, and loopback, site-local or link-local IPs. */
+internal fun isLocalHost(host: String?): Boolean {
+    val h = host?.lowercase()?.removeSurrounding("[", "]") ?: return true
+    if (h == "localhost" || h.endsWith(".local") || h.endsWith(".localhost")) return true
+    // Only IP literals are checked; a name is never resolved here, so it counts as public.
+    if (!IP_LITERAL.matches(h) || h.none { it == '.' || it == ':' }) return false
+    val a = runCatching { InetAddress.getByName(h) }.getOrNull() ?: return false
+    return a.isLoopbackAddress || a.isSiteLocalAddress || a.isLinkLocalAddress || a.isAnyLocalAddress
+}
+
+/** `claude` → `anthropic`; an openai-compat base URL's host → the catalog provider that serves it. */
+internal fun catalogProviderFor(type: String, baseUrl: String?): String? = when (type) {
+    "claude" -> "anthropic"
+    else -> when (runCatching { URI(baseUrl ?: "").host }.getOrNull()?.lowercase()) {
+        "openrouter.ai" -> "openrouter"
+        "api.openai.com" -> "openai"
+        else -> null
+    }
+}
+
+fun ProviderOptions.resolve(
+    catalog: ModelCatalog = ModelCatalog.bundled(),
+    discover: () -> LocalServer? = { discoverLocalServer() },
+): ResolvedProvider =
     when (val t = type.lowercase()) {
         "local" -> {
             val url = baseUrl?.trimEnd('/')
@@ -77,12 +114,21 @@ fun ProviderOptions.resolve(discover: () -> LocalServer? = { discoverLocalServer
                 ?: 8192.also {
                     warnings += "Couldn't read the server's context window; assuming 8192. Pass --context-window-tokens to set it."
                 }
-            ResolvedProvider(t, server.baseUrl, chosen, window, server.models.firstOrNull { "nomic-embed" in it }, warnings)
+            ResolvedProvider(t, server.baseUrl, chosen, window, server.models.firstOrNull { "nomic-embed" in it }, warnings,
+                info = catalog.base(chosen), server = server)
         }
-        "openai-compat", "claude" -> ResolvedProvider(
-            t, baseUrl, model ?: throw UsageError("--model is required with --provider $t"),
-            contextWindowTokens ?: if (t == "claude") 200_000 else 8192, null, emptyList()
-        )
+        "openai-compat", "claude" -> {
+            val chosen = model ?: throw UsageError("--model is required with --provider $t")
+            val cloud = t == "claude" || !isLocalHost(runCatching { URI(baseUrl ?: "").host }.getOrNull())
+            val catalogProvider = catalogProviderFor(t, baseUrl)
+            // An openai-compat server on this machine or network runs a local model: no price, no catalog window.
+            val info = if (cloud) catalog.find(chosen, catalogProvider) else catalog.base(chosen)
+            ResolvedProvider(
+                t, baseUrl, chosen,
+                contextWindowTokens ?: info?.contextTokens ?: if (t == "claude") 200_000 else 8192, null, emptyList(),
+                cloud = cloud, catalogProvider = catalogProvider, info = info,
+            )
+        }
         else -> throw UsageError("Unknown provider: $type (expected 'local', 'openai-compat' or 'claude')")
     }
 
@@ -90,8 +136,8 @@ fun ProviderOptions.resolve(discover: () -> LocalServer? = { discoverLocalServer
 internal fun ResolvedProvider.windowAtMost(cap: Int): Int = minOf(contextWindowTokens, cap)
 
 /** [resolve] at a command's startup: prints the warnings to stderr once. */
-internal fun ProviderOptions.resolveAndWarn(): ResolvedProvider =
-    resolve().also { r -> r.warnings.forEach { System.err.println(it) } }
+internal fun ProviderOptions.resolveAndWarn(catalog: ModelCatalog = ModelCatalog.bundled()): ResolvedProvider =
+    resolve(catalog).also { r -> r.warnings.forEach { System.err.println(it) } }
 
 internal fun ProviderOptions.buildProvider(resolved: ResolvedProvider): LLMProvider =
     buildProvider(resolved, apiKey, timeoutSeconds, maxRetries)
