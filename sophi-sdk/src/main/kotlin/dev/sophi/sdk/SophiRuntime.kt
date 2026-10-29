@@ -87,9 +87,6 @@ class SophiRuntime internal constructor(
     /** What this session's requests have cost, and its budget ([CostMeter.maxUsd]). */
     val costMeter: CostMeter = metered?.meter ?: CostMeter({ null })
 
-    /** Whether the current model is billed: a cloud provider whose price the catalog knows. */
-    val priced: Boolean get() = costMeter.priced(config.model)
-
     /**
      * Switches to [model] with window [contextWindowTokens]. Requests for the start model go to [model]
      * from the next request on, even mid-turn; ones naming another model keep theirs. The window

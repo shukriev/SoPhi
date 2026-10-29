@@ -190,4 +190,4 @@ suspend fun runSettingsMenu(menu: SettingsMenu, input: InputSource, liveRegion: 
 }
 
 /** 2.0 → `2`, 0.5 → `0.5`: dollars as the user would type them. */
-private fun usdText(v: Double): String = if (v == Math.floor(v) && !v.isInfinite()) v.toLong().toString() else v.toString()
+private fun usdText(v: Double): String = v.toBigDecimal().stripTrailingZeros().toPlainString()

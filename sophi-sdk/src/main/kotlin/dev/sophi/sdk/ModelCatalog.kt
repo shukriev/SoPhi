@@ -83,7 +83,6 @@ class ModelCatalog(private val entries: List<ModelInfo>) {
     companion object {
         const val SOURCE_URL = "https://models.dev/api.json"
         private val QUANT = Regex("""[-_.](q\d\w*|iq\d\w*|f16|bf16|fp8|int4|int8|mlx|\d+bit)$""")
-        private val compactJson = Json { prettyPrint = false }
 
         internal fun normaliseLocal(id: String): String {
             var s = id.lowercase().substringAfterLast('/').substringBefore('@').removeSuffix(".gguf").removeSuffix("-gguf")
@@ -101,7 +100,7 @@ class ModelCatalog(private val entries: List<ModelInfo>) {
                 val models = (p as? JsonObject)?.get("models") as? JsonObject ?: return@mapNotNull null
                 provider to JsonObject(models.mapNotNull { (id, m) -> (m as? JsonObject)?.let { id to compact(it) } }.toMap())
             }.toMap()
-            return compactJson.encodeToString(JsonObject.serializer(), JsonObject(out))
+            return Json.encodeToString(JsonObject.serializer(), JsonObject(out))
         }
 
         private fun compact(m: JsonObject): JsonObject {
@@ -147,26 +146,17 @@ class ModelCatalog(private val entries: List<ModelInfo>) {
         }
         private val bundledCatalog: ModelCatalog by lazy { fromObject(bundledJson) }
 
-        /** How many models a gzipped snapshot file holds. */
-        fun bundledSize(gz: Path): Int = Files.newInputStream(gz).use { s -> parse(GZIPInputStream(s).readBytes().decodeToString()).size() }
-
         /** The snapshot shipped in the jar; empty when it's missing. */
         fun bundled(): ModelCatalog = bundledCatalog
 
         /** [cache] (or the snapshot when it's missing or broken), with [user]'s fields laid over it. */
         fun load(cache: Path?, user: Path?, onWarning: (String) -> Unit): ModelCatalog {
-            val base = cache?.takeIf { Files.exists(it) }?.let { c ->
-                runCatching { Json.parseToJsonElement(Files.readString(c)).jsonObject }.getOrElse {
-                    onWarning("model catalog: $c isn't valid JSON (${it.message?.lineSequence()?.first()}) — using the bundled snapshot")
-                    null
-                }
-            } ?: bundledJson
-            val overlay = user?.takeIf { Files.exists(it) }?.let { u ->
-                runCatching { Json.parseToJsonElement(Files.readString(u)).jsonObject }.getOrElse {
-                    onWarning("model catalog: ignoring $u, it isn't valid JSON (${it.message?.lineSequence()?.first()})")
-                    null
-                }
-            } ?: return if (base === bundledJson) bundledCatalog else fromObject(base)
+            fun read(f: Path?, warn: (String) -> String) = f?.takeIf { Files.exists(it) }?.let { p ->
+                runCatching { Json.parseToJsonElement(Files.readString(p)).jsonObject }
+                    .onFailure { onWarning(warn("${it.message?.lineSequence()?.first()}")) }.getOrNull()
+            }
+            val base = read(cache) { "model catalog: $cache isn't valid JSON ($it) — using the bundled snapshot" } ?: bundledJson
+            val overlay = read(user) { "model catalog: ignoring $user, it isn't valid JSON ($it)" } ?: return if (base === bundledJson) bundledCatalog else fromObject(base)
             return fromObject(merge(base, overlay))
         }
 
@@ -198,8 +188,7 @@ class ModelCatalog(private val entries: List<ModelInfo>) {
 
         /** Writes via a temp file and an atomic move, so a killed write never leaves half a file. */
         fun writeAtomically(target: Path, bytes: ByteArray) {
-            target.toAbsolutePath().parent?.let { Files.createDirectories(it) }
-            val dir = target.toAbsolutePath().parent
+            val dir = Files.createDirectories(target.toAbsolutePath().parent)
             val tmp = Files.createTempFile(dir, "models", ".tmp")
             try {
                 Files.write(tmp, bytes)

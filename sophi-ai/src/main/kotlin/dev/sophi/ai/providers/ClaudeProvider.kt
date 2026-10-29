@@ -54,9 +54,10 @@ class ClaudeProvider(
             cacheWrite = maxOf(cacheWrite, chunkUsage?.cacheWriteInputTokens?.toInt() ?: 0)
             // The running total as it grows, not only at the end: a turn the user stops mid-stream
             // was still billed for its prompt and what it wrote so far, and the meter keeps the last one.
-            if ((inputTokens > 0 || outputTokens > 0) && usage() != reported) {
-                reported = usage()
-                emit(StreamEvent.Usage(reported!!))
+            val now = usage()
+            if ((inputTokens > 0 || outputTokens > 0) && now != reported) {
+                reported = now
+                emit(StreamEvent.Usage(now))
             }
         }
     }.catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }

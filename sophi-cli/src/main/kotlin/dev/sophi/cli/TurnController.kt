@@ -38,7 +38,7 @@ class TurnController(
         val meter = runtime.costMeter
         val line = turnUsageLine(
             runtime.config.model, rounds, cloud,
-            turnUsd = if (runtime.priced) meter.totalUsd - usdBefore else null,
+            turnUsd = if (meter.priced(runtime.config.model)) meter.totalUsd - usdBefore else null,
             sessionUsd = meter.totalUsd, maxUsd = meter.maxUsd,
         )
         if (line.isNotEmpty()) output(TextColors.gray(line))

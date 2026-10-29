@@ -43,9 +43,10 @@ class ModelsCommand(private val catalog: () -> ModelCatalog = { loadModelCatalog
     private fun refreshNow() {
         val target = out
         if (target != null) {
-            val bytes = ByteArrayOutputStream().also { b -> GZIPOutputStream(b).use { it.write(ModelCatalog.trim(ModelCatalog.fetchModelsDev()).toByteArray()) } }
+            val trimmed = ModelCatalog.trim(ModelCatalog.fetchModelsDev())
+            val bytes = ByteArrayOutputStream().also { b -> GZIPOutputStream(b).use { it.write(trimmed.toByteArray()) } }
             ModelCatalog.writeAtomically(target, bytes.toByteArray())
-            echo("Wrote ${ModelCatalog.bundledSize(target)} models to $target")
+            echo("Wrote ${ModelCatalog.parse(trimmed).size()} models to $target")
             return
         }
         if (!ModelCatalog.refreshIfStale(DEFAULT_MODELS_CACHE, maxAge = Duration.ZERO)) {
