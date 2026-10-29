@@ -23,6 +23,33 @@ private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
 class HubServerTest : FunSpec({
+    test("a web page can't connect: browsers send an Origin, the CLI never does") {
+        val port = freePort()
+        val server = HubServer(port)
+        server.start()
+        try {
+            runBlocking {
+                withTimeout(5000) {
+                    val client = HttpClient(CIO) { install(WebSockets) }
+                    val seen = async { kotlinx.coroutines.withTimeoutOrNull(1500) { server.events.first() } }
+                    delay(100)
+                    val page = client.webSocketSession(host = "127.0.0.1", port = port, path = "/hub/cli") {
+                        headers.append("Origin", "https://evil.example")
+                    }
+                    runCatching {
+                        page.send(Frame.Text(json.encodeToString(HubEvent.serializer(), HubEvent.SessionRegistered("s1", "t", 1L, "/repo"))))
+                    }
+                    seen.await() shouldBe null
+                    // The server closed it without reading a frame.
+                    (withTimeout(2000) { page.closeReason.await() }?.code) shouldBe io.ktor.websocket.CloseReason.Codes.VIOLATED_POLICY.code
+                    client.close()
+                }
+            }
+        } finally {
+            server.stop()
+        }
+    }
+
     test("a HubEvent published by a connected CLI client shows up on events") {
         val port = freePort()
         val server = HubServer(port)

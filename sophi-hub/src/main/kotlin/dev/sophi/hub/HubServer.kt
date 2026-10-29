@@ -8,7 +8,9 @@ import io.ktor.server.routing.routing
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -17,7 +19,7 @@ import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Local-only (127.0.0.1) hub embedded by sophi-companion. CLI sessions connect to /hub/cli,
+ * Local-only (127.0.0.1) hub embedded by sophi-companion, refusing browsers (any request with an Origin). CLI sessions connect to /hub/cli,
  * announce themselves with a [HubEvent.SessionRegistered] as their first frame, and stream
  * further [HubEvent]s; the companion process reads [events] and calls [sendCommand] directly
  * in-process (see CompanionRuntime) — there is no companion-side WebSocket hop.
@@ -36,6 +38,12 @@ class HubServer(private val port: Int) {
             install(WebSockets)
             routing {
                 webSocket("/hub/cli") {
+                    // Any web page can open ws://127.0.0.1 (CORS doesn't cover WebSockets), and a browser always
+                    // sends Origin; the CLI never does. Without this a site could show fake permission cards.
+                    if (call.request.headers["Origin"] != null) {
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "browsers may not connect"))
+                        return@webSocket
+                    }
                     var registeredId: String? = null
                     try {
                         for (frame in incoming) {
