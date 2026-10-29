@@ -117,6 +117,8 @@ class RuntimeBuilder {
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
+    /** Where background `bash` jobs write their output (per process, under its pid). */
+    var jobsHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "jobs")
     private var checkpointsConfig: Pair<Path, (String) -> Unit>? = null
     private var auditSink: AuditSink? = null
     private var permissionRules: dev.sophi.core.permissions.PermissionRules? = null
@@ -302,9 +304,10 @@ class RuntimeBuilder {
         val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
             store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
         }
+        val jobs = builtinToolsConfig?.let { dev.sophi.core.tools.BashJobs(jobsHome) }
         val bashSandbox = builtinToolsConfig?.let { cfg ->
             dev.sophi.core.tools.BashSandbox(cfg.root).apply { if (cfg.sandboxed) set(dev.sophi.core.tools.SandboxMode.SEATBELT) }
-                .also { s -> buildBuiltinTools(cfg.root, cfg.braveApiKey, sandbox = s).forEach { registry.register(it) } }
+                .also { s -> buildBuiltinTools(cfg.root, cfg.braveApiKey, sandbox = s, jobs = jobs).forEach { registry.register(it) } }
         }
         contextConfig?.let { (engine, project, _) ->
             contextTools(engine, project, knob("SOPHI_CONTEXT_TOOLS", "all", "core", "none")).forEach { registry.register(it) }
@@ -465,7 +468,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered
+            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered, jobs
         )
     }
 }

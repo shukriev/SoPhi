@@ -284,7 +284,7 @@ class SophiCli(
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs\n"
         )
         // containers a killed sophi left behind; off the start path, since asking Docker can take seconds
         kotlin.concurrent.thread(isDaemon = true, name = "sophi-docker-orphans") {
@@ -391,6 +391,7 @@ class SophiCli(
             auditSink = cli.runtime.auditSink,
             permissions = cli.runtime.permissionRules,
             checkpoints = cli.runtime.checkpointStore,
+            jobs = cli.runtime.jobs,
             settings = SettingsController(
                 settings, currentContext.originalArgv, effectiveValues(),
                 registeredOptions().associate { o -> o.names.maxBy { it.length }.removePrefix("--") to o.optionHelp(currentContext) },

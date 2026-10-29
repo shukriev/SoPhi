@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Background `bash`: `bash(background = true)` returns a job id, `bash_output` reads what it printed since last time (waiting up to 120 s for more), `bash_kill` stops it, and `/jobs` lists and stops jobs in the CLI. At most 8 run at once, and every job dies with Sophi.
 - `apply_patch`: adds, updates, moves and deletes several files in one all-or-nothing call (the Codex/OpenCode patch format). Hunks match through whitespace slips and keep the file's indentation and line endings; deletes go to the SoPhi trash, and the call is one undo step.
 
 ### Removed

@@ -24,6 +24,20 @@ class RuntimeBuilderBuiltinToolsTest : FunSpec({
         runtime.toolNames() shouldContain "read_file"
     }
 
+    test("background jobs are wired and close() kills them") {
+        val runtime = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            sessionsDir = tempdir().toPath()
+            jobsHome = tempdir().toPath()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.builtinTools(tempdir().toPath()).build()
+        runtime.toolNames() shouldContain "bash_output"
+        runtime.toolNames() shouldContain "bash_kill"
+        kotlinx.coroutines.runBlocking { runtime.toolRegistry.get("bash").execute("""{"command":"sleep 30","background":true}""") }
+        runtime.jobs!!.list().single().status shouldBe "running"
+        runtime.close()
+        runtime.jobs!!.list().single().status shouldBe "killed"
+    }
+
     test("the runtime exposes its bash sandbox, off by default") {
         val runtime = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()

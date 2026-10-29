@@ -75,6 +75,8 @@ class SophiRuntime internal constructor(
     /** Where `bash` runs; a host switches it with [dev.sophi.core.tools.BashSandbox.set]. Null without [RuntimeBuilder.builtinTools]. */
     val bashSandbox: dev.sophi.core.tools.BashSandbox? = null,
     private val metered: MeteredProvider? = null,
+    /** Background `bash` jobs; [close] kills them. Null without [RuntimeBuilder.builtinTools]. */
+    val jobs: dev.sophi.core.tools.BashJobs? = null,
 ) {
     /** The model and prompt turns run with; [switchModel] changes the model. */
     @Volatile var config: AgentConfig = config
@@ -109,6 +111,7 @@ class SophiRuntime internal constructor(
         mcpClientManager?.close()
         memoryPlugin?.close()
         contextEngine?.close()
+        jobs?.close()
         bashSandbox?.close()
     }
 
