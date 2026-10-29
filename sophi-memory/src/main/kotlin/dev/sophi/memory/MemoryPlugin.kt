@@ -25,7 +25,13 @@ class MemoryPlugin(
     val technique: MemoryTechnique,
     private val clock: () -> Long = System::currentTimeMillis,
     /** How long [close] waits for in-flight encodes before cancelling them. */
-    private val drainTimeoutMs: Long = 30_000
+    private val drainTimeoutMs: Long = 30_000,
+    /**
+     * Told which memories a turn recalled, before their text goes into it (and so before the turn's
+     * first model call): a host can act on where they came from, e.g. treat the chat as having read
+     * outside text. If it throws, the recall is left out of the turn rather than injected unchecked.
+     */
+    private val onRecall: (sessionId: String, memories: List<MemoryView>) -> Unit = { _, _ -> },
 ) : SophiPlugin, ContextContributor {
     override val placement = Placement.VOLATILE
 
@@ -34,8 +40,11 @@ class MemoryPlugin(
     private val encodeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlight = CopyOnWriteArrayList<Job>()
 
-    override suspend fun contribute(sessionId: String, userInput: String): String? =
-        runCatching { technique.recall(RecallQuery(sessionId, userInput, clock()))?.rendered }.getOrNull()
+    override suspend fun contribute(sessionId: String, userInput: String): String? = runCatching {
+        val block = technique.recall(RecallQuery(sessionId, userInput, clock())) ?: return@runCatching null
+        if (block.memoryIds.isNotEmpty()) onRecall(sessionId, technique.views(block.memoryIds))
+        block.rendered
+    }.getOrNull()
 
     override fun hooks(): List<AgentHook> = listOf(object : AgentHook {
         override val point = HookPoint.AFTER_TURN

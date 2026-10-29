@@ -168,6 +168,9 @@ class JanesPalaceTest : FunSpec({
 
         palace.browse(BrowseFilter(sourceSessionId = "ambient")).single().metadata["source"] shouldBe "ambient"
         palace.browse(BrowseFilter(sourceSessionId = "sess_123")).single().metadata["source"] shouldBe "sess_123"
+        // views: the recalled memories by id, with where each came from; unknown ids are skipped.
+        palace.views(listOf("mem_chat", "nope", "mem_ambient")).map { it.id to it.metadata["source"] } shouldBe
+            listOf("mem_chat" to "sess_123", "mem_ambient" to "ambient")
         palace.close()
     }
 

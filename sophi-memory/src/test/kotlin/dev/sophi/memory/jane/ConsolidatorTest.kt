@@ -122,6 +122,20 @@ class ConsolidatorTest : FunSpec({
         coVerify { provider.complete(match { it.judgment == dev.sophi.ai.system1.Judgments.CONSOLIDATOR_CHAIN_SUMMARY }) }
     }
 
+    test("compress: the summary names every session its thread came from, so a host can tell overheard text inside it") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("Moved to Plovdiv", TokenUsage(1, 1))
+        val r = Rig(provider)
+        r.add("mem_1", "user changed jobs", at = 0L, salience = 0.05)
+        r.store.upsertMemory(r.add("mem_2", "family moved to plovdiv", at = 1 * DAY, salience = 0.05).copy(sourceSessionId = "ambient"))
+        r.add("mem_3", "emma enrolled in new school", at = 2 * DAY, salience = 0.05)
+        r.store.upsertEdge(CausalEdge("mem_1", "mem_2", "relocation"))
+        r.store.upsertEdge(CausalEdge("mem_2", "mem_3", "relocation"))
+        r.consolidator.run(nowMs = 200 * DAY)
+        r.store.memories().values.single { it.provenance == Provenance.SYSTEM_INFERRED && it.active }
+            .sourceSessionId shouldBe "ambient,s"
+    }
+
     test("compress keeps the thread when the summary comes back blank (thinking model cut off at length)") {
         val provider = mockk<LLMProvider>()
         coEvery { provider.complete(any()) } returns LLMResponse.Text("", TokenUsage(1, 200), stopReason = "length")

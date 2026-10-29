@@ -168,6 +168,12 @@ class JanesPalace(
 
     override fun explainLastRecall(): String? = store.readLastRecall()
 
+    override fun views(ids: List<String>): List<MemoryView> {
+        val all = store.memories()
+        val now = System.currentTimeMillis()
+        return ids.mapNotNull { all[it] }.map { view(it, now) }
+    }
+
     /**
      * Active, tagged memories eligible for a proactive rescue nudge. The sensitivity ceiling is
      * unconditional, not a caller-supplied parameter: this feed ultimately reaches an OS
