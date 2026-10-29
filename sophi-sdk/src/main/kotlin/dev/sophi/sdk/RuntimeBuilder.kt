@@ -70,6 +70,15 @@ class RuntimeBuilder {
     var contextGlobalInstructions: Path? = Orientation.defaultGlobal()
     /** Required before [build]: SoPhi never picks a model for you. */
     var model: String? = null
+    /** Prices, windows and capabilities; with [priced] true, each request's cost is counted from it. */
+    var modelCatalog: ModelCatalog? = null
+    /** Whether this provider bills (a cloud API); false for a local server, whose requests cost nothing. */
+    var priced: Boolean = false
+    /** The catalog provider to prefer when an id is listed by several (`anthropic`, `openrouter`, …). */
+    var catalogProvider: String? = null
+    private var maxUsd: Double? = null
+    /** Stops the session's work once it has cost [maxUsd] dollars: the turn ends with TurnStopReason.BudgetExceeded. */
+    fun budget(maxUsd: Double): RuntimeBuilder = apply { this.maxUsd = maxUsd }
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
     var systemPrompt: String? = null
@@ -264,9 +273,11 @@ class RuntimeBuilder {
     }
 
     fun build(): SophiRuntime {
-        val p = requireNotNull(provider) { "provider must be set before calling build()" }
-            .let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
         val model = requireNotNull(model) { "model must be set before calling build()" }
+        // Innermost of the wrappers, so a judgment System 1 serves locally is never billed or refused.
+        val metered = MeteredProvider.wrap(requireNotNull(provider) { "provider must be set before calling build()" },
+            model, modelCatalog, priced, catalogProvider).also { m -> maxUsd?.let { m.meter.maxUsd = it } }
+        val p = metered.let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
         val window = requireNotNull(contextWindowTokens) {
             "contextWindowTokens must be set before calling build() — pass the total context " +
                 "window (in tokens) of the model you configured"
@@ -335,7 +346,7 @@ class RuntimeBuilder {
             contextWindowTokens = window,
             onUsage = usageLogPath?.let { path ->
                 { u: dev.sophi.ai.api.TokenUsage, kind: String ->
-                    val line = """{"ts":${System.currentTimeMillis()},"model":${Json.encodeToString(model)},"kind":"$kind","input":${u.inputTokens},"output":${u.outputTokens},"cacheRead":${u.cacheReadTokens}}"""
+                    val line = """{"ts":${System.currentTimeMillis()},"model":${Json.encodeToString(metered.activeModel)},"kind":"$kind","input":${u.inputTokens},"output":${u.outputTokens},"cacheRead":${u.cacheReadTokens}}"""
                     path.parent?.let { java.nio.file.Files.createDirectories(it) }
                     java.nio.file.Files.writeString(path, line + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)
                 }
@@ -439,7 +450,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox
+            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered
         )
     }
 }
