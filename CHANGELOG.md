@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `apply_patch`: adds, updates, moves and deletes several files in one all-or-nothing call (the Codex/OpenCode patch format). Hunks match through whitespace slips and keep the file's indentation and line endings; deletes go to the SoPhi trash, and the call is one undo step.
+
 ### Removed
 - `BudgetTracker` (sophi-infra), a token counter nothing used; `RuntimeBuilder.budget(maxUsd)` replaces it
 

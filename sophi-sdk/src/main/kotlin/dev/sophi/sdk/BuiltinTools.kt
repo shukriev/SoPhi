@@ -5,6 +5,7 @@ import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.audit.JsonlAuditSink
 import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.DeleteFileTool
+import dev.sophi.core.tools.ApplyPatchTool
 import dev.sophi.core.tools.EditTool
 import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.FileReadTool
@@ -35,7 +36,7 @@ import java.nio.file.Path
 fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: String? = null, sandboxed: Boolean = false,
     sandbox: BashSandbox = BashSandbox(root).apply { if (sandboxed) set(SandboxMode.SEATBELT) }): List<Tool> {
     val tools = mutableListOf<Tool>(
-        FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root),
+        FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), ApplyPatchTool(root),
         BashTool(root, sandbox),
         MoveFileTool(root), DeleteFileTool(root),
         FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool()

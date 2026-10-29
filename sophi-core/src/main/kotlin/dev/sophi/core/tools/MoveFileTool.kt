@@ -32,7 +32,7 @@ private fun resolveUserPath(root: Path, home: Path, raw: String): Path = when {
     else -> root.resolve(raw)
 }.normalize()
 
-private suspend fun moveAndRecord(root: Path, home: Path, from: Path, to: Path) {
+internal suspend fun moveAndRecord(root: Path, home: Path, from: Path, to: Path) {
     // `/`, the home and the workspace itself (or anything holding them) are never moved, nor trashed
     require(listOf(root, home).none { it.toAbsolutePath().normalize().startsWith(from) }) {
         "Refusing to move $from: it is /, your home folder, or holds the workspace"
@@ -44,7 +44,7 @@ private suspend fun moveAndRecord(root: Path, home: Path, from: Path, to: Path) 
     coroutineContext[RoundChanges]?.record(FileMove(from.toString(), to.toString()))
 }
 
-private fun worst(a: RuleVerdict, b: RuleVerdict): RuleVerdict = when {
+internal fun worst(a: RuleVerdict, b: RuleVerdict): RuleVerdict = when {
     RuleVerdict.HIGH_RISK in listOf(a, b) -> RuleVerdict.HIGH_RISK
     RuleVerdict.UNKNOWN in listOf(a, b) -> RuleVerdict.UNKNOWN
     else -> RuleVerdict.LOW_RISK
@@ -121,8 +121,13 @@ class DeleteFileTool(
     override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<DeleteArgs>(argumentsJson)
         val path = resolveUserPath(root, home, args.path)
-        val slot = trashDir.resolve("${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}")
-        moveAndRecord(root, home, path, slot.resolve(path.fileName.toString()))
+        moveToTrash(root, home, path, trashDir)
         return "Moved $path to the SoPhi trash (/undo restores it)"
     }
+}
+
+/** Moves [path] into a fresh slot under [trashDir], recorded so /undo restores it. Shared by delete_file and apply_patch. */
+internal suspend fun moveToTrash(root: Path, home: Path, path: Path, trashDir: Path) {
+    val slot = trashDir.resolve("${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}")
+    moveAndRecord(root, home, path, slot.resolve(path.fileName.toString()))
 }

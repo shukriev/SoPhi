@@ -195,7 +195,7 @@ Known limits of the audit log:
 The order is deny, then ask, then allow, then the usual risk tiers and confirmation. A deny rule also blocks under `--god-mode` and in `mcp-serve`; an ask rule always sends the call to a person, also in auto mode and under `--god-mode`. What a pattern is matched against:
 
 - `bash`: each part of the command, after splitting on `&&`, `||`, `;`, `|`, newlines, `$( )`, backticks and subshells. A call is allowed only if every part is.
-- `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `move_file`, `delete_file`: the path, relative to the project root when inside it (`./.env` and `src/../.env` both give `.env`), otherwise the absolute path.
+- `read_file`, `write_file`, `edit_file`, `apply_patch`, `grep`, `glob`, `move_file`, `delete_file`: the path, relative to the project root when inside it (`./.env` and `src/../.env` both give `.env`), otherwise the absolute path.
 - `fetch_url`: the URL.
 - Other tools have no subject, so only a rule without `pattern` applies.
 
