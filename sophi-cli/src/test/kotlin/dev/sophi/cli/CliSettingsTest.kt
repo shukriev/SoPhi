@@ -12,6 +12,8 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import java.nio.file.Path
+import io.kotest.matchers.string.shouldContain
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 private class Sub : CliktCommand(name = "sub") {
@@ -87,6 +89,19 @@ class CliSettingsTest : FunSpec({
         val warnings = mutableListOf<String>()
         store("{nope", warnings).saved() shouldBe emptyMap()
         warnings.size shouldBe 1
+    }
+
+    test("a broken settings.json warns once, however often it is read") {
+        val warnings = mutableListOf<String>()
+        val s = store("{nope", warnings)
+        repeat(5) { s.saved() }
+        warnings.size shouldBe 1
+    }
+
+    test("a save over a broken settings.json is refused and the file is kept") {
+        val s = store("{nope")
+        s.save("model", "x") shouldContain "isn't valid JSON"
+        s.file.readText() shouldBe "{nope"
     }
 
     test("validate rejects a bad choice, a non-number and a non-boolean, and normalises booleans") {

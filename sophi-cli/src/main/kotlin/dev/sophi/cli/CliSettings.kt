@@ -72,14 +72,27 @@ val EXCLUDED_FROM_SETTINGS = setOf("session", "api-key", "brave-api-key", "god-m
 
 /** `~/.sophi/settings.json`: a flat object from setting key to string value. Keys it doesn't know are kept. */
 class CliSettingsStore(val file: Path = DEFAULT_SETTINGS_FILE, private val onWarning: (String) -> Unit) {
-    fun saved(): Map<String, String> {
-        if (!file.exists()) return emptyMap()
+    /** The last parse, kept while the file's time and size are unchanged: the menu reads it for every row. */
+    private class Parsed(val stamp: Pair<Long, Long>, val values: Map<String, String>, val broken: Boolean)
+    private var parsed: Parsed? = null
+
+    fun saved(): Map<String, String> = parse().values
+
+    private fun parse(): Parsed {
+        if (!file.exists()) return Parsed(0L to -1L, emptyMap(), broken = false)
+        val stamp = Files.getLastModifiedTime(file).toMillis() to Files.size(file)
+        parsed?.takeIf { it.stamp == stamp }?.let { return it }
         return runCatching {
-            Json.parseToJsonElement(file.readText()).jsonObject
-                .mapNotNull { (k, v) -> (v as? JsonPrimitive)?.takeUnless { it is JsonNull }?.let { k to it.content } }.toMap()
-        }
-            .getOrElse { onWarning("settings: $file isn't valid JSON (${it.message?.lineSequence()?.first()}) — using defaults"); emptyMap() }
+            Parsed(stamp, Json.parseToJsonElement(file.readText()).jsonObject
+                .mapNotNull { (k, v) -> (v as? JsonPrimitive)?.takeUnless { it is JsonNull }?.let { k to it.content } }.toMap(), broken = false)
+        }.getOrElse {
+            onWarning("settings: $file isn't valid JSON (${it.message?.lineSequence()?.first()}) — using defaults")
+            Parsed(stamp, emptyMap(), broken = true)
+        }.also { parsed = it }
     }
+
+    /** Why a change can't be saved now: overwriting a file that doesn't parse would lose what was typed into it. */
+    fun cannotSave(): String? = if (parse().broken) "$file isn't valid JSON — fix or delete it to save settings" else null
 
     /**
      * What `sophi` reads at start: known settings whose value fits, booleans normalised. Anything
@@ -110,8 +123,9 @@ class CliSettingsStore(val file: Path = DEFAULT_SETTINGS_FILE, private val onWar
     fun normalise(setting: Setting, value: String): String =
         if (setting.kind == SettingKind.Bool) (value.lowercase() in TRUE).toString() else value
 
-    fun save(key: String, value: String) = write(saved() + (key to value))
-    fun reset(key: String) = write(saved() - key)
+    /** Null when saved, otherwise [cannotSave]'s reason. */
+    fun save(key: String, value: String): String? = cannotSave() ?: null.also { write(saved() + (key to value)) }
+    fun reset(key: String): String? = cannotSave() ?: null.also { write(saved() - key) }
 
     private fun write(values: Map<String, String>) {
         Files.createDirectories(file.parent)

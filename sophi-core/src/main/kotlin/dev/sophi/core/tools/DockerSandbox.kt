@@ -19,8 +19,8 @@ private fun docker(args: List<String>, timeoutSeconds: Long = 30): Pair<Int, Str
 /**
  * One long-lived, locked-down container per sandbox; `bash` commands run in it through `docker exec`.
  * The workspace is bind-mounted at the same path, so paths mean the same inside and out; nothing
- * else of the host is shared. Removed on [close], by a shutdown hook, or (after a `kill -9`) by the
- * next sandbox to start, which removes containers whose `sophi.pid` process is gone.
+ * else of the host is shared. Removed on [close], by a shutdown hook, or (after a `kill -9`) by
+ * [removeOrphans], which the next sandbox and each CLI start run.
  *
  * ponytail: a timed-out command's `docker exec` client is killed, but the process inside runs on
  * until the container goes; `docker exec <name> pkill -f` if that bites.
@@ -33,11 +33,14 @@ class DockerSandbox(
     val name = "sophi-" + UUID.randomUUID().toString().take(8)
     private var started = false
     private var closed = false
+    /** Commands running in the container right now; a [close] waits for them before removing it. */
+    private var running = 0
     private val hook = Thread { remove() }
 
     fun runArgs(): List<String> {
         val owner = runCatching { "${Files.getAttribute(root, "unix:uid")}:${Files.getAttribute(root, "unix:gid")}" }.getOrNull()
         return listOf("docker", "run", "-d", "--rm", "--name", name, "--label", "sophi.pid=${ProcessHandle.current().pid()}",
+            "--label", "sophi.started=${startedMillis(ProcessHandle.current())}",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--cpus", "2", "--memory", "2g", "--pids-limit", "512") +
             (if (network) emptyList() else listOf("--network", "none")) +
             (owner?.let { listOf("--user", it) } ?: emptyList()) +
@@ -61,10 +64,23 @@ class DockerSandbox(
         return listOf("docker", "exec", "-w", root.toString(), name) + command
     }
 
+    /** [wrap], counted as running until [release]: a switch mid-command lets it finish first. */
+    @Synchronized
+    fun acquire(command: List<String>): List<String> = wrap(command).also { running++ }
+
+    @Synchronized
+    fun release() {
+        if (--running == 0 && closed && started) removeNow()
+    }
+
+    /** No new commands; the container goes once the running ones finish (the shutdown hook covers an exit before then). */
     @Synchronized
     override fun close() {
         closed = true
-        if (!started) return
+        if (started && running == 0) removeNow()
+    }
+
+    private fun removeNow() {
         started = false
         runCatching { Runtime.getRuntime().removeShutdownHook(hook) }
         remove()
@@ -72,16 +88,26 @@ class DockerSandbox(
 
     private fun remove() { docker(listOf("rm", "-f", name)) }
 
-    private fun removeOrphans() {
-        val (code, out) = docker(listOf("ps", "-a", "--filter", "label=sophi.pid", "--format", "{{.ID}} {{.Label \"sophi.pid\"}}"))
-        if (code != 0) return
-        out.lines().mapNotNull { line -> line.split(" ").takeIf { it.size == 2 } }
-            .filter { (_, pid) -> pid.toLongOrNull()?.let { ProcessHandle.of(it).isEmpty } ?: false }
-            .forEach { (id, _) -> docker(listOf("rm", "-f", id)) }
-    }
-
     companion object {
-        /** The Docker daemon answers. */
-        val available: Boolean by lazy { docker(listOf("version", "--format", "{{.Server.Version}}"), timeoutSeconds = 10).first == 0 }
+        private fun startedMillis(p: ProcessHandle): Long? = p.info().startInstant().map { it.toEpochMilli() }.orElse(null)
+
+        /**
+         * Removes containers a Sophi left behind: its process is gone, or the pid now belongs to a
+         * process that started at another time (the pid was reused).
+         */
+        fun removeOrphans() {
+            val (code, out) = docker(listOf("ps", "-a", "--filter", "label=sophi.pid",
+                "--format", "{{.ID}} {{.Label \"sophi.pid\"}} {{.Label \"sophi.started\"}}"))
+            if (code != 0) return
+            out.lines().map { it.split(" ") }.filter { it.size >= 2 }.filter { parts ->
+                val pid = parts[1].toLongOrNull() ?: return@filter false
+                val process = ProcessHandle.of(pid).orElse(null) ?: return@filter true // gone
+                val started = parts.getOrNull(2)?.toLongOrNull() ?: return@filter false // older label: alive is all we know
+                startedMillis(process) != started
+            }.forEach { docker(listOf("rm", "-f", it[0])) }
+        }
+
+        /** The Docker daemon answers now: asked each time, so Docker started after Sophi is found. */
+        val available: Boolean get() = docker(listOf("version", "--format", "{{.Server.Version}}"), timeoutSeconds = 10).first == 0
     }
 }

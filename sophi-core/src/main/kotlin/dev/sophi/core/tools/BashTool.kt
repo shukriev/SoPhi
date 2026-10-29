@@ -4,6 +4,7 @@ import dev.sophi.core.permissions.PermissionSubject
 import dev.sophi.core.permissions.splitBashCommand
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -81,12 +82,18 @@ class BashTool(
     override suspend fun execute(argumentsJson: String): String = withContext(Dispatchers.IO) {
         val args = json.decodeFromString<BashArgs>(argumentsJson)
         val timeoutSeconds = (args.timeoutSeconds ?: DEFAULT_TIMEOUT_SECONDS).coerceAtMost(MAX_TIMEOUT_SECONDS)
+        val builder = shellProcess(args.command).directory(root.toFile()).redirectErrorStream(true)
+        // held until the command ends, so a sandbox switch mid-command doesn't pull its container away
+        val lease = sandbox?.lease(builder.command())
+        try {
+            run(builder.apply { lease?.let { command(it.command) } }, timeoutSeconds)
+        } finally {
+            lease?.release()
+        }
+    }
 
-        val process = shellProcess(args.command)
-            .apply { sandbox?.let { command(it.wrap(command())) } }
-            .directory(root.toFile())
-            .redirectErrorStream(true)
-            .start()
+    private suspend fun run(builder: ProcessBuilder, timeoutSeconds: Long): String = coroutineScope {
+        val process = builder.start()
         // No input is ever fed to a command; an open pipe left one that reads stdin blocking until the timeout.
         process.outputStream.close()
 

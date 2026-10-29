@@ -7,6 +7,9 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.createDirectories
@@ -57,6 +60,32 @@ class DockerSandboxTest : FunSpec({
     }
 
     context("with Docker").config(enabled = DockerSandbox.available) {
+        test("a container whose pid now belongs to another process is removed; a live sandbox's is kept") {
+            val me = ProcessHandle.current()
+            val reused = docker("run", "-d", "--label", "sophi.pid=${me.pid()}", "--label", "sophi.started=1", DEFAULT_DOCKER_IMAGE, "sleep", "infinity")
+            DockerSandbox(createTempDirectory("ws")).use { live ->
+                live.start()
+                DockerSandbox.removeOrphans()
+                docker("ps", "-aq", "--no-trunc", "--filter", "id=$reused") shouldBe ""
+                docker("ps", "-q", "--filter", "name=${live.name}") shouldNotBe ""
+            }
+        }
+
+        test("a switch lets a running command finish before its container goes") {
+            val ws = createTempDirectory("ws")
+            BashSandbox(ws).use { sandbox ->
+                sandbox.set(SandboxMode.DOCKER) shouldBe null
+                val tool = BashTool(ws, sandbox)
+                val out = runBlocking {
+                    val running = async(Dispatchers.IO) { tool.execute("""{"command":"sleep 3; echo done"}""") }
+                    delay(1500)
+                    sandbox.set(network = false) shouldBe null
+                    running.await()
+                }
+                out shouldContain "done"
+            }
+        }
+
         test("after close, a docker-mode command is refused instead of running on the host") {
             val sandbox = BashSandbox(createTempDirectory("ws"))
             sandbox.set(SandboxMode.DOCKER) shouldBe null

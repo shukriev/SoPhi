@@ -259,6 +259,10 @@ class SophiCli(
             "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
                 "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings\n"
         )
+        // containers a killed sophi left behind; off the start path, since asking Docker can take seconds
+        kotlin.concurrent.thread(isDaemon = true, name = "sophi-docker-orphans") {
+            if (dev.sophi.core.tools.DockerSandbox.available) dev.sophi.core.tools.DockerSandbox.removeOrphans()
+        }
         cli.runtime.bashSandbox?.let { sb ->
             val mode = SandboxMode.valueOf(sandboxMode.uppercase())
             if (mode == SandboxMode.DOCKER) mordantTerminal.println("Starting a container (the first run pulls the image)…")

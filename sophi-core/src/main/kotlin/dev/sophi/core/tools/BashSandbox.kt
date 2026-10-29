@@ -60,6 +60,17 @@ class BashSandbox(
         }
     }
 
+    /** A command [lease]d to run; [release] when it has finished. */
+    class Lease(val command: List<String>, val release: () -> Unit)
+
+    /** Like [wrap], but a Docker container being switched away keeps running until this command is released. */
+    fun lease(command: List<String>): Lease {
+        val s = state
+        if (s.mode != SandboxMode.DOCKER) return Lease(wrap(command)) {}
+        val docker = checkNotNull(s.docker?.takeUnless { closed }) { "the Docker sandbox is closed" }
+        return Lease(docker.acquire(command), docker::release)
+    }
+
     @Synchronized
     override fun close() { closed = true; state.docker?.close() }
 }

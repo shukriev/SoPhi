@@ -54,18 +54,21 @@ class SettingsController(
 
     /** Applies [raw] (live settings) and saves it; the reason when it doesn't fit or can't apply, and then nothing changed. */
     suspend fun commit(s: Setting, raw: String): String? {
+        if (s.kind == SettingKind.Text && raw.isBlank()) return reset(s)
         store.validate(s, raw)?.let { return it }
+        store.cannotSave()?.let { return it }
         val value = store.normalise(s, raw)
         if (s.live) apply(s.key, value)?.let { return it }
-        store.save(s.key, value)
+        store.save(s.key, value)?.let { return it }
         touched += s.key
         return null
     }
 
     /** Back to the built-in default: removed from the file, and a live setting applied now. */
     suspend fun reset(s: Setting): String? {
+        store.cannotSave()?.let { return it }
         if (s.live) apply(s.key, LIVE_DEFAULTS.getValue(s.key))?.let { return it }
-        store.reset(s.key)
+        store.reset(s.key)?.let { return it }
         touched += s.key
         return null
     }
@@ -137,7 +140,7 @@ class SettingsMenu(private val ctl: SettingsController, private val redraw: (Str
     }
 
     private suspend fun commit(s: Setting, value: String) {
-        if (ctl.startsContainer(s, value)) { message = "Starting a container (the first run pulls the image)…"; redraw(render()) }
+        if (ctl.startsContainer(s, value)) { message = "Starting a container (the first run pulls the image; keys wait until it's done)…"; redraw(render()) }
         message = ctl.commit(s, value)?.let { "✗ $it" }
     }
 

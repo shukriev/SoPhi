@@ -109,6 +109,23 @@ class SettingsMenuTest : FunSpec({
         f.store.saved() shouldBe emptyMap()
     }
 
+    test("an empty text value resets the setting") {
+        val f = Fixture()
+        val model = CLI_SETTINGS.single { it.key == "model" }
+        runBlocking { f.controller.commit(model, "gemma-4") } shouldBe null
+        runBlocking { f.controller.commit(model, "") } shouldBe null
+        f.store.saved() shouldBe emptyMap()
+    }
+
+    test("starting a container says keys wait until it's done").config(enabled = dev.sophi.core.tools.SeatbeltSandbox.available) {
+        val f = Fixture(root = tempdir().toPath().resolve("a:b").createDirectories())
+        f.sandbox.set(SandboxMode.SEATBELT) shouldBe null
+        val shown = mutableListOf<String>()
+        val menu = SettingsMenu(f.controller) { shown += it }
+        runBlocking { menu.onKey(TurnKey.Enter) }
+        shown.single() shouldContain "keys wait until it's done"
+    }
+
     test("auto under god mode reports it is fixed") {
         val f = Fixture(godMode = true)
         runBlocking { f.controller.commit(ROWS[2], "true") } shouldBe "auto mode is fixed under --god-mode"
