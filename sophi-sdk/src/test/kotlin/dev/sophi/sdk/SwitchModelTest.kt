@@ -13,6 +13,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 
@@ -97,5 +98,11 @@ class SwitchModelTest : FunSpec({
         rt.switchModel("b", 16_000)
         m.activeModel shouldBe "b"
         rt.close()
+    }
+
+    test("budget() with nothing priced fails at build instead of never tripping") {
+        val e = shouldThrow<IllegalStateException> { runtime(RecordingProvider()) { budget(1.0) } }
+        e.message!! shouldContain "priced"
+        shouldThrow<IllegalStateException> { runtime(RecordingProvider()) { priced = true; budget(1.0) } }.message!! shouldContain "modelCatalog"
     }
 })

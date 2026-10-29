@@ -41,6 +41,9 @@ class ClaudeProvider(
         var outputTokens = 0
         var cacheRead = 0
         var cacheWrite = 0
+        // Anthropic's input_tokens excludes cache reads/writes; normalise to total prompt tokens.
+        fun usage() = TokenUsage(inputTokens + cacheRead + cacheWrite, outputTokens, cacheRead)
+        var reported: TokenUsage? = null
         chatModel.stream(request.toPrompt()).asFlow().collect { response ->
             val text = response.result?.output?.text
             if (!text.isNullOrEmpty()) emit(StreamEvent.Content(text))
@@ -49,11 +52,12 @@ class ClaudeProvider(
             outputTokens = maxOf(outputTokens, chunkUsage?.completionTokens ?: 0)
             cacheRead = maxOf(cacheRead, chunkUsage?.cacheReadInputTokens?.toInt() ?: 0)
             cacheWrite = maxOf(cacheWrite, chunkUsage?.cacheWriteInputTokens?.toInt() ?: 0)
-        }
-        if (inputTokens > 0 || outputTokens > 0) {
-            // Anthropic's input_tokens excludes cache reads/writes; normalise to total prompt tokens.
-            emit(StreamEvent.Usage(
-            TokenUsage(inputTokens + cacheRead + cacheWrite, outputTokens, cacheRead)))
+            // The running total as it grows, not only at the end: a turn the user stops mid-stream
+            // was still billed for its prompt and what it wrote so far, and the meter keeps the last one.
+            if ((inputTokens > 0 || outputTokens > 0) && usage() != reported) {
+                reported = usage()
+                emit(StreamEvent.Usage(reported!!))
+            }
         }
     }.catch { cause -> throw IllegalStateException("LLM stream error: ${cause.message}", cause) }
 

@@ -8,6 +8,7 @@ import dev.sophi.ai.providers.LocalServerKind
 import dev.sophi.sdk.ModelCatalog
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import java.net.InetSocketAddress
 
 private class CatalogHolder : CliktCommand() {
@@ -85,7 +86,8 @@ class ProviderOptionsCatalogTest : FunSpec({
         modelSwitchWindow(r, CATALOG, "claude-x", current = 8_000) shouldBe ModelSwitch(window = 8_000)
         val cloud = opts("--provider", "claude", "--model", "claude-x").resolve(catalog = CATALOG)
         modelSwitchWindow(cloud, CATALOG, "claude-x", current = 8_000) shouldBe ModelSwitch(window = 123456)
-        modelSwitchWindow(cloud, CATALOG, "unknown", current = 8_000) shouldBe ModelSwitch(window = 8_000)
+        // a typo would otherwise be saved as the model for every later start
+        modelSwitchWindow(cloud, CATALOG, "claude-xx", current = 8_000).error!! shouldContain "models.local.json"
         val local = r.copy(server = LocalServer(LocalServerKind.LLAMA_CPP, "http://127.0.0.1:1/v1", listOf("a")))
         modelSwitchWindow(local, CATALOG, "b", current = 8_000).error shouldBe "b isn't on the server at http://127.0.0.1:1/v1"
         modelSwitchWindow(local, CATALOG, "a", current = 8_000, detect = { _, _ -> 4_096 }) shouldBe ModelSwitch(window = 4_096)

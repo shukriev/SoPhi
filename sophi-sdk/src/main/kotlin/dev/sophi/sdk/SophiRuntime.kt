@@ -91,8 +91,9 @@ class SophiRuntime internal constructor(
     val priced: Boolean get() = costMeter.priced(config.model)
 
     /**
-     * From the next turn on, [model] answers and [contextWindowTokens] is its window. Requests for the
-     * start model are sent to [model]; ones naming another model keep theirs.
+     * Switches to [model] with window [contextWindowTokens]. Requests for the start model go to [model]
+     * from the next request on, even mid-turn; ones naming another model keep theirs. The window
+     * applies from the next turn (a running turn keeps the one it started with).
      */
     fun switchModel(model: String, contextWindowTokens: Int) {
         require(contextWindowTokens > 0) { "contextWindowTokens must be positive" }

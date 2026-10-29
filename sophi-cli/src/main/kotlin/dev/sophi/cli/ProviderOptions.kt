@@ -142,7 +142,7 @@ fun ProviderOptions.resolve(
 internal fun ResolvedProvider.windowAtMost(cap: Int): Int = minOf(contextWindowTokens, cap)
 
 /** [resolve] at a command's startup: prints the warnings to stderr once. */
-internal fun ProviderOptions.resolveAndWarn(catalog: ModelCatalog = ModelCatalog.bundled()): ResolvedProvider =
+internal fun ProviderOptions.resolveAndWarn(catalog: ModelCatalog = loadModelCatalog()): ResolvedProvider =
     resolve(catalog).also { r -> r.warnings.forEach { System.err.println(it) } }
 
 internal fun ProviderOptions.buildProvider(resolved: ResolvedProvider, inner: (LLMProvider) -> LLMProvider = { it }): LLMProvider =
@@ -168,5 +168,9 @@ internal fun modelSwitchWindow(
         return ModelSwitch(window = detect(server, id) ?: current)
     }
     if (!resolved.cloud) return ModelSwitch(window = current)
-    return ModelSwitch(window = catalog.find(id, resolved.catalogProvider)?.contextTokens ?: current)
+    // The id is saved for later starts too, so a typo is refused here rather than failing every next start.
+    val info = catalog.find(id, resolved.catalogProvider) ?: return ModelSwitch(
+        error = "$id isn't in the model catalog — check the id, or add it to ~/.sophi/models.local.json"
+    )
+    return ModelSwitch(window = info.contextTokens ?: current)
 }

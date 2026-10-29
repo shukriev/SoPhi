@@ -282,6 +282,11 @@ class RuntimeBuilder {
         // Innermost of the wrappers, so a judgment System 1 serves locally is never billed or refused.
         val given = requireNotNull(provider) { "provider must be set before calling build()" }
         val hostMeter = metered
+        // A budget nothing is priced against would never trip: say so now, not after the bill.
+        if (maxUsd != null && hostMeter == null) {
+            check(priced) { "budget(maxUsd) needs priced = true: a provider that isn't priced costs nothing, so the budget never trips" }
+            check(modelCatalog != null) { "budget(maxUsd) needs a modelCatalog to price requests against (ModelCatalog.bundled())" }
+        }
         val metered = hostMeter ?: MeteredProvider.wrap(given, model, modelCatalog, priced, catalogProvider)
         maxUsd?.let { metered.meter.maxUsd = it }
         val inner: LLMProvider = if (hostMeter != null) given else metered
