@@ -2,6 +2,7 @@ package dev.sophi.core.tools
 
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionEntry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -22,8 +23,10 @@ fun renderTodos(items: List<TodoItem>): String =
     if (items.isEmpty()) CLEARED else items.joinToString("\n") { MARKS.getValue(it.status) + it.text }
 
 private fun parseRendered(text: String): List<TodoItem>? {
-    if (text == CLEARED) return emptyList()
-    return text.lines().map { line ->
+    // the loop may append a note after a blank line (e.g. a repeated identical call); the list ends there
+    val list = text.substringBefore("\n\n")
+    if (list == CLEARED) return emptyList()
+    return list.lines().map { line ->
         val status = MARKS.entries.firstOrNull { line.startsWith(it.value) }?.key ?: return null
         TodoItem(line.substring(4), status)
     }
@@ -33,12 +36,15 @@ private fun parseRendered(text: String): List<TodoItem>? {
  * The session's todo list: the newest `todo` result on the branch, or what compaction carried over (the summary's
  * `_todo`); null when the model never kept one. The list lives in the session, so resume and /checkout bring it back.
  */
-fun currentTodos(session: AgentSession): List<TodoItem>? {
-    val branch = session.branch()
-    branch.asReversed().firstOrNull { it.role == EntryRole.TOOL_RESULT && it.metadata["toolName"] == "todo" && !it.content.startsWith("Error:") }
-        ?.let { e -> parseRendered(e.content)?.let { return it } }
-    return branch.firstOrNull()?.metadata?.get("_todo")?.let { runCatching { todoJson.decodeFromString<List<TodoItem>>(it) }.getOrNull() }
-}
+fun currentTodos(session: AgentSession): List<TodoItem>? = currentTodos(session.branch())
+
+/** [currentTodos] over [entries] in order: the newest readable `todo` result, else the first entry's `_todo`. */
+fun currentTodos(entries: List<SessionEntry>): List<TodoItem>? =
+    entries.asReversed().asSequence()
+        .filter { it.role == EntryRole.TOOL_RESULT && it.metadata["toolName"] == "todo" }
+        .mapNotNull { parseRendered(it.content) }
+        .firstOrNull()
+        ?: entries.firstOrNull()?.metadata?.get("_todo")?.let { runCatching { todoJson.decodeFromString<List<TodoItem>>(it) }.getOrNull() }
 
 /** A session checklist the model keeps by replacing the whole list each call. Survives compaction (see ContextCompactor). */
 class TodoTool : Tool {

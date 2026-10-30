@@ -42,6 +42,15 @@ class TodoToolTest : FunSpec({
         currentTodos(s) shouldBe listOf(TodoItem("a", "done"), TodoItem("b", "in_progress"))
     }
 
+    test("an unreadable newest result falls back to an older one") {
+        currentTodos(sessionWithTodoResults("[ ] a", "Stopped by the user before this finished.")) shouldBe listOf(TodoItem("a", "pending"))
+    }
+
+    test("the loop's repeated-call note after the list is ignored") {
+        val noted = "[x] a\n[ ] b\n\n[Note: you have now made this exact call 3 times.]"
+        currentTodos(sessionWithTodoResults(noted)) shouldBe listOf(TodoItem("a", "done"), TodoItem("b", "pending"))
+    }
+
     test("no todo call is null") {
         currentTodos(AgentSession("s").apply { append(EntryRole.USER, "hi") }) shouldBe null
     }
