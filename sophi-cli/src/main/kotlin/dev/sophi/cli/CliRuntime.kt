@@ -47,6 +47,8 @@ data class CliOptions(
     val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
     /** Overridable so tests don't open the real ~/.sophi/db. */
     val contextRoot: Path = ContextEngine.defaultRoot(),
+    /** Overridable so tests don't write background-job logs to the real ~/.sophi/jobs. */
+    val jobsHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "jobs"),
     /** Tests turn this off: no index host (ArcadeDB keeps a JVM shutdown hook per server) and no indexing of the repo they run in. */
     val startContext: Boolean = true,
     val braveApiKey: String? = null,
@@ -158,6 +160,7 @@ internal suspend fun buildCliRuntime(
     val runtime = try { Sophi.runtime {
         this.provider = provider
         this.metered = metered
+        jobsHome = opts.jobsHome
         model = opts.model
         maxTokens = opts.maxTokens
         contextWindowTokens(opts.contextWindowTokens)

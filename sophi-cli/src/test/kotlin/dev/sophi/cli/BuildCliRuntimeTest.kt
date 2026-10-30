@@ -49,6 +49,8 @@ internal fun optionsFor(
     learningHome = dir.resolve("learning"),
     // Keep the context index out of the developer's real ~/.sophi/db.
     contextRoot = dir.resolve("db"),
+    // Keep background-job logs (and their startup cleanup) out of the developer's real ~/.sophi/jobs.
+    jobsHome = dir.resolve("jobs"),
     startContext = false,
     braveApiKey = null,
     autoMode = autoMode,
@@ -80,6 +82,15 @@ class BuildCliRuntimeTest : FunSpec({
             input = ScriptedInputSource(emptyList()),
             interactive = interactive,
         ))
+    }
+
+    test("background job logs go under the options' jobsHome") {
+        val dir = tempdir().toPath()
+        val cli = autoClose(buildCliRuntime(optionsFor(dir), mockk<LLMProvider>(relaxed = true), Terminal(), ScriptedInputSource(emptyList())))
+        kotlinx.coroutines.withContext(dev.sophi.core.session.SessionIdContext("s")) {
+            cli.registry.get("bash").execute("""{"command":"echo hi","background":true}""")
+        }
+        java.nio.file.Files.exists(dir.resolve("jobs/${ProcessHandle.current().pid()}/s/j1.log")) shouldBe true
     }
 
     test("ask_user is registered only in an interactive terminal") {

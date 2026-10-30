@@ -138,4 +138,49 @@ class BashJobsTest : FunSpec({
             it.riskLevel("{}") shouldBe RiskLevel.SAFE
         }
     }
+
+    test("a huge log is read from its tail, not loaded whole") {
+        val f = Fx()
+        f.bg("sleep 2.5; seq 1 300000")
+        val o = runBlocking { f.jobs.output("s", "j1", waitSeconds = 20) }
+        o shouldContain "earlier output in"
+        o.lines().last { it.isNotBlank() } shouldBe "300000"
+        (o.length < 17_000) shouldBe true
+        f.jobs.close()
+    }
+
+    test("close removes the shutdown hook") {
+        val jobs = BashJobs(tempdir().toPath())
+        jobs.close()
+        Runtime.getRuntime().removeShutdownHook(jobs.shutdownHook) shouldBe false
+    }
+
+    test("jobs left by a Sophi that died are killed at the next start") {
+        val home = tempdir().toPath()
+        val orphan = ProcessBuilder("sleep", "60").start()
+        val dir = home.resolve("999999999/s").also { Files.createDirectories(it) }
+        dir.resolve("j1.pid").writeText("${orphan.pid()} ${orphan.toHandle().info().startInstant().get().toEpochMilli()}")
+        BashJobs(home).close()
+        orphan.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+        home.resolve("999999999").exists() shouldBe false
+    }
+
+    test("a reused pid is left alone") {
+        val home = tempdir().toPath()
+        val bystander = ProcessBuilder("sleep", "60").start()
+        val dir = home.resolve("999999999/s").also { Files.createDirectories(it) }
+        dir.resolve("j1.pid").writeText("${bystander.pid()} 1")
+        BashJobs(home).close()
+        bystander.isAlive shouldBe true
+        bystander.destroyForcibly()
+    }
+
+    test("a started job writes its pid file for the reaper") {
+        val f = Fx()
+        f.bg("sleep 30")
+        val pidFile = f.home.resolve("${ProcessHandle.current().pid()}/s/j1.pid")
+        pidFile.exists() shouldBe true
+        Files.readString(pidFile).split(" ").size shouldBe 2
+        f.jobs.close()
+    }
 })

@@ -34,18 +34,33 @@ class BashJobs(home: Path, private val maxRunning: Int = 8) : AutoCloseable {
     }
 
     private val dir: Path = home.resolve(ProcessHandle.current().pid().toString())
+    private companion object { const val SKIPPED = "\u0000skipped\u0000" }
     private val jobs = LinkedHashMap<String, Job>()
     private val ids = AtomicInteger()
     @Volatile private var closed = false
+
+    internal val shutdownHook = Thread(::close, "sophi-jobs-cleanup")
 
     init {
         runCatching {
             if (Files.isDirectory(home)) home.listDirectoryEntries().forEach { d ->
                 val pid = d.name.toLongOrNull() ?: return@forEach
-                if (ProcessHandle.of(pid).isEmpty) d.toFile().deleteRecursively()
+                if (ProcessHandle.of(pid).isEmpty) { reapOrphans(d); d.toFile().deleteRecursively() }
             }
         }
-        Runtime.getRuntime().addShutdownHook(Thread(::close, "sophi-jobs-cleanup"))
+        Runtime.getRuntime().addShutdownHook(shutdownHook)
+    }
+
+    /**
+     * Kills the jobs a Sophi that died without closing (kill -9, a crash) left running, from their pid files.
+     * A pid is only killed when its start time matches, so a reused pid is never touched.
+     */
+    private fun reapOrphans(dir: Path) {
+        dir.toFile().walk().filter { it.name.endsWith(".pid") }.forEach { f ->
+            val (pid, started) = f.readText().trim().split(" ").mapNotNull { it.toLongOrNull() }.takeIf { it.size == 2 } ?: return@forEach
+            ProcessHandle.of(pid).filter { h -> h.info().startInstant().map { it.toEpochMilli() == started }.orElse(false) }
+                .ifPresent { h -> h.descendants().forEach { it.destroyForcibly() }; h.destroyForcibly() }
+        }
     }
 
     /** Starts [builder] (already sandbox-wrapped) as a job; [release] runs when it ends. Throws when [maxRunning] jobs run. */
@@ -62,36 +77,49 @@ class BashJobs(home: Path, private val maxRunning: Int = 8) : AutoCloseable {
             val process = builder.redirectErrorStream(true).redirectOutput(log.toFile()).start()
             process.outputStream.close() // nothing is ever fed to a job; an open stdin would hang a command that reads it
             process.onExit().thenRun(release)
+            process.toHandle().info().startInstant().ifPresent { log.resolveSibling("$id.pid").toFile().writeText("${process.pid()} ${it.toEpochMilli()}") }
             Job(id, sessionId, command, process, log, System.currentTimeMillis()).also { jobs[id] = it }
         }
         val deadline = System.currentTimeMillis() + 2_000
         while (job.process.isAlive && System.currentTimeMillis() < deadline) delay(100)
-        return JobStart(job.id, tail(job, read(job), 200, 16_000))
+        return JobStart(job.id, tail(job, read(job, 16_000), 200, 16_000))
     }
 
     private fun find(sessionId: String?, id: String): Job? = synchronized(this) { jobs[id]?.takeIf { sessionId == null || it.sessionId == sessionId } }
 
-    /** New output since the last read, from [Job.offset] to the end. */
-    private fun read(job: Job): String = synchronized(job) {
+    /**
+     * New output since the last read, from [Job.offset] to the end. Past [maxChars]×4 bytes only the end is read
+     * (from a line start), marked with [SKIPPED], so a huge log is never loaded whole.
+     */
+    private fun read(job: Job, maxChars: Int): String = synchronized(job) {
         if (!Files.exists(job.log)) return ""
         RandomAccessFile(job.log.toFile(), "r").use { f ->
             val end = f.length()
             if (end <= job.offset) return ""
-            f.seek(job.offset)
-            val bytes = ByteArray((end - job.offset).toInt())
+            val from = maxOf(job.offset, end - maxChars * 4L)
+            f.seek(from)
+            val bytes = ByteArray((end - from).toInt())
             f.readFully(bytes)
+            val skipped = from > job.offset
             job.offset = end
-            bytes.decodeToString()
+            val text = bytes.decodeToString()
+            if (skipped) SKIPPED + text.substringAfter('\n') else text
         }
     }
 
-    private fun tail(job: Job, text: String, maxLines: Int, maxChars: Int): String {
+    private fun tail(job: Job, read: String, maxLines: Int, maxChars: Int): String {
+        val skipped = read.startsWith(SKIPPED)
+        val text = read.removePrefix(SKIPPED)
         var lines = text.trimEnd('\n').lines().let { if (it == listOf("")) emptyList() else it }
         val dropped = (lines.size - maxLines).coerceAtLeast(0)
         lines = lines.takeLast(maxLines)
         var body = lines.joinToString("\n")
         if (body.length > maxChars) body = body.takeLast(maxChars)
-        return if (dropped > 0) "($dropped earlier lines in ${job.log})\n$body" else body
+        return when {
+            skipped -> "(earlier output in ${job.log})\n$body"
+            dropped > 0 -> "($dropped earlier lines in ${job.log})\n$body"
+            else -> body
+        }
     }
 
     /**
@@ -104,14 +132,14 @@ class BashJobs(home: Path, private val maxRunning: Int = 8) : AutoCloseable {
         while (job.process.isAlive && !job.killed && System.currentTimeMillis() < deadline &&
             Files.size(job.log) <= job.offset) delay(100)
         if (!job.process.isAlive) job.process.waitFor() // let the log settle before the last read
-        return job.status + "\n" + tail(job, read(job), maxLines, maxChars)
+        return job.status + "\n" + tail(job, read(job, maxChars), maxLines, maxChars)
     }
 
     /** Kills [id]'s process tree; a null [sessionId] is the host (e.g. `/jobs kill`), which may stop any session's job. */
     fun kill(sessionId: String?, id: String): String {
         val job = find(sessionId, id) ?: return "Error: no such job $id"
         if (job.process.isAlive) { job.killed = true; killTree(job.process) }
-        return "${job.status} $id\n" + tail(job, read(job), 200, 16_000)
+        return "${job.status} $id\n" + tail(job, read(job, 16_000), 200, 16_000)
     }
 
     fun list(sessionId: String? = null): List<JobInfo> = synchronized(this) {
@@ -119,10 +147,14 @@ class BashJobs(home: Path, private val maxRunning: Int = 8) : AutoCloseable {
     }
 
     override fun close() {
+        // Throws while the JVM is already shutting down (we're then running as that hook): nothing to remove.
+        runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
         val all = synchronized(this) { closed = true; jobs.values.toList() }
         all.filter { it.process.isAlive }.forEach { it.killed = true; killTree(it.process) }
     }
 
+    // ponytail: a child that daemonizes (setsid, double fork) leaves the tree and survives this; catching it needs
+    // a process group per job, which the JVM can't create portably.
     private fun killTree(p: Process) {
         p.descendants().forEach { it.destroyForcibly() }
         p.destroyForcibly()
