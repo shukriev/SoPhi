@@ -261,3 +261,19 @@ turns_assistant_6_2() { echo "Write down what you know about my role, Tomas, how
 check_assistant_6() {
   grep -qi "platform lead" answer.txt 2>/dev/null && grep -qi "payments" answer.txt && grep -q "ff_" answer.txt && grep -qi "riverside" answer.txt
 }
+
+# Roadmap #11 core tools (2026-10-30). ask_user and the desktop tools aren't registered in these piped,
+# non-interactive runs, so they have no case; they are checked by hand.
+CASES+=(patch-1 jobs-1 todo-1)
+
+setup_patch_1() { :; }
+turns_patch_1() { echo "Rename the function parse_amount to parse_money everywhere in this project (definition, re-export, callers and tests) with a single apply_patch call. The test suite (python3 -m unittest discover -s tests -t .) must still pass."; }
+check_patch_1() { ! grep -rq parse_amount --include='*.py' . && grep -q "def parse_money" ledger/money.py && suite_passes; }
+
+setup_jobs_1() { mkdir -p site && echo served-42 > site/token.txt; }
+turns_jobs_1() { echo "Start 'python3 -m http.server 18765 --directory site' as a background job, fetch http://127.0.0.1:18765/token.txt with curl and write its contents to answer.txt, then stop the server. Work only inside $PWD."; }
+check_jobs_1() { answer_is served-42 && ! curl -fs -m 2 http://127.0.0.1:18765/token.txt >/dev/null 2>&1; }
+
+setup_todo_1() { :; }
+turns_todo_1() { echo "Do these four steps in order and keep a todo list with the todo tool as you go: (1) create notes/a.txt containing 'one'; (2) create notes/b.txt containing 'two'; (3) create notes/c.txt containing 'three'; (4) write the number of files in notes/ to answer.txt."; }
+check_todo_1() { answer_is 3 && [ "$(cat notes/a.txt notes/b.txt notes/c.txt 2>/dev/null | tr -d '[:space:]')" = "onetwothree" ]; }
