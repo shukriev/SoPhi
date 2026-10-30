@@ -29,9 +29,30 @@ private class ScriptedTechnique : MemoryTechnique {
     override fun profileView() = emptyList<ProfileAttributeView>()
     override fun updateProfile(action: ProfileAction) = false
     override fun explainLastRecall(): String? = null
+    override fun views(ids: List<String>) = ids.map { MemoryView(it, "text of $it", mapOf("source" to "src-$it")) }
 }
 
 class MemoryPluginTest : FunSpec({
+    test("a recall is reported with the recalled memories, before its text goes into the turn") {
+        val t = ScriptedTechnique().apply { recallAnswer = MemoryBlock("<memory_context>X</memory_context>", listOf("m1", "m2")) }
+        val seen = mutableListOf<Pair<String, List<String>>>()
+        val plugin = MemoryPlugin(t, onRecall = { sid, ms -> seen += sid to ms.map { it.metadata["source"].orEmpty() } })
+        plugin.contribute("s1", "hi") shouldContain "<memory_context>"
+        seen shouldBe listOf("s1" to listOf("src-m1", "src-m2"))
+    }
+
+    test("a recall that can't be reported puts nothing into the turn") {
+        val t = ScriptedTechnique().apply { recallAnswer = MemoryBlock("<memory_context>X</memory_context>", listOf("m1")) }
+        MemoryPlugin(t, onRecall = { _, _ -> error("can't check") }).contribute("s1", "hi") shouldBe null
+    }
+
+    test("a recall with no memories (profile only) isn't reported") {
+        val t = ScriptedTechnique().apply { recallAnswer = MemoryBlock("<memory_context>profile</memory_context>", emptyList()) }
+        var calls = 0
+        MemoryPlugin(t, onRecall = { _, _ -> calls++ }).contribute("s1", "hi") shouldContain "profile"
+        calls shouldBe 0
+    }
+
     test("contribute renders the technique's recall via collectContext") {
         val t = ScriptedTechnique().apply { recallAnswer = MemoryBlock("<memory_context>X</memory_context>", listOf("mem_1")) }
         val plugin = MemoryPlugin(t)

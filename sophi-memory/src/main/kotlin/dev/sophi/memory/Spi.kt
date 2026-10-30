@@ -59,4 +59,7 @@ interface MemoryTechnique {
     fun profileView(): List<ProfileAttributeView>
     fun updateProfile(action: ProfileAction): Boolean
     fun explainLastRecall(): String?
+    /** The memories with these [ids], in that order, skipping unknown ones; a technique that can't look
+     *  them up returns none, and a host checking recalls then treats them as unchecked. */
+    fun views(ids: List<String>): List<MemoryView> = emptyList()
 }

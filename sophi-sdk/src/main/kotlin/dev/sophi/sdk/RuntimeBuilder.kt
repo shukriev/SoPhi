@@ -272,9 +272,11 @@ class RuntimeBuilder {
         embeddingApiKey: String? = null,
         embeddingDimensions: Int = 1536,
         onWarning: (String) -> Unit = {},
-        embeddingProvider: EmbeddingProvider? = null
+        embeddingProvider: EmbeddingProvider? = null,
+        /** Each turn's recalled memories, before they go into it; see [MemoryPlugin]'s `onRecall`. */
+        onRecall: (sessionId: String, memories: List<dev.sophi.memory.MemoryView>) -> Unit = { _, _ -> },
     ): RuntimeBuilder = apply {
-        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider)
+        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider, onRecall)
     }
 
     fun build(): SophiRuntime {
@@ -404,7 +406,7 @@ class RuntimeBuilder {
                         p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                     )
                 }.fold(
-                    onSuccess = { palace -> MemoryPlugin(palace).also { pluginRegistry.register(it) } },
+                    onSuccess = { palace -> MemoryPlugin(palace, onRecall = mc.onRecall).also { pluginRegistry.register(it) } },
                     onFailure = { e ->
                         mc.onWarning("memory: disabled — couldn't open the memory database at $memoryHome (${e.message ?: "unknown error"})")
                         null
@@ -483,7 +485,8 @@ private data class MemoryConfig(
     val embeddingApiKey: String?,
     val embeddingDimensions: Int,
     val onWarning: (String) -> Unit,
-    val embeddingProvider: EmbeddingProvider? = null
+    val embeddingProvider: EmbeddingProvider? = null,
+    val onRecall: (String, List<dev.sophi.memory.MemoryView>) -> Unit = { _, _ -> },
 )
 
 /**

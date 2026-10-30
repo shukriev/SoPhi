@@ -219,7 +219,9 @@ class Consolidator(
                 salience = members.maxOf { it.salience }, signals = SalienceSignals(0.0, 0.0, 0.0, 0.0, 0.0),
                 sensitivity = members.maxBy { it.sensitivity }.sensitivity,
                 provenance = Provenance.SYSTEM_INFERRED, createdAt = nowMs, reinforcedAt = nowMs,
-                sourceSessionId = "consolidation")
+                // Every session the thread came from, so a host can still tell overheard or outside
+                // text inside the summary (e.g. "ambient,<chat id>").
+                sourceSessionId = members.map { it.sourceSessionId }.distinct().sorted().joinToString(","))
             store.upsertMemory(summary)
             store.vectorFor(members.first().id)?.let { v ->
                 store.putEmbedding(summary.id, store.embeddingModel() ?: "", v)
