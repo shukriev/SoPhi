@@ -8,6 +8,7 @@ import dev.sophi.core.tools.UserQuestion
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -55,5 +56,24 @@ class TerminalUserAskerTest : FunSpec({
         val second = out.indexOf("Sophi asks:", first + 1)
         val promptAfterFirst = out.indexOf("Answer with a number", first)
         (promptAfterFirst in first until second) shouldBe true
+    }
+
+    test("an empty reply to a question without options asks again, without a 1-0 range") {
+        val (a, rec) = asker("", "fine")
+        val open = UserQuestion("s", "Anything else?", emptyList(), allowFreeText = true, unattended = false, deadlineMs = null)
+        runBlocking { a.ask(open, null) } shouldBe Answer.Reply(null, "fine")
+        rec.output() shouldNotContain "1-0"
+    }
+
+    test("the timeout covers waiting for an earlier question") {
+        val (a, _) = asker("1", delayMs = 2_000)
+        val answers = runBlocking {
+            val first = async { a.ask(q("First?"), null) }
+            kotlinx.coroutines.delay(50)
+            val t0 = System.currentTimeMillis()
+            val second = async { a.ask(q("Second?"), 200).also { (System.currentTimeMillis() - t0 < 1_000) shouldBe true } }
+            listOf(first, second).awaitAll()
+        }
+        answers[1] shouldBe Answer.TimedOut
     }
 })

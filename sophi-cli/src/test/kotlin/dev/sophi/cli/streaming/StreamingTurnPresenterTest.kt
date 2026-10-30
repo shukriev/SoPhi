@@ -7,6 +7,17 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 
 class StreamingTurnPresenterTest : FunSpec({
+    test("a parallel tool's line waits until the question is answered") {
+        val p = StreamingTurnPresenter()
+        p.feed(TurnEvent.ToolCallStarted("ask_user", "{}"))
+        p.feed(TurnEvent.ToolCallStarted("bash", "{}"))
+        p.feed(TurnEvent.ToolCallFinished("bash", "ok")) shouldBe null
+        val after = p.feed(TurnEvent.ToolCallFinished("ask_user", "User chose A"))
+        after.shouldBeInstanceOf<StreamingTurnPresenter.Rendered.ToolLine>()
+        after.text shouldContain "bash"
+        after.text shouldContain "ask_user"
+    }
+
     test("ask_user pauses the live region like a confirmation until it finishes") {
         val p = StreamingTurnPresenter()
         p.feed(TurnEvent.ToolCallStarted("ask_user", "{}"))
