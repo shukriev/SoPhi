@@ -156,4 +156,33 @@ class ApplyPatchToolTest : FunSpec({
         }
         f.root.resolve("dir").exists() shouldBe true
     }
+
+    test("re-indent swaps the patch's indentation for the file's when one doesn't extend the other") {
+        val f = Fx()
+        val p = f.file("f.py", "def a():\n\tx = 1\n\ty = 2\n")
+        f.run("*** Update File: f.py", "@@", "-  x = 1", "+  x = 10", "+  z = 3")
+        p.readText() shouldBe "def a():\n\tx = 10\n\tz = 3\n\ty = 2\n"
+    }
+
+    test("mixed line endings are kept line by line") {
+        val f = Fx()
+        val p = f.file("m.txt", "a\r\nb\nc\n")
+        f.run("*** Update File: m.txt", "@@", " a", "-b", "+B", " c")
+        p.readText() shouldBe "a\r\nB\nc\n"
+    }
+
+    test("a UTF-8 BOM doesn't stop the first line matching and is kept") {
+        val f = Fx()
+        val p = f.file("b.txt", "\uFEFFa\nb\n")
+        f.run("*** Update File: b.txt", "@@", " a", "-b", "+c")
+        p.readText() shouldBe "\uFEFFa\nc\n"
+    }
+
+    test("preview is a unified diff against the file") {
+        val f = Fx()
+        f.file("u.txt", "1\n2\n3\n")
+        val preview = f.tool.confirmationPreview(args(envelope("*** Update File: u.txt", "@@", " 1", "-2", "+two", " 3")))!!
+        preview shouldContain "--- u.txt\n+++ u.txt"
+        preview shouldContain "@@ -1,3 +1,3 @@\n 1\n-2\n+two\n 3"
+    }
 })

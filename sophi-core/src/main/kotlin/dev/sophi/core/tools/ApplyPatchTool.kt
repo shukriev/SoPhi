@@ -114,44 +114,65 @@ internal fun seek(lines: List<String>, pattern: List<String>, start: Int, eof: B
 
 private fun leading(s: String) = s.takeWhile { it == ' ' || it == '\t' }
 
-/** [content] with [hunks] applied; throws [PatchException] naming the hunk that didn't match. */
-internal fun applyHunks(path: String, content: String, hunks: List<Hunk>): Pair<String, Pair<Int, Int>> {
-    val crlf = content.contains("\r\n")
-    val text = content.replace("\r\n", "\n")
-    val trailingNewline = text.endsWith("\n")
-    val lines = (if (trailingNewline) text.dropLast(1) else text).let { if (it.isEmpty() && text.isEmpty()) emptyList() else it.split("\n") }
-    val replacements = mutableListOf<Triple<Int, Int, List<String>>>()
+internal data class Applied(val content: String, val added: Int, val removed: Int, val diff: String)
+
+/**
+ * [content] with [hunks] applied; throws [PatchException] naming the hunk that didn't match. Each line keeps its
+ * own ending (added lines take the ending of the line they replace), and a UTF-8 BOM is kept off the matching.
+ * [Applied.diff] is a unified diff of the change against the file, for the confirmation preview.
+ */
+internal fun applyHunks(path: String, content: String, hunks: List<Hunk>): Applied {
+    val bom = if (content.startsWith("\uFEFF")) "\uFEFF" else ""
+    val text = content.removePrefix(bom)
+    // (line, ending) pairs; the last line's ending is "" when the file has no trailing newline
+    val raw = Regex("(.*?)(\r\n|\n|$)").findAll(text).map { it.groupValues[1] to it.groupValues[2] }
+        .toMutableList().also { if (it.lastOrNull()?.let { l -> l.first.isEmpty() && l.second.isEmpty() } == true) it.removeAt(it.lastIndex) }
+    val lines = raw.map { it.first }
+    val dominant = raw.map { it.second }.filter { it.isNotEmpty() }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: "\n"
+    val replacements = mutableListOf<Triple<Int, Int, List<Pair<String, String>>>>()
+    val diff = StringBuilder()
     var cursor = 0
     var added = 0
     var removed = 0
+    var shift = 0
     hunks.forEachIndexed { n, h ->
         var start = cursor
         h.header?.let { hdr -> (cursor until lines.size).firstOrNull { lines[it].trim() == hdr }?.let { start = it + 1 } }
         val old = h.old
         val m = seek(lines, old, start, h.atEof) ?: throw PatchException(missMessage(path, n + 1, old, lines, start))
-        // Pass 3 matched ignoring indentation: give the added lines the file's indentation too.
-        val indent = if (m.pass == 3 && old.isNotEmpty()) {
-            val file = leading(lines[m.index]); val patch = leading(old.first())
-            if (file.startsWith(patch)) file.removePrefix(patch) else ""
-        } else ""
+        // Matched ignoring indentation: added lines swap the patch's indentation for the file's.
+        val (fileIndent, patchIndent) = if (m.pass == 3 && old.isNotEmpty()) leading(lines[m.index]) to leading(old.first()) else "" to ""
         var fileAt = m.index
-        val out = mutableListOf<String>()
+        val out = mutableListOf<Pair<String, String>>()
+        val body = StringBuilder()
         for (l in h.lines) when (l.kind) {
-            ' ' -> out += lines[fileAt++]
-            '-' -> { fileAt++; removed++ }
-            else -> { out += if (l.text.isEmpty()) "" else indent + l.text; added++ }
+            ' ' -> { out += raw[fileAt]; body.append(" ").append(lines[fileAt++]).append('\n') }
+            '-' -> { body.append("-").append(lines[fileAt++]).append('\n'); removed++ }
+            else -> {
+                val line = if (fileIndent != patchIndent && l.text.startsWith(patchIndent)) fileIndent + l.text.removePrefix(patchIndent) else l.text
+                out += line to (raw.getOrNull(fileAt)?.second?.ifEmpty { null } ?: dominant)
+                body.append("+").append(line).append('\n'); added++
+            }
         }
+        diff.append("@@ -${m.index + 1},${old.size} +${m.index + 1 + shift},${out.size} @@\n").append(body)
+        shift += out.size - old.size
         replacements += Triple(m.index, old.size, out)
         cursor = m.index + old.size
     }
-    val result = lines.toMutableList()
+    val result = raw.toMutableList()
     for ((at, size, repl) in replacements.asReversed()) {
         repeat(size) { result.removeAt(at) }
         result.addAll(at, repl)
     }
-    var joined = result.joinToString("\n") + if (trailingNewline) "\n" else ""
-    if (crlf) joined = joined.replace("\n", "\r\n")
-    return joined to (added to removed)
+    val trailing = raw.lastOrNull()?.second?.isNotEmpty() ?: text.isNotEmpty()
+    val joined = result.mapIndexed { i, (line, eol) ->
+        when {
+            i < result.lastIndex -> line + eol.ifEmpty { dominant }
+            trailing -> line + eol.ifEmpty { dominant }
+            else -> line
+        }
+    }.joinToString("")
+    return Applied(bom + joined, added, removed, diff.toString().trimEnd('\n'))
 }
 
 private fun missMessage(path: String, hunk: Int, old: List<String>, lines: List<String>, start: Int): String {
@@ -216,8 +237,13 @@ class ApplyPatchTool(
         when (op) {
             is FileOp.Add -> "A ${op.path} (+${op.lines.size})"
             is FileOp.Delete -> "D ${op.path}"
-            is FileOp.Update -> (if (op.moveTo != null) "R ${op.path} → ${op.moveTo}" else "M ${op.path}") + "\n" +
-                op.hunks.joinToString("\n") { h -> (listOfNotNull(h.header?.let { "@@ $it" }) + h.lines.map { "${it.kind}${it.text}" }).joinToString("\n") }
+            is FileOp.Update -> {
+                val head = if (op.moveTo != null) "R ${op.path} → ${op.moveTo}\n--- ${op.path}\n+++ ${op.moveTo}" else "--- ${op.path}\n+++ ${op.path}"
+                // The real diff when the file reads and every hunk matches; otherwise the hunks as sent (execute will report why).
+                val diff = runCatching { applyHunks(op.path, root.resolve(op.path).normalize().readText(), op.hunks).diff }.getOrNull()
+                    ?: op.hunks.joinToString("\n") { h -> (listOfNotNull(h.header?.let { "@@ $it" }) + h.lines.map { "${it.kind}${it.text}" }).joinToString("\n") }
+                "$head\n$diff"
+            }
         }
     }
 
@@ -255,10 +281,10 @@ class ApplyPatchTool(
                     is FileOp.Update -> {
                         if (!p.isRegularFile()) throw PatchException("Update File ${op.path}: no such file")
                         if (target != null && target.exists()) throw PatchException("Move to ${op.moveTo}: it already exists")
-                        val (content, counts) = applyHunks(op.path, p.readText(), op.hunks)
-                        writes += p to content
+                        val applied = applyHunks(op.path, p.readText(), op.hunks)
+                        writes += p to applied.content
                         if (target != null) { moves += p to target; summary += "R ${op.path} → ${op.moveTo}" }
-                        else summary += "M ${op.path} (+${counts.first} -${counts.second})"
+                        else summary += "M ${op.path} (+${applied.added} -${applied.removed})"
                     }
                 }
             }
