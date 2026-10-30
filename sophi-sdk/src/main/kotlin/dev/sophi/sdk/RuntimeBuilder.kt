@@ -223,6 +223,15 @@ class RuntimeBuilder {
      */
     fun askUser(asker: dev.sophi.core.tools.UserAsker): RuntimeBuilder = apply { userAsker = asker }
 
+    private var desktop: dev.sophi.core.tools.Desktop? = null
+
+    /**
+     * Registers `notify`, `clipboard_read`, `clipboard_write` and `open` for whatever [desktop] can do (by default this
+     * machine's own commands). A host nobody sits at (a server, a scheduled daemon) leaves it off.
+     */
+    fun desktop(desktop: dev.sophi.core.tools.Desktop = dev.sophi.core.tools.SystemDesktop.detect()): RuntimeBuilder =
+        apply { this.desktop = desktop }
+
     /**
      * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
      * if [agentsDir] was never called or found no definitions, matching [SubagentTool]'s own
@@ -326,6 +335,7 @@ class RuntimeBuilder {
             plugins.add(HintPlugin(engine, project, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
         }
         userAsker?.let { registry.register(dev.sophi.core.tools.AskUserTool(it)) }
+        desktop?.let { d -> dev.sophi.core.tools.desktopTools(d, builtinToolsConfig?.root ?: Path.of("").toAbsolutePath()).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
             registry.register(SkillTool(loadSkills, topK = harnessConfig?.topKSkills))

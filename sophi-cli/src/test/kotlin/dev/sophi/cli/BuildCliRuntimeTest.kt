@@ -87,6 +87,11 @@ class BuildCliRuntimeTest : FunSpec({
         build(interactive = false).registry.names() shouldNotContain "ask_user"
     }
 
+    test("desktop tools are registered only in an interactive terminal") {
+        build(interactive = true).registry.names() shouldContain "notify"
+        build(interactive = false).registry.names() shouldNotContain "notify"
+    }
+
     test("registers the builtin, calendar, schedule and goal-decomposition tools") {
         build().registry.names() shouldContainAll listOf(
             "read_file", "write_file", "grep", "glob", "edit_file", "apply_patch", "bash", "todo", "fetch_url",

@@ -100,7 +100,7 @@ internal suspend fun buildCliRuntime(
     onWarning: (String) -> Unit = {},
     /** The cost meter already inside [provider] (under System 1); null = the runtime meters [provider] itself. */
     metered: dev.sophi.sdk.MeteredProvider? = null,
-    /** A real terminal someone can answer in: registers ask_user. Off in piped runs and tests by default. */
+    /** A real terminal someone sits at: registers ask_user and the desktop tools. Off in piped runs and tests by default. */
     interactive: Boolean = false,
 ): CliRuntime {
     // Assigned once the runtime exists (below). The confirmation policy reads them lazily, which
@@ -177,7 +177,7 @@ internal suspend fun buildCliRuntime(
         goalDecomposition(Path.of(opts.plansDir))
         skillTools()
         loopGuard(loopGuardPolicy)
-        if (interactive) askUser(TerminalUserAsker(terminal, input))
+        if (interactive) { askUser(TerminalUserAsker(terminal, input)); desktop() }
         confirmationPolicy(confirmationPolicy)
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))
         schedule(Path.of(opts.scheduleDir))
