@@ -62,22 +62,34 @@ class SystemDesktop(private val os: String, private val run: suspend (List<Strin
     }
 
     companion object {
-        fun detect(): SystemDesktop = SystemDesktop(System.getProperty("os.name").orEmpty(), ::runCommand)
+        fun detect(): SystemDesktop = SystemDesktop(System.getProperty("os.name").orEmpty()) { cmd, stdin -> runCommand(cmd, stdin) }
 
-        private suspend fun runCommand(cmd: List<String>, stdin: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
-            val p = ProcessBuilder(cmd).redirectErrorStream(true).start()
-            p.outputStream.use { o -> stdin?.let { o.write(it.toByteArray()) } }
-            val out = p.inputStream.bufferedReader().readText()
-            if (!p.waitFor(10, TimeUnit.SECONDS)) { p.destroyForcibly(); return@withContext -1 to out }
-            p.exitValue() to out
+        internal suspend fun runCommand(cmd: List<String>, stdin: String?, timeoutMs: Long = 10_000): Pair<Int, String> = withContext(Dispatchers.IO) {
+            // Output goes to a file, not a pipe: a child that outlives the command (xclip serving the selection)
+            // would hold a pipe open forever, and reading it would never reach the timeout.
+            val outFile = Files.createTempFile("sophi-desktop", ".out")
+            try {
+                val p = ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(outFile.toFile()).start()
+                p.outputStream.use { o -> stdin?.let { o.write(it.toByteArray()) } }
+                if (!p.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) { p.destroyForcibly(); return@withContext -1 to Files.readString(outFile) }
+                p.exitValue() to Files.readString(outFile)
+            } finally {
+                Files.deleteIfExists(outFile)
+            }
         }
     }
 }
 
 private const val MAX_CLIPBOARD = 16_000
 private val SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:")
-// macOS and Linux launch these when opened: scripts, installers, app bundles
-private val LAUNCHERS = setOf("app", "command", "tool", "terminal", "workflow", "pkg", "mpkg", "dmg", "scpt", "applescript", "jar", "sh", "desktop", "appimage")
+// Documents and media only: a denylist of launchers never ends (.fileloc/.webloc follow to any app or URL scheme,
+// .py runs in Python Launcher), so anything else is refused.
+private val DOCUMENTS = setOf(
+    "html", "htm", "pdf", "txt", "md", "csv", "tsv", "json", "xml", "yaml", "yml", "log", "rtf", "epub",
+    "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "key", "numbers", "pages",
+    "png", "jpg", "jpeg", "gif", "svg", "webp", "heic", "bmp", "tiff", "ico",
+    "mp3", "m4a", "wav", "flac", "ogg", "mp4", "mov", "m4v", "webm", "mkv",
+)
 
 private fun str(argumentsJson: String, key: String): String? =
     runCatching { (Json.parseToJsonElement(argumentsJson) as JsonObject)[key] as? JsonPrimitive }.getOrNull()?.contentOrNull
@@ -126,7 +138,7 @@ fun desktopTools(desktop: Desktop, root: Path): List<Tool> = buildList {
             val home = System.getProperty("user.home")
             val p = (if (target.startsWith("~/")) Path.of(home, target.substring(2)) else root.resolve(target)).normalize()
             if (!Files.exists(p)) return@DesktopTool "Error: open only takes http(s) URLs or existing files"
-            if (Files.isDirectory(p) || Files.isExecutable(p) || p.fileName.toString().substringAfterLast('.', "").lowercase() in LAUNCHERS)
+            if (Files.isDirectory(p) || Files.isExecutable(p) || p.fileName.toString().substringAfterLast('.', "").lowercase() !in DOCUMENTS)
                 return@DesktopTool "Error: open won't launch programs"
             p.toString()
         }

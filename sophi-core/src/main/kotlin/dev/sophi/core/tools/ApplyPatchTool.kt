@@ -248,7 +248,7 @@ class ApplyPatchTool(
                         summary += "A ${op.path}"
                     }
                     is FileOp.Delete -> {
-                        if (!p.exists()) throw PatchException("Delete File ${op.path}: no such file")
+                        if (!p.isRegularFile()) throw PatchException("Delete File ${op.path}: no such file (apply_patch deletes files, not folders)")
                         deletes.add(p)
                         summary += "D ${op.path}"
                     }

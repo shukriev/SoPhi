@@ -144,4 +144,16 @@ class ApplyPatchToolTest : FunSpec({
         val subjects = f.tool.permissionSubjects(args(envelope("*** Update File: a.txt", "*** Move to: b.txt", "@@", "-1", "+2")))!!
         subjects.map { it.text }.toSet() shouldBe setOf("a.txt", "b.txt")
     }
+
+    test("deleting a directory or the root is refused before anything is written") {
+        val f = Fx()
+        val a = f.file("a.txt", "1\n")
+        Files.createDirectories(f.root.resolve("dir"))
+        listOf("dir", ".").forEach { target ->
+            val out = f.run("*** Update File: a.txt", "@@", "-1", "+one", "*** Delete File: $target")
+            out shouldStartWith "Error:"
+            a.readText() shouldBe "1\n"
+        }
+        f.root.resolve("dir").exists() shouldBe true
+    }
 })

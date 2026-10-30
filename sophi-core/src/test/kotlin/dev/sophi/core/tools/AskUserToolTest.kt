@@ -109,4 +109,10 @@ class AskUserToolTest : FunSpec({
             describeAnswer(q, Answer.Dismissed, null) shouldBe "User dismissed the question — proceed with your best judgment or stop."
         }
     }
+
+    test("an unattended question times out in core even when the host ignores the timeout") {
+        val hanging = UserAsker { _, _ -> kotlinx.coroutines.delay(3_000); Answer.Dismissed }
+        val out = runIn("g1", Unattended) { AskUserTool(hanging, unattendedTimeoutMs = 100).execute("""{"question":"?"}""") }
+        out shouldStartWith "User did not answer"
+    }
 })

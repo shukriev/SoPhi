@@ -75,4 +75,24 @@ class DesktopToolsTest : FunSpec({
         t.getValue("notify").riskLevel("{}") shouldBe RiskLevel.SAFE
         listOf("clipboard_read", "clipboard_write", "open").forEach { t.getValue(it).riskLevel("{}") shouldBe RiskLevel.CAUTION }
     }
+
+    test("open only takes documents and media: shortcut and script files are refused") {
+        val root = tempdir().toPath()
+        listOf("x.fileloc", "x.webloc", "x.inetloc", "x.url", "x.py", "x.rb", "x.pl", "x.bin").forEach { root.resolve(it).writeText("x") }
+        val t = tools(mac(Calls()), root).getValue("open")
+        listOf("x.fileloc", "x.webloc", "x.inetloc", "x.url", "x.py", "x.rb", "x.pl", "x.bin").forEach {
+            exec(t, """{"target":"$it"}""") shouldBe "Error: open won't launch programs"
+        }
+    }
+
+    test("a command's output is read even when a child keeps the pipe open, and the timeout holds") {
+        val t0 = System.currentTimeMillis()
+        val (code, out) = runBlocking { SystemDesktop.runCommand(listOf("sh", "-c", "echo hi; (sleep 30 &) ; exit 0"), null, timeoutMs = 3_000) }
+        (System.currentTimeMillis() - t0 < 6_000) shouldBe true
+        code shouldBe 0
+        out.trim() shouldBe "hi"
+        val t1 = System.currentTimeMillis()
+        runBlocking { SystemDesktop.runCommand(listOf("sleep", "30"), null, timeoutMs = 500) }.first shouldBe -1
+        (System.currentTimeMillis() - t1 < 4_000) shouldBe true
+    }
 })

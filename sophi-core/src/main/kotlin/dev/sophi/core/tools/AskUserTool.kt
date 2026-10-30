@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.coroutineContext
@@ -102,7 +103,9 @@ class AskUserTool(
         val unattended = coroutineContext[Unattended.Key] != null
         val timeoutMs = if (unattended) unattendedTimeoutMs else null
         val q = UserQuestion(sessionId, question, choices, allowFreeText, unattended, timeoutMs?.let { nowMs() + it })
-        return describeAnswer(q, asker.ask(q, timeoutMs), timeoutMs)
+        // Enforced here too, so an unattended run never blocks on a host that ignores timeoutMs.
+        val answer = timeoutMs?.let { t -> withTimeoutOrNull(t) { asker.ask(q, t) } ?: Answer.TimedOut } ?: asker.ask(q, null)
+        return describeAnswer(q, answer, timeoutMs)
     }
 
     companion object {
