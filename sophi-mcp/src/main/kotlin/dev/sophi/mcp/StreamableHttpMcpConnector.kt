@@ -2,7 +2,9 @@ package dev.sophi.mcp
 
 import dev.sophi.mcp.config.McpServerConfig
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.header
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
@@ -20,7 +22,10 @@ import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 class StreamableHttpMcpConnector : McpConnector {
     override suspend fun connect(config: McpServerConfig): McpSession {
         val url = requireNotNull(config.url) { "http MCP server '${config.name}' requires a url" }
-        val httpClient = HttpClient { install(SSE) }
+        val httpClient = HttpClient {
+            install(SSE)
+            defaultRequest { config.headers.forEach { (k, v) -> header(k, v) } }
+        }
         val transport = StreamableHttpClientTransport(client = httpClient, url = url)
         val client = Client(clientInfo = Implementation(name = "sophi", version = "1.0.0"))
         client.connect(transport)

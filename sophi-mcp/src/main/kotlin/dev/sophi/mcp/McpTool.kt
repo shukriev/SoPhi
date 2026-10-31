@@ -20,7 +20,9 @@ class McpTool(
     remoteTool: RemoteToolInfo,
     private val safeTools: Set<String>,
     private val timeout: Duration = DEFAULT_MCP_TOOL_TIMEOUT,
-    override val deferred: Boolean = false
+    override val deferred: Boolean = false,
+    /** Masks live secrets out of the result, so a server echoing its token never shows it to the model. */
+    private val mask: (String) -> String = { it },
 ) : Tool {
     private val remoteName = remoteTool.name
 
@@ -30,7 +32,7 @@ class McpTool(
     override fun riskLevel(argumentsJson: String): RiskLevel =
         if (remoteName in safeTools) RiskLevel.SAFE else RiskLevel.DESTRUCTIVE
 
-    override suspend fun execute(argumentsJson: String): String =
+    override suspend fun execute(argumentsJson: String): String = mask(
         try {
             withTimeout(timeout) {
                 session.callTool(remoteName, argumentsJson)
@@ -40,4 +42,5 @@ class McpTool(
         } catch (e: Exception) {
             "Error: ${e.message}"
         }
+    )
 }
