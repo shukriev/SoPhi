@@ -1,6 +1,7 @@
 package dev.sophi.mcp
 
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.mcp.auth.signInRequired
 import dev.sophi.core.tools.Tool
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -40,7 +41,7 @@ class McpTool(
         } catch (e: TimeoutCancellationException) {
             "Error: MCP tool '$remoteName' timed out after $timeout"
         } catch (e: Exception) {
-            "Error: ${e.message}"
+            "Error: ${(e.signInRequired() ?: e).message}"
         }
     )
 }

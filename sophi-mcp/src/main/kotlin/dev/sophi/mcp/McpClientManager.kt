@@ -6,6 +6,7 @@ import dev.sophi.core.tools.Tool
 import dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER
 import dev.sophi.mcp.config.McpServerConfig
 import dev.sophi.mcp.config.McpTransport
+import dev.sophi.mcp.auth.signInRequired
 import dev.sophi.mcp.config.MissingSecretException
 import dev.sophi.mcp.config.resolveSecrets
 import kotlinx.coroutines.runBlocking
@@ -45,10 +46,12 @@ class McpClientManager(
             val defer = remoteTools.size > deferToolsOver
             remoteTools.map { McpTool(session, config.name, it, safeTools, deferred = defer, mask = mask::mask) }
         } catch (e: Exception) {
+            val signIn = e.signInRequired()
             val message = e.message?.let(mask::mask)
-            System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: $message")
+            if (signIn != null) System.err.println("${config.name} needs sign-in — run `sophi mcp login ${config.name}`")
+            else System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: $message")
             // A secret can't ride out in the exception: callers show its message, and its cause chain may hold the value.
-            onFailure(if (e is MissingSecretException) e else Exception(message))
+            onFailure(signIn ?: if (e is MissingSecretException) e else Exception(message))
             emptyList()
         }
     }
