@@ -18,6 +18,21 @@ class PlanProgressRendererTest : FunSpec({
         return PlanProgressRenderer(liveRegion) { output.add(it) }
     }
 
+    test("a parallel tool's line waits until ask_user is answered") {
+        val output = mutableListOf<String>()
+        val r = renderer(output)
+        runBlocking {
+            r.onTurnEvent(dev.sophi.core.agent.TurnEvent.ToolCallStarted("ask_user", "{}"))
+            r.onTurnEvent(dev.sophi.core.agent.TurnEvent.ToolCallStarted("bash", "{}"))
+            r.onTurnEvent(dev.sophi.core.agent.TurnEvent.ToolCallFinished("bash", "ok"))
+            output shouldBe emptyList()
+            r.onTurnEvent(dev.sophi.core.agent.TurnEvent.ToolCallFinished("ask_user", "User chose A"))
+        }
+        output.size shouldBe 2
+        output[0] shouldContain "bash"
+        output[1] shouldContain "ask_user"
+    }
+
     test("StepStarted echoes the step id and instruction") {
         val output = mutableListOf<String>()
         val step = PlanStep(id = "s1", instruction = "ship the release")

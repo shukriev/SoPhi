@@ -47,6 +47,8 @@ class SlashHandler(
     private val auditSink: AuditSink? = null,
     private val permissions: dev.sophi.core.permissions.PermissionRules? = null,
     private val checkpoints: CheckpointStore? = null,
+    /** Background bash jobs for /jobs; null = not available. */
+    private val jobs: dev.sophi.core.tools.BashJobs? = null,
     /** Null: `/settings` reports it isn't available (a handler built without the CLI's wiring). */
     private val settings: SettingsController? = null,
     /**
@@ -66,6 +68,16 @@ class SlashHandler(
     private val startWindow = contextWindowTokens
     private val config: AgentConfig get() = live?.invoke()?.first ?: startConfig
     private val contextWindowTokens: Int? get() = live?.invoke()?.second ?: startWindow
+
+    private fun handleJobs(arg: String?) {
+        val jobs = jobs ?: return output("Background jobs aren't available.")
+        val words = arg?.split(" ")?.filter { it.isNotBlank() }.orEmpty()
+        if (words.firstOrNull() == "kill") return output(words.getOrNull(1)?.let { jobs.kill(null, it) } ?: "Usage: /jobs kill <id>")
+        val all = jobs.list()
+        if (all.isEmpty()) return output("No background jobs.")
+        val now = System.currentTimeMillis()
+        all.forEach { output("${it.id}  ${it.status}  ${(now - it.startedAtMs) / 1000}s  ${it.command}") }
+    }
 
     suspend fun handle(line: String, session: AgentSession): AgentSession {
         val parts = line.trimStart('/').split(" ", limit = 2)
@@ -173,10 +185,11 @@ class SlashHandler(
             "permissions" -> { handlePermissions(arg); session }
             "settings" -> { handleSettings(arg); session }
             "model" -> { handleModel(arg); session }
+            "jobs" -> { handleJobs(arg); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs"
                 )
                 session
             }

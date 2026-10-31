@@ -38,6 +38,8 @@ import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.isToolError
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.RoundChanges
+import dev.sophi.core.tools.currentTodos
+import dev.sophi.core.tools.renderTodos
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -368,7 +370,10 @@ class AgentLoop(
             runCatching { onUsage(it, "summarise") }
         }
         messages.subList(turnStartIndex, cutIndex).clear()
-        messages[turnStartIndex - 1] = userMessage.copy(content = turnUserContent + SUMMARY_MARKER + summary)
+        // The todo results just cut away carried the model's checklist: keep its latest state in the summary.
+        val todos = currentTodos(rounds.mapIndexed { i, r -> SessionEntry("r$i", null, r.role, r.content, 0L, r.metadata) })
+            ?.takeIf { it.isNotEmpty() }?.let { "\n\nCurrent todo list:\n" + renderTodos(it) }.orEmpty()
+        messages[turnStartIndex - 1] = userMessage.copy(content = turnUserContent + SUMMARY_MARKER + summary + todos)
         // Still over after the summary: stub the largest remaining results too (the summarise already counts).
         val afterSummary = projected - (toCompact.sumOf { it.content.length } - summary.length) / CHARS_PER_TOKEN_ESTIMATE
         if (afterSummary >= triggerTokens) elideLargestRelief(messages, turnStartIndex, afterSummary, triggerTokens)
@@ -486,7 +491,9 @@ class AgentLoop(
         // Volatile context (hints, recall) rides on this turn's request only: prefixed to the user
         // message so the system prompt and all of history stay a byte-stable, cacheable prefix.
         // Never persisted — every session.append below stores the raw userInput.
-        val turnUserContent = turnPreamble?.let { "$it\n\n$userInput" } ?: userInput
+        // Tool rounds don't replay across turns, so the model's own todo list rides along here the same way.
+        val todoNote = currentTodos(session)?.takeIf { it.isNotEmpty() }?.let { "\n\n[Your todo list so far:\n${renderTodos(it)}]" }.orEmpty()
+        val turnUserContent = (turnPreamble?.let { "$it\n\n$userInput" } ?: userInput) + todoNote
         messages.add(Message(MessageRole.USER, turnUserContent))
         // Everything from here on is this turn's own accumulated rounds — the only region
         // mid-loop compaction is ever allowed to touch. The prior-session prefix in front of it

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Desktop tools: `notify` (a desktop notification, or a terminal bell), `clipboard_read` / `clipboard_write`, and `open` (an http(s) URL, or an existing document or media file in its default app; anything else, including scripts, shortcut files and folders, is refused). The CLI turns them on in an interactive terminal; in the SDK, `RuntimeBuilder.desktop()`.
+- The CLI answers `ask_user`: Sophi can stop mid-turn to ask you something, with numbered options or a typed reply, and Esc to skip. Only in an interactive terminal.
+- `ask_user` is in core: a host passes a `UserAsker` with `RuntimeBuilder.askUser(asker)`, and the tool is registered only then. Scheduled runs are marked `Unattended`, so their questions time out after 4 minutes and the model carries on.
+- `todo`: a checklist the model keeps for multi-step tasks. It lives in the session, so resume and `/checkout` bring it back, and compaction carries it into its summary; the system prompt never changes. The CLI prints the list under a turn that changed it.
+- Background `bash`: `bash(background = true)` returns a job id, `bash_output` reads what it printed since last time (waiting up to 120 s for more), `bash_kill` stops it, and `/jobs` lists and stops jobs in the CLI. At most 8 run at once, and every job dies with Sophi.
+- `apply_patch`: adds, updates, moves and deletes several files in one all-or-nothing call (the Codex/OpenCode patch format). Hunks match through whitespace slips and keep the file's indentation and line endings; deletes go to the SoPhi trash, and the call is one undo step.
+
 ### Removed
 - `BudgetTracker` (sophi-infra), a token counter nothing used; `RuntimeBuilder.budget(maxUsd)` replaces it
 

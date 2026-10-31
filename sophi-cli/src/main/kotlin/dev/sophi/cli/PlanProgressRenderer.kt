@@ -27,6 +27,7 @@ class PlanProgressRenderer(
     private var reasoningTokenCount = 0
     private var currentPhase: StreamingPhase = StreamingPhase.Generating()
     private var confirmationPending = false
+    private var askHeld: MutableList<String>? = null
     private val pendingArgs = mutableMapOf<String, String>()
     private val animationTimer = AnimationTimer()
 
@@ -63,11 +64,18 @@ class PlanProgressRenderer(
             is TurnEvent.ToolCallStarted -> {
                 pendingArgs[event.name] = event.argsJson
                 currentPhase = StreamingPhase.ExecutingTool(event.name)
+                // ask_user prints its question and reads a typed line: keep the spinner off it
+                if (event.name == "ask_user") { confirmationPending = true; askHeld = mutableListOf(); liveRegion.clear() }
             }
             is TurnEvent.ToolCallFinished -> {
-                liveRegion.clear()
                 val args = pendingArgs.remove(event.name) ?: ""
-                output(ResponseRenderer.renderToolCall(event.name, args, event.result))
+                val line = ResponseRenderer.renderToolCall(event.name, args, event.result)
+                // a parallel tool's line waits until the question is answered, so it doesn't print into the typed reply
+                if (confirmationPending && askHeld != null && event.name != "ask_user") { askHeld!! += line; return }
+                if (event.name == "ask_user") { confirmationPending = false }
+                liveRegion.clear()
+                (askHeld.orEmpty() + line).forEach { output(it) }
+                askHeld = null
                 currentPhase = StreamingPhase.Generating(tokenCount, reasoningTokenCount)
             }
             is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage -> Unit

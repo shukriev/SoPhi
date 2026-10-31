@@ -23,7 +23,7 @@ private data class EditArgs(
 class EditTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
 
     override val name = "edit_file"
-    override val description = "Replace an exact string in a file within the working directory"
+    override val description = "Replace an exact string in a file within the working directory. For changes to several files or many hunks, use apply_patch."
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
         // Unparseable: execute() decodes the same type and throws before doing anything, so don't prompt —

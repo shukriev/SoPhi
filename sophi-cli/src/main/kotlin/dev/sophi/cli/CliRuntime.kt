@@ -47,6 +47,8 @@ data class CliOptions(
     val learningHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "learning"),
     /** Overridable so tests don't open the real ~/.sophi/db. */
     val contextRoot: Path = ContextEngine.defaultRoot(),
+    /** Overridable so tests don't write background-job logs to the real ~/.sophi/jobs. */
+    val jobsHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "jobs"),
     /** Tests turn this off: no index host (ArcadeDB keeps a JVM shutdown hook per server) and no indexing of the repo they run in. */
     val startContext: Boolean = true,
     val braveApiKey: String? = null,
@@ -100,6 +102,8 @@ internal suspend fun buildCliRuntime(
     onWarning: (String) -> Unit = {},
     /** The cost meter already inside [provider] (under System 1); null = the runtime meters [provider] itself. */
     metered: dev.sophi.sdk.MeteredProvider? = null,
+    /** A real terminal someone sits at: registers ask_user and the desktop tools. Off in piped runs and tests by default. */
+    interactive: Boolean = false,
 ): CliRuntime {
     // Assigned once the runtime exists (below). The confirmation policy reads them lazily, which
     // is what breaks the cycle: the policy must exist before the runtime that owns the
@@ -156,6 +160,7 @@ internal suspend fun buildCliRuntime(
     val runtime = try { Sophi.runtime {
         this.provider = provider
         this.metered = metered
+        jobsHome = opts.jobsHome
         model = opts.model
         maxTokens = opts.maxTokens
         contextWindowTokens(opts.contextWindowTokens)
@@ -175,6 +180,7 @@ internal suspend fun buildCliRuntime(
         goalDecomposition(Path.of(opts.plansDir))
         skillTools()
         loopGuard(loopGuardPolicy)
+        if (interactive) { askUser(TerminalUserAsker(terminal, input)); desktop() }
         confirmationPolicy(confirmationPolicy)
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))
         schedule(Path.of(opts.scheduleDir))

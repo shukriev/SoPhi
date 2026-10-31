@@ -14,6 +14,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -48,6 +49,8 @@ internal fun optionsFor(
     learningHome = dir.resolve("learning"),
     // Keep the context index out of the developer's real ~/.sophi/db.
     contextRoot = dir.resolve("db"),
+    // Keep background-job logs (and their startup cleanup) out of the developer's real ~/.sophi/jobs.
+    jobsHome = dir.resolve("jobs"),
     startContext = false,
     braveApiKey = null,
     autoMode = autoMode,
@@ -66,7 +69,8 @@ class BuildCliRuntimeTest : FunSpec({
     suspend fun build(
         autoMode: Boolean = false,
         godMode: Boolean = false,
-        writeMcpConfig: Boolean = false
+        writeMcpConfig: Boolean = false,
+        interactive: Boolean = false,
     ): CliRuntime {
         val dir = tempdir().toPath()
         val mcpPath = dir.resolve("mcp.json")
@@ -75,13 +79,33 @@ class BuildCliRuntimeTest : FunSpec({
             opts = optionsFor(dir, autoMode = autoMode, godMode = godMode),
             provider = mockk<LLMProvider>(relaxed = true),
             terminal = Terminal(),
-            input = ScriptedInputSource(emptyList())
+            input = ScriptedInputSource(emptyList()),
+            interactive = interactive,
         ))
+    }
+
+    test("background job logs go under the options' jobsHome") {
+        val dir = tempdir().toPath()
+        val cli = autoClose(buildCliRuntime(optionsFor(dir), mockk<LLMProvider>(relaxed = true), Terminal(), ScriptedInputSource(emptyList())))
+        kotlinx.coroutines.withContext(dev.sophi.core.session.SessionIdContext("s")) {
+            cli.registry.get("bash").execute("""{"command":"echo hi","background":true}""")
+        }
+        java.nio.file.Files.exists(dir.resolve("jobs/${ProcessHandle.current().pid()}/s/j1.log")) shouldBe true
+    }
+
+    test("ask_user is registered only in an interactive terminal") {
+        build(interactive = true).registry.names() shouldContain "ask_user"
+        build(interactive = false).registry.names() shouldNotContain "ask_user"
+    }
+
+    test("desktop tools are registered only in an interactive terminal") {
+        build(interactive = true).registry.names() shouldContain "notify"
+        build(interactive = false).registry.names() shouldNotContain "notify"
     }
 
     test("registers the builtin, calendar, schedule and goal-decomposition tools") {
         build().registry.names() shouldContainAll listOf(
-            "read_file", "write_file", "grep", "glob", "edit_file", "bash", "fetch_url",
+            "read_file", "write_file", "grep", "glob", "edit_file", "apply_patch", "bash", "todo", "fetch_url",
             "get_current_datetime", "manage_scheduled_task",
             "create_calendar_event", "list_calendar_events", "get_calendar_event",
             "update_calendar_event", "delete_calendar_event", "list_calendars",

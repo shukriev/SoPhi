@@ -14,6 +14,9 @@ class StreamingTurnPresenter(private val autoExitTokenView: Boolean = true) {
     private val buffer = StringBuilder()
     private val reasoningBuffer = StringBuilder()
     private val pendingArgs = mutableMapOf<String, String>()
+    // While ask_user waits for a typed answer, other tools' lines are held so they don't print into it.
+    private var asking = false
+    private val held = mutableListOf<String>()
     private var tokenCount = 0
     private var reasoningTokenCount = 0
     private var currentPhase: StreamingPhase? = StreamingPhase.Generating()
@@ -43,15 +46,21 @@ class StreamingTurnPresenter(private val autoExitTokenView: Boolean = true) {
             Rendered.Redraw
         }
         is TurnEvent.ToolCallStarted -> {
+            // ask_user prints its question and reads a typed line: keep the spinner off it, as for a confirmation
+            if (event.name == "ask_user") { confirmationPending = true; asking = true }
             pendingArgs[event.name] = event.argsJson
             currentPhase = StreamingPhase.ExecutingTool(event.name)
             Rendered.Cleared
         }
         is TurnEvent.ToolCallFinished -> {
             val args = pendingArgs.remove(event.name) ?: ""
-            if (autoExitTokenView) tokenViewState = TokenViewToggleState()
-            currentPhase = StreamingPhase.Generating(tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount)
-            Rendered.ToolLine(ResponseRenderer.renderToolCall(event.name, args, event.result))
+            val line = ResponseRenderer.renderToolCall(event.name, args, event.result)
+            if (asking && event.name != "ask_user") { held += line; null } else {
+                if (event.name == "ask_user") { confirmationPending = false; asking = false }
+                if (autoExitTokenView) tokenViewState = TokenViewToggleState()
+                currentPhase = StreamingPhase.Generating(tokenCount = tokenCount, reasoningTokenCount = reasoningTokenCount)
+                Rendered.ToolLine((held + line).joinToString("\n")).also { held.clear() }
+            }
         }
         is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage -> null
     }

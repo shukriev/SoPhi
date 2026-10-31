@@ -182,7 +182,7 @@ class ScheduleEngine(
                         val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
                         val effectiveConfig = if (extra == null) config
                             else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
-                        val result = withContext(SessionIdContext(session.id)) {
+                        val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended) {
                             loop.turn(session, task.prompt, effectiveConfig, onEvent = bridge)
                         }
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
@@ -204,7 +204,7 @@ class ScheduleEngine(
                             criticEnabled = criticEnabled
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge, planLog = planLog)
-                        val result = withContext(SessionIdContext(session.id)) {
+                        val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended) {
                             runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
                         }
                         replans = result.replans.size

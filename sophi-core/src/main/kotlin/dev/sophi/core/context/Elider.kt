@@ -56,6 +56,7 @@ object Elider {
     private fun stubFor(m: Message, calls: Map<String, ToolCall>, unseen: Boolean = false): String? {
         val call = calls[m.toolCallId]
         val name = m.toolName ?: call?.name ?: "tool"
+        if (name == "todo") return null // small, and can't be re-read: the model's own checklist stays
         val arg = call?.let { keyArg(name, it.argumentsJson) }?.take(80)?.let { " $it" } ?: ""
         val tail = if (unseen) "too large to show at once; re-read a smaller part or narrow the request]" else "re-read if needed]"
         val stub = "$PREFIX$name$arg, ${m.content.lines().size} lines — $tail"

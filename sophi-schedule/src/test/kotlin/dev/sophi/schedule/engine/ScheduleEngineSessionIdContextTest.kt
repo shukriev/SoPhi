@@ -62,4 +62,32 @@ class ScheduleEngineSessionIdContextTest : FunSpec({
 
         observedSessionId shouldBe record?.sessionId
     }
+
+    test("scheduled runs are unattended") {
+        var unattended: Boolean? = null
+        val probeTool = object : Tool {
+            override val name = "probe"
+            override val description = "captures Unattended"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String {
+                unattended = kotlin.coroutines.coroutineContext[dev.sophi.core.tools.Unattended.Key] != null
+                return "ok"
+            }
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "probe", "{}")))),
+            flowOf(StreamEvent.Content("done"))
+        )
+        val home = tempdir().toPath()
+        val taskStore = TaskStore(home.resolve("tasks.json"))
+        val engine = ScheduleEngine(
+            taskStore = taskStore, runLog = RunLog(home.resolve("runs.jsonl")), provider = provider,
+            fullRegistry = ToolRegistry().register(probeTool), sessionManager = FileSessionManager(home.resolve("sessions")),
+            notifier = NoopNotifier, model = "test-model", contextWindowTokens = TEST_CONTEXT_WINDOW
+        )
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "run the probe"))
+        runBlocking { engine.runNow(task.id) }
+        unattended shouldBe true
+    }
 })

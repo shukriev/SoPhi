@@ -33,12 +33,13 @@ private val SCRATCH_PATH_PREFIXES = listOf("/tmp/", "/private/tmp/", "./scratch/
 private val SINGLE_FILE_RM = Regex("""^rm\s+(\S+)$""")
 
 @Serializable
-private data class BashArgs(val command: String, val timeoutSeconds: Long? = null)
+private data class BashArgs(val command: String, val timeoutSeconds: Long? = null, val background: Boolean = false)
 
-/** [sandbox]: where each command runs; a host can switch it while the session runs. */
+/** [sandbox]: where each command runs; a host can switch it while the session runs. [jobs]: null = no background jobs. */
 class BashTool(
     private val root: Path = Paths.get("").toAbsolutePath(),
     private val sandbox: BashSandbox? = null,
+    private val jobs: BashJobs? = null,
 ) : Tool {
 
     override val name = "bash"
@@ -74,13 +75,14 @@ class BashTool(
             ?.takeIf { it.isNotEmpty() }
             ?.map { PermissionSubject(it.text, allowable = !it.redirects && !it.assigns) }
     override val parametersJson = """
-        {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"}},"required":["command"]}
+        {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"},"background":{"type":"boolean","description":"Start a long-running command (dev server, watcher, long build) and return at once with a job id; read it with bash_output, stop it with bash_kill"}},"required":["command"]}
     """.trimIndent()
 
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun execute(argumentsJson: String): String = withContext(Dispatchers.IO) {
         val args = json.decodeFromString<BashArgs>(argumentsJson)
+        if (args.background) return@withContext background(args.command)
         val timeoutSeconds = (args.timeoutSeconds ?: DEFAULT_TIMEOUT_SECONDS).coerceAtMost(MAX_TIMEOUT_SECONDS)
         val builder = shellProcess(args.command).directory(root.toFile()).redirectErrorStream(true)
         // held until the command ends, so a sandbox switch mid-command doesn't pull its container away
@@ -90,6 +92,24 @@ class BashTool(
         } finally {
             lease?.release()
         }
+    }
+
+    private suspend fun background(command: String): String {
+        val jobs = jobs ?: return "Error: background jobs aren't available here"
+        if (sandbox?.mode == SandboxMode.DOCKER) return "Error: background jobs don't run in the Docker sandbox yet: killing one " +
+            "wouldn't stop it inside the container. Switch /settings sandbox to seatbelt or off, or run it in the foreground."
+        val builder = shellProcess(command).directory(root.toFile())
+        val lease = sandbox?.lease(builder.command())
+        lease?.let { builder.command(it.command) }
+        val session = kotlin.coroutines.coroutineContext[dev.sophi.core.session.SessionIdContext]?.sessionId ?: "default"
+        val started = try {
+            jobs.start(session, command, builder) { lease?.release() }
+        } catch (e: IllegalStateException) {
+            lease?.release()
+            return "Error: ${e.message}"
+        }
+        return "job ${started.id} started\n${started.initialOutput}\n" +
+            "Read it with bash_output(id), stop it with bash_kill(id) (load them with tool_search)."
     }
 
     private suspend fun run(builder: ProcessBuilder, timeoutSeconds: Long): String = coroutineScope {

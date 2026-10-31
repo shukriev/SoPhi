@@ -117,6 +117,8 @@ class RuntimeBuilder {
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
     private var builtinToolsConfig: BuiltinToolsConfig? = null
+    /** Where background `bash` jobs write their output (per process, under its pid). */
+    var jobsHome: Path = Path.of(System.getProperty("user.home"), ".sophi", "jobs")
     private var checkpointsConfig: Pair<Path, (String) -> Unit>? = null
     private var auditSink: AuditSink? = null
     private var permissionRules: dev.sophi.core.permissions.PermissionRules? = null
@@ -213,6 +215,23 @@ class RuntimeBuilder {
     /** Enforces already-loaded [rules]. The last of [permissionRules] and this wins. */
     fun permissions(rules: dev.sophi.core.permissions.PermissionRules): RuntimeBuilder = apply { permissionRules = rules }
 
+    private var userAsker: dev.sophi.core.tools.UserAsker? = null
+
+    /**
+     * Registers `ask_user`, answered through [asker] (the CLI's terminal, the companion's bubble). Without it the tool
+     * isn't registered, so a host nobody can answer from (MCP serve, a non-interactive run) never offers it.
+     */
+    fun askUser(asker: dev.sophi.core.tools.UserAsker): RuntimeBuilder = apply { userAsker = asker }
+
+    private var desktop: dev.sophi.core.tools.Desktop? = null
+
+    /**
+     * Registers `notify`, `clipboard_read`, `clipboard_write` and `open` for whatever [desktop] can do (by default this
+     * machine's own commands). A host nobody sits at (a server, a scheduled daemon) leaves it off.
+     */
+    fun desktop(desktop: dev.sophi.core.tools.Desktop = dev.sophi.core.tools.SystemDesktop.detect()): RuntimeBuilder =
+        apply { this.desktop = desktop }
+
     /**
      * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
      * if [agentsDir] was never called or found no definitions, matching [SubagentTool]'s own
@@ -304,9 +323,10 @@ class RuntimeBuilder {
         val harnessConfig: HarnessConfig? = configVersionRef?.let { (id, store) ->
             store.get(id)?.let { v -> Json.decodeFromString<HarnessConfig>(v.content) }
         }
+        val jobs = builtinToolsConfig?.let { dev.sophi.core.tools.BashJobs(jobsHome) }
         val bashSandbox = builtinToolsConfig?.let { cfg ->
             dev.sophi.core.tools.BashSandbox(cfg.root).apply { if (cfg.sandboxed) set(dev.sophi.core.tools.SandboxMode.SEATBELT) }
-                .also { s -> buildBuiltinTools(cfg.root, cfg.braveApiKey, sandbox = s).forEach { registry.register(it) } }
+                .also { s -> buildBuiltinTools(cfg.root, cfg.braveApiKey, sandbox = s, jobs = jobs).forEach { registry.register(it) } }
         }
         contextConfig?.let { (engine, project, _) ->
             contextTools(engine, project, knob("SOPHI_CONTEXT_TOOLS", "all", "core", "none")).forEach { registry.register(it) }
@@ -316,6 +336,8 @@ class RuntimeBuilder {
                 globalInstructions = contextGlobalInstructions))
             plugins.add(HintPlugin(engine, project, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
         }
+        userAsker?.let { registry.register(dev.sophi.core.tools.AskUserTool(it)) }
+        desktop?.let { d -> dev.sophi.core.tools.desktopTools(d, builtinToolsConfig?.root ?: Path.of("").toAbsolutePath()).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
             registry.register(SkillTool(loadSkills, topK = harnessConfig?.topKSkills))
@@ -467,7 +489,7 @@ class RuntimeBuilder {
         return SophiRuntime(
             loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered
+            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered, jobs
         )
     }
 }

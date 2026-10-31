@@ -3,8 +3,13 @@ package dev.sophi.sdk
 import dev.sophi.ai.providers.BraveSearchProvider
 import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.audit.JsonlAuditSink
+import dev.sophi.core.tools.BashJobs
+import dev.sophi.core.tools.BashKillTool
+import dev.sophi.core.tools.BashOutputTool
 import dev.sophi.core.tools.BashTool
+import dev.sophi.core.tools.TodoTool
 import dev.sophi.core.tools.DeleteFileTool
+import dev.sophi.core.tools.ApplyPatchTool
 import dev.sophi.core.tools.EditTool
 import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.FileReadTool
@@ -33,13 +38,16 @@ import java.nio.file.Path
  * workspace, temp and tool caches fail).
  */
 fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: String? = null, sandboxed: Boolean = false,
-    sandbox: BashSandbox = BashSandbox(root).apply { if (sandboxed) set(SandboxMode.SEATBELT) }): List<Tool> {
+    sandbox: BashSandbox = BashSandbox(root).apply { if (sandboxed) set(SandboxMode.SEATBELT) },
+    /** Background bash jobs; null = `bash(background)` is refused and `bash_output`/`bash_kill` aren't registered. */
+    jobs: BashJobs? = null): List<Tool> {
     val tools = mutableListOf<Tool>(
-        FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root),
-        BashTool(root, sandbox),
+        FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), ApplyPatchTool(root),
+        BashTool(root, sandbox, jobs),
         MoveFileTool(root), DeleteFileTool(root),
-        FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool()
+        FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool(), TodoTool()
     )
+    if (jobs != null) tools += listOf(BashOutputTool(jobs), BashKillTool(jobs))
     val key = braveApiKey ?: System.getenv("BRAVE_SEARCH_API_KEY")
     if (key != null) {
         tools.add(WebSearchTool(BraveSearchProvider(key)))

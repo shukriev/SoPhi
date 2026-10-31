@@ -24,4 +24,10 @@ interface InputSource {
     /** Like [awaitYesNo], but `a` answers [ConfirmAnswer.ALWAYS] when [offerAlways] is true (and is ignored otherwise). */
     suspend fun awaitConfirmation(offerAlways: Boolean): ConfirmAnswer =
         if (awaitYesNo()) ConfirmAnswer.YES else ConfirmAnswer.NO
+
+    /**
+     * The next line the user types and ends with Enter, for ask_user; null when they press Esc. Routed through the
+     * active reader loop like [awaitConfirmation], so it never races it for keystrokes.
+     */
+    suspend fun awaitAnswer(): String? = readLine()
 }
