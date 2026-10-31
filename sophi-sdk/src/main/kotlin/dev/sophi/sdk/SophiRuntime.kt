@@ -77,6 +77,9 @@ class SophiRuntime internal constructor(
     private val metered: MeteredProvider? = null,
     /** Background `bash` jobs; [close] kills them. Null without [RuntimeBuilder.builtinTools]. */
     val jobs: dev.sophi.core.tools.BashJobs? = null,
+    /** Where MCP secrets come from; null without [RuntimeBuilder.credentials]. */
+    val credentials: dev.sophi.core.credentials.CredentialStore? = null,
+    private val mcpOAuth: dev.sophi.mcp.auth.McpOAuth? = null,
 ) {
     /** The model and prompt turns run with; [switchModel] changes the model. */
     @Volatile var config: AgentConfig = config
@@ -276,6 +279,29 @@ class SophiRuntime internal constructor(
             tool.name
         }.also { toolRegistry.registerToolSearchIfDeferred() }
     }
+
+    /**
+     * Signs [config]'s remote server in through the browser ([openBrowser] shows the sign-in page), then reconnects it,
+     * returning its tool names. The only path in Sophi that opens a browser for a sign-in.
+     */
+    suspend fun mcpLogin(config: McpServerConfig, openBrowser: (java.net.URI) -> Unit): Result<List<String>> = runCatching {
+        val oauth = requireNotNull(mcpOAuth) { "MCP sign-in needs credentials() on the RuntimeBuilder" }
+        val manager = requireNotNull(mcpClientManager) { "MCP not configured for this runtime" }
+        val resolved = dev.sophi.mcp.config.resolveSecrets(config, credentials, manager.mask)
+        oauth.login(resolved, dev.sophi.core.credentials.OAuthFlow(openBrowser = openBrowser)).getOrThrow()
+        disconnectMcpServer(config.name)
+        var failure: Throwable? = null
+        connectMcpServer(config) { failure = it }.also { failure?.let { throw it } }
+    }
+
+    /** Forgets [serverName]'s sign-in and disconnects it. */
+    suspend fun mcpLogout(serverName: String) {
+        mcpOAuth?.logout(serverName)
+        mcpClientManager?.let { disconnectMcpServer(serverName) }
+    }
+
+    /** Whether [serverName] has a stored sign-in. */
+    fun mcpSignedIn(serverName: String): Boolean = mcpOAuth?.hasSignIn(serverName) == true
 
     suspend fun disconnectMcpServer(serverName: String) {
         val manager = requireNotNull(mcpClientManager) {

@@ -79,7 +79,8 @@ class McpOAuth(
     /** Servers whose last refresh failed: [onSignInNeeded] fires once per failure streak. */
     private val failing = ConcurrentHashMap.newKeySet<String>()
 
-    suspend fun login(config: McpServerConfig): Result<Unit> = runCatching {
+    /** Signs in through the browser (via [flow]'s openBrowser) and stores the result. [config] must be resolved. */
+    suspend fun login(config: McpServerConfig, flow: OAuthFlow = this.flow): Result<Unit> = runCatching {
         val url = requireNotNull(config.url) { "${config.name} has no url" }
         val endpoints = discover(url, config.name)
         val previous = stored(config.name)
