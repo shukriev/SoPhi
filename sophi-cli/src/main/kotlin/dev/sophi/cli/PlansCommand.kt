@@ -9,7 +9,6 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.core.dryrun.ChangePlan
-import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.core.dryrun.replayReport
 import dev.sophi.sdk.Sophi
 import dev.sophi.sdk.SophiRuntime
@@ -54,8 +53,7 @@ internal suspend fun plansAction(action: String?, id: String?, runtime: SophiRun
                 runtime.approvePlan(id, plan.dropped)
                 runApprovedPlan(runtime, id, input, output)
             }
-            "run" -> if (plan.status != PlanStatus.APPROVED) output("Couldn't run the plan: This plan wasn't approved (it's ${plan.status.name.lowercase()})")
-                else runApprovedPlan(runtime, id, input, output)
+            "run" -> runApprovedPlan(runtime, id, input, output)
             "cancel" -> { runtime.cancelPlan(id); output("Cancelled; nothing ran.") }
         }
     } catch (e: IllegalStateException) {

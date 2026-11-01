@@ -7,7 +7,7 @@ import dev.sophi.core.dryrun.StepResult
 import dev.sophi.sdk.SophiRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -149,8 +149,8 @@ internal suspend fun applyPlanChoice(
 /** Replays an approved plan, one line per step; ESC stops it. The outcome note goes on [session] when given. */
 internal suspend fun runApprovedPlan(
     runtime: SophiRuntime, id: String, input: InputSource, output: (String) -> Unit, session: dev.sophi.core.session.AgentSession? = null,
-) = coroutineScope {
-    val plan = runtime.plan(id) ?: return@coroutineScope output("No plan $id")
+) = supervisorScope { // a refused plan surfaces at await, instead of cancelling this scope
+    val plan = runtime.plan(id) ?: return@supervisorScope output("No plan $id")
     val run = async { runtime.runPlan(id, session) { output(resultLine(plan, it)) } }
     val esc = launch { input.awaitEsc(); run.cancel() }
     try {
