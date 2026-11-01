@@ -34,6 +34,8 @@ class TurnController(
     /** After each reply, a gray line with its tokens and cost (or tok/s when local); [cloud] picks which. */
     private val usageLine: Boolean = false,
     private val cloud: Boolean = false,
+    /** Reviews the plan a turn recorded, after its reply is shown; null = plan-first isn't shown here. */
+    private val planFirst: PlanFirstHost? = null,
     private val output: (String) -> Unit
 ) {
     private fun printUsage(rounds: List<TurnEvent.RoundUsage>, usdBefore: Double, settled: AgentSession) {
@@ -63,6 +65,7 @@ class TurnController(
             val rounds = mutableListOf<TurnEvent.RoundUsage>()
             val usdBefore = runtime.costMeter.totalUsd
             val todosBefore = currentTodos(session)
+            var recorded: dev.sophi.core.dryrun.ChangePlan? = null
 
             fun render() {
                 val queue = editor.render()
@@ -102,6 +105,7 @@ class TurnController(
                     runtime.streamTurn(session, userInput, inbox) { event ->
                         onEvent(event)
                         if (event is TurnEvent.RoundUsage) rounds += event
+                        if (event is TurnEvent.PlanReady) recorded = event.plan
                         when (event) {
                             is TurnEvent.SteerApplied -> startSegment(event.texts)
                             is TurnEvent.FollowUpStarted -> startSegment(listOf(event.text))
@@ -144,6 +148,7 @@ class TurnController(
                         output(ResponseRenderer.renderText(presenter.finalText()))
                         printUsage(rounds, usdBefore, result)
                         currentTodos(result)?.takeIf { it != todosBefore }?.let { output(TextColors.gray(renderTodos(it))) }
+                        recorded?.let { planFirst?.review(it) }
                         result
                     }
                 }

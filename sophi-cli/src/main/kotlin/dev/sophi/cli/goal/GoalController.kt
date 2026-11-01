@@ -42,6 +42,8 @@ class GoalController(
     /** Mirrored out to a connected companion, exactly as TurnController does for a chat turn. */
     private val onEvent: suspend (TurnEvent) -> Unit = {},
     private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit,
+    /** Records the goal's outside changes into one plan, reviewed when the goal ends; null = off. */
+    private val planFirst: dev.sophi.cli.PlanFirstHost? = null,
     private val output: (String) -> Unit
 ) {
     suspend fun run(session: AgentSession, rawInput: String?): GoalRunResult {
@@ -97,14 +99,19 @@ class GoalController(
             onProgress = { renderer.handle(it) }
         )
 
+        var recorded: dev.sophi.core.dryrun.ChangePlan? = null
+        suspend fun go() = runner.run(session.id, args.task, stopCondition, initialPlan = plan)
         val outcome: Result<PlanOutcome>? = undoableRound(session, checkpoints, "goal") { coroutineScope {
-            val runDeferred = async { runCatching { runner.run(session.id, args.task, stopCondition, initialPlan = plan) } }
+            val runDeferred = async { runCatching {
+                planFirst?.scope(session.id, args.task) { go() }?.let { (r, p) -> recorded = p; r } ?: go()
+            } }
             val escDeferred = async { input.awaitControlKeys(tokenViewKey, onToggle = { renderer.toggleTokenView() }) }
             select {
                 runDeferred.onAwait { result -> escDeferred.cancel(); result }
                 escDeferred.onAwait { runDeferred.cancel(); null }
             }
         } }
+        recorded?.let { planFirst?.review(it) }
 
         return when {
             outcome == null -> {

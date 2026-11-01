@@ -71,6 +71,50 @@ class GoalControllerTest : FunSpec({
 
     fun singleStepPlan() = Plan(id = "plan_1", goalPrompt = "goal", steps = listOf(PlanStep(id = "s1", instruction = "do it")))
 
+    test("a /goal that records changes ends with the review") {
+        val okta = object : dev.sophi.core.tools.Tool {
+            var calls = 0
+            override val name = "okta__deactivate_user"
+            override val description = "fake"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override fun reach(argumentsJson: String) = dev.sophi.core.tools.Reach.OUTSIDE_CHANGE
+            override suspend fun execute(argumentsJson: String): String { calls++; return "done" }
+        }
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returnsMany listOf(
+            flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "okta__deactivate_user", "{}")))),
+            flowOf(StreamEvent.Content("planned")),
+        )
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        val sm = sessionManager()
+        val runtime = dev.sophi.sdk.RuntimeBuilder().apply {
+            this.provider = provider; sessionsDir = tempdir().toPath(); model = "m"
+            planFirst(dev.sophi.core.dryrun.PlanFirst.OUTSIDE, dir = tempdir().toPath())
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+        val input = ScriptedInputSource(listOf("y", "n"))
+        val output = mutableListOf<String>()
+        val gc = GoalController(
+            agentLoop = AgentLoop(provider, ToolRegistry().register(okta), sm, contextWindowTokens = TEST_CONTEXT_WINDOW),
+            sessionManager = sm, provider = provider, planner = planner,
+            critic = StepCritic { _, _ -> 1.0 },
+            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
+            planLog = PlanLog(tempdir().toPath()), input = input,
+            liveRegion = LiveRegion(StringBuilder()) { 80 },
+            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
+            learning = null, onTurnSettled = { _, _, _ -> },
+            planFirst = dev.sophi.cli.PlanFirstHost(runtime, input) { output.add(it) },
+        ) { output.add(it) }
+
+        runBlocking { gc.run(AgentSession(id = "s1"), "offboard jane") }
+
+        okta.calls shouldBe 0
+        output.any { it.startsWith("Allow okta deactivate_user") } shouldBe true
+        runtime.plans().single().status shouldBe dev.sophi.core.dryrun.PlanStatus.CANCELLED
+    }
+
     test("declining the preview leaves session.entries empty, never calls planner.plan twice, and returns Declined") {
         val provider = mockk<LLMProvider>()
         val planner = mockk<Planner>()

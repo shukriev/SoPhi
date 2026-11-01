@@ -66,6 +66,8 @@ data class CliOptions(
     val sessionIdToResume: String? = null,
     /** Session budget in USD; null or 0 = none. */
     val maxCostUsd: Double? = null,
+    val planFirst: dev.sophi.core.dryrun.PlanFirst = dev.sophi.core.dryrun.PlanFirst.OUTSIDE,
+    val trustReadOnlyHints: Boolean = true,
 )
 
 /**
@@ -189,6 +191,7 @@ internal suspend fun buildCliRuntime(
         credentials()
         onMcpSignInNeeded { server -> onWarning("$server needs you to sign in again — run `sophi mcp login $server`") }
         if (mcpConfigPath.exists()) mcpConfig(mcpConfigPath)
+        planFirst(opts.planFirst, opts.trustReadOnlyHints)
         // Memory (Jane's Theory, experimental): resolve --memory's dependent flags here, but
         // delegate building/probing the embedding provider and JanesPalace to the shared
         // RuntimeBuilder.memory(), which sophi-companion also calls.

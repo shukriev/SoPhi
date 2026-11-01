@@ -52,6 +52,8 @@ val CLI_SETTINGS: List<Setting> = listOf(
     next("llm-max-retries", SettingKind.Int),
     next("system", SettingKind.Text),
     next("goal-escalation-model", SettingKind.Text),
+    next("plan-first", SettingKind.Choice(listOf("outside", "every", "off"))),
+    next("trust-read-only-hints", SettingKind.Bool),
     next("memory", SettingKind.Bool),
     next("embedding-model", SettingKind.Text),
     next("embedding-base-url", SettingKind.Text),
