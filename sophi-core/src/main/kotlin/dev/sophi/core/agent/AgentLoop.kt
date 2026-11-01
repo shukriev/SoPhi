@@ -61,7 +61,8 @@ private data class PendingEntry(
 )
 
 /** One turn's rounds so far, and whether they were already written to the session. */
-private class TurnProgress {
+/** [images]: the turn's input images, saved on its USER entry whatever the model can see. */
+private class TurnProgress(val images: List<dev.sophi.ai.api.ImageRef> = emptyList()) {
     val pendingRounds = mutableListOf<PendingEntry>()
     var persisted = false
 }
@@ -236,7 +237,9 @@ class AgentLoop(
     /** Gets one entry per tool call. Null = the enclosing loop's sink (AuditScope), if any. */
     private val audit: AuditSink? = null,
     /** Allow/ask/deny rules checked before the confirmation flow. Null = the enclosing loop's rules (PermissionScope), if any. */
-    private val permissions: PermissionRules? = null
+    private val permissions: PermissionRules? = null,
+    /** Whether the model this loop calls can see images; read once per turn, so a host's model switch applies at the next one. */
+    private val supportsImages: () -> Boolean = { false },
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
@@ -284,7 +287,7 @@ class AgentLoop(
         val stopMessage = "[Stopped early: $reason]"
         onEvent(TurnEvent.Token(stopMessage))
         turn.persisted = true
-        session.append(EntryRole.USER, userInput)
+        session.append(EntryRole.USER, userInput, dev.sophi.core.session.imagesMetadata(turn.images))
         turn.pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
         session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to stopReason.name))
         sessionManager.save(session)
@@ -413,8 +416,9 @@ class AgentLoop(
         config: AgentConfig,
         turnPreamble: String? = null,
         inbox: TurnInbox? = null,
+        images: List<dev.sophi.ai.api.ImageRef> = emptyList(),
         onEvent: suspend (TurnEvent) -> Unit = {}
-    ): AgentSession = streamTurn(session, userInput, config, turnPreamble, inbox, onEvent)
+    ): AgentSession = streamTurn(session, userInput, config, turnPreamble, inbox, images, onEvent)
 
     suspend fun streamTurn(
         session: AgentSession,
@@ -422,9 +426,10 @@ class AgentLoop(
         config: AgentConfig,
         turnPreamble: String? = null,
         inbox: TurnInbox? = null,
+        images: List<dev.sophi.ai.api.ImageRef> = emptyList(),
         onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
-        val turn = TurnProgress()
+        val turn = TurnProgress(images)
         return try {
             // Fresh per turn (and per nested AgentLoop): tool_search activations die with the turn.
             // A nested loop built without a sink audits to the outer loop's, and obeys its rules.
@@ -464,7 +469,7 @@ class AgentLoop(
         by: String = "the user", stopMessage: String = STOPPED_BY_USER, reason: TurnStopReason = TurnStopReason.UserStopped,
     ) {
         turn.persisted = true
-        session.append(EntryRole.USER, userInput)
+        session.append(EntryRole.USER, userInput, dev.sophi.core.session.imagesMetadata(turn.images))
         turn.pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
         val last = turn.pendingRounds.lastOrNull()
         if (last?.role == EntryRole.ASSISTANT) {
@@ -487,14 +492,15 @@ class AgentLoop(
         turnPreamble: String? = null,
         inbox: TurnInbox? = null,
     ): AgentSession {
-        val messages = PromptBuilder.build(session.branch()).toMutableList()
+        val seesImages = supportsImages()
+        val messages = PromptBuilder.build(session.branch(), withImages = seesImages).toMutableList()
         // Volatile context (hints, recall) rides on this turn's request only: prefixed to the user
         // message so the system prompt and all of history stay a byte-stable, cacheable prefix.
         // Never persisted — every session.append below stores the raw userInput.
         // Tool rounds don't replay across turns, so the model's own todo list rides along here the same way.
         val todoNote = currentTodos(session)?.takeIf { it.isNotEmpty() }?.let { "\n\n[Your todo list so far:\n${renderTodos(it)}]" }.orEmpty()
         val turnUserContent = (turnPreamble?.let { "$it\n\n$userInput" } ?: userInput) + todoNote
-        messages.add(Message(MessageRole.USER, turnUserContent))
+        messages.add(Message(MessageRole.USER, turnUserContent, images = if (seesImages) turn.images else emptyList()))
         // Everything from here on is this turn's own accumulated rounds — the only region
         // mid-loop compaction is ever allowed to touch. The prior-session prefix in front of it
         // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
@@ -580,7 +586,7 @@ class AgentLoop(
                     continue
                 }
                 turn.persisted = true
-                session.append(EntryRole.USER, userInput)
+                session.append(EntryRole.USER, userInput, dev.sophi.core.session.imagesMetadata(turn.images))
                 pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
                 session.append(EntryRole.ASSISTANT, contentBuf.toString())
                 sessionManager.save(session)

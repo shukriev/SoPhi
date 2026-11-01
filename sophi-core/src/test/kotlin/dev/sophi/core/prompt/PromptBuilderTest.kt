@@ -117,4 +117,31 @@ class PromptBuilderTest : FunSpec({
         msgs.map { it.role } shouldBe listOf(MessageRole.USER, MessageRole.ASSISTANT)
         msgs[0].content shouldBe "install deps\n\ntry yarn"
     }
+
+    val shot = dev.sophi.ai.api.ImageRef("/tmp/a.png", "image/png")
+    val other = dev.sophi.ai.api.ImageRef("/tmp/b.jpg", "image/jpeg")
+
+    test("user entry images become Message images") {
+        val msgs = PromptBuilder.build(listOf(entry(EntryRole.USER, "look", dev.sophi.core.session.imagesMetadata(listOf(shot)))))
+        msgs.single().images shouldBe listOf(shot)
+    }
+
+    test("adjacent user merge keeps both entries' images in order") {
+        val msgs = PromptBuilder.build(listOf(
+            entry(EntryRole.USER, "one", dev.sophi.core.session.imagesMetadata(listOf(shot))),
+            entry(EntryRole.USER, "two", dev.sophi.core.session.imagesMetadata(listOf(other))),
+        ))
+        msgs.single().content shouldBe "one\n\ntwo"
+        msgs.single().images shouldBe listOf(shot, other)
+    }
+
+    test("withImages false drops them, content unchanged") {
+        val msgs = PromptBuilder.build(listOf(entry(EntryRole.USER, "look", dev.sophi.core.session.imagesMetadata(listOf(shot)))), withImages = false)
+        msgs.single().images shouldBe emptyList()
+        msgs.single().content shouldBe "look"
+    }
+
+    test("bad images metadata reads as none") {
+        PromptBuilder.build(listOf(entry(EntryRole.USER, "look", mapOf("images" to "not json")))).single().images shouldBe emptyList()
+    }
 })
