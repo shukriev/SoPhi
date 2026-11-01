@@ -25,5 +25,7 @@ sealed class TurnEvent {
     /** A message queued as a follow-up is starting as its own turn. */
     data class FollowUpStarted(val text: String) : TurnEvent()
     /** One model request finished: its [usage], and [generationMillis] from its first streamed event to its end (0 when none came). */
+    /** The turn recorded changes instead of making them; [plan] is saved, pending the user's approval. */
+    data class PlanReady(val plan: dev.sophi.core.dryrun.ChangePlan) : TurnEvent()
     data class RoundUsage(val usage: dev.sophi.ai.api.TokenUsage, val generationMillis: Long) : TurnEvent()
 }

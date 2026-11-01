@@ -117,6 +117,19 @@ class RuntimeBuilder {
         apply { autoTitles = onTitled }
     private var learningEmbeddingProvider: EmbeddingProvider? = null
     private var scheduleDir: Path? = null
+    private var planFirstSettings: PlanFirstSettings? = null
+
+    /**
+     * Plan-first turns: when a turn wants to change something [mode] covers, the change is recorded instead of made,
+     * lookups still run, and the turn ends with a saved plan ([dev.sophi.core.agent.TurnEvent.PlanReady]) that
+     * [SophiRuntime.approvePlan] / [SophiRuntime.runPlan] replay exactly. [trustReadOnlyHints]: a tool its MCP server
+     * calls read-only runs without asking in these turns.
+     */
+    fun planFirst(
+        mode: dev.sophi.core.dryrun.PlanFirst = dev.sophi.core.dryrun.PlanFirst.OUTSIDE,
+        trustReadOnlyHints: Boolean = true,
+        dir: Path = Path.of(System.getProperty("user.home"), ".sophi", "plans"),
+    ): RuntimeBuilder = apply { planFirstSettings = PlanFirstSettings(mode, trustReadOnlyHints, dev.sophi.core.dryrun.ChangePlanStore(dir)) }
     private var contextWindowTokens: Int? = null
     private var memoryConfig: MemoryConfig? = null
     private var agentsDirConfig: AgentsDirConfig? = null
@@ -534,7 +547,7 @@ class RuntimeBuilder {
             loop, sm, pluginRegistry, effectiveConfig, manager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
             deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered, jobs,
-            credentialStore.takeIf { mcpClientManager == null }, oauth
+            credentialStore.takeIf { mcpClientManager == null }, oauth, planFirstSettings
         )
     }
 }

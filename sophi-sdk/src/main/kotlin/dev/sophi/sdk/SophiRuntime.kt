@@ -8,7 +8,20 @@ import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.TurnInbox
 import dev.sophi.core.agent.plan.PlanLog
+import dev.sophi.core.audit.ActorContext
 import dev.sophi.core.audit.AuditSink
+import dev.sophi.core.audit.LOCAL_ACTOR
+import dev.sophi.core.audit.auditEntry
+import dev.sophi.core.audit.recordQuietly
+import dev.sophi.core.dryrun.ChangePlan
+import dev.sophi.core.dryrun.ChangePlanStore
+import dev.sophi.core.dryrun.PlanFirst
+import dev.sophi.core.dryrun.PlanRecorder
+import dev.sophi.core.dryrun.PlanReplayer
+import dev.sophi.core.dryrun.PlanStatus
+import dev.sophi.core.dryrun.StepResult
+import dev.sophi.core.dryrun.stepsHash
+import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
@@ -36,6 +49,7 @@ import dev.sophi.skills.SkillInstaller
 import dev.sophi.skills.SkillRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
 
@@ -80,6 +94,8 @@ class SophiRuntime internal constructor(
     /** Where MCP secrets come from; null without [RuntimeBuilder.credentials]. */
     private val credentials: dev.sophi.core.credentials.CredentialStore? = null,
     private val mcpOAuth: dev.sophi.mcp.auth.McpOAuth? = null,
+    /** Null unless [RuntimeBuilder.planFirst] was called. */
+    val planFirst: PlanFirstSettings? = null,
 ) {
     /** The model and prompt turns run with; [switchModel] changes the model. */
     @Volatile var config: AgentConfig = config
@@ -196,11 +212,14 @@ class SophiRuntime internal constructor(
         val partial = StringBuilder()
         return try {
             onLoopStart()
-            val updated = agentLoop.streamTurn(session, input, turnConfig, preamble, inbox, images) { event ->
-                if (event is TurnEvent.Token) partial.append(event.text)
-                bridge(event)
-                onEvent(event)
+            val (updated, plan) = planFirstScope(session.id, input) {
+                agentLoop.streamTurn(session, input, turnConfig, preamble, inbox, images) { event ->
+                    if (event is TurnEvent.Token) partial.append(event.text)
+                    bridge(event)
+                    onEvent(event)
+                }
             }
+            if (plan != null) onEvent(TurnEvent.PlanReady(plan))
             settleOutcome(session.id, input, updated.lastAssistantReply(), error = null)
             updated
         } catch (e: CancellationException) {
@@ -270,6 +289,80 @@ class SophiRuntime internal constructor(
      * whether that (LLM-cost) evaluator is configured. A no-op for memory when [learningPlugin]
      * isn't configured — there is no outcome signal to give it, so none is fabricated.
      */
+    private fun plansOrThrow(): ChangePlanStore =
+        planFirst?.store ?: throw IllegalStateException("plan-first isn't enabled on this runtime")
+
+    private fun planOrThrow(id: String): ChangePlan = plansOrThrow().get(id) ?: throw IllegalArgumentException("No plan $id")
+
+    /**
+     * Runs [block] plan-first: changes it wants are recorded, not made. Returns the plan (saved, pending) when it
+     * recorded any. A plain call when plan-first is off, or inside an outer plan-first scope (the outer one collects).
+     * Hosts running their own loops (/goal, /plan) wrap them in this so they plan the same way a chat turn does.
+     */
+    suspend fun <T> planFirstScope(sessionId: String, task: String, block: suspend () -> T): Pair<T, ChangePlan?> {
+        val settings = planFirst?.takeIf { it.mode != PlanFirst.OFF } ?: return block() to null
+        if (currentCoroutineContext()[PlanRecorder] != null) return block() to null
+        val recorder = PlanRecorder(settings.mode, settings.trustReadOnlyHints)
+        val result = withContext(recorder) { block() }
+        if (recorder.steps.isEmpty()) return result to null
+        val actor = currentCoroutineContext()[ActorContext]
+        val plan = recorder.toPlan(task, sessionId, actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId)
+        settings.store.save(plan)
+        auditPlan(plan, "plan.create", """{"plan":"${plan.id}","steps":${plan.steps.size}}""")
+        return result to plan
+    }
+
+    fun plans(): List<ChangePlan> = plansOrThrow().list()
+    fun plan(id: String): ChangePlan? = plansOrThrow().get(id)
+
+    /** Approves a pending plan, minus the [dropped] step numbers. Only what's approved here can run. */
+    fun approvePlan(id: String, dropped: Set<Int> = emptySet()): ChangePlan {
+        val plan = planOrThrow(id)
+        check(plan.status == PlanStatus.PENDING) { "Only a pending plan can be approved; ${plan.id} is ${plan.status.name.lowercase()}" }
+        val approved = plan.copy(dropped = dropped, status = PlanStatus.APPROVED, approvedAtMs = System.currentTimeMillis())
+            .let { it.copy(approvedHash = it.stepsHash()) }
+        plansOrThrow().save(approved)
+        auditPlan(approved, "plan.approve", """{"plan":"$id","dropped":${dropped.sorted()}}""")
+        return approved
+    }
+
+    /** Replays an approved plan, then notes the outcome in the plan's session (if it still exists). */
+    suspend fun runPlan(id: String, onStep: suspend (StepResult) -> Unit = {}): ChangePlan {
+        val plan = planOrThrow(id)
+        val checkpoint: (suspend () -> Unit)? = checkpointStore?.let { cs -> { cs.snapshot() } }
+        val done = try {
+            PlanReplayer(toolRegistry, plansOrThrow(), auditSink, checkpoint).run(plan, onStep)
+        } finally {
+            withContext(NonCancellable) { plansOrThrow().get(id)?.takeIf { it.results.isNotEmpty() }?.let(::notePlanOutcome) }
+        }
+        return done
+    }
+
+    fun cancelPlan(id: String): ChangePlan {
+        val plan = planOrThrow(id)
+        check(plan.status == PlanStatus.PENDING || plan.status == PlanStatus.APPROVED) {
+            "${plan.id} is ${plan.status.name.lowercase()}; only a pending or approved plan can be cancelled"
+        }
+        return plan.copy(status = PlanStatus.CANCELLED).also(plansOrThrow()::save)
+    }
+
+    /** Secret values masked, for showing plan arguments. */
+    fun maskSecrets(text: String): String = mcpClientManager?.mask?.mask(text) ?: text
+
+    private fun notePlanOutcome(plan: ChangePlan) {
+        runCatching {
+            val session = sessionManager.load(plan.sessionId)
+            session.append(EntryRole.ASSISTANT, plan.replayReport(), mapOf("plan" to plan.id))
+            sessionManager.save(session)
+        }
+    }
+
+    private fun auditPlan(plan: ChangePlan, what: String, args: String) {
+        auditSink?.recordQuietly {
+            auditEntry(plan.actor, plan.tenant, plan.sessionId, what, RiskLevel.SAFE, args, "user", "ok", "", System.currentTimeMillis(), plan = plan.id)
+        }
+    }
+
     suspend fun recordSessionEnd(sessionId: String) {
         val mechanical = learningPlugin?.let { runCatching { it.recordSessionEnd(sessionId) }.getOrNull() }
         mechanical?.let { memoryPlugin?.recordSessionEnd(sessionId, success = it.outcome == "completed") }
