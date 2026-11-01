@@ -13,6 +13,8 @@ import kotlin.coroutines.CoroutineContext
 class PlanRecorder(val mode: PlanFirst, val trustReadOnlyHints: Boolean = true) : AbstractCoroutineContextElement(Key) {
     companion object Key : CoroutineContext.Key<PlanRecorder>
 
+    /** The id the plan will have, known up front so a held call's audit entry can name its step. */
+    val planId: String = "plan_" + UUID.randomUUID()
     private val lock = Any()
     private val _steps = mutableListOf<PlanStep>()
     private val _reads = mutableListOf<PlanRead>()
@@ -36,5 +38,5 @@ class PlanRecorder(val mode: PlanFirst, val trustReadOnlyHints: Boolean = true) 
     }
 
     fun toPlan(task: String, sessionId: String, actor: String = LOCAL_ACTOR, tenant: String? = null): ChangePlan =
-        ChangePlan("plan_" + UUID.randomUUID(), System.currentTimeMillis(), task, sessionId, actor, tenant, reads, steps)
+        ChangePlan(planId, System.currentTimeMillis(), task, sessionId, actor, tenant, reads, steps)
 }

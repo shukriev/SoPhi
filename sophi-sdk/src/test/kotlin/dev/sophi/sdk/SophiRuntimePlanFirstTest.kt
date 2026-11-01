@@ -121,6 +121,25 @@ class SophiRuntimePlanFirstTest : FunSpec({
         rt.sessionManager.load(live.id).tip!!.id shouldBe live.tip!!.id
     }
 
+    test("approvePlan refuses dropping every step, or steps the plan doesn't have") {
+        val rt = runtime(provider(use(ToolCall("c1", "okta__deactivate_user", "{}")), text), OutsideTool("okta__deactivate_user"))
+        runBlocking { rt.turn(rt.newSession(), "offboard jane") }
+        val id = rt.plans().single().id
+        shouldThrow<IllegalArgumentException> { rt.approvePlan(id, dropped = setOf(1)) }.message shouldBe "That drops every step; cancel the plan instead"
+        shouldThrow<IllegalArgumentException> { rt.approvePlan(id, dropped = setOf(7)) }.message shouldBe "This plan has no step 7"
+        rt.plan(id)!!.status shouldBe PlanStatus.PENDING
+    }
+
+    test("a turn that only ran read-only-per-server lookups says so") {
+        val find = OutsideTool("okta__find_user", Reach.OUTSIDE_HINTED_READ)
+        val rt = runtime(provider(use(ToolCall("c1", "okta__find_user", "{}")), text), find)
+        val events = mutableListOf<TurnEvent>()
+        runBlocking { rt.streamTurn(rt.newSession(), "who is jane") { events += it } }
+        find.calls.size shouldBe 1
+        events.filterIsInstance<TurnEvent.HintedReads>().single().reads.single().tool shouldBe "okta__find_user"
+        rt.plans() shouldBe emptyList()
+    }
+
     test("approvePlan with dropped steps runs only the rest") {
         val okta = OutsideTool("okta__deactivate_user")
         val gh = OutsideTool("github__remove_member")

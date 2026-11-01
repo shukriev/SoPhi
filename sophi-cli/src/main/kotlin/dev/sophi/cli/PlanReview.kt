@@ -62,6 +62,10 @@ internal fun renderPlan(plan: ChangePlan, mask: (String) -> String, full: Boolea
     plan.steps.forEach { appendLine("  " + stepLine(it, mask, full, dropped)) }
 }.trimEnd()
 
+/** The lookups a plan-first turn ran on their server's word alone, when it changed nothing. */
+internal fun hintedReadsLine(reads: List<dev.sophi.core.dryrun.PlanRead>): String =
+    "Ran without asking (its server says read-only): " + reads.map { systemAndTool(it.tool) }.distinct().joinToString(", ") { (s, t) -> "$s $t" }
+
 private const val KEYS = "[a] approve all  [v] view arguments  [d 1,2] drop steps  [t 18:00] run at a time  [s] save for later  [n] cancel"
 private val DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
@@ -180,6 +184,8 @@ class PlanFirstHost internal constructor(private val runtime: SophiRuntime, priv
             applyPlanChoice(runtime, plan, reviewPlan(plan, input, output, runtime::maskSecrets), input, output, session)
         } catch (e: IllegalStateException) {
             output(e.message ?: "That plan can't be changed now") // e.g. approved or cancelled elsewhere meanwhile
+        } catch (e: IllegalArgumentException) {
+            output(e.message ?: "That plan can't be approved like that")
         }
     }
 }

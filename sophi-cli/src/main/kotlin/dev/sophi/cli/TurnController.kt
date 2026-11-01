@@ -61,6 +61,7 @@ class TurnController(
         // The draft is taken once coroutineScope returns, i.e. after a cancelled turn has settled:
         // a follow-up cancelled before its loop started is put back in the inbox only then.
         var recorded: dev.sophi.core.dryrun.ChangePlan? = null
+        var hinted: List<dev.sophi.core.dryrun.PlanRead> = emptyList()
         return coroutineScope {
             var presenter = StreamingTurnPresenter(autoExitTokenView)
             val rounds = mutableListOf<TurnEvent.RoundUsage>()
@@ -106,6 +107,7 @@ class TurnController(
                         onEvent(event)
                         if (event is TurnEvent.RoundUsage) rounds += event
                         if (event is TurnEvent.PlanReady) recorded = event.plan
+                        if (event is TurnEvent.HintedReads) hinted = event.reads
                         when (event) {
                             is TurnEvent.SteerApplied -> startSegment(event.texts)
                             is TurnEvent.FollowUpStarted -> startSegment(listOf(event.text))
@@ -167,6 +169,7 @@ class TurnController(
             draft = editor.takeDraft()
             // Only now, with the key reader joined: it hands the terminal back as it stops.
             recorded?.let { planFirst?.review(it, settled) }
+            if (hinted.isNotEmpty()) output(TextColors.gray(hintedReadsLine(hinted)))
         }
     }
 }

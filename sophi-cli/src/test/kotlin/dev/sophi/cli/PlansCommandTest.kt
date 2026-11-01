@@ -62,6 +62,8 @@ class PlansCommandTest : FunSpec({
         val text = run(rt, "approve plan_c")
         okta.calls shouldBe listOf("""{"id":"00u9"}""")
         text shouldContain "✓ 1 okta deactivate_user"
+        // what's approved is shown before it runs
+        (text.indexOf("1 okta deactivate_user id=00u9") in 0 until text.indexOf("✓ 1")) shouldBe true
         rt.plan("plan_c")!!.status shouldBe PlanStatus.DONE
     }
 

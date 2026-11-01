@@ -24,19 +24,21 @@ class PlanReplayer(
     private val checkpoint: (suspend () -> Unit)? = null,
 ) {
     suspend fun run(plan: ChangePlan, onStep: suspend (StepResult) -> Unit = {}): ChangePlan {
-        // ponytail: re-read guard, not a lock — add a file lock if two hosts race to run one plan
-        val current = store.get(plan.id) ?: plan
-        if (current.status != PlanStatus.APPROVED || plan.status != PlanStatus.APPROVED) throw PlanNotRunnableException("This plan wasn't approved")
-        if (plan.approvedHash != plan.stepsHash() || current.approvedHash != plan.approvedHash) {
-            throw PlanNotRunnableException("This plan changed after it was approved")
-        }
         val steps = plan.approvedSteps()
-        // Checked before anything runs, so a plan opened where its servers aren't connected stays approved for later.
-        steps.map { it.tool }.distinct().filter { registry.getOrNull(it) == null }.takeIf { it.isNotEmpty() }?.let {
-            throw PlanNotRunnableException("This plan needs tools that aren't connected here: ${it.joinToString(", ")}")
-        }
         val results = mutableListOf<StepResult>()
-        var state = plan.copy(status = PlanStatus.RUNNING, results = emptyList()).also(store::save)
+        // Check and mark RUNNING under the plan's lock: two processes can't both start it.
+        var state = (store.startLock(plan.id) ?: throw PlanNotRunnableException("This plan is starting elsewhere right now")).use {
+            val current = store.get(plan.id) ?: plan
+            if (current.status != PlanStatus.APPROVED || plan.status != PlanStatus.APPROVED) throw PlanNotRunnableException("This plan wasn't approved")
+            if (plan.approvedHash != plan.stepsHash() || current.approvedHash != plan.approvedHash) {
+                throw PlanNotRunnableException("This plan changed after it was approved")
+            }
+            // Checked before anything runs, so a plan opened where its servers aren't connected stays approved for later.
+            steps.map { it.tool }.distinct().filter { registry.getOrNull(it) == null }.takeIf { it.isNotEmpty() }?.let {
+                throw PlanNotRunnableException("This plan needs tools that aren't connected here: ${it.joinToString(", ")}")
+            }
+            plan.copy(status = PlanStatus.RUNNING, results = emptyList()).also(store::save)
+        }
         fun finish(status: PlanStatus): ChangePlan {
             val rest = steps.drop(results.size).map { StepResult(it.n, "not-run", "") }
             return state.copy(status = status, results = results + rest).also(store::save)

@@ -26,6 +26,8 @@ sealed class TurnEvent {
     data class FollowUpStarted(val text: String) : TurnEvent()
     /** The turn recorded changes instead of making them; [plan] is saved, pending the user's approval. */
     data class PlanReady(val plan: dev.sophi.core.dryrun.ChangePlan) : TurnEvent()
+    /** A plan-first turn changed nothing but ran lookups only their server vouched were read-only: [reads] lists them. */
+    data class HintedReads(val reads: List<dev.sophi.core.dryrun.PlanRead>) : TurnEvent()
     /** One model request finished: its [usage], and [generationMillis] from its first streamed event to its end (0 when none came). */
     data class RoundUsage(val usage: dev.sophi.ai.api.TokenUsage, val generationMillis: Long) : TurnEvent()
 }

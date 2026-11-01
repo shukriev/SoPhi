@@ -210,10 +210,13 @@ class AgentLoopPlanModeTest : FunSpec({
         val entries = mutableListOf<AuditEntry>()
         val deactivate = FakeTool("okta__deactivate_user")
         val (provider, sm) = scripted(use(ToolCall("c1", "okta__deactivate_user", "{}")), done)
-        withContext(PlanRecorder(PlanFirst.OUTSIDE)) {
+        val recorder = PlanRecorder(PlanFirst.OUTSIDE)
+        withContext(recorder) {
             loop(provider, sm, deactivate, audit = { entries += it }).turn(AgentSession(id = "s"), "go", config)
         }
         entries.single().let { it.outcome shouldBe "recorded"; it.decision shouldBe "held"; it.rule shouldBe "plan" }
+        entries.single().plan shouldBe "${recorder.planId}#1"
+        recorder.toPlan("go", "s").id shouldBe recorder.planId
     }
 
     test("unattended: a granted outside change is recorded, an ungranted one is denied") {

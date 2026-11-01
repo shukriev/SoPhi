@@ -1,7 +1,10 @@
 package dev.sophi.core.dryrun
 
 import kotlinx.serialization.json.Json
+import java.nio.channels.FileChannel
+import java.nio.channels.OverlappingFileLockException
 import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import kotlin.io.path.exists
@@ -26,6 +29,18 @@ class ChangePlanStore(val dir: Path = Path.of(System.getProperty("user.home"), "
         val file = dir.resolve("$id.json")
         if (!file.exists()) return null
         return runCatching { planJson.decodeFromString(ChangePlan.serializer(), file.readText()) }.getOrNull()
+    }
+
+    /**
+     * Held while a replay checks a plan and marks it RUNNING, so two processes can't both start it; null when
+     * another holder (this process or another) has it. Close it once RUNNING is saved.
+     */
+    fun startLock(id: String): AutoCloseable? {
+        Files.createDirectories(dir)
+        val channel = FileChannel.open(dir.resolve("$id.lock"), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+        val lock = try { channel.tryLock() } catch (e: OverlappingFileLockException) { null }
+        if (lock == null) { channel.close(); return null }
+        return AutoCloseable { lock.release(); channel.close() }
     }
 
     /** Newest first; unreadable files are skipped. */

@@ -153,6 +153,18 @@ class PlanReplayerTest : FunSpec({
         entries.single().let { it.outcome shouldBe "cancelled"; it.plan shouldBe "plan_t#1" }
     }
 
+    test("a plan another process is starting doesn't run twice") {
+        val a = Recording("a__x")
+        val s = store()
+        val plan = approved("a__x" to "{}").also(s::save)
+        s.startLock(plan.id)!!.use {
+            shouldThrow<PlanNotRunnableException> { PlanReplayer(ToolRegistry().register(a), s).run(plan) }
+                .message shouldBe "This plan is starting elsewhere right now"
+        }
+        a.calls shouldBe emptyList()
+        PlanReplayer(ToolRegistry().register(a), s).run(plan).status shouldBe PlanStatus.DONE
+    }
+
     test("a plan whose tools aren't connected doesn't start and stays approved") {
         val a = Recording("a__x")
         val s = store()

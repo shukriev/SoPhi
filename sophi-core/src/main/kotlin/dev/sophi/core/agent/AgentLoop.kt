@@ -261,7 +261,8 @@ class AgentLoop(
      */
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
-        effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long, ruleOverride: String? = null
+        effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long, ruleOverride: String? = null,
+        plan: String? = null,
     ) = sink.recordQuietly {
         val rule = ruleOverride ?: when {
             effect == Effect.DENY -> "rule:deny"
@@ -272,7 +273,7 @@ class AgentLoop(
             else -> notes.rules[req.callId] ?: "policy"
         }
         auditEntry(actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId, session.id, req.toolName, req.riskLevel,
-            req.argumentsJson, rule, outcome, result, start)
+            req.argumentsJson, rule, outcome, result, start, plan)
     }
 
     /**
@@ -718,7 +719,8 @@ class AgentLoop(
                         val step = held[call.id]
                         fun audit(outcome: String, result: String) {
                             val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else null
-                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule)
+                            val plan = step?.let { "${recorder!!.planId}#$it" }
+                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan)
                         }
                         var failed = false
                         val result = if (step != null) {

@@ -16,6 +16,7 @@ import dev.sophi.core.audit.recordQuietly
 import dev.sophi.core.dryrun.ChangePlan
 import dev.sophi.core.dryrun.ChangePlanStore
 import dev.sophi.core.dryrun.PlanFirst
+import dev.sophi.core.dryrun.PlanRead
 import dev.sophi.core.dryrun.PlanRecorder
 import dev.sophi.core.dryrun.PlanReplayer
 import dev.sophi.core.dryrun.PlanStatus
@@ -216,7 +217,7 @@ class SophiRuntime internal constructor(
         val partial = StringBuilder()
         return try {
             onLoopStart()
-            val (updated, plan) = planFirstScope(session.id, input) {
+            val (updated, plan, hinted) = planFirstScopeWithReads(session.id, input) {
                 agentLoop.streamTurn(session, input, turnConfig, preamble, inbox, images) { event ->
                     if (event is TurnEvent.Token) partial.append(event.text)
                     bridge(event)
@@ -224,6 +225,7 @@ class SophiRuntime internal constructor(
                 }
             }
             if (plan != null) onEvent(TurnEvent.PlanReady(plan))
+            else if (hinted.isNotEmpty()) onEvent(TurnEvent.HintedReads(hinted))
             settleOutcome(session.id, input, updated.lastAssistantReply(), error = null)
             updated
         } catch (e: CancellationException) {
@@ -295,17 +297,21 @@ class SophiRuntime internal constructor(
      * recorded any. A plain call when plan-first is off, or inside an outer plan-first scope (the outer one collects).
      * Hosts running their own loops (/goal, /plan) wrap them in this so they plan the same way a chat turn does.
      */
-    suspend fun <T> planFirstScope(sessionId: String, task: String, block: suspend () -> T): Pair<T, ChangePlan?> {
-        val settings = planFirst?.takeIf { it.mode != PlanFirst.OFF } ?: return block() to null
-        if (currentCoroutineContext()[PlanRecorder] != null) return block() to null
+    suspend fun <T> planFirstScope(sessionId: String, task: String, block: suspend () -> T): Pair<T, ChangePlan?> =
+        planFirstScopeWithReads(sessionId, task, block).let { (r, p, _) -> r to p }
+
+    /** [planFirstScope], plus the lookups that ran on a server's read-only word when nothing was recorded. */
+    private suspend fun <T> planFirstScopeWithReads(sessionId: String, task: String, block: suspend () -> T): Triple<T, ChangePlan?, List<PlanRead>> {
+        val settings = planFirst?.takeIf { it.mode != PlanFirst.OFF } ?: return Triple(block(), null, emptyList())
+        if (currentCoroutineContext()[PlanRecorder] != null) return Triple(block(), null, emptyList())
         val recorder = PlanRecorder(settings.mode, settings.trustReadOnlyHints)
         val result = withContext(recorder) { block() }
-        if (recorder.steps.isEmpty()) return result to null
+        if (recorder.steps.isEmpty()) return Triple(result, null, recorder.reads.filter { it.viaHint })
         val actor = currentCoroutineContext()[ActorContext]
         val plan = recorder.toPlan(task, sessionId, actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId)
         settings.store.save(plan)
         auditPlan(plan, "plan.create", """{"plan":"${plan.id}","steps":${plan.steps.size}}""")
-        return result to plan
+        return Triple(result, plan, emptyList())
     }
 
     fun plans(): List<ChangePlan> = plansOrThrow().list()
@@ -315,6 +321,8 @@ class SophiRuntime internal constructor(
     fun approvePlan(id: String, dropped: Set<Int> = emptySet()): ChangePlan {
         val plan = planOrThrow(id)
         check(plan.status == PlanStatus.PENDING) { "Only a pending plan can be approved; ${plan.id} is ${plan.status.name.lowercase()}" }
+        dropped.firstOrNull { n -> plan.steps.none { it.n == n } }?.let { throw IllegalArgumentException("This plan has no step $it") }
+        require(plan.steps.any { it.n !in dropped }) { "That drops every step; cancel the plan instead" }
         val approved = plan.copy(dropped = dropped, status = PlanStatus.APPROVED, approvedAtMs = System.currentTimeMillis())
             .let { it.copy(approvedHash = it.stepsHash()) }
         plansOrThrow().save(approved)

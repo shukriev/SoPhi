@@ -23,12 +23,12 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
-private class Change(override val name: String = "okta__deactivate_user") : Tool {
+private class Change(override val name: String = "okta__deactivate_user", private val where: Reach = Reach.OUTSIDE_CHANGE) : Tool {
     var calls = 0
     override val description = "fake"
     override val parametersJson = "{}"
     override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
-    override fun reach(argumentsJson: String) = Reach.OUTSIDE_CHANGE
+    override fun reach(argumentsJson: String) = where
     override suspend fun execute(argumentsJson: String): String { calls++; return "done" }
 }
 
@@ -90,5 +90,15 @@ class PlanReviewFlowTest : FunSpec({
         runBlocking { PlanFirstHost(rt, input, out::add).review(plan, AgentSession(id = "x")) }
         out.joinToString("\n") shouldContain "cancelled"
         change.calls shouldBe 0
+    }
+
+    test("a turn that only ran read-only-per-server lookups lists them after the reply") {
+        val find = Change("okta__find_user", Reach.OUTSIDE_HINTED_READ)
+        val rt = runtime(find)
+        val out = mutableListOf<String>()
+        val input = ScriptedInputSource(emptyList())
+        val tc = TurnController(rt, input, LiveRegion(StringBuilder()) { 80 }, planFirst = PlanFirstHost(rt, input) {}) { out.add(it) }
+        runBlocking { tc.runTurn(rt.sessionManager.load(rt.newSession()), "who is jane") }
+        out.joinToString("\n") shouldContain "Ran without asking (its server says read-only): okta find_user"
     }
 })

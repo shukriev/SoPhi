@@ -50,6 +50,7 @@ internal suspend fun plansAction(action: String?, id: String?, runtime: SophiRun
                 plan.results.takeIf { it.isNotEmpty() }?.let { output(runtime.maskSecrets(plan.replayReport())) }
             }
             "approve" -> {
+                output(renderPlan(plan, runtime::maskSecrets, dropped = plan.dropped))
                 runtime.approvePlan(id, plan.dropped)
                 runApprovedPlan(runtime, id, input, output)
             }
@@ -57,6 +58,8 @@ internal suspend fun plansAction(action: String?, id: String?, runtime: SophiRun
             "cancel" -> { runtime.cancelPlan(id); output("Cancelled; nothing ran.") }
         }
     } catch (e: IllegalStateException) {
+        output(e.message ?: "That didn't work")
+    } catch (e: IllegalArgumentException) {
         output(e.message ?: "That didn't work")
     }
 }
