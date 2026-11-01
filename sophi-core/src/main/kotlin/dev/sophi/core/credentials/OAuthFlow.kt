@@ -62,8 +62,8 @@ class OAuthFlow(
     suspend fun authorize(
         endpoints: OAuthEndpoints, client: OAuthClient, loopback: Loopback, scopes: List<String>, extra: Map<String, String> = emptyMap(),
     ): Tokens {
-        requireSecure(endpoints.authorizeUrl)
-        requireSecure(endpoints.tokenUrl)
+        requireSecureUrl(endpoints.authorizeUrl)
+        requireSecureUrl(endpoints.tokenUrl)
         val verifier = randomUrlSafe(48).take(64)
         val challenge = b64url(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()))
         val state = randomUrlSafe(24)
@@ -95,7 +95,7 @@ class OAuthFlow(
 
     private suspend fun token(endpoints: OAuthEndpoints, params: List<Pair<String, String>>, keepRefresh: String?): Tokens =
         withContext(Dispatchers.IO) {
-            requireSecure(endpoints.tokenUrl)
+            requireSecureUrl(endpoints.tokenUrl)
             val req = HttpRequest.newBuilder(URI(endpoints.tokenUrl))
                 .header("Content-Type", "application/x-www-form-urlencoded").header("Accept", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(form(params))).build()
@@ -111,14 +111,6 @@ class OAuthFlow(
             Tokens(access, str("refresh_token") ?: keepRefresh, expiresIn?.let { nowMs() + it * 1000 })
         }
 
-    /** The endpoints come from a server's own metadata: anything but https (or http on this machine) is refused, so a
-     *  hostile server can't make the browser open a file, a script or an app link, or the code travel in the clear. */
-    private fun requireSecure(url: String) {
-        val uri = runCatching { URI(url) }.getOrNull()
-        val loopback = uri?.host in setOf("127.0.0.1", "localhost", "[::1]", "::1")
-        if (uri?.scheme != "https" && !(uri?.scheme == "http" && loopback)) throw OAuthException("Sign-in needs an https address, not $url")
-    }
-
     private fun randomUrlSafe(bytes: Int) = b64url(ByteArray(bytes).also(random::nextBytes))
     private fun b64url(b: ByteArray) = Base64.getUrlEncoder().withoutPadding().encodeToString(b)
     private fun form(params: List<Pair<String, String>>) =
@@ -127,3 +119,14 @@ class OAuthFlow(
 
 private fun query(s: String?) = (s ?: "").split("&").filter { '=' in it }
     .associate { it.substringBefore("=") to URLDecoder.decode(it.substringAfter("="), Charsets.UTF_8) }
+
+/**
+ * Sign-in addresses come from a server's own metadata: anything but https (or http on this machine) is refused, so a
+ * hostile server can't make Sophi fetch internal http addresses, open a file, script or app link in the browser, or
+ * send a code in the clear. Throws [OAuthException].
+ */
+fun requireSecureUrl(url: String) {
+    val uri = runCatching { URI(url) }.getOrNull()
+    val loopback = uri?.host in setOf("127.0.0.1", "localhost", "[::1]", "::1")
+    if (uri?.scheme != "https" && !(uri?.scheme == "http" && loopback)) throw OAuthException("Sign-in needs an https address, not $url")
+}

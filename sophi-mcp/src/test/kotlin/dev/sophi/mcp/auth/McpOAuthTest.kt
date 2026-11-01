@@ -64,7 +64,12 @@ private fun freePort() = ServerSocket(0).use { it.localPort }
  * One process playing both sides: an MCP server at /mcp that wants a bearer token, and its authorization server.
  * Refresh tokens rotate: each one works once.
  */
-private class AuthedMcpServer(val protectedResourceMetadata: Boolean = true) : AutoCloseable {
+private class AuthedMcpServer(
+    val protectedResourceMetadata: Boolean = true,
+    /** What the 401 names as its metadata, and the registration endpoint it advertises; null = its own. */
+    val metadataUrl: String? = null,
+    val registrationUrl: String? = null,
+) : AutoCloseable {
     val port = freePort()
     val base = "http://127.0.0.1:$port"
     val url = "$base/mcp"
@@ -83,7 +88,7 @@ private class AuthedMcpServer(val protectedResourceMetadata: Boolean = true) : A
             onCall { call ->
                 val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
                 if (call.request.path() == "/mcp" && (token == null || token !in validAccess)) {
-                    call.response.header("WWW-Authenticate", "Bearer resource_metadata=\"$base/.well-known/oauth-protected-resource\"")
+                    call.response.header("WWW-Authenticate", "Bearer resource_metadata=\"${metadataUrl ?: "$base/.well-known/oauth-protected-resource"}\"")
                     call.respond(HttpStatusCode.Unauthorized)
                 }
             }
@@ -94,7 +99,7 @@ private class AuthedMcpServer(val protectedResourceMetadata: Boolean = true) : A
             }
             get("/.well-known/oauth-authorization-server") {
                 call.respondText(
-                    """{"issuer":"$base","authorization_endpoint":"$base/authorize","token_endpoint":"$base/token","registration_endpoint":"$base/register"}""",
+                    """{"issuer":"$base","authorization_endpoint":"$base/authorize","token_endpoint":"$base/token","registration_endpoint":"${registrationUrl ?: "$base/register"}"}""",
                     ContentType.Application.Json,
                 )
             }
@@ -274,6 +279,23 @@ class McpOAuthTest : FunSpec({
             rig.oauth.logout("sentry")
             rig.oauth.hasSignIn("sentry") shouldBe false
             rig.store.map.keys shouldBe emptySet()
+        }
+    }
+
+    test("discovery refuses metadata on a non-https address instead of fetching it") {
+        AuthedMcpServer(metadataUrl = "http://169.254.169.254/latest/meta-data").use { srv ->
+            val rig = Rig()
+            runBlocking { rig.oauth.login(srv.config) }.exceptionOrNull()!!.message!! shouldContain "https"
+            srv.registrations.get() shouldBe 0
+            rig.browser.opened shouldBe 0
+        }
+    }
+
+    test("registration refuses a non-https endpoint instead of posting to it") {
+        AuthedMcpServer(registrationUrl = "http://10.0.0.5/register").use { srv ->
+            val rig = Rig()
+            runBlocking { rig.oauth.login(srv.config) }.exceptionOrNull()!!.message!! shouldContain "https"
+            rig.browser.opened shouldBe 0
         }
     }
 })

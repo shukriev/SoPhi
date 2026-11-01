@@ -7,6 +7,7 @@ import dev.sophi.core.credentials.OAuthException
 import dev.sophi.core.credentials.OAuthFlow
 import dev.sophi.core.credentials.SecretMask
 import dev.sophi.core.credentials.Tokens
+import dev.sophi.core.credentials.requireSecureUrl
 import dev.sophi.mcp.config.McpServerConfig
 import io.ktor.client.HttpClient as KtorClient
 import io.ktor.client.plugins.HttpSend
@@ -195,8 +196,10 @@ class McpOAuth(
         val metadataUrl = challenge?.headers()?.firstValue("WWW-Authenticate")?.orElse(null)
             ?.let { Regex("resource_metadata=\"([^\"]+)\"").find(it)?.groupValues?.get(1) }
             ?: "$origin/.well-known/oauth-protected-resource"
+        requireSecureUrl(metadataUrl)
         val authServer = getJson(metadataUrl)?.get("authorization_servers")?.jsonArray?.firstOrNull()
             ?.let { (it as? JsonPrimitive)?.contentOrNull }?.trimEnd('/') ?: origin
+        requireSecureUrl(authServer)
         val meta = getJson("$authServer/.well-known/oauth-authorization-server")
             ?: getJson("$authServer/.well-known/openid-configuration")
             ?: throw OAuthException("$server doesn't offer sign-in")
@@ -209,6 +212,7 @@ class McpOAuth(
     }
 
     private suspend fun register(endpoint: String, redirectUri: String): OAuthClient = withContext(Dispatchers.IO) {
+        requireSecureUrl(endpoint)
         val body = buildJsonObject {
             put("client_name", "Sophi")
             putJsonArray("redirect_uris") { add(JsonPrimitive(redirectUri)) }
