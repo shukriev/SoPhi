@@ -97,7 +97,7 @@ class SophiRuntimeTest : FunSpec({
             )
         )
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any()) } returns updated
+        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any(), any()) } returns updated
         runtime.turn("s1", "hi") shouldBe "hello!"
     }
 
@@ -118,7 +118,7 @@ class SophiRuntimeTest : FunSpec({
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(errorPlugin), config)
         val session = AgentSession("s1")
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any()) } throws RuntimeException("LLM error")
+        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any(), any()) } throws RuntimeException("LLM error")
 
         shouldThrow<RuntimeException> { rt.turn("s1", "hi") }
         log shouldBe listOf(HookPoint.ON_ERROR)
@@ -142,7 +142,7 @@ class SophiRuntimeTest : FunSpec({
             )
         )
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any()) } returns updated
+        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any(), any()) } returns updated
 
         rt.streamTurn("s1", "hi") { }
 
@@ -172,7 +172,7 @@ class SophiRuntimeTest : FunSpec({
 
         val started = CompletableDeferred<Unit>()
         val onEventSlot = slot<suspend (TurnEvent) -> Unit>()
-        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), capture(onEventSlot)) } coAnswers {
+        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any(), capture(onEventSlot)) } coAnswers {
             onEventSlot.captured(TurnEvent.Token("par"))
             onEventSlot.captured(TurnEvent.Token("tial"))
             started.complete(Unit)
@@ -208,7 +208,7 @@ class SophiRuntimeTest : FunSpec({
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
         val session = AgentSession("s1")
         every { sessionManager.load("s1") } returns session
-        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any()) } throws RuntimeException("boom")
+        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any(), any()) } throws RuntimeException("boom")
 
         shouldThrow<RuntimeException> { rt.streamTurn("s1", "hi") { } }
 
@@ -232,7 +232,7 @@ class SophiRuntimeTest : FunSpec({
         )
         every { sessionManager.load("s1") } returns session
         val configSlot = slot<AgentConfig>()
-        coEvery { agentLoop.streamTurn(session, "hi", capture(configSlot), any(), any(), any()) } returns updated
+        coEvery { agentLoop.streamTurn(session, "hi", capture(configSlot), any(), any(), any(), any()) } returns updated
 
         rt.streamTurn("s1", "hi") { }
 
@@ -287,7 +287,7 @@ class SophiRuntimeTest : FunSpec({
                 SessionEntry("e2", "e1", EntryRole.ASSISTANT, "hello!", 0L)
             )
         )
-        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any()) } returns updated
+        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any(), any()) } returns updated
 
         val result = rt.streamTurn(session, "hi") { }
 
@@ -440,7 +440,7 @@ class SophiRuntimeTest : FunSpec({
             TurnEvent.ToolCallFinished("read_file", "contents", isError = false)
         )
         val onEventSlot = slot<suspend (TurnEvent) -> Unit>()
-        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), capture(onEventSlot)) } coAnswers {
+        coEvery { agentLoop.streamTurn(session, "hi", config, any(), any(), any(), capture(onEventSlot)) } coAnswers {
             fakeEvents.forEach { onEventSlot.captured(it) }
             updated
         }

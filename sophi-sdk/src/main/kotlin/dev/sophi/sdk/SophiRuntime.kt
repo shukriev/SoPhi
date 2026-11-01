@@ -131,7 +131,8 @@ class SophiRuntime internal constructor(
             runCatching { sessionManager.saveConfigSnapshot(id, config.model, config.systemPrompt) }
         }
 
-    suspend fun turn(sessionId: String, input: String): String = streamTurn(sessionId, input) { }
+    suspend fun turn(sessionId: String, input: String, images: List<dev.sophi.ai.api.ImageRef> = emptyList()): String =
+        streamTurn(sessionManager.load(sessionId), input, images = images) { }.lastAssistantReply()
 
     suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String =
         streamTurn(sessionManager.load(sessionId), input, onEvent = onEvent).lastAssistantReply()
@@ -140,14 +141,18 @@ class SophiRuntime internal constructor(
      * Runs a turn against an already-loaded [session] and returns the updated one. Prefer this
      * over the id-based overload when you are already threading the session yourself — it does
      * not reload from disk.
+     *
+     * [images] go with [input] to a model that can see images (see [RuntimeBuilder.supportsImages]);
+     * steers and follow-ups from [inbox] are text only. Plugins and hooks see only the text.
      */
     suspend fun streamTurn(
         session: AgentSession,
         input: String,
         inbox: TurnInbox? = null,
+        images: List<dev.sophi.ai.api.ImageRef> = emptyList(),
         onEvent: suspend (TurnEvent) -> Unit
     ): AgentSession {
-        var current = oneTurn(session, input, inbox, onEvent)
+        var current = oneTurn(session, input, inbox, onEvent, images = images)
         // Follow-ups (and steers that arrived too late for the loop) each get a turn of their own.
         // Cancellation and errors propagate out of oneTurn, leaving the inbox as it is.
         while (inbox != null) {
@@ -170,7 +175,8 @@ class SophiRuntime internal constructor(
         input: String,
         inbox: TurnInbox?,
         onEvent: suspend (TurnEvent) -> Unit,
-        onLoopStart: () -> Unit = {}
+        images: List<dev.sophi.ai.api.ImageRef> = emptyList(),
+        onLoopStart: () -> Unit = {},
     ): AgentSession {
         pluginRegistry.dispatch(HookPoint.BEFORE_TURN, HookContext(session.id, userInput = input))
         // BEFORE_TURN fires first so a plugin can prime state that its own contribute() then reads.
@@ -188,7 +194,7 @@ class SophiRuntime internal constructor(
         val partial = StringBuilder()
         return try {
             onLoopStart()
-            val updated = agentLoop.streamTurn(session, input, turnConfig, preamble, inbox) { event ->
+            val updated = agentLoop.streamTurn(session, input, turnConfig, preamble, inbox, images) { event ->
                 if (event is TurnEvent.Token) partial.append(event.text)
                 bridge(event)
                 onEvent(event)
