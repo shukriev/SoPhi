@@ -7,7 +7,8 @@ import kotlin.coroutines.CoroutineContext
 
 /**
  * One tool call, as written to the audit log. `args` and `result` are already redacted and truncated.
- * `decision` is `allowed` or `denied`; `outcome` is `ok`, `error`, `denied` or `cancelled` (stopped mid-run, `result` empty).
+ * `decision` is `allowed`, `denied` or `held` (recorded into a plan, not run); `outcome` is `ok`, `error`, `denied`,
+ * `recorded` or `cancelled` (stopped mid-run, `result` empty).
  */
 @Serializable
 data class AuditEntry(
@@ -24,6 +25,8 @@ data class AuditEntry(
     val outcome: String,
     val result: String,
     val durationMs: Long,
+    /** The plan step this call belongs to, `<plan id>#<n>`; null outside plans. */
+    val plan: String? = null,
 )
 
 /** Where audit entries go. sophi-enterprise implements this for retention and export. Must not throw for ordinary failures. */
@@ -49,7 +52,7 @@ private const val REDACT_WINDOW = 20_000
  */
 fun auditEntry(
     actor: String, tenant: String?, session: String, tool: String, risk: RiskLevel, argumentsJson: String,
-    rule: String, outcome: String, result: String, start: Long,
+    rule: String, outcome: String, result: String, start: Long, plan: String? = null,
 ) = AuditEntry(
     ts = start,
     actor = actor,
@@ -58,11 +61,12 @@ fun auditEntry(
     tool = tool,
     risk = risk,
     args = runCatching { redactArguments(argumentsJson, REDACT_WINDOW, budget = 4000, work = 5 * REDACT_WINDOW).take(4000) }.getOrDefault(UNREDACTABLE),
-    decision = if (outcome == "denied") "denied" else "allowed",
+    decision = when (outcome) { "denied" -> "denied"; "recorded" -> "held"; else -> "allowed" },
     rule = rule,
     outcome = outcome,
     result = runCatching { redactWindowed(result, REDACT_WINDOW).take(500) }.getOrDefault(UNREDACTABLE),
     durationMs = System.currentTimeMillis() - start,
+    plan = plan,
 )
 
 /** Builds and records an entry; anything thrown on the way, Errors included (a regex overflow), drops only this entry. */
