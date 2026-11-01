@@ -124,4 +124,15 @@ class OAuthFlowTest : FunSpec({
             shouldThrow<BindException> { flow.loopback(port) }
         }
     }
+
+    test("an authorize URL that isn't https (or loopback http) is refused before any browser opens") {
+        var opened = 0
+        val flow = OAuthFlow(openBrowser = { opened++ })
+        listOf("file:///etc/passwd", "javascript:alert(1)", "http://evil.example/authorize", "x-app://do").forEach { url ->
+            shouldThrow<OAuthException> {
+                flow.loopback().use { lb -> runBlocking { flow.authorize(OAuthEndpoints(url, "https://a/token"), OAuthClient("c"), lb, emptyList()) } }
+            }.message!! shouldContain "https"
+        }
+        opened shouldBe 0
+    }
 })
