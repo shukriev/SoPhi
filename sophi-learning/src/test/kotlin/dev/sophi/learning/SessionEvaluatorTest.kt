@@ -4,6 +4,8 @@ import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionEntry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
@@ -42,6 +44,9 @@ class SessionEvaluatorTest : FunSpec({
         return EvalFixture(SessionEvaluator(provider, lessons, outcomes, config, prefs), lessons, outcomes, prefs)
     }
     val mechanical = SessionOutcome(1L, "/p", "s1", "completed", turns = 2)
+    // Implicit feedback must quote something the user wrote, so feedback tests need a real transcript.
+    val chat = listOf("start", "a1", "wrong", "a3", "no, the OTHER file", "a5", "perfect,\n  thanks", "a7")
+        .mapIndexed { i, text -> SessionEntry("e$i", null, if (i % 2 == 0) EntryRole.USER else EntryRole.ASSISTANT, text, 1L) }
 
     test("buildPrompt includes a Planning section when the mechanical outcome carries a planningNote") {
         val (eval, _, _) = fixture(LLMResponse.Text(verdict, TokenUsage(1, 1)))
@@ -116,11 +121,31 @@ class SessionEvaluatorTest : FunSpec({
                   {"entryIndex":3,"polarity":"negative","signal":"user_corrected","evidence":"no, the OTHER file","retryOf":null},
                   {"entryIndex":5,"polarity":"negative","signal":"user_frustrated","evidence":"","retryOf":null}
                 ]}""", TokenUsage(1, 1)))
-        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        runBlocking { eval.evaluate("s1", chat, mechanical) }
         val record = prefs.forSession("s1").single()
         record.source shouldBe "implicit"
         record.weight shouldBe 0.5
         record.evidence shouldBe "no, the OTHER file"
+    }
+
+    test("a malformed or ungrounded feedback item is dropped alone; the judgment and lessons survive") {
+        val (eval, lessons, outcomes, prefs) = fixtureWithPrefs(LLMResponse.Text(
+            """{"judgment":"partial","reason":"ok","lessons":[{"text":"kept"}],
+                "feedback":[
+                  {"entryIndex":3,"signal":"user_corrected","evidence":"no, the OTHER file"},
+                  {"entryIndex":3,"polarity":"negative","signal":"user_corrected","evidence":"something nobody said"},
+                  {"entryIndex":40,"polarity":"negative","signal":"user_corrected","evidence":"wrong"},
+                  {"entryIndex":5,"polarity":"negative","signal":"user_corrected","evidence":"no, the OTHER file"}
+                ]}""", TokenUsage(1, 1)))
+        runBlocking { eval.evaluate("s1", chat, mechanical) }
+        outcomes.readAll().single() shouldContain "\"judgment\":\"partial\""
+        lessons.active("/p").single().text shouldBe "kept"
+        prefs.forSession("s1").map { it.entryIndex } shouldBe listOf(5)
+    }
+
+    test("the prompt shows the feedback shape it asks for") {
+        val (eval, _, _, _) = fixtureWithPrefs(LLMResponse.Text(verdict, TokenUsage(1, 1)))
+        eval.buildPrompt(chat, mechanical) shouldContain "\"feedback\":[{\"entryIndex\":N,\"polarity\":\"negative|positive\""
     }
 
     test("retryOf on an implicit item links the pair by record id") {
@@ -130,7 +155,7 @@ class SessionEvaluatorTest : FunSpec({
                   {"entryIndex":2,"polarity":"negative","signal":"user_corrected","evidence":"wrong","retryOf":null},
                   {"entryIndex":6,"polarity":"positive","signal":"user_satisfied","evidence":"perfect, thanks","retryOf":2}
                 ]}""", TokenUsage(1, 1)))
-        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        runBlocking { eval.evaluate("s1", chat, mechanical) }
         val byEntry = prefs.forSession("s1").associateBy { it.entryIndex }
         val negative = byEntry.getValue(2)
         val positive = byEntry.getValue(6)
@@ -162,7 +187,7 @@ class SessionEvaluatorTest : FunSpec({
                   {"entryIndex":6,"polarity":"positive","signal":"user_satisfied","evidence":"perfect, thanks","retryOf":2},
                   {"entryIndex":2,"polarity":"negative","signal":"user_corrected","evidence":"wrong","retryOf":null}
                 ]}""", TokenUsage(1, 1)))
-        runBlocking { eval.evaluate("s1", emptyList(), mechanical) }
+        runBlocking { eval.evaluate("s1", chat, mechanical) }
         val byEntry = prefs.forSession("s1").associateBy { it.entryIndex }
         val negative = byEntry.getValue(2)
         val positive = byEntry.getValue(6)
@@ -188,8 +213,8 @@ class SessionEvaluatorTest : FunSpec({
             "feedback":[{"entryIndex":3,"polarity":"negative","signal":"user_corrected","evidence":"no, the OTHER file","retryOf":null}]}"""
         val (eval, _, _, prefs) = fixtureWithPrefs(LLMResponse.Text(reply, TokenUsage(1, 1)), LLMResponse.Text(reply, TokenUsage(1, 1)))
         runBlocking {
-            eval.evaluate("s1", emptyList(), mechanical)
-            eval.evaluate("s1", emptyList(), mechanical)
+            eval.evaluate("s1", chat, mechanical)
+            eval.evaluate("s1", chat, mechanical)
         }
         prefs.forSession("s1").size shouldBe 1
     }

@@ -269,4 +269,24 @@ class ExporterTest : FunSpec({
         // Only the recent unpaired negative survives the since filter.
         counts.getValue("unpairedNegatives").jsonPrimitive.int shouldBe 1
     }
+
+    test("the same pair linked twice (explicit and implicit on the same replies) is exported once") {
+        val home = tempdir().toPath(); val sessionsDir = tempdir().toPath(); val outDir = tempdir().toPath().resolve("out")
+        val prefs = PreferenceStore(JsonlLog(home.resolve("preferences.jsonl")))
+        val s = AgentSession(id = "s1")
+        s.append(EntryRole.USER, "write a commit message")
+        s.append(EntryRole.ASSISTANT, "Updated stuff.")
+        s.append(EntryRole.USER, "no, conventional commits please")
+        s.append(EntryRole.ASSISTANT, "feat(core): add X")
+        FileSessionManager(sessionsDir).save(s)
+        for (src in listOf("explicit", "implicit")) {
+            prefs.add(PreferenceRecord("n_$src", 1L, "/p", "s1", 1, "negative", src))
+            prefs.add(PreferenceRecord("p_$src", 2L, "/p", "s1", 3, "positive", src))
+            prefs.link("n_$src", "p_$src")
+        }
+        val result = Exporter(ExportInputs(home, sessionsDir)).export(ExportOptions(outDir = outDir))
+        result.dpoPairs shouldBe 1
+        val counts = Json.parseToJsonElement(Files.readString(outDir.resolve("manifest.json"))).jsonObject.getValue("counts").jsonObject
+        counts.getValue("duplicatesDropped").jsonPrimitive.int shouldBe 1
+    }
 })
