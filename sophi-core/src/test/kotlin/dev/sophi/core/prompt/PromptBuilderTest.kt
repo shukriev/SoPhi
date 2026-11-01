@@ -135,12 +135,6 @@ class PromptBuilderTest : FunSpec({
         msgs.single().images shouldBe listOf(shot, other)
     }
 
-    test("withImages false drops them, content unchanged") {
-        val msgs = PromptBuilder.build(listOf(entry(EntryRole.USER, "look", dev.sophi.core.session.imagesMetadata(listOf(shot)))), withImages = false)
-        msgs.single().images shouldBe emptyList()
-        msgs.single().content shouldBe "look"
-    }
-
     test("bad images metadata reads as none") {
         PromptBuilder.build(listOf(entry(EntryRole.USER, "look", mapOf("images" to "not json")))).single().images shouldBe emptyList()
     }

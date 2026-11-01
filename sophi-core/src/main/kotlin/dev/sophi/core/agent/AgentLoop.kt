@@ -492,15 +492,14 @@ class AgentLoop(
         turnPreamble: String? = null,
         inbox: TurnInbox? = null,
     ): AgentSession {
-        val seesImages = supportsImages()
-        val messages = PromptBuilder.build(session.branch(), withImages = seesImages).toMutableList()
+        val messages = PromptBuilder.build(session.branch()).toMutableList()
         // Volatile context (hints, recall) rides on this turn's request only: prefixed to the user
         // message so the system prompt and all of history stay a byte-stable, cacheable prefix.
         // Never persisted — every session.append below stores the raw userInput.
         // Tool rounds don't replay across turns, so the model's own todo list rides along here the same way.
         val todoNote = currentTodos(session)?.takeIf { it.isNotEmpty() }?.let { "\n\n[Your todo list so far:\n${renderTodos(it)}]" }.orEmpty()
         val turnUserContent = (turnPreamble?.let { "$it\n\n$userInput" } ?: userInput) + todoNote
-        messages.add(Message(MessageRole.USER, turnUserContent, images = if (seesImages) turn.images else emptyList()))
+        messages.add(Message(MessageRole.USER, turnUserContent, images = turn.images))
         // Everything from here on is this turn's own accumulated rounds — the only region
         // mid-loop compaction is ever allowed to touch. The prior-session prefix in front of it
         // is governed separately by cross-turn compaction (AgentConfig.maxBranchLength).
@@ -516,7 +515,8 @@ class AgentLoop(
 
         while (true) {
             val request = CompletionRequest(
-                messages = messages.toList(),
+                // Asked every round, so a mid-turn switch to a model that can't see sends it no images.
+                messages = dev.sophi.ai.api.prepareForModel(messages.toList(), canSee = supportsImages()),
                 model = config.model,
                 maxTokens = config.maxTokens,
                 temperature = config.temperature,

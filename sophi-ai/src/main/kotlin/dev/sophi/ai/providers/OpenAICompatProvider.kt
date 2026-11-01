@@ -182,11 +182,11 @@ class OpenAICompatProvider(
         MessageRole.USER -> ChatCompletionMessageParam.ofUser(
             if (images.isEmpty()) ChatCompletionUserMessageParam.builder().content(content).build()
             else {
-                val (kept, leftOut) = dev.sophi.ai.api.usableImages(images)
+                val (kept, leftOut) = dev.sophi.ai.api.loadImages(images)
                 val parts = listOf(ChatCompletionContentPart.ofText(
                     ChatCompletionContentPartText.builder().text(dev.sophi.ai.api.withLeftOutNotes(content, leftOut)).build()
                 )) + kept.map { image ->
-                    val data = java.util.Base64.getEncoder().encodeToString(java.nio.file.Files.readAllBytes(java.nio.file.Path.of(image.path)))
+                    val data = java.util.Base64.getEncoder().encodeToString(image.bytes)
                     ChatCompletionContentPart.ofImageUrl(ChatCompletionContentPartImage.builder()
                         .imageUrl(ChatCompletionContentPartImage.ImageUrl.builder().url("data:${image.mimeType};base64,$data").build())
                         .build())

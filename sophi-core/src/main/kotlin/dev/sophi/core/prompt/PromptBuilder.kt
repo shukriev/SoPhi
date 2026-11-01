@@ -21,16 +21,16 @@ object PromptBuilder {
     }
 
     /**
-     * [withImages] false (a model that can't see) leaves every image out; the text is unchanged.
+     * A USER entry's images come back as [Message.images]; which ones a request carries is decided per request.
      * Adjacent USER messages are merged: a steer saved after a tool round (replay=false) would
      * otherwise replay right after the turn's input, and strict chat templates require alternation.
      */
-    fun build(entries: List<SessionEntry>, withImages: Boolean = true): List<Message> = entries
+    fun build(entries: List<SessionEntry>): List<Message> = entries
         .filter { it.metadata["replay"] != "false" }
         .map { entry ->
         when (entry.role) {
             EntryRole.SYSTEM -> Message(MessageRole.SYSTEM, entry.content)
-            EntryRole.USER -> Message(MessageRole.USER, entry.content, images = if (withImages) entry.images() else emptyList())
+            EntryRole.USER -> Message(MessageRole.USER, entry.content, images = entry.images())
             EntryRole.ASSISTANT -> Message(MessageRole.ASSISTANT, stopNote(entry.content) ?: entry.content)
             EntryRole.TOOL_RESULT -> Message(
                 role = MessageRole.TOOL,

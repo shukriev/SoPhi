@@ -7,17 +7,17 @@ import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.ToolResponseMessage
 import org.springframework.ai.chat.messages.UserMessage
 import org.springframework.ai.content.Media
-import org.springframework.core.io.FileSystemResource
+import org.springframework.core.io.ByteArrayResource
 import org.springframework.util.MimeTypeUtils
-import dev.sophi.ai.api.usableImages
+import dev.sophi.ai.api.loadImages
 import dev.sophi.ai.api.withLeftOutNotes
 
 internal fun Message.toSpring(): org.springframework.ai.chat.messages.Message = when (role) {
     MessageRole.USER -> if (images.isEmpty()) UserMessage(content) else {
-        val (kept, leftOut) = usableImages(images)
+        val (kept, leftOut) = loadImages(images)
         UserMessage.builder()
             .text(withLeftOutNotes(content, leftOut))
-            .media(kept.map { Media(MimeTypeUtils.parseMimeType(it.mimeType), FileSystemResource(it.path)) })
+            .media(kept.map { Media(MimeTypeUtils.parseMimeType(it.mimeType), ByteArrayResource(it.bytes)) })
             .build()
     }
     MessageRole.ASSISTANT -> {
