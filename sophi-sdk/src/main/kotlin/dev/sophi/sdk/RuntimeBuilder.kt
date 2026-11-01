@@ -101,7 +101,11 @@ class RuntimeBuilder {
     private var mcpConfigPath: Path? = null
     private var deferToolsOver: Int = DEFAULT_DEFER_TOOLS_OVER
     private var system1Config: Pair<Path, (String) -> Unit>? = null
-    private var mcpClientManager: McpClientManager = McpClientManager()
+    private var mcpClientManager: McpClientManager? = null
+    private var credentialStore: dev.sophi.core.credentials.CredentialStore? = null
+    private val secretMask = dev.sophi.core.credentials.SecretMask()
+    private var onMcpSignInNeeded: (String) -> Unit = {}
+    private var mcpWiring: Triple<dev.sophi.mcp.McpConnector, dev.sophi.mcp.McpConnector, dev.sophi.mcp.auth.McpOAuth?>? = null
     private var providedRegistry: ToolRegistry? = null
     private var loopGuardPolicy: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
     private var learningConfig: LearningConfig? = null
@@ -147,6 +151,22 @@ class RuntimeBuilder {
     /** Deferral threshold for MCP servers when no mcp.json is given (a loaded mcp.json's own value wins). */
     fun deferToolsOver(n: Int): RuntimeBuilder = apply { deferToolsOver = n }
     fun mcpClientManager(manager: McpClientManager): RuntimeBuilder = apply { mcpClientManager = manager }
+
+    /**
+     * Secrets for MCP servers: `${secret:name}` in mcp.json resolves from [store] (the macOS Keychain by default), and
+     * remote servers can sign in (see [SophiRuntime.mcpLogin]). Every value is masked out of tool results and errors.
+     * Ignored when the host passes its own [mcpClientManager].
+     */
+    fun credentials(store: dev.sophi.core.credentials.CredentialStore? = null): RuntimeBuilder = apply {
+        credentialStore = store ?: dev.sophi.core.credentials.KeychainCredentialStore(mask = secretMask)
+    }
+
+    /** Told when a signed-in MCP server's sign-in stops working (refresh refused), once per failure. */
+    fun onMcpSignInNeeded(callback: (server: String) -> Unit): RuntimeBuilder = apply { onMcpSignInNeeded = callback }
+
+    /** Tests only: the connectors and sign-in the built manager uses. */
+    internal fun mcpWiring(stdio: dev.sophi.mcp.McpConnector, http: dev.sophi.mcp.McpConnector, oauth: dev.sophi.mcp.auth.McpOAuth?) =
+        apply { mcpWiring = Triple(stdio, http, oauth) }
 
     /**
      * Use [registry] instead of a privately created one. Pass your own when something built
@@ -365,7 +385,17 @@ class RuntimeBuilder {
         val mcp = mcpConfigPath?.let { McpConfigLoader().load(it) }
         val deferOver = mcp?.deferToolsOver ?: deferToolsOver
         val mcpServers = mcp?.servers?.filter { server -> server.enabled } ?: emptyList()
-        runBlocking { mcpClientManager.connect(mcpServers, deferOver) }.forEach { registry.register(it) }
+        val oauth = mcpWiring?.third ?: credentialStore?.takeIf { mcpClientManager == null }?.let { store ->
+            dev.sophi.mcp.auth.McpOAuth(store, secretMask, dev.sophi.core.credentials.OAuthFlow(openBrowser = {
+                error("only SophiRuntime.mcpLogin opens a browser")
+            }), onSignInNeeded = onMcpSignInNeeded)
+        }
+        val manager = mcpClientManager ?: McpClientManager(
+            stdioConnector = mcpWiring?.first ?: dev.sophi.mcp.StdioMcpConnector(),
+            httpConnector = mcpWiring?.second ?: dev.sophi.mcp.StreamableHttpMcpConnector(auth = oauth),
+            credentials = credentialStore, mask = secretMask,
+        )
+        runBlocking { manager.connect(mcpServers, deferOver) }.forEach { registry.register(it) }
         registry.registerToolSearchIfDeferred()
         val sm = FileSessionManager(sessionsDir)
         val agentConfig = AgentConfig(
@@ -501,9 +531,10 @@ class RuntimeBuilder {
 
         val schedulesDir = scheduleDir ?: Path.of(System.getProperty("user.home"), ".sophi", "schedule")
         return SophiRuntime(
-            loop, sm, pluginRegistry, effectiveConfig, mcpClientManager, learningPlugin, registry, p, window,
+            loop, sm, pluginRegistry, effectiveConfig, manager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
-            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered, jobs
+            deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered, jobs,
+            credentialStore.takeIf { mcpClientManager == null }, oauth
         )
     }
 }

@@ -49,6 +49,8 @@ class SlashHandler(
     private val checkpoints: CheckpointStore? = null,
     /** Background bash jobs for /jobs; null = not available. */
     private val jobs: dev.sophi.core.tools.BashJobs? = null,
+    /** `/mcp login|logout <server>`: the host signs in and reconnects (see [mcpAuth]); null = not available. */
+    private val mcp: (suspend (action: String, server: String) -> String)? = null,
     /** Null: `/settings` reports it isn't available (a handler built without the CLI's wiring). */
     private val settings: SettingsController? = null,
     /**
@@ -68,6 +70,15 @@ class SlashHandler(
     private val startWindow = contextWindowTokens
     private val config: AgentConfig get() = live?.invoke()?.first ?: startConfig
     private val contextWindowTokens: Int? get() = live?.invoke()?.second ?: startWindow
+
+    private suspend fun handleMcp(arg: String?) {
+        val words = arg?.split(" ")?.filter { it.isNotBlank() }.orEmpty()
+        val action = words.getOrNull(0)?.takeIf { it == "login" || it == "logout" }
+        val server = words.getOrNull(1)
+        if (action == null || server == null) return output("Usage: /mcp login <server> | /mcp logout <server>")
+        val mcp = mcp ?: return output("MCP sign-in isn't available.")
+        output(mcp(action, server))
+    }
 
     private fun handleJobs(arg: String?) {
         val jobs = jobs ?: return output("Background jobs aren't available.")
@@ -186,10 +197,11 @@ class SlashHandler(
             "settings" -> { handleSettings(arg); session }
             "model" -> { handleModel(arg); session }
             "jobs" -> { handleJobs(arg); session }
+            "mcp" -> { handleMcp(arg); session }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /mcp"
                 )
                 session
             }

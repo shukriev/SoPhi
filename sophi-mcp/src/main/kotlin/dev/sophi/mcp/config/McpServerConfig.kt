@@ -19,9 +19,16 @@ data class McpServerConfig(
     val command: List<String> = emptyList(),
     val env: Map<String, String> = emptyMap(),
     val url: String? = null,
+    /** http only: sent on every request. Values may be `${secret:name}` references. */
+    val headers: Map<String, String> = emptyMap(),
+    /** http only: a registered OAuth client, for servers without dynamic registration (GitHub). */
+    val oauth: McpOAuthConfig? = null,
     val safeTools: List<String> = emptyList(),
     val enabled: Boolean = true
 )
+
+@Serializable
+data class McpOAuthConfig(val clientId: String, val clientSecret: String? = null, val scopes: List<String> = emptyList())
 
 @Serializable
 data class McpConfig(

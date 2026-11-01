@@ -14,6 +14,8 @@ fun main(args: Array<String>) {
     SophiCli()
         .subcommands(
             McpServeCommand(),
+            McpCommand().subcommands(McpLoginCommand(), McpLogoutCommand()),
+            SecretCommand().subcommands(SecretSetCommand(), SecretListCommand(), SecretRemoveCommand()),
             MemoryCommand(),
             LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand(), LessonsForgetCommand()),
             FeedbackCommand().subcommands(FeedbackListCommand(), FeedbackDeleteCommand()),
