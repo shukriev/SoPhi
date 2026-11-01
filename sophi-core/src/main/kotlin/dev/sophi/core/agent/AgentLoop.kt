@@ -238,7 +238,7 @@ class AgentLoop(
     private val audit: AuditSink? = null,
     /** Allow/ask/deny rules checked before the confirmation flow. Null = the enclosing loop's rules (PermissionScope), if any. */
     private val permissions: PermissionRules? = null,
-    /** Whether the model this loop calls can see images; read once per turn, so a host's model switch applies at the next one. */
+    /** Whether the model this loop calls can see images; asked for every request, so a host's model switch applies at once. */
     private val supportsImages: () -> Boolean = { false },
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)

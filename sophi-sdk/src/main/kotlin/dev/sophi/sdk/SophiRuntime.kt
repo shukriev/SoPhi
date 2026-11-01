@@ -131,8 +131,7 @@ class SophiRuntime internal constructor(
             runCatching { sessionManager.saveConfigSnapshot(id, config.model, config.systemPrompt) }
         }
 
-    suspend fun turn(sessionId: String, input: String, images: List<dev.sophi.ai.api.ImageRef> = emptyList()): String =
-        streamTurn(sessionManager.load(sessionId), input, images = images) { }.lastAssistantReply()
+    suspend fun turn(sessionId: String, input: String): String = streamTurn(sessionId, input) { }
 
     suspend fun streamTurn(sessionId: String, input: String, onEvent: suspend (TurnEvent) -> Unit): String =
         streamTurn(sessionManager.load(sessionId), input, onEvent = onEvent).lastAssistantReply()

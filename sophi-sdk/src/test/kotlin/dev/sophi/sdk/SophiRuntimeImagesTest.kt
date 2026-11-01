@@ -28,7 +28,7 @@ private class ImageRecordingProvider : LLMProvider {
 private val CATALOG = ModelCatalog.parse("""{"anthropic":{"seer":{"v":1},"reader":{}}}""")
 
 class SophiRuntimeImagesTest : FunSpec({
-    val shot = ImageRef("/tmp/sophi-sdk-test.png", "image/png")
+    val shot = ImageRef("/tmp/sophi-sdk-test.png")
 
     fun runtime(p: LLMProvider, start: String, configure: RuntimeBuilder.() -> Unit = {}) = RuntimeBuilder().apply {
         provider = p; contextWindowTokens(32_000); model = start; sessionsDir = tempdir().toPath(); usageLogPath = null

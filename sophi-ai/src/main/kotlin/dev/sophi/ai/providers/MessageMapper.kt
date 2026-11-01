@@ -13,8 +13,7 @@ import dev.sophi.ai.api.loadImages
 import dev.sophi.ai.api.withLeftOutNotes
 
 internal fun Message.toSpring(): org.springframework.ai.chat.messages.Message = when (role) {
-    MessageRole.USER -> if (images.isEmpty()) UserMessage(content) else {
-        val (kept, leftOut) = loadImages(images)
+    MessageRole.USER -> loadImages(images).let { (kept, leftOut) ->
         UserMessage.builder()
             .text(withLeftOutNotes(content, leftOut))
             .media(kept.map { Media(MimeTypeUtils.parseMimeType(it.mimeType), ByteArrayResource(it.bytes)) })

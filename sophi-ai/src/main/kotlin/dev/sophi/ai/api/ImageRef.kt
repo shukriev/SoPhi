@@ -3,27 +3,27 @@ package dev.sophi.ai.api
 import java.nio.file.Files
 import java.nio.file.Path
 
-val IMAGE_MIME_TYPES = setOf("image/png", "image/jpeg", "image/webp", "image/gif")
 const val MAX_IMAGES = 4
 /** 5 MB once base64-encoded, the limit Anthropic checks; raw bytes grow by 4/3. */
 const val MAX_IMAGE_BYTES = 5L * 1024 * 1024 * 3 / 4
 
-/** An image on a user message, by file: providers read and encode it only when they build a request,
- *  so sessions and messages never hold the bytes. */
-data class ImageRef(val path: String, val mimeType: String) {
-    init { require(mimeType in IMAGE_MIME_TYPES) { "Unsupported image type $mimeType" } }
-}
+/** An image on a user message, by file: providers read it only when they build a request, so sessions and
+ *  messages never hold the bytes. Its type comes from the bytes, never from a name or a label. */
+data class ImageRef(val path: String)
 
-/** An image read for one request, with the type its bytes say it is (not the label it came with). */
+/** An image read for one request. */
 internal class LoadedImage(val mimeType: String, val bytes: ByteArray)
 
 /** The type the file's first bytes say, or null for anything that isn't a PNG, JPEG, GIF or WebP. */
-internal fun sniffImageType(b: ByteArray): String? = when {
-    b.size >= 4 && b[0] == 0x89.toByte() && b[1] == 'P'.code.toByte() && b[2] == 'N'.code.toByte() && b[3] == 'G'.code.toByte() -> "image/png"
-    b.size >= 3 && b[0] == 0xFF.toByte() && b[1] == 0xD8.toByte() && b[2] == 0xFF.toByte() -> "image/jpeg"
-    b.size >= 4 && String(b, 0, 4, Charsets.ISO_8859_1) == "GIF8" -> "image/gif"
-    b.size >= 12 && String(b, 0, 4, Charsets.ISO_8859_1) == "RIFF" && String(b, 8, 4, Charsets.ISO_8859_1) == "WEBP" -> "image/webp"
-    else -> null
+internal fun sniffImageType(b: ByteArray): String? {
+    val h = String(b, 0, minOf(b.size, 12), Charsets.ISO_8859_1)
+    return when {
+        h.startsWith("\u0089PNG") -> "image/png"
+        h.startsWith("ÿØÿ") -> "image/jpeg"
+        h.startsWith("GIF8") -> "image/gif"
+        h.startsWith("RIFF") && h.startsWith("WEBP", 8) -> "image/webp"
+        else -> null
+    }
 }
 
 /**
@@ -38,14 +38,12 @@ internal fun loadImages(images: List<ImageRef>): Pair<List<LoadedImage>, List<St
         val file = Path.of(image.path)
         val reason = when {
             !Files.isRegularFile(file) -> "file missing"
-            kept.size == MAX_IMAGES -> "more than 4 images"
             runCatching { Files.size(file) }.getOrDefault(0L) > MAX_IMAGE_BYTES -> "over 5 MB"
             else -> {
                 val bytes = runCatching { Files.readAllBytes(file) }.getOrNull()
                 val type = bytes?.let(::sniffImageType)
                 when {
                     bytes == null -> "can't read the file"
-                    bytes.size > MAX_IMAGE_BYTES -> "over 5 MB"
                     type == null -> "not an image"
                     else -> { kept += LoadedImage(type, bytes); null }
                 }

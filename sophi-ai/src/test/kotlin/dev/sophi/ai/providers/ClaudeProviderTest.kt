@@ -176,7 +176,7 @@ class ClaudeProviderTest : FunSpec({
         val png = kotlin.io.path.createTempFile(suffix = ".png").also { it.toFile().writeBytes(byteArrayOf(-119, 80, 78, 71)) }
 
         provider.complete(CompletionRequest(
-            messages = listOf(Message(MessageRole.USER, "look", images = listOf(dev.sophi.ai.api.ImageRef(png.toString(), "image/png")))),
+            messages = listOf(Message(MessageRole.USER, "look", images = listOf(dev.sophi.ai.api.ImageRef(png.toString())))),
             model = "claude-opus-4-8"
         ))
 

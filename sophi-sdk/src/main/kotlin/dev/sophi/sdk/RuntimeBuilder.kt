@@ -279,8 +279,8 @@ class RuntimeBuilder {
     private var supportsImagesFn: ((String) -> Boolean)? = null
 
     /**
-     * Whether [model] can see images, asked at each turn's start with the current model (so [SophiRuntime.switchModel]
-     * applies). Default: the [modelCatalog]'s vision flag (by id, else a local build's base model); false without a catalog,
+     * Whether [model] can see images, asked for every request with the current model (so [SophiRuntime.switchModel]
+     * applies at once). Default: the [modelCatalog]'s vision flag (by id, else a local build's base model); false without a catalog,
      * so a model nobody vouched for only ever gets the text.
      */
     fun supportsImages(fn: (model: String) -> Boolean): RuntimeBuilder = apply { supportsImagesFn = fn }

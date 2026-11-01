@@ -273,7 +273,7 @@ class ContextCompactorTest : FunSpec({
 
     test("images count toward compaction and show as [image]") {
         val s = AgentSession(id = "s-img")
-        val meta = dev.sophi.core.session.imagesMetadata(List(4) { dev.sophi.ai.api.ImageRef("/tmp/x$it.png", "image/png") })
+        val meta = dev.sophi.core.session.imagesMetadata(List(4) { dev.sophi.ai.api.ImageRef("/tmp/x$it.png") })
         repeat(6) { s.append(EntryRole.USER, "q$it", meta); s.append(EntryRole.ASSISTANT, "a$it") }
         // 12 short entries: text alone is far below half of a 40,000-token window; 24 images at 1,500 each are not.
         ContextCompactor(provider).needsCompaction(s, config.copy(maxBranchLength = 1000), 40_000) shouldBe true

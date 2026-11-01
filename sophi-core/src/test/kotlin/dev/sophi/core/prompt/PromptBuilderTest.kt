@@ -118,8 +118,8 @@ class PromptBuilderTest : FunSpec({
         msgs[0].content shouldBe "install deps\n\ntry yarn"
     }
 
-    val shot = dev.sophi.ai.api.ImageRef("/tmp/a.png", "image/png")
-    val other = dev.sophi.ai.api.ImageRef("/tmp/b.jpg", "image/jpeg")
+    val shot = dev.sophi.ai.api.ImageRef("/tmp/a.png")
+    val other = dev.sophi.ai.api.ImageRef("/tmp/b.jpg")
 
     test("user entry images become Message images") {
         val msgs = PromptBuilder.build(listOf(entry(EntryRole.USER, "look", dev.sophi.core.session.imagesMetadata(listOf(shot)))))

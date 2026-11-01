@@ -17,7 +17,7 @@ import io.mockk.mockk
 
 class AgentLoopImagesTest : FunSpec({
     val config = AgentConfig(model = "test-model", systemPrompt = "You are helpful.")
-    val shot = ImageRef("/tmp/sophi-test-shot.png", "image/png")
+    val shot = ImageRef("/tmp/sophi-test-shot.png")
     val requests = mutableListOf<CompletionRequest>()
     val saved = mutableListOf<AgentSession>()
 
@@ -59,7 +59,7 @@ class AgentLoopImagesTest : FunSpec({
     }
 
     test("deleted image file: the turn still runs and the request carries the reference for the provider to note") {
-        val gone = ImageRef("/nope/deleted.png", "image/png")
+        val gone = ImageRef("/nope/deleted.png")
         loop(true).turn(AgentSession(id = "s"), "look", config, images = listOf(gone))
         requests.single().messages.last().images shouldBe listOf(gone)
         saved.last().branch().last().content shouldBe "seen"

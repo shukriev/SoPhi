@@ -44,7 +44,7 @@ private fun run(fixture: String, type: String = "openai-compat", tools: List<Too
 class OpenAICompatContractTest : FunSpec({
     test("streaming sends image_url data URL") {
         val png = kotlin.io.path.createTempFile(suffix = ".png").also { it.toFile().writeBytes(byteArrayOf(-119, 80, 78, 71)) }
-        val msg = Message(MessageRole.USER, "look", images = listOf(dev.sophi.ai.api.ImageRef(png.toString(), "image/png")))
+        val msg = Message(MessageRole.USER, "look", images = listOf(dev.sophi.ai.api.ImageRef(png.toString())))
         val body = run("plain-text.sse", messages = listOf(msg)).second
         body shouldContain "\"image_url\""
         body shouldContain "data:image/png;base64,"

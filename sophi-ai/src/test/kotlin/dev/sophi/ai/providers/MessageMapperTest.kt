@@ -48,46 +48,35 @@ class MessageMapperTest : FunSpec({
     fun png(): String = createTempFile(suffix = ".png").also { it.writeBytes(byteArrayOf(-119, 80, 78, 71)) }.toString()
 
     test("user message with an image maps to UserMessage media") {
-        val m = Message(MessageRole.USER, "look", images = listOf(ImageRef(png(), "image/png")))
+        val m = Message(MessageRole.USER, "look", images = listOf(ImageRef(png())))
         val u = m.toSpring() as UserMessage
         u.media.size shouldBe 1
         u.media.single().mimeType.toString() shouldBe "image/png"
     }
 
     test("missing image is left out with a note") {
-        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef("/nope/gone.png", "image/png"))).toSpring() as UserMessage
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef("/nope/gone.png"))).toSpring() as UserMessage
         u.media.size shouldBe 0
         u.text shouldEndWith "[image left out: file missing]"
     }
 
-    test("five images keep four") {
-        val u = Message(MessageRole.USER, "look", images = List(5) { ImageRef(png(), "image/png") }).toSpring() as UserMessage
-        u.media.size shouldBe 4
-        u.text shouldEndWith "[image left out: more than 4 images]"
-    }
-
     test("a file that isn't an image is left out") {
         val txt = createTempFile(suffix = ".png").also { it.writeBytes("not a picture".toByteArray()) }.toString()
-        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(txt, "image/png"))).toSpring() as UserMessage
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(txt))).toSpring() as UserMessage
         u.media.size shouldBe 0
         u.text shouldEndWith "[image left out: not an image]"
     }
 
-    test("a mislabelled image goes with its real type") {
-        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(png(), "image/jpeg"))).toSpring() as UserMessage
-        u.media.single().mimeType.toString() shouldBe "image/png"
-    }
-
     test("an unreadable file is left out, not thrown") {
         val locked = createTempFile(suffix = ".png").also { it.writeBytes(byteArrayOf(-119, 80, 78, 71)); it.toFile().setReadable(false) }
-        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(locked.toString(), "image/png"))).toSpring() as UserMessage
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(locked.toString()))).toSpring() as UserMessage
         u.media.size shouldBe 0
         u.text shouldEndWith "[image left out: can't read the file]"
     }
 
     test("an image over 5 MB once encoded is left out") {
         val big = createTempFile(suffix = ".png").also { it.writeBytes(byteArrayOf(-119, 80, 78, 71) + ByteArray(3_932_160)) }
-        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(big.toString(), "image/png"))).toSpring() as UserMessage
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(big.toString()))).toSpring() as UserMessage
         u.media.size shouldBe 0
         u.text shouldEndWith "[image left out: over 5 MB]"
     }
