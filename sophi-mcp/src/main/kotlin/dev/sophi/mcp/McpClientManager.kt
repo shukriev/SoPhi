@@ -1,14 +1,22 @@
 package dev.sophi.mcp
 
+import dev.sophi.core.credentials.CredentialStore
+import dev.sophi.core.credentials.SecretMask
 import dev.sophi.core.tools.Tool
 import dev.sophi.mcp.config.DEFAULT_DEFER_TOOLS_OVER
 import dev.sophi.mcp.config.McpServerConfig
 import dev.sophi.mcp.config.McpTransport
+import dev.sophi.mcp.auth.signInRequired
+import dev.sophi.mcp.config.MissingSecretException
+import dev.sophi.mcp.config.resolveSecrets
 import kotlinx.coroutines.runBlocking
 
 class McpClientManager(
     private val stdioConnector: McpConnector = StdioMcpConnector(),
-    private val httpConnector: McpConnector = StreamableHttpMcpConnector()
+    private val httpConnector: McpConnector = StreamableHttpMcpConnector(),
+    /** Where `${secret:name}` references in a server's config come from; null = any reference fails that server. */
+    private val credentials: CredentialStore? = null,
+    val mask: SecretMask = SecretMask(),
 ) : AutoCloseable {
 
     private val sessions = mutableMapOf<String, McpSession>()
@@ -31,15 +39,19 @@ class McpClientManager(
             McpTransport.HTTP -> httpConnector
         }
         return try {
-            val session = connector.connect(config)
+            val session = connector.connect(resolveSecrets(config, credentials, mask))
             sessions[config.name] = session
             val safeTools = config.safeTools.toSet()
             val remoteTools = session.listTools()
             val defer = remoteTools.size > deferToolsOver
-            remoteTools.map { McpTool(session, config.name, it, safeTools, deferred = defer) }
+            remoteTools.map { McpTool(session, config.name, it, safeTools, deferred = defer, mask = mask::mask) }
         } catch (e: Exception) {
-            System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: ${e.message}")
-            onFailure(e)
+            val signIn = e.signInRequired()
+            val message = e.message?.let(mask::mask)
+            if (signIn != null) System.err.println("${config.name} needs sign-in — run `sophi mcp login ${config.name}`")
+            else System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: $message")
+            // A secret can't ride out in the exception: callers show its message, and its cause chain may hold the value.
+            onFailure(signIn ?: if (e is MissingSecretException) e else Exception(message))
             emptyList()
         }
     }

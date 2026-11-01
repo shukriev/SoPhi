@@ -185,6 +185,9 @@ internal suspend fun buildCliRuntime(
         learning(LearningConfig(home = opts.learningHome, sessionModel = opts.model))
         schedule(Path.of(opts.scheduleDir))
         // mcpConfig throws on a missing file; sophi-web guards identically today.
+        // ${secret:name} in mcp.json from the Keychain; remote servers sign in with `sophi mcp login` or /mcp login.
+        credentials()
+        onMcpSignInNeeded { server -> onWarning("$server needs you to sign in again — run `sophi mcp login $server`") }
         if (mcpConfigPath.exists()) mcpConfig(mcpConfigPath)
         // Memory (Jane's Theory, experimental): resolve --memory's dependent flags here, but
         // delegate building/probing the embedding provider and JanesPalace to the shared

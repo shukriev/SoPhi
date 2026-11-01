@@ -1,8 +1,11 @@
 package dev.sophi.mcp
 
+import dev.sophi.mcp.auth.McpOAuth
 import dev.sophi.mcp.config.McpServerConfig
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.header
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
@@ -17,10 +20,15 @@ import io.modelcontextprotocol.kotlin.sdk.types.Implementation
  * alongside the SDK [Client] — see the `httpClient` param doc on [SdkMcpSession] for why that's
  * necessary rather than automatic.
  */
-class StreamableHttpMcpConnector : McpConnector {
+/** [auth]: signs requests in for servers that want it (MCP OAuth); null = only [McpServerConfig.headers]. */
+class StreamableHttpMcpConnector(private val auth: McpOAuth? = null) : McpConnector {
     override suspend fun connect(config: McpServerConfig): McpSession {
         val url = requireNotNull(config.url) { "http MCP server '${config.name}' requires a url" }
-        val httpClient = HttpClient { install(SSE) }
+        val httpClient = HttpClient {
+            install(SSE)
+            defaultRequest { config.headers.forEach { (k, v) -> header(k, v) } }
+        }
+        auth?.install(httpClient, config.name)
         val transport = StreamableHttpClientTransport(client = httpClient, url = url)
         val client = Client(clientInfo = Implementation(name = "sophi", version = "1.0.0"))
         client.connect(transport)
