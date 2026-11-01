@@ -7,5 +7,7 @@ data class Message(
     val content: String,
     val toolCallId: String? = null,
     val toolName: String? = null,
-    val toolCalls: List<ToolCall>? = null
+    val toolCalls: List<ToolCall>? = null,
+    /** Only on USER messages; see [ImageRef]. */
+    val images: List<ImageRef> = emptyList()
 )

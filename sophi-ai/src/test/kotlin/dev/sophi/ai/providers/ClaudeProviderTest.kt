@@ -170,6 +170,19 @@ class ClaudeProviderTest : FunSpec({
         (instructions[1] as UserMessage).text shouldBe "hello"
     }
 
+    test("complete() sends a user message's image as media") {
+        val capturedPrompt = slot<Prompt>()
+        every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")
+        val png = kotlin.io.path.createTempFile(suffix = ".png").also { it.toFile().writeBytes(byteArrayOf(-119, 80, 78, 71)) }
+
+        provider.complete(CompletionRequest(
+            messages = listOf(Message(MessageRole.USER, "look", images = listOf(dev.sophi.ai.api.ImageRef(png.toString())))),
+            model = "claude-opus-4-8"
+        ))
+
+        (capturedPrompt.captured.instructions.last() as UserMessage).media.size shouldBe 1
+    }
+
     test("complete() omits SystemMessage when systemPrompt is null") {
         val capturedPrompt = slot<Prompt>()
         every { mockChatModel.call(capture(capturedPrompt)) } returns stubTextResponse("ok")

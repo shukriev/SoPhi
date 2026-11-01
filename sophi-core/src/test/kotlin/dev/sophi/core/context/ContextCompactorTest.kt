@@ -270,4 +270,17 @@ class ContextCompactorTest : FunSpec({
         second.branch()[0].content shouldContain "Old.kt"
         second.branch()[0].content shouldContain "mvn old → exit 0"
     }
+
+    test("images count toward compaction and show as [image]") {
+        val s = AgentSession(id = "s-img")
+        val meta = dev.sophi.core.session.imagesMetadata(List(4) { dev.sophi.ai.api.ImageRef("/tmp/x$it.png") })
+        repeat(6) { s.append(EntryRole.USER, "q$it", meta); s.append(EntryRole.ASSISTANT, "a$it") }
+        // 12 short entries: text alone is far below half of a 40,000-token window; 24 images at 1,500 each are not.
+        ContextCompactor(provider).needsCompaction(s, config.copy(maxBranchLength = 1000), 40_000) shouldBe true
+
+        val prompt = slot<dev.sophi.ai.api.CompletionRequest>()
+        coEvery { provider.complete(capture(prompt)) } returns dev.sophi.ai.api.LLMResponse.Text("sum", dev.sophi.ai.api.TokenUsage(1, 1))
+        ContextCompactor(provider).compact(s, config)
+        prompt.captured.messages.last().content shouldContain "USER: q0 [image] [image] [image] [image]"
+    }
 })

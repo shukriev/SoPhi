@@ -5,6 +5,7 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
+import dev.sophi.core.session.images
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -23,7 +24,8 @@ class ContextCompactor(
     fun needsCompaction(session: AgentSession, config: AgentConfig, windowTokens: Int, keepRecentCount: Int = 4): Boolean {
         val replayable = session.branch().filter { it.metadata["replay"] != "false" }
         if (cutIndex(replayable, keepRecentCount) <= 0) return false
-        return replayable.sumOf { it.content.length } / 4 > windowTokens * 0.5 || replayable.size > config.maxBranchLength
+        val tokens = replayable.sumOf { it.content.length } / 4 + replayable.sumOf { it.images().size } * IMAGE_TOKEN_ESTIMATE
+        return tokens > windowTokens * 0.5 || replayable.size > config.maxBranchLength
     }
 
     /** Start of the kept tail, moved back to a USER entry (a strict template rejects a leading ASSISTANT); <= 0 = nothing to do. */
@@ -53,7 +55,7 @@ class ContextCompactor(
         val toKeep = replayable.subList(cut, replayable.size)
         val firstKeptId = toKeep.first().id
 
-        val transcript = toCompact.joinToString("\n") { entry -> "${entry.role.name}: ${entry.content}" }
+        val transcript = toCompact.joinToString("\n") { entry -> "${entry.role.name}: ${entry.content}" + " [image]".repeat(entry.images().size) }
         // The WorkingSet reads the persisted tool rounds too, so exact files/commands survive the cut.
         // A previous cross-turn summary carries its own WorkingSet (the rounds it covered are gone from the branch).
         val previous = entries.firstOrNull()?.takeIf { it.metadata["_compacted"] == "true" }
@@ -98,3 +100,6 @@ class ContextCompactor(
         )
     }
 }
+
+/** A rough per-image cost for the compaction check; real usage still comes from the provider. */
+internal const val IMAGE_TOKEN_ESTIMATE = 1_500

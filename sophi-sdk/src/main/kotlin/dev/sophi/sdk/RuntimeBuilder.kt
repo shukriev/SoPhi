@@ -296,6 +296,15 @@ class RuntimeBuilder {
      */
     fun contextWindowTokens(tokens: Int): RuntimeBuilder = apply { contextWindowTokens = tokens }
 
+    private var supportsImagesFn: ((String) -> Boolean)? = null
+
+    /**
+     * Whether [model] can see images, asked for every request with the current model (so [SophiRuntime.switchModel]
+     * applies at once). Default: the [modelCatalog]'s vision flag (by id, else a local build's base model); false without a catalog,
+     * so a model nobody vouched for only ever gets the text.
+     */
+    fun supportsImages(fn: (model: String) -> Boolean): RuntimeBuilder = apply { supportsImagesFn = fn }
+
     /**
      * Enables Jane's Theory long-term memory (experimental). [embeddingBaseUrl] is probed once at
      * [build] time; on failure [onWarning] fires and memory stays off for this runtime — it never
@@ -419,7 +428,12 @@ class RuntimeBuilder {
                 }
             } ?: { _, _ -> },
             checkpoints = checkpointStore,
-            audit = auditSink, permissions = permissionRules
+            audit = auditSink, permissions = permissionRules,
+            supportsImages = {
+                val current = metered.activeModel
+                supportsImagesFn?.invoke(current)
+                    ?: (modelCatalog?.find(current, catalogProvider)?.vision ?: modelCatalog?.base(current)?.vision ?: false)
+            }
         )
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))

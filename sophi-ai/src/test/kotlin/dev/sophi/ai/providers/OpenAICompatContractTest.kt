@@ -19,7 +19,7 @@ import java.net.InetSocketAddress
 private val readFileTool = ToolDefinition("read_file", "Read a file", """{"type":"object","properties":{"path":{"type":"string"}}}""")
 
 /** Streams the [fixture] from src/test/resources/contract through [type]'s provider; returns the events and the request body sent. */
-private fun run(fixture: String, type: String = "openai-compat", tools: List<ToolDefinition> = emptyList()): Pair<List<StreamEvent>, String> {
+private fun run(fixture: String, type: String = "openai-compat", tools: List<ToolDefinition> = emptyList(), messages: List<Message> = listOf(Message(MessageRole.USER, "hi"))): Pair<List<StreamEvent>, String> {
     val body = StringBuilder()
     val sse = object {}.javaClass.getResource("/contract/$fixture")!!.readText()
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -33,7 +33,7 @@ private fun run(fixture: String, type: String = "openai-compat", tools: List<Too
     try {
         val provider = buildProviderFromType(type, null, "http://127.0.0.1:${server.address.port}/v1", "m", maxRetries = 0)
         val events = runBlocking {
-            provider.stream(CompletionRequest(messages = listOf(Message(MessageRole.USER, "hi")), model = "m", maxTokens = 50, tools = tools)).toList()
+            provider.stream(CompletionRequest(messages = messages, model = "m", maxTokens = 50, tools = tools)).toList()
         }
         return events to body.toString()
     } finally {
@@ -42,6 +42,14 @@ private fun run(fixture: String, type: String = "openai-compat", tools: List<Too
 }
 
 class OpenAICompatContractTest : FunSpec({
+    test("streaming sends image_url data URL") {
+        val png = kotlin.io.path.createTempFile(suffix = ".png").also { it.toFile().writeBytes(byteArrayOf(-119, 80, 78, 71)) }
+        val msg = Message(MessageRole.USER, "look", images = listOf(dev.sophi.ai.api.ImageRef(png.toString())))
+        val body = run("plain-text.sse", messages = listOf(msg)).second
+        body shouldContain "\"image_url\""
+        body shouldContain "data:image/png;base64,"
+    }
+
     test("plain text streams content then finish") {
         val (events, _) = run("plain-text.sse")
         events shouldBe listOf(StreamEvent.Content("Hello"), StreamEvent.Content(", world"), StreamEvent.Finish("stop"))

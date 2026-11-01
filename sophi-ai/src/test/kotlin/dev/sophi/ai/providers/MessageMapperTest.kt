@@ -5,7 +5,12 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.ToolCall
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldEndWith
 import org.springframework.ai.chat.messages.SystemMessage
+import org.springframework.ai.chat.messages.UserMessage
+import dev.sophi.ai.api.ImageRef
+import kotlin.io.path.createTempFile
+import kotlin.io.path.writeBytes
 
 // Compacted message shapes carry no SYSTEM role, so toSpring() (Claude path) yields no SystemMessage.
 // OpenAICompat streaming maps through toRawMessageParam, not toSpring(), so it is not covered here.
@@ -38,5 +43,41 @@ class MessageMapperTest : FunSpec({
             Message(MessageRole.USER, "next"),
             Message(MessageRole.ASSISTANT, "ok")
         ))
+    }
+
+    fun png(): String = createTempFile(suffix = ".png").also { it.writeBytes(byteArrayOf(-119, 80, 78, 71)) }.toString()
+
+    test("user message with an image maps to UserMessage media") {
+        val m = Message(MessageRole.USER, "look", images = listOf(ImageRef(png())))
+        val u = m.toSpring() as UserMessage
+        u.media.size shouldBe 1
+        u.media.single().mimeType.toString() shouldBe "image/png"
+    }
+
+    test("missing image is left out with a note") {
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef("/nope/gone.png"))).toSpring() as UserMessage
+        u.media.size shouldBe 0
+        u.text shouldEndWith "[image left out: file missing]"
+    }
+
+    test("a file that isn't an image is left out") {
+        val txt = createTempFile(suffix = ".png").also { it.writeBytes("not a picture".toByteArray()) }.toString()
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(txt))).toSpring() as UserMessage
+        u.media.size shouldBe 0
+        u.text shouldEndWith "[image left out: not an image]"
+    }
+
+    test("an unreadable file is left out, not thrown") {
+        val locked = createTempFile(suffix = ".png").also { it.writeBytes(byteArrayOf(-119, 80, 78, 71)); it.toFile().setReadable(false) }
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(locked.toString()))).toSpring() as UserMessage
+        u.media.size shouldBe 0
+        u.text shouldEndWith "[image left out: can't read the file]"
+    }
+
+    test("an image over 5 MB once encoded is left out") {
+        val big = createTempFile(suffix = ".png").also { it.writeBytes(byteArrayOf(-119, 80, 78, 71) + ByteArray(3_932_160)) }
+        val u = Message(MessageRole.USER, "look", images = listOf(ImageRef(big.toString()))).toSpring() as UserMessage
+        u.media.size shouldBe 0
+        u.text shouldEndWith "[image left out: over 5 MB]"
     }
 })

@@ -6,6 +6,9 @@ import com.openai.core.JsonValue
 import com.openai.models.FunctionDefinition
 import com.openai.models.FunctionParameters
 import com.openai.models.chat.completions.ChatCompletionAssistantMessageParam
+import com.openai.models.chat.completions.ChatCompletionContentPart
+import com.openai.models.chat.completions.ChatCompletionContentPartImage
+import com.openai.models.chat.completions.ChatCompletionContentPartText
 import com.openai.models.chat.completions.ChatCompletionCreateParams
 import com.openai.models.chat.completions.ChatCompletionFunctionTool
 import com.openai.models.chat.completions.ChatCompletionMessageFunctionToolCall
@@ -177,7 +180,19 @@ class OpenAICompatProvider(
             ChatCompletionSystemMessageParam.builder().content(content).build()
         )
         MessageRole.USER -> ChatCompletionMessageParam.ofUser(
-            ChatCompletionUserMessageParam.builder().content(content).build()
+            if (images.isEmpty()) ChatCompletionUserMessageParam.builder().content(content).build()
+            else {
+                val (kept, leftOut) = dev.sophi.ai.api.loadImages(images)
+                val parts = listOf(ChatCompletionContentPart.ofText(
+                    ChatCompletionContentPartText.builder().text(dev.sophi.ai.api.withLeftOutNotes(content, leftOut)).build()
+                )) + kept.map { image ->
+                    val data = java.util.Base64.getEncoder().encodeToString(image.bytes)
+                    ChatCompletionContentPart.ofImageUrl(ChatCompletionContentPartImage.builder()
+                        .imageUrl(ChatCompletionContentPartImage.ImageUrl.builder().url("data:${image.mimeType};base64,$data").build())
+                        .build())
+                }
+                ChatCompletionUserMessageParam.builder().contentOfArrayOfContentParts(parts).build()
+            }
         )
         MessageRole.ASSISTANT -> {
             val assistantBuilder = ChatCompletionAssistantMessageParam.builder().content(content)
