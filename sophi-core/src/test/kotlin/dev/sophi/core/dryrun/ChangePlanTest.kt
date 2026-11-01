@@ -29,6 +29,14 @@ class ChangePlanTest : FunSpec({
         recorder.steps.forEach { recorder.steps.single { s -> s.n == it.n }.tool shouldBe it.tool }
     }
 
+    test("recording the same call twice keeps one step") {
+        val r = PlanRecorder(PlanFirst.OUTSIDE)
+        r.record("okta__deactivate_user", """{"id":"1"}""", RiskLevel.DESTRUCTIVE, false) shouldBe 1
+        r.record("okta__deactivate_user", """{"id":"2"}""", RiskLevel.DESTRUCTIVE, false) shouldBe 2
+        r.record("okta__deactivate_user", """{"id":"1"}""", RiskLevel.DESTRUCTIVE, false) shouldBe 1
+        r.steps.size shouldBe 2
+    }
+
     test("stepsHash ignores dropped steps and changes when an argument changes") {
         val p = plan(steps = arrayOf("okta__a" to """{"id":"1"}""", "github__b" to """{"u":"j"}"""))
         val withDrop = p.copy(dropped = setOf(2))

@@ -60,12 +60,12 @@ class TurnController(
         val editor = SteerEditor(inbox)
         // The draft is taken once coroutineScope returns, i.e. after a cancelled turn has settled:
         // a follow-up cancelled before its loop started is put back in the inbox only then.
+        var recorded: dev.sophi.core.dryrun.ChangePlan? = null
         return coroutineScope {
             var presenter = StreamingTurnPresenter(autoExitTokenView)
             val rounds = mutableListOf<TurnEvent.RoundUsage>()
             val usdBefore = runtime.costMeter.totalUsd
             val todosBefore = currentTodos(session)
-            var recorded: dev.sophi.core.dryrun.ChangePlan? = null
 
             fun render() {
                 val queue = editor.render()
@@ -148,7 +148,6 @@ class TurnController(
                         output(ResponseRenderer.renderText(presenter.finalText()))
                         printUsage(rounds, usdBefore, result)
                         currentTodos(result)?.takeIf { it != todosBefore }?.let { output(TextColors.gray(renderTodos(it))) }
-                        recorded?.let { planFirst?.review(it) }
                         result
                     }
                 }
@@ -164,6 +163,10 @@ class TurnController(
                     session
                 }
             }
-        }.also { draft = editor.takeDraft() }
+        }.also { settled ->
+            draft = editor.takeDraft()
+            // Only now, with the key reader joined: it hands the terminal back as it stops.
+            recorded?.let { planFirst?.review(it, settled) }
+        }
     }
 }

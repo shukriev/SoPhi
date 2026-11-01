@@ -31,6 +31,10 @@ class PlanReplayer(
             throw PlanNotRunnableException("This plan changed after it was approved")
         }
         val steps = plan.approvedSteps()
+        // Checked before anything runs, so a plan opened where its servers aren't connected stays approved for later.
+        steps.map { it.tool }.distinct().filter { registry.getOrNull(it) == null }.takeIf { it.isNotEmpty() }?.let {
+            throw PlanNotRunnableException("This plan needs tools that aren't connected here: ${it.joinToString(", ")}")
+        }
         val results = mutableListOf<StepResult>()
         var state = plan.copy(status = PlanStatus.RUNNING, results = emptyList()).also(store::save)
         fun finish(status: PlanStatus): ChangePlan {
@@ -48,6 +52,12 @@ class PlanReplayer(
                 val result = if (tool == null) "Error: Tool '${step.tool}' not found" else try {
                     tool.execute(step.args)
                 } catch (e: CancellationException) {
+                    // Stopped mid-call: the request may already have reached the other system.
+                    results += StepResult(step.n, "cancelled", "Stopped while running; it may have run")
+                    audit?.recordQuietly {
+                        auditEntry(plan.actor, plan.tenant, plan.sessionId, step.tool, step.risk, step.args, "plan",
+                            "cancelled", "", start, plan = "${plan.id}#${step.n}")
+                    }
                     throw e
                 } catch (e: Exception) {
                     "Error: ${e.message}"

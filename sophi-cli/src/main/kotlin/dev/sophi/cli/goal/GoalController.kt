@@ -111,9 +111,8 @@ class GoalController(
                 escDeferred.onAwait { runDeferred.cancel(); null }
             }
         } }
-        recorded?.let { planFirst?.review(it) }
 
-        return when {
+        val ran = when {
             outcome == null -> {
                 session.append(
                     EntryRole.ASSISTANT,
@@ -149,5 +148,8 @@ class GoalController(
                 GoalRunResult.Ran(session)
             }
         }
+        // After the goal's own summary, so the replay note is the session's newest entry.
+        recorded?.let { planFirst?.review(it, session) }
+        return ran
     }
 }

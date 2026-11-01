@@ -18,7 +18,7 @@ data class PlanRead(val tool: String, val args: String, val result: String, val 
 @Serializable
 data class PlanStep(val n: Int, val tool: String, val args: String, val risk: RiskLevel, val allowedByRule: Boolean)
 
-/** [outcome]: `ok`, `error` or `not-run`. */
+/** [outcome]: `ok`, `error`, `cancelled` (stopped mid-call, may have run) or `not-run`. */
 @Serializable
 data class StepResult(val n: Int, val outcome: String, val result: String)
 
@@ -55,6 +55,7 @@ fun ChangePlan.replayReport(): String = "Plan $id: " + results.joinToString(" ·
 private fun StepResult.label() = when (outcome) {
     "ok" -> "$n ok"
     "error" -> "$n failed: ${result.removePrefix("Error: ").take(200)}"
+    "cancelled" -> "$n stopped mid-call (it may have run)"
     else -> "$n not run"
 }
 

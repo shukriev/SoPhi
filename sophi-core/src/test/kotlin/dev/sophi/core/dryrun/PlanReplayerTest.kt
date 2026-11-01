@@ -77,12 +77,6 @@ class PlanReplayerTest : FunSpec({
         out.results.single().result shouldBe "Error: boom"
     }
 
-    test("a missing tool fails its step") {
-        val s = store()
-        val out = PlanReplayer(ToolRegistry(), s).run(approved("gone__x" to "{}").also(s::save))
-        out.results.single().result shouldBe "Error: Tool 'gone__x' not found"
-    }
-
     test("a plan edited after approval doesn't run") {
         val a = Recording("a__x")
         val s = store()
@@ -142,7 +136,30 @@ class PlanReplayerTest : FunSpec({
         }
         val saved = s.get("plan_t")!!
         saved.status shouldBe PlanStatus.CANCELLED
-        saved.results.map { it.n to it.outcome } shouldBe listOf(1 to "ok", 2 to "not-run", 3 to "not-run")
+        saved.results.map { it.n to it.outcome } shouldBe listOf(1 to "ok", 2 to "cancelled", 3 to "not-run")
         c.calls shouldBe emptyList()
+    }
+
+    test("a step stopped mid-call is audited as cancelled") {
+        val entries = mutableListOf<AuditEntry>()
+        val started = CompletableDeferred<Unit>()
+        val a = Recording("a__x") { started.complete(Unit); awaitCancellation() }
+        val s = store()
+        coroutineScope {
+            val job = async { PlanReplayer(ToolRegistry().register(a), s, audit = { entries += it }).run(approved("a__x" to "{}").also(s::save)) }
+            started.await()
+            job.cancelAndJoin()
+        }
+        entries.single().let { it.outcome shouldBe "cancelled"; it.plan shouldBe "plan_t#1" }
+    }
+
+    test("a plan whose tools aren't connected doesn't start and stays approved") {
+        val a = Recording("a__x")
+        val s = store()
+        val plan = approved("a__x" to "{}", "gone__y" to "{}").also(s::save)
+        shouldThrow<PlanNotRunnableException> { PlanReplayer(ToolRegistry().register(a), s).run(plan) }
+            .message shouldBe "This plan needs tools that aren't connected here: gone__y"
+        a.calls shouldBe emptyList()
+        s.get("plan_t")!!.status shouldBe PlanStatus.APPROVED
     }
 })

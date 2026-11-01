@@ -285,14 +285,6 @@ class SophiRuntime internal constructor(
         }
     }
 
-    /**
-     * The one thing a host calls when a session/conversation is over — instead of separately
-     * wiring [learningPlugin] and [memoryPlugin] itself. Derives memory's outcome-attribution
-     * success signal from learning's cheap mechanical outcome ("completed" vs "error"), not the
-     * optional LLM-judged verdict, since the mechanical signal is always available regardless of
-     * whether that (LLM-cost) evaluator is configured. A no-op for memory when [learningPlugin]
-     * isn't configured — there is no outcome signal to give it, so none is fabricated.
-     */
     private fun plansOrThrow(): ChangePlanStore =
         planFirst?.store ?: throw IllegalStateException("plan-first isn't enabled on this runtime")
 
@@ -330,14 +322,17 @@ class SophiRuntime internal constructor(
         return approved
     }
 
-    /** Replays an approved plan, then notes the outcome in the plan's session (if it still exists). */
-    suspend fun runPlan(id: String, onStep: suspend (StepResult) -> Unit = {}): ChangePlan {
+    /**
+     * Replays an approved plan, then notes the outcome in [session] — pass the host's live session object, so its next
+     * turn carries the note — or, when null, in the plan's session on disk (if it still exists).
+     */
+    suspend fun runPlan(id: String, session: AgentSession? = null, onStep: suspend (StepResult) -> Unit = {}): ChangePlan {
         val plan = planOrThrow(id)
         val checkpoint: (suspend () -> Unit)? = checkpointStore?.let { cs -> { cs.snapshot() } }
         val done = try {
             PlanReplayer(toolRegistry, plansOrThrow(), auditSink, checkpoint).run(plan, onStep)
         } finally {
-            withContext(NonCancellable) { plansOrThrow().get(id)?.takeIf { it.results.isNotEmpty() }?.let(::notePlanOutcome) }
+            withContext(NonCancellable) { plansOrThrow().get(id)?.takeIf { it.results.isNotEmpty() }?.let { notePlanOutcome(it, session) } }
         }
         return done
     }
@@ -362,9 +357,9 @@ class SophiRuntime internal constructor(
     /** Secret values masked, for showing plan arguments. */
     fun maskSecrets(text: String): String = mcpClientManager?.mask?.mask(text) ?: text
 
-    private fun notePlanOutcome(plan: ChangePlan) {
+    private fun notePlanOutcome(plan: ChangePlan, live: AgentSession?) {
         runCatching {
-            val session = sessionManager.load(plan.sessionId)
+            val session = live ?: sessionManager.load(plan.sessionId)
             session.append(EntryRole.ASSISTANT, plan.replayReport(), mapOf("plan" to plan.id))
             sessionManager.save(session)
         }
@@ -376,6 +371,14 @@ class SophiRuntime internal constructor(
         }
     }
 
+    /**
+     * The one thing a host calls when a session/conversation is over — instead of separately
+     * wiring [learningPlugin] and [memoryPlugin] itself. Derives memory's outcome-attribution
+     * success signal from learning's cheap mechanical outcome ("completed" vs "error"), not the
+     * optional LLM-judged verdict, since the mechanical signal is always available regardless of
+     * whether that (LLM-cost) evaluator is configured. A no-op for memory when [learningPlugin]
+     * isn't configured — there is no outcome signal to give it, so none is fabricated.
+     */
     suspend fun recordSessionEnd(sessionId: String) {
         val mechanical = learningPlugin?.let { runCatching { it.recordSessionEnd(sessionId) }.getOrNull() }
         mechanical?.let { memoryPlugin?.recordSessionEnd(sessionId, success = it.outcome == "completed") }

@@ -84,4 +84,11 @@ internal fun buildScheduleEngine(
 /** Scheduled runs start from launchd, not a project directory: their MCP servers are the user-wide ones. */
 internal fun defaultScheduleMcpConfig(): Path = Path.of(System.getProperty("user.home"), ".sophi", "mcp.json")
 
+/** The plan-first choices saved with /settings, for scheduled runs (they take no start flags). */
+internal fun savedPlanFirst(store: CliSettingsStore = CliSettingsStore {}): Pair<dev.sophi.core.dryrun.PlanFirst, Boolean> {
+    val saved = store.saved()
+    val mode = saved["plan-first"]?.let { v -> dev.sophi.core.dryrun.PlanFirst.entries.firstOrNull { it.name.equals(v, ignoreCase = true) } }
+    return (mode ?: dev.sophi.core.dryrun.PlanFirst.OUTSIDE) to (saved["trust-read-only-hints"]?.toBooleanStrictOrNull() ?: true)
+}
+
 internal fun defaultScheduleDir(): Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule")

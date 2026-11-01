@@ -46,7 +46,8 @@ class ScheduleRunDueCommand : CliktCommand(
             Path.of(scheduleDirStr), Path.of(sessionsDirStr), Path.of(agentsDirStr), braveApiKeyOption,
             taskTimeoutSeconds, maxTokens,
             llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries,
-                mcpConfigPath = defaultScheduleMcpConfig()
+                mcpConfigPath = defaultScheduleMcpConfig(),
+                planFirst = savedPlanFirst().first, trustReadOnlyHints = savedPlanFirst().second,
         ) }
         engine.tickOnce(now)
     }

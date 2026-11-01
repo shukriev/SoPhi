@@ -57,7 +57,7 @@ class PlanCommand(
     suspend fun run(goal: String, session: AgentSession): AgentSession {
         var recorded: dev.sophi.core.dryrun.ChangePlan? = null
         val result = runPlan(goal, session) { recorded = it }
-        recorded?.let { planFirst?.review(it) }
+        recorded?.let { planFirst?.review(it, result) }
         return result
     }
 

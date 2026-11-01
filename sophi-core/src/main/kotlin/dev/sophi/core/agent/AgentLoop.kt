@@ -660,7 +660,7 @@ class AgentLoop(
                         // Unattended, only tools the run was granted may be planned; the rest are denied as today.
                         change && (!unattended || preAllowed) ->
                             held[call.id] = recorder.record(call.name, call.argumentsJson, req.riskLevel, preAllowed)
-                        hinted && effect == null -> hintedReads += call.id
+                        hinted && effect == null && (!unattended || preAllowed) -> hintedReads += call.id
                     }
                 }
             }

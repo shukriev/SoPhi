@@ -20,8 +20,12 @@ class PlanRecorder(val mode: PlanFirst, val trustReadOnlyHints: Boolean = true) 
     val steps: List<PlanStep> get() = synchronized(lock) { _steps.toList() }
     val reads: List<PlanRead> get() = synchronized(lock) { _reads.toList() }
 
-    /** Records a change and returns its step number, from 1. */
+    /**
+     * Records a change and returns its step number, from 1. The same call again (a /goal replan or escalation
+     * re-running a step) returns the step it already has, so a plan never holds one change twice.
+     */
     fun record(tool: String, args: String, risk: RiskLevel, allowedByRule: Boolean): Int = synchronized(lock) {
+        _steps.firstOrNull { it.tool == tool && it.args == args }?.let { return it.n }
         val n = _steps.size + 1
         _steps += PlanStep(n, tool, args, risk, allowedByRule)
         n

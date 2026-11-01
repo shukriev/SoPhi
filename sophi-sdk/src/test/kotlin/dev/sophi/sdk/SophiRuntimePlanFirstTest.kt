@@ -110,6 +110,17 @@ class SophiRuntimePlanFirstTest : FunSpec({
         note.content shouldContain "1 ok"
     }
 
+    test("the replay note lands on the caller's live session, so the next turn sees it") {
+        val okta = OutsideTool("okta__deactivate_user")
+        val rt = runtime(provider(use(ToolCall("c1", "okta__deactivate_user", "{}")), text), okta)
+        val live = runBlocking { rt.streamTurn(rt.sessionManager.load(rt.newSession()), "offboard jane") {} }
+        val id = rt.plans().single().id
+        rt.approvePlan(id)
+        runBlocking { rt.runPlan(id, session = live) }
+        live.tip!!.metadata["plan"] shouldBe id
+        rt.sessionManager.load(live.id).tip!!.id shouldBe live.tip!!.id
+    }
+
     test("approvePlan with dropped steps runs only the rest") {
         val okta = OutsideTool("okta__deactivate_user")
         val gh = OutsideTool("github__remove_member")

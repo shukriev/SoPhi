@@ -120,16 +120,20 @@ private fun resultLine(plan: ChangePlan, r: StepResult): String {
     return when (r.outcome) {
         "ok" -> "✓ ${r.n} $system $tool"
         "error" -> "✗ ${r.n} $system $tool: ${r.result.removePrefix("Error: ").take(200)}"
+        "cancelled" -> "? ${r.n} $system $tool stopped mid-call — it may have run"
         else -> "· ${r.n} $system $tool not run"
     }
 }
 
 /** Carries out [choice]: approve and replay (ESC stops it), schedule, keep, or cancel. */
-internal suspend fun applyPlanChoice(runtime: SophiRuntime, plan: ChangePlan, choice: PlanChoice, input: InputSource, output: (String) -> Unit) {
+internal suspend fun applyPlanChoice(
+    runtime: SophiRuntime, plan: ChangePlan, choice: PlanChoice, input: InputSource, output: (String) -> Unit,
+    session: dev.sophi.core.session.AgentSession? = null,
+) {
     when (choice) {
         is PlanChoice.Approve -> {
             runtime.approvePlan(plan.id, choice.dropped)
-            runApprovedPlan(runtime, plan.id, input, output)
+            runApprovedPlan(runtime, plan.id, input, output, session)
         }
         is PlanChoice.RunAt -> {
             runtime.approvePlan(plan.id, choice.dropped)
@@ -142,10 +146,12 @@ internal suspend fun applyPlanChoice(runtime: SophiRuntime, plan: ChangePlan, ch
     }
 }
 
-/** Replays an approved plan, one line per step; ESC stops it between steps' results. */
-internal suspend fun runApprovedPlan(runtime: SophiRuntime, id: String, input: InputSource, output: (String) -> Unit) = coroutineScope {
+/** Replays an approved plan, one line per step; ESC stops it. The outcome note goes on [session] when given. */
+internal suspend fun runApprovedPlan(
+    runtime: SophiRuntime, id: String, input: InputSource, output: (String) -> Unit, session: dev.sophi.core.session.AgentSession? = null,
+) = coroutineScope {
     val plan = runtime.plan(id) ?: return@coroutineScope output("No plan $id")
-    val run = async { runtime.runPlan(id) { output(resultLine(plan, it)) } }
+    val run = async { runtime.runPlan(id, session) { output(resultLine(plan, it)) } }
     val esc = launch { input.awaitEsc(); run.cancel() }
     try {
         val done = run.await()
@@ -168,6 +174,12 @@ class PlanFirstHost internal constructor(private val runtime: SophiRuntime, priv
     /** `/plans [list] | show|approve|run|cancel <id>`. */
     suspend fun command(action: String?, id: String?) = plansAction(action, id, runtime, input, output)
 
-    suspend fun review(plan: ChangePlan) =
-        applyPlanChoice(runtime, plan, reviewPlan(plan, input, output, runtime::maskSecrets), input, output)
+    /** Shows [plan] and carries out the choice; a replay's outcome is noted on [session], the host's live one. */
+    suspend fun review(plan: ChangePlan, session: dev.sophi.core.session.AgentSession? = null) {
+        try {
+            applyPlanChoice(runtime, plan, reviewPlan(plan, input, output, runtime::maskSecrets), input, output, session)
+        } catch (e: IllegalStateException) {
+            output(e.message ?: "That plan can't be changed now") // e.g. approved or cancelled elsewhere meanwhile
+        }
+    }
 }

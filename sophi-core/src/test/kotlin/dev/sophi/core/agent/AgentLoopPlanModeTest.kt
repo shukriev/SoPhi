@@ -230,6 +230,18 @@ class AgentLoopPlanModeTest : FunSpec({
         b.executed shouldBe 0
     }
 
+    test("unattended: a hinted read the run wasn't granted is denied, a granted one runs") {
+        val find = FakeTool("okta__find_user", where = Reach.OUTSIDE_HINTED_READ)
+        val search = FakeTool("slack__search", where = Reach.OUTSIDE_HINTED_READ)
+        val (provider, sm) = scripted(use(ToolCall("c1", "okta__find_user", "{}"), ToolCall("c2", "slack__search", "{}")), done)
+        withContext(PlanRecorder(PlanFirst.OUTSIDE) + Unattended) {
+            loop(provider, sm, find, search, policy = ConfirmationPolicy.DENY_ALL, grants = setOf("slack__search"))
+                .turn(AgentSession(id = "s"), "go", config)
+        }
+        find.executed shouldBe 0
+        search.executed shouldBe 1
+    }
+
     test("a nested loop's outside change lands in the parent turn's recorder") {
         val deactivate = FakeTool("okta__deactivate_user")
         val (innerProvider, innerSm) = scripted(use(ToolCall("i1", "okta__deactivate_user", "{}")), done)
