@@ -200,10 +200,15 @@ class SlashHandler(
             "model" -> { handleModel(arg); session }
             "jobs" -> { handleJobs(arg); session }
             "mcp" -> { handleMcp(arg); session }
+            "plans" -> {
+                val words = arg?.split(" ")?.filter { it.isNotBlank() }.orEmpty()
+                planFirst?.command(words.getOrNull(0), words.getOrNull(1)) ?: output("Plan-first is off in this session.")
+                session
+            }
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /mcp"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /mcp /plans"
                 )
                 session
             }

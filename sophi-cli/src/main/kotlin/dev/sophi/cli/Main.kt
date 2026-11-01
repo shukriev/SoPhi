@@ -15,6 +15,7 @@ fun main(args: Array<String>) {
         .subcommands(
             McpServeCommand(),
             McpCommand().subcommands(McpLoginCommand(), McpLogoutCommand()),
+            PlansCommand(),
             SecretCommand().subcommands(SecretSetCommand(), SecretListCommand(), SecretRemoveCommand()),
             MemoryCommand(),
             LessonsCommand().subcommands(LessonsListCommand(), LessonsArchiveCommand(), LessonsForgetCommand()),

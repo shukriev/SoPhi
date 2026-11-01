@@ -165,6 +165,9 @@ class PlanFirstHost internal constructor(private val runtime: SophiRuntime, priv
     suspend fun <T> scope(sessionId: String, task: String, block: suspend () -> T): Pair<T, ChangePlan?> =
         runtime.planFirstScope(sessionId, task, block)
 
+    /** `/plans [list] | show|approve|run|cancel <id>`. */
+    suspend fun command(action: String?, id: String?) = plansAction(action, id, runtime, input, output)
+
     suspend fun review(plan: ChangePlan) =
         applyPlanChoice(runtime, plan, reviewPlan(plan, input, output, runtime::maskSecrets), input, output)
 }

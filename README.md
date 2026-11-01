@@ -424,6 +424,25 @@ Remote servers that sign in with OAuth (Sentry, Linear, Notion, ...) need no key
 
 Stored values never reach the model: they're masked as `[REDACTED:secret]` in every MCP result and error (values under 8 characters are stored but not masked). A missing `${secret:...}` fails only that server, naming the secret. SDK: `RuntimeBuilder.credentials()` (or `credentials(store)` for your own `CredentialStore`), `SophiRuntime.mcpLogin(config, openBrowser)` / `mcpLogout(name)`.
 
+### Plan first: approve changes before they happen
+
+When a task wants to change something in another system (an MCP tool that isn't read-only), Sophi doesn't do it and doesn't stop to ask either. It records the change and carries on: lookups still run, so the plan has real ids and names. At the end of the turn you see one plan:
+
+```
+offboard jane@acme.com: 3 changes in 3 systems
+Looked up (read-only, already ran):
+  okta find_user → 00u9f… (read-only per server)
+Changes waiting for you:
+  1 okta deactivate_user id=00u9f…
+  2 github remove_org_member org=acme user=jdoe (allowed by your rule)
+  3 slack deactivate_user user=U04…
+[a] approve all  [v] view arguments  [d 1,2] drop steps  [t 18:00] run at a time  [s] save for later  [n] cancel
+```
+
+Nothing changes before you approve, even calls a permission rule or grant would allow. Approving replays exactly those calls (same tools, same arguments) with no model involved, stopping at the first failure; each call is in the audit log with its plan and step. A plan with one change shows the usual allow prompt instead. `t` approves it now and runs it later from the scheduler; a recurring scheduled task that wants to change something leaves a pending plan and tells you instead.
+
+`sophi plans` lists plans; `sophi plans show|approve|run|cancel <id>` (or `/plans ...` in a session). Plans live in `~/.sophi/plans`. Settings (`/settings`): `plan-first` = `outside` (default) / `every` (local changes too) / `off`, and `trust-read-only-hints` (default on: a tool its MCP server marks read-only runs without asking in these turns; list lookups in `safeTools` to rely on your own word instead). Scheduled runs use the servers in `~/.sophi/mcp.json`. SDK: `RuntimeBuilder.planFirst(mode)`, `TurnEvent.PlanReady`, `SophiRuntime.approvePlan` / `runPlan` / `cancelPlan` / `schedulePlan` / `planFirstScope`.
+
 ### Large MCP servers (deferred tools)
 
 An MCP server that lists more than 10 tools is loaded on demand: the model sees only their names and calls `tool_search` to load the ones it needs for the turn, so the schemas stay out of the prompt. Change the limit with `"deferToolsOver"` at the top of `.sophi/mcp.json` (SDK: `RuntimeBuilder.deferToolsOver(n)` when no mcp.json is loaded).
