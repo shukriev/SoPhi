@@ -45,7 +45,8 @@ class SophiRuntimePlanFirstTest : FunSpec({
     fun use(vararg calls: ToolCall) = LLMResponse.ToolUse(calls.toList(), TokenUsage(1, 0))
     val text = LLMResponse.Text("I plan to deactivate Jane.", TokenUsage(1, 1))
 
-    fun runtime(llm: LLMProvider, vararg tools: Tool, planFirst: Boolean = true): SophiRuntime = RuntimeBuilder().apply {
+    fun runtime(llm: LLMProvider, vararg tools: Tool, planFirst: Boolean = true, scheduleDir: java.nio.file.Path = tempdir().toPath()): SophiRuntime = RuntimeBuilder().apply {
+        schedule(scheduleDir)
         provider = llm
         sessionsDir = tempdir().toPath()
         model = "test-model"
@@ -143,5 +144,23 @@ class SophiRuntimePlanFirstTest : FunSpec({
         }
         plan!!.task shouldBe "goal: offboard jane"
         rt.plans().single().id shouldBe plan.id
+    }
+
+    test("schedulePlan writes a one-off task carrying the plan id") {
+        val dir = tempdir().toPath()
+        val rt = runtime(provider(use(ToolCall("c1", "okta__deactivate_user", "{}")), text), OutsideTool("okta__deactivate_user"), scheduleDir = dir)
+        runBlocking { rt.turn(rt.newSession(), "offboard jane") }
+        val id = rt.plans().single().id
+        rt.approvePlan(id)
+        val taskId = rt.schedulePlan(id, 1_900_000_000_000L)
+        val task = dev.sophi.schedule.store.TaskStore(dir.resolve("tasks.json")).get(taskId)!!
+        task.changePlanId shouldBe id
+        task.trigger shouldBe dev.sophi.schedule.model.Trigger.Once(1_900_000_000_000L)
+    }
+
+    test("schedulePlan refuses a pending plan") {
+        val rt = runtime(provider(use(ToolCall("c1", "okta__deactivate_user", "{}")), text), OutsideTool("okta__deactivate_user"))
+        runBlocking { rt.turn(rt.newSession(), "offboard jane") }
+        shouldThrow<IllegalStateException> { rt.schedulePlan(rt.plans().single().id, 1L) }
     }
 })

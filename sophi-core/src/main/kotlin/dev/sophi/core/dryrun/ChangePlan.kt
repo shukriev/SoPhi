@@ -49,6 +49,15 @@ fun ChangePlan.stepsHash(): String = MessageDigest.getInstance("SHA-256")
     .digest(approvedSteps().joinToString("") { it.tool + "\u0000" + it.args + "\n" }.toByteArray())
     .joinToString("") { "%02x".format(it) }
 
+/** One line a person reads: `Plan <id>: 1 ok · 2 failed: <why> · 3 not run`. */
+fun ChangePlan.replayReport(): String = "Plan $id: " + results.joinToString(" · ") { it.label() }
+
+private fun StepResult.label() = when (outcome) {
+    "ok" -> "$n ok"
+    "error" -> "$n failed: ${result.removePrefix("Error: ").take(200)}"
+    else -> "$n not run"
+}
+
 /** What the model gets back for a recorded call. */
 fun planStepStub(n: Int): String =
     "Not run yet: recorded as plan step $n. It runs only if the user approves the plan after this turn. " +

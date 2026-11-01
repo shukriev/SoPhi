@@ -20,6 +20,7 @@ import dev.sophi.core.dryrun.PlanRecorder
 import dev.sophi.core.dryrun.PlanReplayer
 import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.core.dryrun.StepResult
+import dev.sophi.core.dryrun.replayReport
 import dev.sophi.core.dryrun.stepsHash
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.session.AgentSession
@@ -43,6 +44,9 @@ import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.ProposalStore
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import dev.sophi.schedule.model.ScheduledTask
+import dev.sophi.schedule.model.TaskMode
+import dev.sophi.schedule.model.Trigger
 import dev.sophi.skills.InstallResult
 import dev.sophi.skills.Skill
 import dev.sophi.skills.SkillInstaller
@@ -338,6 +342,15 @@ class SophiRuntime internal constructor(
         return done
     }
 
+    /** Schedules an approved plan to replay at [atMs] (no model run then); returns the scheduled task's id. */
+    fun schedulePlan(id: String, atMs: Long): String {
+        val plan = planOrThrow(id)
+        check(plan.status == PlanStatus.APPROVED) { "Only an approved plan can be scheduled; ${plan.id} is ${plan.status.name.lowercase()}" }
+        val task = ScheduledTask(name = "plan: ${plan.task.take(40)}", trigger = Trigger.Once(atMs), mode = TaskMode.Recurring,
+            prompt = plan.task, changePlanId = plan.id)
+        return TaskStore(schedulesDir.resolve("tasks.json")).add(task).id
+    }
+
     fun cancelPlan(id: String): ChangePlan {
         val plan = planOrThrow(id)
         check(plan.status == PlanStatus.PENDING || plan.status == PlanStatus.APPROVED) {
@@ -447,7 +460,13 @@ class SophiRuntime internal constructor(
             pluginRegistry = pluginRegistry,
             planLog = plansDir?.let { PlanLog(it) },
             audit = auditSink,
-            permissions = permissionRules
+            permissions = permissionRules,
+            runChangePlan = planFirst?.let { { id -> runPlan(id) } },
+            planFirst = planFirst?.mode ?: PlanFirst.OFF,
+            trustReadOnlyHints = planFirst?.trustReadOnlyHints ?: true,
+            savePendingPlan = planFirst?.let { settings ->
+                { plan -> settings.store.save(plan); auditPlan(plan, "plan.create", """{"plan":"${plan.id}","steps":${plan.steps.size}}""") }
+            },
         )
     }
 }

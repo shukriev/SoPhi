@@ -1,5 +1,12 @@
 package dev.sophi.schedule.engine
 
+import dev.sophi.core.dryrun.ChangePlan
+import dev.sophi.core.dryrun.PlanFirst
+import dev.sophi.core.dryrun.PlanRecorder
+import dev.sophi.core.dryrun.PlanStatus
+import dev.sophi.core.dryrun.replayReport
+import kotlin.coroutines.EmptyCoroutineContext
+
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinition
@@ -29,6 +36,7 @@ import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.notify.Notifier
 import dev.sophi.schedule.store.RunLog
 import dev.sophi.schedule.store.TaskStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -114,7 +122,13 @@ class ScheduleEngine(
     /** Where each task's tool calls are audited, or null to skip auditing. */
     private val audit: AuditSink? = null,
     /** Null inherits no rules: an unattended run outside a turn enforces nothing unless the host passes them. */
-    private val permissions: dev.sophi.core.permissions.PermissionRules? = null
+    private val permissions: dev.sophi.core.permissions.PermissionRules? = null,
+    /** Replays an approved change plan (a task's [ScheduledTask.changePlanId]); null = this scheduler can't. */
+    private val runChangePlan: (suspend (planId: String) -> ChangePlan)? = null,
+    /** Plan-first for model runs: changes are recorded into a pending plan ([savePendingPlan]) instead of made. */
+    private val planFirst: PlanFirst = PlanFirst.OFF,
+    private val trustReadOnlyHints: Boolean = true,
+    private val savePendingPlan: ((ChangePlan) -> Unit)? = null,
 ) {
     suspend fun tickOnce(nowMs: Long = System.currentTimeMillis()) {
         val due = taskStore.list().filter { it.enabled && it.nextRunAtMs != null && it.nextRunAtMs <= nowMs }
@@ -142,7 +156,9 @@ class ScheduleEngine(
             )
         } else try {
             withTimeout(taskTimeoutMs) {
+                task.changePlanId?.let { return@withTimeout replayChangePlan(task, it, startedAtMs) }
                 val session = sessionManager.create(title = "schedule:${task.name}")
+                val recorder = if (planFirst != PlanFirst.OFF && savePendingPlan != null) PlanRecorder(planFirst, trustReadOnlyHints) else null
                 sessionId = session.id
                 val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
                 val scopedRegistry = when (val type = task.subagentType) {
@@ -177,12 +193,12 @@ class ScheduleEngine(
                 // SessionIdContext scopes only the actual turn/plan-run call below — SubagentTool and
                 // DecomposeGoalTool are the only readers, and everything else in this function (config
                 // assembly, RunRecord building) has no use for it.
-                val (outcome, summary) = when (val mode = task.mode) {
+                val (outcome, ranSummary) = when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
                         val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
                         val effectiveConfig = if (extra == null) config
                             else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
-                        val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended) {
+                        val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended + (recorder ?: EmptyCoroutineContext)) {
                             loop.turn(session, task.prompt, effectiveConfig, onEvent = bridge)
                         }
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
@@ -204,7 +220,7 @@ class ScheduleEngine(
                             criticEnabled = criticEnabled
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge, planLog = planLog)
-                        val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended) {
+                        val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended + (recorder ?: EmptyCoroutineContext)) {
                             runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
                         }
                         replans = result.replans.size
@@ -214,6 +230,11 @@ class ScheduleEngine(
                             result.finalOutput
                     }
                 }
+                val pending = recorder?.takeIf { it.steps.isNotEmpty() }?.toPlan(task.prompt, session.id)
+                    ?.also { savePendingPlan?.invoke(it) }
+                val summary = pending?.let {
+                    "Plan waiting for your approval: ${it.steps.size} change${if (it.steps.size == 1) "" else "s"} — sophi plans show ${it.id}"
+                } ?: ranSummary
                 runCatching {
                     pluginRegistry?.dispatch(
                         HookPoint.AFTER_TURN,
@@ -237,6 +258,17 @@ class ScheduleEngine(
         taskStore.recordRun(task.id, record.finishedAtMs)
         if (!record.summary.trim().equals("NO_RESCUE_NEEDED", ignoreCase = true)) notifier.notify(task, record)
         return record
+    }
+
+    private suspend fun replayChangePlan(task: ScheduledTask, planId: String, startedAtMs: Long): RunRecord {
+        fun record(outcome: RunOutcome, summary: String) = RunRecord(task.id, startedAtMs, System.currentTimeMillis(), outcome, summary)
+        val run = runChangePlan ?: return record(RunOutcome.Failed("plan $planId can't run: this scheduler has no plan-first runtime"), "")
+        val plan = try { run(planId) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            return record(RunOutcome.Failed(e.message ?: "plan $planId failed"), "")
+        }
+        if (plan.status == PlanStatus.DONE) return record(RunOutcome.Succeeded, plan.replayReport())
+        val why = plan.results.firstOrNull { it.outcome == "error" }?.result?.removePrefix("Error: ")
+        return record(RunOutcome.Failed("plan $planId ${plan.status.name.lowercase()}" + (why?.let { ": $it" } ?: "")), plan.replayReport())
     }
 
     /**

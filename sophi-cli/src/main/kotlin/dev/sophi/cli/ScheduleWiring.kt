@@ -27,7 +27,11 @@ internal fun buildScheduleEngine(
     versioningHome: Path = defaultVersioningHome,
     evalsDir: Path = Path.of("evals"),
     llmTimeoutSeconds: Long = 60,
-    llmMaxRetries: Int = 2
+    llmMaxRetries: Int = 2,
+    /** Scheduled runs connect these MCP servers (secrets from the Keychain, stored sign-ins); null = none. */
+    mcpConfigPath: Path? = null,
+    planFirst: dev.sophi.core.dryrun.PlanFirst = dev.sophi.core.dryrun.PlanFirst.OUTSIDE,
+    trustReadOnlyHints: Boolean = true,
 ): ScheduleRuntime {
     val provider = buildProvider(resolved, apiKeyOption, llmTimeoutSeconds, llmMaxRetries)
     val model = resolved.model
@@ -52,6 +56,12 @@ internal fun buildScheduleEngine(
         permissionRules(Path.of("").toAbsolutePath())
         tool(dev.sophi.schedule.tools.ProposeImprovementTool())
         plugin(dev.sophi.schedule.tools.ProposalPlugin(proposalStore))
+        if (mcpConfigPath != null && mcpConfigPath.toFile().exists()) {
+            credentials()
+            onMcpSignInNeeded { server -> onWarning("$server needs you to sign in again — run `sophi mcp login $server`") }
+            mcpConfig(mcpConfigPath)
+        }
+        if (planFirst != dev.sophi.core.dryrun.PlanFirst.OFF) planFirst(planFirst, trustReadOnlyHints)
         if (memoryHome != null) {
             this.memoryHome = memoryHome
             if (embeddingModel == null || embeddingBaseUrl == null) {
@@ -70,5 +80,8 @@ internal fun buildScheduleEngine(
     )
     return ScheduleRuntime(engine, runtime.memoryPlugin)
 }
+
+/** Scheduled runs start from launchd, not a project directory: their MCP servers are the user-wide ones. */
+internal fun defaultScheduleMcpConfig(): Path = Path.of(System.getProperty("user.home"), ".sophi", "mcp.json")
 
 internal fun defaultScheduleDir(): Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule")
