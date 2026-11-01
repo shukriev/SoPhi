@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Stored secrets for MCP servers: `sophi secret set|list|remove` keeps them in the macOS Keychain, and `${secret:name}` in `mcp.json` (`env`, the new `headers` for http servers, `oauth.clientSecret`) resolves them at connect time. Stored values are masked in every MCP result and error.
+- MCP sign-in for remote servers (`sophi mcp login|logout <server>`, `/mcp login|logout`): MCP authorization discovery, dynamic client registration or an `oauth` client block, PKCE in the browser, silent refresh shared across processes. SDK: `RuntimeBuilder.credentials()`, `onMcpSignInNeeded`, `SophiRuntime.mcpLogin/mcpLogout/mcpSignedIn`.
 - Desktop tools: `notify` (a desktop notification, or a terminal bell), `clipboard_read` / `clipboard_write`, and `open` (an http(s) URL, or an existing document or media file in its default app; anything else, including scripts, shortcut files and folders, is refused). The CLI turns them on in an interactive terminal; in the SDK, `RuntimeBuilder.desktop()`.
 - The CLI answers `ask_user`: Sophi can stop mid-turn to ask you something, with numbered options or a typed reply, and Esc to skip. Only in an interactive terminal.
 - `ask_user` is in core: a host passes a `UserAsker` with `RuntimeBuilder.askUser(asker)`, and the tool is registered only then. Scheduled runs are marked `Unattended`, so their questions time out after 4 minutes and the model carries on.

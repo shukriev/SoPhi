@@ -407,6 +407,21 @@ Register plugins either manually (`RuntimeBuilder.plugin(...)` /
 `PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery
 (`PluginRegistry().discover()`).
 
+### Secrets and signing in to MCP servers
+
+Keys for MCP servers live in the macOS Keychain, not in `mcp.json`. Store one with `sophi secret set cloudflare` (a hidden prompt, or one line on stdin; `sophi secret list` and `sophi secret remove <name>` too), then reference it as `${secret:cloudflare}` in a stdio server's `env` or a remote server's new `headers`:
+
+```json
+{"servers":[
+  {"name":"cf","transport":"stdio","command":["npx","cf-mcp"],"env":{"CLOUDFLARE_API_TOKEN":"${secret:cloudflare}"}},
+  {"name":"internal","transport":"http","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer ${secret:internal}"}}
+]}
+```
+
+Remote servers that sign in with OAuth (Sentry, Linear, Notion, ...) need no key: `sophi mcp login sentry`, or `/mcp login sentry` in a session, opens the sign-in page; Sophi registers itself, stores the sign-in in the Keychain and renews it silently, also when the CLI and the companion share one sign-in. When a renewal is refused, the server's tools answer "needs you to sign in again" and nothing opens a browser on its own. A server without self-registration (GitHub) takes an `"oauth": {"clientId": "...", "clientSecret": "${secret:gh}", "scopes": ["repo"]}` block. `sophi mcp logout <server>` forgets it.
+
+Stored values never reach the model: they're masked as `[REDACTED:secret]` in every MCP result and error (values under 8 characters are stored but not masked). A missing `${secret:...}` fails only that server, naming the secret. SDK: `RuntimeBuilder.credentials()` (or `credentials(store)` for your own `CredentialStore`), `SophiRuntime.mcpLogin(config, openBrowser)` / `mcpLogout(name)`.
+
 ### Large MCP servers (deferred tools)
 
 An MCP server that lists more than 10 tools is loaded on demand: the model sees only their names and calls `tool_search` to load the ones it needs for the turn, so the schemas stay out of the prompt. Change the limit with `"deferToolsOver"` at the top of `.sophi/mcp.json` (SDK: `RuntimeBuilder.deferToolsOver(n)` when no mcp.json is loaded).

@@ -393,6 +393,10 @@ class SophiCli(
             permissions = cli.runtime.permissionRules,
             checkpoints = cli.runtime.checkpointStore,
             jobs = cli.runtime.jobs,
+            mcp = { action, server ->
+                mcpAuth(action, server, Path.of(mcpConfigPathStr),
+                    login = { c -> cli.runtime.mcpLogin(c, openInBrowser) }, logout = { cli.runtime.mcpLogout(it) })
+            },
             settings = SettingsController(
                 settings, currentContext.originalArgv, effectiveValues(),
                 registeredOptions().associate { o -> o.names.maxBy { it.length }.removePrefix("--") to o.optionHelp(currentContext) },
