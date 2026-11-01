@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Images in user messages: `SophiRuntime.streamTurn(session, input, images = listOf(ImageRef(path, mimeType)))` and `turn(id, input, images)`. Claude and OpenAI-compatible servers (LM Studio and llama.cpp vision models too) get them; a model that can't see images gets the text alone. `RuntimeBuilder.supportsImages { model -> … }` decides, and defaults to the model catalog's vision flag (false without a catalog). The session keeps file references, never bytes, so a later switch to a vision model can still use them. At most 4 images of 5 MB each per message; a missing or oversized one is left out with a note in the text. Steers and follow-ups stay text only.
 - Desktop tools: `notify` (a desktop notification, or a terminal bell), `clipboard_read` / `clipboard_write`, and `open` (an http(s) URL, or an existing document or media file in its default app; anything else, including scripts, shortcut files and folders, is refused). The CLI turns them on in an interactive terminal; in the SDK, `RuntimeBuilder.desktop()`.
 - The CLI answers `ask_user`: Sophi can stop mid-turn to ask you something, with numbered options or a typed reply, and Esc to skip. Only in an interactive terminal.
 - `ask_user` is in core: a host passes a `UserAsker` with `RuntimeBuilder.askUser(asker)`, and the tool is registered only then. Scheduled runs are marked `Unattended`, so their questions time out after 4 minutes and the model carries on.
