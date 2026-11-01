@@ -3,7 +3,9 @@ package dev.sophi.mcp
 data class RemoteToolInfo(
     val name: String,
     val description: String,
-    val inputSchemaJson: String
+    val inputSchemaJson: String,
+    /** The server's own claim that the tool only reads; trusted only by plan mode, never for approval. */
+    val readOnlyHint: Boolean = false,
 )
 
 interface McpSession {

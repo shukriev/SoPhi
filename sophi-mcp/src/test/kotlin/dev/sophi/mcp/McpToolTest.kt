@@ -1,5 +1,6 @@
 package dev.sophi.mcp
 
+import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -10,6 +11,15 @@ import kotlinx.coroutines.runBlocking
 import kotlin.time.Duration.Companion.milliseconds
 
 class McpToolTest : FunSpec({
+
+    test("reach: safeTools read, hinted read, otherwise a change") {
+        val session = mockk<McpSession>()
+        McpTool(session, "okta", RemoteToolInfo("list_users", "", "{}"), setOf("list_users")).reach("{}") shouldBe Reach.OUTSIDE_READ
+        McpTool(session, "okta", RemoteToolInfo("find_user", "", "{}", readOnlyHint = true), emptySet()).reach("{}") shouldBe Reach.OUTSIDE_HINTED_READ
+        McpTool(session, "okta", RemoteToolInfo("deactivate_user", "", "{}"), emptySet()).reach("{}") shouldBe Reach.OUTSIDE_CHANGE
+        // the hint never changes the approval tier
+        McpTool(session, "okta", RemoteToolInfo("find_user", "", "{}", readOnlyHint = true), emptySet()).riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
+    }
 
     test("name is namespaced with the server name") {
         val session = mockk<McpSession>()

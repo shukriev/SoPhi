@@ -39,7 +39,8 @@ class SdkMcpSession(
             RemoteToolInfo(
                 name = tool.name,
                 description = tool.description.orEmpty(),
-                inputSchemaJson = Json.encodeToString(tool.inputSchema)
+                inputSchemaJson = Json.encodeToString(tool.inputSchema),
+                readOnlyHint = tool.annotations?.readOnlyHint == true,
             )
         }
 

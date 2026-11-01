@@ -8,6 +8,12 @@ enum class RiskLevel { SAFE, CAUTION, DESTRUCTIVE }
 enum class RuleVerdict { LOW_RISK, HIGH_RISK, UNKNOWN }
 
 /**
+ * Where a call acts, for plan-first turns: on this machine, or in another system (an MCP server) as a lookup, a
+ * lookup only the server vouches for, or a change. Only plan mode reads it; approval tiers stay [RiskLevel].
+ */
+enum class Reach { LOCAL, OUTSIDE_READ, OUTSIDE_HINTED_READ, OUTSIDE_CHANGE }
+
+/**
  * A tool reports a handled failure by returning text that starts with this (or by throwing).
  * The agent loop, mcp-serve and the MCP client all read failures through [isToolError].
  */
@@ -43,5 +49,6 @@ interface Tool {
      * the call (unparseable arguments, nothing to match); never an empty list in that case.
      */
     fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? = emptyList()
+    fun reach(argumentsJson: String): Reach = Reach.LOCAL
     suspend fun execute(argumentsJson: String): String
 }
