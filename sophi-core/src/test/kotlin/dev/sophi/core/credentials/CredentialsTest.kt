@@ -78,4 +78,11 @@ class CredentialsTest : FunSpec({
         val mask = SecretMask().apply { add("abcdefgh"); add("abcdefghij") }
         mask.mask("abcdefghij") shouldBe "[REDACTED:secret]"
     }
+
+    test("a value too long for one security -i line is refused before running anything") {
+        val sec = FakeSecurity()
+        shouldThrow<IllegalArgumentException> { KeychainCredentialStore(run = sec.run).set("big", "x".repeat(5_000)) }
+            .message!! shouldContain "too long"
+        sec.calls shouldBe emptyList()
+    }
 })

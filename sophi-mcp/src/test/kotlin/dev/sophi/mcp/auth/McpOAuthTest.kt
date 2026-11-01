@@ -49,7 +49,9 @@ import java.util.concurrent.atomic.AtomicInteger
 
 private class MemoryStore : CredentialStore {
     val map = ConcurrentHashMap<String, String>()
-    override fun get(name: String, actor: String) = map[if (actor == LOCAL_ACTOR) name else "$actor/$name"]
+    /** Each read is a `security` process with the real Keychain, so tests count them. */
+    val reads = AtomicInteger()
+    override fun get(name: String, actor: String) = map[if (actor == LOCAL_ACTOR) name else "$actor/$name"].also { reads.incrementAndGet() }
     override fun set(name: String, value: String, actor: String) { map[name] = value }
     override fun remove(name: String, actor: String) { map.remove(name) }
     override fun names(actor: String) = map.keys.sorted()
@@ -296,6 +298,43 @@ class McpOAuthTest : FunSpec({
             val rig = Rig()
             runBlocking { rig.oauth.login(srv.config) }.exceptionOrNull()!!.message!! shouldContain "https"
             rig.browser.opened shouldBe 0
+        }
+    }
+
+    test("a remote server that needs no sign-in costs no Keychain read per request") {
+        val port = freePort()
+        val plain = dev.sophi.mcp.startTestMcpHttpServer(port)
+        try {
+            val rig = Rig()
+            val tool = rig.connect(McpServerConfig("plain", McpTransport.HTTP, url = "http://127.0.0.1:$port/mcp")).single()
+            val before = rig.store.reads.get()
+            repeat(5) { runBlocking { tool.execute("{}") } shouldBe "pong" }
+            rig.store.reads.get() shouldBe before
+            repeat(3) { rig.oauth.hasSignIn("plain") }
+            rig.store.reads.get() shouldBe before + 1
+        } finally { plain.stop(100, 500) }
+    }
+
+    test("a revoked sign-in is refreshed once per call, not twice") {
+        AuthedMcpServer().use { srv ->
+            val rig = Rig()
+            runBlocking { rig.oauth.login(srv.config) }.getOrThrow()
+            val tool = rig.connect(srv.config).single()
+            srv.expireAccess(); srv.revokeRefresh()
+            runBlocking { tool.execute("{}") }
+            val afterFirst = srv.tokenRequests.count { it["grant_type"] == "refresh_token" }
+            runBlocking { tool.execute("{}") }
+            srv.tokenRequests.count { it["grant_type"] == "refresh_token" } shouldBe afterFirst + 1
+        }
+    }
+
+    test("a sign-in made by another process is picked up on the next 401") {
+        AuthedMcpServer().use { srv ->
+            val other = Rig()
+            val rig = Rig(store = other.store, lock = other.lock)
+            rig.connect(srv.config) shouldBe emptyList()
+            runBlocking { other.oauth.login(srv.config) }.getOrThrow()
+            rig.connect(srv.config).map { it.name } shouldBe listOf("sentry__ping")
         }
     }
 })

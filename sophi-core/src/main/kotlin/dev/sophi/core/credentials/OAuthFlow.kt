@@ -44,12 +44,16 @@ class OAuthFlow(
 
     /** The redirect target. [port] 0 picks a free one; a taken [port] throws [java.net.BindException]. */
     class Loopback internal constructor(port: Int) : AutoCloseable {
-        @Volatile internal var pending: CompletableDeferred<Map<String, String>>? = null
+        /** The sign-in being waited for: its state, and where its answer goes. */
+        @Volatile internal var pending: Pair<String, CompletableDeferred<Map<String, String>>>? = null
         private val server = HttpServer.create(InetSocketAddress("127.0.0.1", port), 0).apply {
             createContext("/callback") { ex ->
-                val body = "Signed in. You can close this tab and go back to SoPhi.".toByteArray()
-                ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.use { it.write(body) }
-                pending?.complete(query(ex.requestURI.rawQuery))
+                val q = query(ex.requestURI.rawQuery)
+                // Only the answer carrying this sign-in's state counts: a forged or stale one can't end it early.
+                val waiting = pending?.takeIf { it.first == q["state"] }
+                val body = (if (waiting != null) "Signed in. You can close this tab and go back to SoPhi." else "This isn't the sign-in SoPhi is waiting for.").toByteArray()
+                ex.sendResponseHeaders(if (waiting != null) 200 else 400, body.size.toLong()); ex.responseBody.use { it.write(body) }
+                waiting?.second?.complete(q)
             }
             start()
         }
@@ -67,7 +71,7 @@ class OAuthFlow(
         val verifier = randomUrlSafe(48).take(64)
         val challenge = b64url(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()))
         val state = randomUrlSafe(24)
-        val got = CompletableDeferred<Map<String, String>>().also { loopback.pending = it }
+        val got = CompletableDeferred<Map<String, String>>().also { loopback.pending = state to it }
         val params = listOfNotNull(
             "response_type" to "code", "client_id" to client.clientId, "redirect_uri" to loopback.redirectUri,
             scopes.takeIf { it.isNotEmpty() }?.let { "scope" to it.joinToString(" ") }, "state" to state,

@@ -77,6 +77,8 @@ class McpOAuth(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val access = ConcurrentHashMap<String, Tokens>()
+    /** Whether each server has a stored sign-in, so requests and UI redraws don't each start a Keychain lookup. */
+    private val signedIn = ConcurrentHashMap<String, Boolean>()
     /** Servers whose last refresh failed: [onSignInNeeded] fires once per failure streak. */
     private val failing = ConcurrentHashMap.newKeySet<String>()
 
@@ -102,15 +104,18 @@ class McpOAuth(
             ))
             remember(config.name, tokens)
         }
+        signedIn[config.name] = true
         failing.remove(config.name)
     }
 
     fun logout(server: String) {
         access.remove(server)
+        signedIn[server] = false
         store.remove(key(server))
     }
 
-    fun hasSignIn(server: String): Boolean = stored(server) != null
+    /** Cached; [install]'s 401 path re-reads it, so a sign-in another process made is still found. */
+    fun hasSignIn(server: String): Boolean = signedIn.getOrPut(server) { stored(server) != null }
 
     /** A live access token: cached, else refreshed. Null when there's no sign-in or the refresh was refused. */
     suspend fun accessToken(server: String): String? {
@@ -126,11 +131,12 @@ class McpOAuth(
     fun install(client: KtorClient, server: String) {
         fun refuse(): Nothing = throw SignInRequiredException(server)
         client.plugin(HttpSend).intercept { request ->
-            accessToken(server)?.let { request.headers[HttpHeaders.Authorization] = "Bearer $it" }
+            // Only a server this process holds a token for sends one up front; the rest find out from a 401.
+            if (access.containsKey(server)) request.headers[HttpHeaders.Authorization] = "Bearer ${accessToken(server) ?: refuse()}"
             val first = execute(request)
             if (first.response.status != HttpStatusCode.Unauthorized) return@intercept first
             access.remove(server)
-            if (!hasSignIn(server)) refuse()
+            signedIn.remove(server)
             val token = accessToken(server) ?: refuse()
             request.headers[HttpHeaders.Authorization] = "Bearer $token"
             val second = execute(request)
@@ -140,7 +146,7 @@ class McpOAuth(
     }
 
     private suspend fun refresh(server: String): String? {
-        val s = stored(server) ?: return null
+        val s = stored(server) ?: run { signedIn[server] = false; return null }
         val refreshToken = s.refreshToken ?: return signInNeeded(server)
         return try {
             val tokens = flow.refresh(

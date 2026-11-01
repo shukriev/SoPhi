@@ -68,13 +68,13 @@ class OAuthFlowTest : FunSpec({
         }
     }
 
-    test("a wrong state fails the sign-in") {
+    test("a wrong state never completes the sign-in") {
         FakeAuthServer().use { auth ->
-            val flow = OAuthFlow(openBrowser = FakeBrowser { "code=c1&state=forged" }.open)
+            val flow = OAuthFlow(openBrowser = FakeBrowser { "code=c1&state=forged" }.open, callbackTimeoutMs = 300)
             val e = shouldThrow<OAuthException> {
                 flow.loopback().use { lb -> runBlocking { flow.authorize(auth.endpoints, OAuthClient("cid"), lb, emptyList()) } }
             }
-            e.message shouldBe "Sign-in was not completed"
+            e.message shouldBe "Sign-in timed out"
             auth.forms shouldBe emptyList()
         }
     }
@@ -134,5 +134,19 @@ class OAuthFlowTest : FunSpec({
             }.message!! shouldContain "https"
         }
         opened shouldBe 0
+    }
+
+    test("a forged callback with the wrong state doesn't end a sign-in that then completes") {
+        FakeAuthServer().use { auth ->
+            val flow = OAuthFlow(openBrowser = { uri ->
+                val q = query(uri.rawQuery)
+                val cb = q.getValue("redirect_uri")
+                http.send(HttpRequest.newBuilder(URI("$cb?code=evil&state=forged")).GET().build(), HttpResponse.BodyHandlers.discarding())
+                http.send(HttpRequest.newBuilder(URI("$cb?code=c1&state=${q["state"]}")).GET().build(), HttpResponse.BodyHandlers.discarding())
+            })
+            val tokens = flow.loopback().use { lb -> runBlocking { flow.authorize(auth.endpoints, OAuthClient("cid"), lb, emptyList()) } }
+            tokens.accessToken shouldBe "at"
+            auth.forms.single()["code"] shouldBe "c1"
+        }
     }
 })

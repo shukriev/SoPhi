@@ -78,7 +78,7 @@ class SophiRuntime internal constructor(
     /** Background `bash` jobs; [close] kills them. Null without [RuntimeBuilder.builtinTools]. */
     val jobs: dev.sophi.core.tools.BashJobs? = null,
     /** Where MCP secrets come from; null without [RuntimeBuilder.credentials]. */
-    val credentials: dev.sophi.core.credentials.CredentialStore? = null,
+    private val credentials: dev.sophi.core.credentials.CredentialStore? = null,
     private val mcpOAuth: dev.sophi.mcp.auth.McpOAuth? = null,
 ) {
     /** The model and prompt turns run with; [switchModel] changes the model. */

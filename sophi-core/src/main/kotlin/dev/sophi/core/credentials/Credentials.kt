@@ -33,7 +33,11 @@ class KeychainCredentialStore(
         require(value.none { it == '\n' || it == '\r' || it == '\u0000' }) { "A secret can't contain line breaks." }
         val acct = account(name, actor)
         require(acct.none { it.isISOControl() }) { "A secret's name can't contain control characters." }
-        val (code, out) = run(listOf("security", "-i"), "add-generic-password -U -s ${quote(service)} -a ${quote(acct)} -w ${quote(value)}\n")
+        val line = "add-generic-password -U -s ${quote(service)} -a ${quote(acct)} -w ${quote(value)}\n"
+        // ponytail: `security -i` garbles input lines past ~4 KB, so a longer value is refused; a value that big would
+        // need the Security framework through JNA instead of the command.
+        require(line.toByteArray().size <= MAX_LINE) { "That secret is too long for the Keychain command (over ${MAX_LINE / 1000} KB)." }
+        val (code, out) = run(listOf("security", "-i"), line)
         check(code == 0) { "Couldn't save it in the Keychain: ${out.trim().ifEmpty { "exit $code" }}" }
         mask?.add(value)
     }
@@ -52,6 +56,8 @@ class KeychainCredentialStore(
             acct?.takeIf { attr("svce", entry) == service }
         }.filter { if (prefix.isEmpty()) '/' !in it else it.startsWith(prefix) }.map { it.removePrefix(prefix) }.sorted()
     }
+
+    private companion object { const val MAX_LINE = 4_000 }
 
     private fun account(name: String, actor: String) = if (actor == LOCAL_ACTOR) name else "$actor/$name"
     private fun quote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
