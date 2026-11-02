@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.sophi</groupId>
+        <artifactId>sophi-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>sophi-gateway-discord</artifactId>
+    <name>Sophi — Gateway: Discord (a bot that DMs the one paired user)</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>dev.sophi</groupId>
+            <artifactId>sophi-gateway</artifactId>
+        </dependency>
+        <!-- Opus decoder for Discord voice messages. BSD-3-Clause; pure Java, no native code. -->
+        <dependency>
+            <groupId>io.github.jaredmdobson</groupId>
+            <artifactId>concentus</artifactId>
+            <version>1.0.2</version>
+        </dependency>
+        <dependency>
+            <groupId>io.kotest</groupId>
+            <artifactId>kotest-runner-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -39,6 +39,8 @@ app — same core, three ways to run it.
 | 🏛️ `sophi-memory` | Long-term memory (Jane's Theory): a memory-palace store behind a technique-agnostic `MemoryTechnique` SPI |
 | 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
 | 📡 `sophi-hub` | Local WebSocket hub (`HubServer`/`HubClient`) — lets `sophi-companion` monitor and remote-control running `sophi-cli` sessions |
+| 🚪 `sophi-gateway` | Message contract between chat services and a SoPhi host (`GatewayHost`) |
+| 💬 `sophi-gateway-discord` | Discord bot gateway: one paired user, text, voice messages, photos, permission buttons |
 | 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
 | 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
 | 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
