@@ -6,6 +6,7 @@ import dev.sophi.core.dryrun.PlanRecorder
 import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.core.dryrun.replayReport
 import kotlin.coroutines.EmptyCoroutineContext
+import dev.sophi.core.tools.DenialLimit
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
@@ -41,6 +42,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.job
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -193,7 +195,10 @@ class ScheduleEngine(
                 // SessionIdContext scopes only the actual turn/plan-run call below — SubagentTool and
                 // DecomposeGoalTool are the only readers, and everything else in this function (config
                 // assembly, RunRecord building) has no use for it.
-                val (outcome, ranSummary) = when (val mode = task.mode) {
+                // Nobody can approve a blocked call here, so the 3rd one stops the run (DenialLimit cancels this scope).
+                var limit: DenialLimit? = null
+                val ran = try {
+                    coroutineScope { withContext(DenialLimit(coroutineContext.job).also { limit = it }) { when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
                         val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
                         val effectiveConfig = if (extra == null) config
@@ -229,7 +234,12 @@ class ScheduleEngine(
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
                             result.finalOutput
                     }
+                } } }
+                } catch (e: CancellationException) {
+                    if (limit?.tripped != true) throw e
+                    null
                 }
+                val (outcome, ranSummary) = limit?.takeIf { it.tripped }?.reason()?.let { RunOutcome.Failed(it) to it } ?: ran!!
                 val pending = recorder?.takeIf { it.steps.isNotEmpty() }?.toPlan(task.prompt, session.id)
                     ?.also { savePendingPlan?.invoke(it) }
                 val summary = pending?.let {
