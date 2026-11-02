@@ -152,6 +152,7 @@ class RuntimeBuilder {
     private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
     private var skillToolsEnabled: Boolean = false
     private var includeAutoSkills: () -> Boolean = { true }
+    private var foreignSkillDirs: List<Path> = emptyList()
     private var configVersionRef: Pair<String, VersionStore>? = null
 
     fun tool(t: Tool): RuntimeBuilder = apply { tools.add(t) }
@@ -292,10 +293,16 @@ class RuntimeBuilder {
      * Registers `skill`, `install_skill` and `write_skill`. `skill` always registers and reloads
      * [skillsDir] plus this project's `.sophi/skills` on every use, so skills learned mid-session
      * (auto-learned ones) are usable at once. [includeAutoSkills] false hides `auto-*` skills.
+     * [foreignSkillDirs]: other agents' skill dirs to read too, e.g. `SkillRegistry.foreignDirs(home, cwd)`
+     * for Claude Code's and `.agents` skills; read only, and SoPhi's own skill wins a name clash.
      */
-    fun skillTools(includeAutoSkills: () -> Boolean = { true }): RuntimeBuilder = apply {
+    fun skillTools(
+        includeAutoSkills: () -> Boolean = { true },
+        foreignSkillDirs: List<Path> = emptyList()
+    ): RuntimeBuilder = apply {
         skillToolsEnabled = true
         this.includeAutoSkills = includeAutoSkills
+        this.foreignSkillDirs = foreignSkillDirs
     }
 
     /**
@@ -389,7 +396,7 @@ class RuntimeBuilder {
         userAsker?.let { registry.register(dev.sophi.core.tools.AskUserTool(it)) }
         desktop?.let { d -> dev.sophi.core.tools.desktopTools(d, builtinToolsConfig?.root ?: Path.of("").toAbsolutePath()).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
-            val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), includeAutoSkills)
+            val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), foreignSkillDirs, includeAutoSkills)
             registry.register(SkillTool(loadSkills, topK = harnessConfig?.topKSkills))
             registry.register(InstallSkillTool())
             registry.register(WriteSkillTool())
@@ -584,15 +591,20 @@ private data class MemoryConfig(
  * A skill learned in another chat still changes the tool list mid-turn: one prompt-cache miss on
  * a local server, once per learned skill.
  */
-internal fun skillRegistryLoader(globalDir: Path, projectDir: Path, includeAutoSkills: () -> Boolean): () -> SkillRegistry {
+internal fun skillRegistryLoader(
+    globalDir: Path,
+    projectDir: Path,
+    foreignDirs: List<Path> = emptyList(),
+    includeAutoSkills: () -> Boolean
+): () -> SkillRegistry {
     val lock = Any()
     var key: Any? = null
     var cached: SkillRegistry? = null
     return {
         val include = includeAutoSkills()
-        val now = Triple(skillFiles(globalDir), skillFiles(projectDir), include)
+        val now = listOf(skillFiles(globalDir), skillFiles(projectDir), foreignDirs.map(::skillFiles), include)
         synchronized(lock) {
-            cached?.takeIf { key == now } ?: SkillRegistry.load(globalDir, projectDir)
+            cached?.takeIf { key == now } ?: SkillRegistry.load(globalDir, projectDir, foreignDirs = foreignDirs)
                 .let { r -> if (include) r else r.filter { !isAutoSkillId(it) } }
                 .also { cached = it; key = now }
         }
