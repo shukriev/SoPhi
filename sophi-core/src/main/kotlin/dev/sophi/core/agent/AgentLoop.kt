@@ -33,7 +33,12 @@ import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.ActivatedTools
+import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.Unattended
+import dev.sophi.core.dryrun.PlanFirst
+import dev.sophi.core.dryrun.PlanRecorder
+import dev.sophi.core.dryrun.planStepStub
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.isToolError
 import dev.sophi.core.undo.CheckpointStore
@@ -256,9 +261,10 @@ class AgentLoop(
      */
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
-        effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long
+        effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long, ruleOverride: String? = null,
+        plan: String? = null,
     ) = sink.recordQuietly {
-        val rule = when {
+        val rule = ruleOverride ?: when {
             effect == Effect.DENY -> "rule:deny"
             effect == Effect.ALLOW -> "rule:allow"
             effect == Effect.ASK -> notes.rules[req.callId] ?: "policy"
@@ -267,7 +273,7 @@ class AgentLoop(
             else -> notes.rules[req.callId] ?: "policy"
         }
         auditEntry(actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId, session.id, req.toolName, req.riskLevel,
-            req.argumentsJson, rule, outcome, result, start)
+            req.argumentsJson, rule, outcome, result, start, plan)
     }
 
     /**
@@ -630,7 +636,36 @@ class AgentLoop(
                 val always = if (rules == null || effect == Effect.ASK) null else PermissionRules.alwaysAllowRules(call.name, subjects)
                 call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always, askRule = effect == Effect.ASK)
             }
-            val needsDecision = classified.filter { (_, req) ->
+            // Plan-first: changes are held (recorded, not run) whatever a grant or allow/ask rule says; trusted
+            // read-only hints run without asking. Numbered here, in call order, before the parallel run.
+            val recorder = currentCoroutineContext()[PlanRecorder]
+            val reaches = if (recorder == null) emptyMap() else classified.associate { (call, _) ->
+                call.id to (registry.getOrNull(call.name)?.reach(call.argumentsJson) ?: Reach.LOCAL)
+            }
+            val held = mutableMapOf<String, Int>()
+            val hintedReads = mutableSetOf<String>()
+            if (recorder != null) {
+                val unattended = currentCoroutineContext()[Unattended.Key] != null
+                classified.forEach { (call, req) ->
+                    val effect = effects[req.callId]
+                    if (effect == Effect.DENY || req.riskLevel == RiskLevel.SAFE) return@forEach
+                    val reach = reaches.getValue(call.id)
+                    val hinted = reach == Reach.OUTSIDE_HINTED_READ && recorder.trustReadOnlyHints
+                    val change = when (recorder.mode) {
+                        PlanFirst.OFF -> false
+                        PlanFirst.OUTSIDE -> reach == Reach.OUTSIDE_CHANGE
+                        PlanFirst.EVERY -> !hinted
+                    }
+                    val preAllowed = effect == Effect.ALLOW || call.name in grants
+                    when {
+                        // Unattended, only tools the run was granted may be planned; the rest are denied as today.
+                        change && (!unattended || preAllowed) ->
+                            held[call.id] = recorder.record(call.name, call.argumentsJson, req.riskLevel, preAllowed)
+                        hinted && effect == null && (!unattended || preAllowed) -> hintedReads += call.id
+                    }
+                }
+            }
+            val needsDecision = classified.filter { (_, req) -> req.callId !in held && req.callId !in hintedReads }.filter { (_, req) ->
                 when (effects[req.callId]) {
                     Effect.ASK -> true
                     null -> req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
@@ -650,7 +685,7 @@ class AgentLoop(
                 }
             }
             val allowedCalls = classified.map { (call, req) ->
-                val allowed = when (effects[req.callId]) {
+                val allowed = if (req.callId in held) false else if (req.callId in hintedReads) true else when (effects[req.callId]) {
                     Effect.DENY -> false
                     Effect.ALLOW -> true
                     Effect.ASK -> decisions[req.callId] == true
@@ -681,11 +716,16 @@ class AgentLoop(
                     async {
                         onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
                         val start = System.currentTimeMillis()
+                        val step = held[call.id]
                         fun audit(outcome: String, result: String) {
-                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start)
+                            val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else null
+                            val plan = step?.let { "${recorder!!.planId}#$it" }
+                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan)
                         }
                         var failed = false
-                        val result = if (!allowed) {
+                        val result = if (step != null) {
+                            planStepStub(step)
+                        } else if (!allowed) {
                             failed = true
                             if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
                             else "Error: Tool '${call.name}' execution denied by confirmation policy"
@@ -707,7 +747,11 @@ class AgentLoop(
                         // this convention) — count both the same way for loop-guard/reliability purposes.
                         failed = failed || isToolError(result)
                         // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
-                        audit(if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
+                        audit(if (step != null) "recorded" else if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
+                        val reach = reaches[call.id]
+                        if (recorder != null && allowed && !failed && (reach == Reach.OUTSIDE_READ || reach == Reach.OUTSIDE_HINTED_READ)) {
+                            recorder.read(call.name, call.argumentsJson, result.take(500), viaHint = reach == Reach.OUTSIDE_HINTED_READ)
+                        }
                         onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start, call.argumentsJson))
                         ToolCallOutcome(
                             call,

@@ -1,5 +1,6 @@
 package dev.sophi.mcp
 
+import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.mcp.auth.signInRequired
 import dev.sophi.core.tools.Tool
@@ -26,12 +27,19 @@ class McpTool(
     private val mask: (String) -> String = { it },
 ) : Tool {
     private val remoteName = remoteTool.name
+    private val readOnlyHint = remoteTool.readOnlyHint
 
     override val name = "${serverName}__$remoteName"
     override val description = remoteTool.description
     override val parametersJson = remoteTool.inputSchemaJson
     override fun riskLevel(argumentsJson: String): RiskLevel =
         if (remoteName in safeTools) RiskLevel.SAFE else RiskLevel.DESTRUCTIVE
+
+    override fun reach(argumentsJson: String): Reach = when {
+        remoteName in safeTools -> Reach.OUTSIDE_READ
+        readOnlyHint -> Reach.OUTSIDE_HINTED_READ
+        else -> Reach.OUTSIDE_CHANGE
+    }
 
     override suspend fun execute(argumentsJson: String): String = mask(
         try {

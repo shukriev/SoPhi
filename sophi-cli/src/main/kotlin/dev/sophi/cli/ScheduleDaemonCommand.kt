@@ -74,7 +74,9 @@ class ScheduleDaemonCommand : CliktCommand(
                 embeddingApiKey = provider.apiKey,
                 embeddingDimensions = embeddingDimensions,
                 onWarning = { echo(it) },
-                llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries
+                llmTimeoutSeconds = provider.timeoutSeconds, llmMaxRetries = provider.maxRetries,
+                mcpConfigPath = defaultScheduleMcpConfig(),
+                planFirst = savedPlanFirst().first, trustReadOnlyHints = savedPlanFirst().second,
             ) }
         } catch (e: com.arcadedb.exception.DatabaseOperationException) {
             echo(

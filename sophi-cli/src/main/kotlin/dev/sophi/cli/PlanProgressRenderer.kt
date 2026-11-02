@@ -78,7 +78,7 @@ class PlanProgressRenderer(
                 askHeld = null
                 currentPhase = StreamingPhase.Generating(tokenCount, reasoningTokenCount)
             }
-            is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage -> Unit
+            is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage, is TurnEvent.PlanReady, is TurnEvent.HintedReads -> Unit
         }
     }
 

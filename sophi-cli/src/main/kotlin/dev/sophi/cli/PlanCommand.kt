@@ -50,9 +50,18 @@ class PlanCommand(
     private val checkpoints: CheckpointStore? = null,
     private val audit: dev.sophi.core.audit.AuditSink? = null,
     private val permissions: dev.sophi.core.permissions.PermissionRules? = null,
+    /** Records the plan's outside changes into one change plan, reviewed when it ends; null = off. */
+    private val planFirst: PlanFirstHost? = null,
     private val echo: (String) -> Unit
 ) {
-    suspend fun run(goal: String, session: AgentSession): AgentSession = coroutineScope {
+    suspend fun run(goal: String, session: AgentSession): AgentSession {
+        var recorded: dev.sophi.core.dryrun.ChangePlan? = null
+        val result = runPlan(goal, session) { recorded = it }
+        recorded?.let { planFirst?.review(it, result) }
+        return result
+    }
+
+    private suspend fun runPlan(goal: String, session: AgentSession, onRecorded: (dev.sophi.core.dryrun.ChangePlan) -> Unit): AgentSession = coroutineScope {
         val renderer = PlanProgressRenderer(liveRegion, echo)
         val animationJob = launch { renderer.animate() }
         // A confirmation prompt during a plan step answers through awaitYesNo(), which never
@@ -82,7 +91,10 @@ class PlanCommand(
             )
             // saved even when the run throws: /undo reloads the session, and the round entry must be there
             val outcome = try {
-                undoableRound(session, checkpoints, "plan") { runner.run(session.id, goal, StopCondition.LlmJudged) }
+                undoableRound(session, checkpoints, "plan") {
+                    suspend fun go() = runner.run(session.id, goal, StopCondition.LlmJudged)
+                    planFirst?.scope(session.id, goal) { go() }?.let { (r, p) -> p?.let(onRecorded); r } ?: go()
+                }
             } catch (e: dev.sophi.ai.api.BudgetExceededException) {
                 // The planner or the judge was refused: end /plan with what was saved, not the whole session.
                 echo("${e.message}\n$BUDGET_HINT")

@@ -21,6 +21,8 @@ data class ScheduledTask(
     val maxWallClockMsPerWindow: Long? = null,
     /** The trailing window [maxWallClockMsPerWindow] is measured over. Ignored when that's null. */
     val wallClockWindowMs: Long = 86_400_000L,
+    /** An approved change plan to replay at trigger time, with no model run; [prompt] is then only its description. */
+    val changePlanId: String? = null,
     val enabled: Boolean = true,
     val lastRunAtMs: Long? = null,
     val nextRunAtMs: Long? = null,

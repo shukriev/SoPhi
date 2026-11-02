@@ -34,6 +34,8 @@ class TurnController(
     /** After each reply, a gray line with its tokens and cost (or tok/s when local); [cloud] picks which. */
     private val usageLine: Boolean = false,
     private val cloud: Boolean = false,
+    /** Reviews the plan a turn recorded, after its reply is shown; null = plan-first isn't shown here. */
+    private val planFirst: PlanFirstHost? = null,
     private val output: (String) -> Unit
 ) {
     private fun printUsage(rounds: List<TurnEvent.RoundUsage>, usdBefore: Double, settled: AgentSession) {
@@ -58,6 +60,8 @@ class TurnController(
         val editor = SteerEditor(inbox)
         // The draft is taken once coroutineScope returns, i.e. after a cancelled turn has settled:
         // a follow-up cancelled before its loop started is put back in the inbox only then.
+        var recorded: dev.sophi.core.dryrun.ChangePlan? = null
+        var hinted: List<dev.sophi.core.dryrun.PlanRead> = emptyList()
         return coroutineScope {
             var presenter = StreamingTurnPresenter(autoExitTokenView)
             val rounds = mutableListOf<TurnEvent.RoundUsage>()
@@ -102,6 +106,8 @@ class TurnController(
                     runtime.streamTurn(session, userInput, inbox) { event ->
                         onEvent(event)
                         if (event is TurnEvent.RoundUsage) rounds += event
+                        if (event is TurnEvent.PlanReady) recorded = event.plan
+                        if (event is TurnEvent.HintedReads) hinted = event.reads
                         when (event) {
                             is TurnEvent.SteerApplied -> startSegment(event.texts)
                             is TurnEvent.FollowUpStarted -> startSegment(listOf(event.text))
@@ -159,6 +165,11 @@ class TurnController(
                     session
                 }
             }
-        }.also { draft = editor.takeDraft() }
+        }.also { settled ->
+            draft = editor.takeDraft()
+            // Only now, with the key reader joined: it hands the terminal back as it stops.
+            recorded?.let { planFirst?.review(it, settled) }
+            if (hinted.isNotEmpty()) output(TextColors.gray(hintedReadsLine(hinted)))
+        }
     }
 }

@@ -161,6 +161,15 @@ class SophiCli(
         help = "Port a running sophi-companion's hub listens on. This session registers with " +
             "it automatically if reachable; unreachable is silent, not an error."
     ).int().default(8765)
+    private val planFirstMode: String by option(
+        "--plan-first",
+        help = "When a task wants to change something, record it into a plan you approve first instead of doing it: " +
+            "outside (default: changes in other systems, via MCP), every (any change, local too) or off."
+    ).choice("outside", "every", "off").default("outside")
+    private val trustReadOnlyHints: Boolean by option(
+        "--trust-read-only-hints",
+        help = "In plan-first tasks, run a lookup without asking when its MCP server marks it read-only (default on)."
+    ).flag("--no-trust-read-only-hints", default = true)
     private val sandboxMode: String by option(
         "--sandbox",
         help = "Where bash runs: off (default), seatbelt (macOS sandbox: writes only to the workspace, temp " +
@@ -228,6 +237,8 @@ class SophiCli(
                 scheduleDir = scheduleDirStr,
                 plansDir = plansDirStr,
                 mcpConfigPath = mcpConfigPathStr,
+                planFirst = dev.sophi.core.dryrun.PlanFirst.valueOf(planFirstMode.uppercase()),
+                trustReadOnlyHints = trustReadOnlyHints,
                 braveApiKey = braveApiKeyOption,
                 autoMode = autoMode,
                 godMode = godMode,
@@ -361,6 +372,7 @@ class SophiCli(
             }
             switch.error
         }
+        val planFirstHost = cli.runtime.planFirst?.let { PlanFirstHost(cli.runtime, inputSource) { mordantTerminal.println(it) } }
         val goalController = dev.sophi.cli.goal.GoalController(
             agentLoop = goalLoop,
             sessionManager = cli.runtime.sessionManager, provider = provider,
@@ -378,7 +390,8 @@ class SophiCli(
             onEvent = onEvent,
             onTurnSettled = { userInput, assistantReply, error ->
                 cli.runtime.settleExternalTurn(session.id, userInput, assistantReply, error)
-            }
+            },
+            planFirst = planFirstHost,
         ) { mordantTerminal.println(it) }
         val slashHandler = SlashHandler(
             cli.runtime.sessionManager, compactor, cli.runtime.config, learningPlugin,
@@ -408,7 +421,8 @@ class SophiCli(
             liveRegion = liveRegion,
             onEvent = onEvent,
             input = inputSource,
-            goalController = goalController
+            goalController = goalController,
+            planFirst = planFirstHost,
         ) { mordantTerminal.println(it) }
         if (tokenViewKey.length != 1) {
             mordantTerminal.println(TextColors.yellow(
@@ -419,6 +433,7 @@ class SophiCli(
             tokenViewKey = tokenViewKey.singleOrNull() ?: DEFAULT_TOKEN_VIEW_KEY,
             autoExitTokenView = autoExitTokenView,
             usageLine = true, cloud = resolved.cloud,
+            planFirst = planFirstHost,
         ) {
             mordantTerminal.println(it)
         }

@@ -142,7 +142,10 @@ class BashJobsTest : FunSpec({
     test("a huge log is read from its tail, not loaded whole") {
         val f = Fx()
         f.bg("sleep 2.5; seq 1 300000")
-        val o = runBlocking { f.jobs.output("s", "j1", waitSeconds = 20) }
+        // output(wait) returns on the first new bytes, mid-write; wait for the exit so the whole log is there.
+        val deadline = System.currentTimeMillis() + 20_000
+        while (f.jobs.list().single().status == "running" && System.currentTimeMillis() < deadline) Thread.sleep(100)
+        val o = runBlocking { f.jobs.output("s", "j1") }
         o shouldContain "earlier output in"
         o.lines().last { it.isNotBlank() } shouldBe "300000"
         (o.length < 17_000) shouldBe true

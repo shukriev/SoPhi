@@ -62,7 +62,7 @@ class StreamingTurnPresenter(private val autoExitTokenView: Boolean = true) {
                 Rendered.ToolLine((held + line).joinToString("\n")).also { held.clear() }
             }
         }
-        is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage -> null
+        is TurnEvent.SteerApplied, is TurnEvent.FollowUpStarted, is TurnEvent.RoundUsage, is TurnEvent.PlanReady, is TurnEvent.HintedReads -> null
     }
 
     private fun bumpGenerating() {

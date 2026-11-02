@@ -5,7 +5,11 @@ import io.kotest.matchers.shouldBe
 import io.ktor.client.HttpClient
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.ListToolsResult
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import io.modelcontextprotocol.kotlin.sdk.types.Tool
+import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
+import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -21,6 +25,16 @@ import java.util.concurrent.TimeUnit
  * a misbehaving server could reintroduce a narrower process-leak bug.
  */
 class SdkMcpSessionTest : FunSpec({
+
+    test("listTools carries the server's readOnlyHint") {
+        val client = mockk<io.modelcontextprotocol.kotlin.sdk.client.Client>()
+        coEvery { client.listTools(any(), any()) } returns ListToolsResult(tools = listOf(
+            Tool(name = "find_user", inputSchema = ToolSchema(), annotations = ToolAnnotations(readOnlyHint = true)),
+            Tool(name = "deactivate_user", inputSchema = ToolSchema()),
+        ), nextCursor = null)
+        val tools = runBlocking { SdkMcpSession(client, null).listTools() }
+        tools.associate { it.name to it.readOnlyHint } shouldBe mapOf("find_user" to true, "deactivate_user" to false)
+    }
 
     test("a remote isError result comes back as an \"Error: \" result, so the loop counts it failed") {
         val client = mockk<io.modelcontextprotocol.kotlin.sdk.client.Client>()

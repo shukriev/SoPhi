@@ -36,4 +36,11 @@ class ScheduleWiringTest : FunSpec({
         (record?.outcome is RunOutcome.Failed) shouldBe true
         (record?.outcome as RunOutcome.Failed).error shouldContain "ghost"
     }
+
+    test("scheduled runs take plan-first and trust-read-only-hints from settings.json") {
+        val file = createTempDirectory("settings").resolve("settings.json")
+        savedPlanFirst(CliSettingsStore(file) {}) shouldBe (dev.sophi.core.dryrun.PlanFirst.OUTSIDE to true)
+        java.nio.file.Files.writeString(file, """{"plan-first":"off","trust-read-only-hints":"false"}""")
+        savedPlanFirst(CliSettingsStore(file) {}) shouldBe (dev.sophi.core.dryrun.PlanFirst.OFF to false)
+    }
 })
