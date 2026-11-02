@@ -3,6 +3,7 @@ package dev.sophi.skills
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
@@ -143,5 +144,69 @@ class SkillRegistryTest : FunSpec({
         registry.childrenOf("site-maidplus-de").map { it.first } shouldBe
             listOf("site-maidplus-de/companies", "site-maidplus-de/dashboard")
         registry.childrenOf("standalone") shouldBe emptyList()
+    }
+
+    test("load() reads other agents' <name>/SKILL.md skills (Claude Code, .agents, agentskills.io)") {
+        val sophi = createTempDirectory("skills-sophi")
+        val claude = createTempDirectory("skills-claude")
+        try {
+            claude.resolve("pdf-tools/scripts").createDirectories()
+            claude.resolve("pdf-tools/SKILL.md").writeText(
+                "---\nname: pdf-tools\ndescription: Fill PDF forms\nallowed-tools: Bash\n---\n\nRun scripts/fill.py."
+            )
+            claude.resolve("pdf-tools/scripts/fill.py").writeText("print('hi')")
+            val registry = SkillRegistry.load(sophi, sophi, foreignDirs = listOf(claude))
+            registry.all().map { it.first } shouldBe listOf("pdf-tools")
+            val skill = registry.get("pdf-tools")!!
+            skill.metadata.title shouldBe "pdf-tools"
+            skill.metadata.description shouldBe "Fill PDF forms"
+            skill.body shouldContain "Run scripts/fill.py."
+            skill.body shouldContain claude.resolve("pdf-tools").toAbsolutePath().toString()
+        } finally {
+            sophi.toFile().deleteRecursively()
+            claude.toFile().deleteRecursively()
+        }
+    }
+
+    test("load() lets SoPhi's own skill win over another agent's skill with the same name") {
+        val sophi = createTempDirectory("skills-sophi")
+        val claude = createTempDirectory("skills-claude")
+        try {
+            sophi.resolve("review.md").writeText("---\ntitle: SoPhi Review\n---\n\nOurs.")
+            claude.resolve("review").createDirectories()
+            claude.resolve("review/SKILL.md").writeText("---\nname: review\ndescription: theirs\n---\n\nTheirs.")
+            SkillRegistry.load(sophi, sophi, foreignDirs = listOf(claude)).get("review")?.metadata?.title shouldBe "SoPhi Review"
+        } finally {
+            sophi.toFile().deleteRecursively()
+            claude.toFile().deleteRecursively()
+        }
+    }
+
+    test("load() skips a foreign skill with malformed frontmatter, says so, and loads the rest") {
+        val sophi = createTempDirectory("skills-sophi")
+        val claude = createTempDirectory("skills-claude")
+        try {
+            claude.resolve("broken").createDirectories()
+            claude.resolve("broken/SKILL.md").writeText("---\nname: [unclosed\n---\n\nBody.")
+            claude.resolve("fine").createDirectories()
+            claude.resolve("fine/SKILL.md").writeText("---\nname: fine\ndescription: ok\n---\n\nBody.")
+            val warnings = mutableListOf<String>()
+            val registry = SkillRegistry.load(sophi, sophi, foreignDirs = listOf(claude), onWarning = { warnings += it })
+            registry.all().map { it.first } shouldBe listOf("fine")
+            warnings shouldHaveSize 1
+            warnings.single() shouldContain "broken"
+        } finally {
+            sophi.toFile().deleteRecursively()
+            claude.toFile().deleteRecursively()
+        }
+    }
+
+    test("foreignDirs() lists user-wide dirs before project ones, so the project's win") {
+        val home = Path.of("/h")
+        val project = Path.of("/p")
+        SkillRegistry.foreignDirs(home, project) shouldBe listOf(
+            home.resolve(".claude/skills"), home.resolve(".agents/skills"),
+            project.resolve(".claude/skills"), project.resolve(".agents/skills")
+        )
     }
 })

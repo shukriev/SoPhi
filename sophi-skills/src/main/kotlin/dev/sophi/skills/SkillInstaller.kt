@@ -32,9 +32,9 @@ private fun Path.walkSkillDirs(): List<DiscoveredSkill> =
         .toList()
 
 @Serializable
-private data class ClaudeSkillFrontmatter(val name: String? = null, val description: String = "")
+internal data class ClaudeSkillFrontmatter(val name: String? = null, val description: String = "")
 
-private val permissiveYaml = Yaml(configuration = YamlConfiguration(strictMode = false))
+internal val permissiveYaml = Yaml(configuration = YamlConfiguration(strictMode = false))
 
 private const val BUNDLE_MARKER = ".sophi-bundle"
 
