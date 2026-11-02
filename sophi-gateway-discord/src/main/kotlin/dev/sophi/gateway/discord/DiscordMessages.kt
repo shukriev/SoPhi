@@ -31,6 +31,8 @@ const val ENDED_ON_MAC = "This request ended on the Mac."
 private const val PART_SUFFIX_MAX = 8      // "\n(99/99)"
 private const val FENCE_CLOSE = "\n```"
 private const val LATE_AFTER_MS = 120_000L
+/** Room left for the "sent when your Mac woke" line. */
+private const val PLAN_MAX = 1900
 
 /**
  * [text] in parts of at most [limit] characters, cut at a blank line, else a newline, else a space.
@@ -85,6 +87,7 @@ fun render(out: GatewayOut, nowMs: Long, zone: ZoneId): List<OutgoingMessage> {
                 listOf(ActionRow(listOf(Button(3, "Allow", "p:${out.key}:allow"), Button(4, "Deny", "p:${out.key}:deny")))),
             ) else OutgoingMessage("**SoPhi needs you on your Mac** · ${out.chatTitle}: ${out.action}."),
         )
+        is GatewayOut.Plan -> listOf(planMessage(out))
         is GatewayOut.Question -> listOf(
             OutgoingMessage(
                 out.text + if (out.allowFreeText) "\nOr reply in your own words." else "",
@@ -99,11 +102,22 @@ fun render(out: GatewayOut, nowMs: Long, zone: ZoneId): List<OutgoingMessage> {
     else messages.dropLast(1) + messages.last().let { it.copy(content = it.content + late) }
 }
 
+/** Every step in full, or none: a plan that doesn't fit one message is approved on the Mac. */
+private fun planMessage(out: GatewayOut.Plan): OutgoingMessage {
+    val full = "**SoPhi has a plan** · ${out.chatTitle}\n${out.task}\n" +
+        out.steps.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n") + "\nNothing has run yet. To leave a step out, use your Mac."
+    if (out.canAnswer && full.length <= PLAN_MAX) return OutgoingMessage(
+        full, listOf(ActionRow(listOf(Button(3, "Approve", "pl:${out.key}:approve"), Button(4, "Cancel", "pl:${out.key}:cancel")))),
+    )
+    val changes = if (out.steps.size == 1) "1 change" else "${out.steps.size} changes"
+    return OutgoingMessage("**SoPhi has a plan for you on your Mac** · ${out.chatTitle}: $changes · ${out.task}.")
+}
+
 /** What a clicked card is edited to, from what the host decided. */
-fun clickText(result: GatewayResult, choiceLabel: String?, nowMs: Long, zone: ZoneId): String = when (result) {
+fun clickText(result: GatewayResult, choiceLabel: String?, nowMs: Long, zone: ZoneId, plan: Boolean = false): String = when (result) {
     is GatewayResult.Answered -> when (result.allow) {
-        true -> "Allowed from your phone · ${hhmm(nowMs, zone)}"
-        false -> "Denied from your phone · ${hhmm(nowMs, zone)}"
+        true -> "${if (plan) "Approved" else "Allowed"} from your phone · ${hhmm(nowMs, zone)}"
+        false -> "${if (plan) "Cancelled" else "Denied"} from your phone · ${hhmm(nowMs, zone)}"
         null -> choiceLabel.orEmpty()
     }
     GatewayResult.AlreadyAnswered -> "Answered on the Mac"

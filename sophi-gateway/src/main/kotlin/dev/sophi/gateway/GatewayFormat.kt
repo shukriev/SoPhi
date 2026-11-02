@@ -32,6 +32,10 @@ sealed class GatewayIn {
 
     @Serializable @SerialName("answer_question")
     data class AnswerQuestion(override val from: GatewayAddress, val key: String, val choiceIndex: Int?, val text: String?) : GatewayIn()
+
+    /** The whole plan, as offered: approve runs every step, or cancel discards it. */
+    @Serializable @SerialName("answer_plan")
+    data class AnswerPlan(override val from: GatewayAddress, val key: String, val approve: Boolean) : GatewayIn()
 }
 
 enum class Resolution { BY_THIS_GATEWAY_ALLOWED, BY_THIS_GATEWAY_DENIED, BY_THIS_GATEWAY_ANSWERED, ELSEWHERE }
@@ -55,7 +59,14 @@ sealed class GatewayOut {
         val key: String, val text: String, val choices: List<String>, val allowFreeText: Boolean, override val createdAtMs: Long,
     ) : GatewayOut()
 
-    /** A permission or question that is no longer waiting, and who settled it. */
+    /** A plan-first plan: nothing ran yet. [steps] read as shown, secrets already masked. */
+    @Serializable @SerialName("plan")
+    data class Plan(
+        val key: String, val sessionId: String, val chatTitle: String, val task: String, val steps: List<String>,
+        val canAnswer: Boolean, override val createdAtMs: Long,
+    ) : GatewayOut()
+
+    /** A permission, question or plan that is no longer waiting, and who settled it. */
     @Serializable @SerialName("resolved")
     data class Resolved(val key: String, val how: Resolution, override val createdAtMs: Long) : GatewayOut()
 
@@ -68,7 +79,7 @@ sealed interface GatewayResult {
     /** [pictureDropped]: SoPhi was busy, so the photo's text steered the running turn without the picture. */
     data class Sent(val sessionId: String, val pictureDropped: Boolean = false) : GatewayResult
     data object NewChatStarted : GatewayResult
-    /** [allow] is null for a question. */
+    /** [allow] is null for a question; for a plan, true is approved. */
     data class Answered(val allow: Boolean?) : GatewayResult
     data object AlreadyAnswered : GatewayResult
     /** This host may not approve; the card stays on the computer. */

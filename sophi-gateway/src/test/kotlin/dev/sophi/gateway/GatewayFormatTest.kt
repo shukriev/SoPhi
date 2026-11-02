@@ -13,6 +13,7 @@ class GatewayFormatTest : FunSpec({
             GatewayIn.NewChat(from),
             GatewayIn.AnswerPermission(from, "k1", allow = true),
             GatewayIn.AnswerQuestion(from, "k2", choiceIndex = 1, text = null),
+            GatewayIn.AnswerPlan(from, "plan:p1", approve = false),
         ).forEach { decodeGatewayIn(encodeGatewayIn(it)).getOrThrow() shouldBe it }
     }
 
