@@ -60,6 +60,28 @@ class DiscordMessagesTest : FunSpec({
             .single().content shouldEndWith "\nThis chat has outside text in it, so each step asks."
     }
 
+    test("plan lists its steps with Approve and Cancel") {
+        val plan = GatewayOut.Plan("plan:p1", "s1", "Offboarding", "offboard jane",
+            listOf("okta deactivate_user `{\"user\":\"jane\"}`", "slack remove_user `{\"id\":\"U1\"}`"), canAnswer = true, now)
+        val m = render(plan, now, utc).single()
+        m.content shouldBe "**SoPhi has a plan** · Offboarding\noffboard jane\n" +
+            "1. okta deactivate_user `{\"user\":\"jane\"}`\n2. slack remove_user `{\"id\":\"U1\"}`\n" +
+            "Nothing has run yet. To leave a step out, use your Mac."
+        val buttons = m.components.single().components
+        buttons.map { it.label } shouldBe listOf("Approve", "Cancel")
+        buttons.map { it.style } shouldBe listOf(3, 4)
+        buttons.map { it.customId } shouldBe listOf("pl:plan:p1:approve", "pl:plan:p1:cancel")
+    }
+
+    test("a plan too long for one message, or not approvable here, stays on the Mac") {
+        val long = GatewayOut.Plan("plan:p1", "s1", "Offboarding", "offboard jane", listOf("x ".repeat(1100)), canAnswer = true, now)
+        val shown = render(long, now, utc).single()
+        shown.content shouldBe "**SoPhi has a plan for you on your Mac** · Offboarding: 1 change · offboard jane."
+        shown.components shouldBe emptyList()
+        render(long.copy(steps = listOf("a", "b"), canAnswer = false), now, utc).single().content shouldBe
+            "**SoPhi has a plan for you on your Mac** · Offboarding: 2 changes · offboard jane."
+    }
+
     test("question with 7 choices makes two rows") {
         val m = render(GatewayOut.Question("q1", "Which?", (1..7).map { "Option $it" }, allowFreeText = true, now), now, utc).single()
         m.content shouldBe "Which?\nOr reply in your own words."
@@ -82,6 +104,8 @@ class DiscordMessagesTest : FunSpec({
         clickText(GatewayResult.Answered(null), "B  Tomorrow", now, utc) shouldBe "B  Tomorrow"
         clickText(GatewayResult.AlreadyAnswered, null, now, utc) shouldBe "Answered on the Mac"
         clickText(GatewayResult.NotAllowed, null, now, utc) shouldBe "Approve this on your Mac."
+        clickText(GatewayResult.Answered(true), null, now, utc, plan = true) shouldBe "Approved from your phone · 14:02"
+        clickText(GatewayResult.Answered(false), null, now, utc, plan = true) shouldBe "Cancelled from your phone · 14:02"
         ENDED_ON_MAC shouldContain "ended on the Mac"
     }
 })

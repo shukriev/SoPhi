@@ -265,6 +265,19 @@ class DiscordGatewayTest : FunSpec({
         r.close()
     }
 
+    test("plan buttons answer the plan, and the card says so") {
+        val r = Rig(); r.pair()
+        runBlocking { r.host.out.emit(GatewayOut.Plan("plan:p1", "s1", "Chat", "offboard jane", listOf("okta deactivate_user"), canAnswer = true, 1_000_000L)) }
+        runBlocking { waitFor { r.discord.sent.isNotEmpty() } }
+        r.discord.sent.single().second.components.single().components.map { it.customId } shouldBe listOf("pl:plan:p1:approve", "pl:plan:p1:cancel")
+        r.host.result = { GatewayResult.Answered(true) }
+        r.click("pl:plan:p1:approve")
+        runBlocking { waitFor { r.discord.answers.isNotEmpty() } }
+        (r.host.received.single() as GatewayIn.AnswerPlan).let { it.key shouldBe "plan:p1"; it.approve.shouldBeTrue() }
+        r.discord.answers.single().content shouldEndWith "\nApproved from your phone · 00:16"
+        r.close()
+    }
+
     test("Mac answer edits the phone card to Answered on the Mac") {
         val r = Rig(); r.pair()
         runBlocking { r.host.out.emit(GatewayOut.Permission("permission:s1", "s1", "Chat", "Send email", canAnswer = true, tainted = false, 1_000_000L)) }

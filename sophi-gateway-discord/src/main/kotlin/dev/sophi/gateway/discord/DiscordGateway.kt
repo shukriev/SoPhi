@@ -56,7 +56,7 @@ private const val GATEWAY_WAIT_MS = 60_000L
 
 /**
  * SoPhi on Discord: DMs from the one paired user go through a [GatewayHost], and what the host sends
- * comes back as DMs, with buttons for permissions and questions. Knows nothing of the host: it is
+ * comes back as DMs, with buttons for permissions, questions and plans. Knows nothing of the host: it is
  * handed how to [transcribe] a WAV (null without a voice model), read [photoText] (null when it
  * can't), and keep the token ([tokens]). It outlives the host it is [bind]-ed to.
  */
@@ -275,6 +275,7 @@ class DiscordGateway(
         val card = cards.remove(key)
         val (result, label) = when (kind) {
             "p" -> current.receive(GatewayIn.AnswerPermission(from, key, allow = last == "allow")) to null
+            "pl" -> current.receive(GatewayIn.AnswerPlan(from, key, approve = last == "approve")) to null
             "q" -> {
                 val index = last.toIntOrNull()
                 current.receive(GatewayIn.AnswerQuestion(from, key, index, null)) to
@@ -283,7 +284,7 @@ class DiscordGateway(
             else -> return client.answerInteraction(id, token, OutgoingMessage(original))
         }
         if (result == GatewayResult.NotAllowed && card != null) cards[key] = card   // still waiting on the Mac
-        client.answerInteraction(id, token, OutgoingMessage("$original\n" + clickText(result, label, nowMs(), zone)))
+        client.answerInteraction(id, token, OutgoingMessage("$original\n" + clickText(result, label, nowMs(), zone, plan = kind == "pl")))
     }
 
     private suspend fun receive(m: GatewayIn): GatewayResult? {
@@ -306,6 +307,7 @@ class DiscordGateway(
                 render(out.copy(text = prefix + out.text), nowMs(), zone).forEach { outbox.send(Outgoing(it, null, emptyList())) }
             }
             is GatewayOut.Permission -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, emptyList())) }
+            is GatewayOut.Plan -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, emptyList())) }
             is GatewayOut.Question -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, out.choices)) }
             is GatewayOut.Notice -> render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, null, emptyList())) }
         }
