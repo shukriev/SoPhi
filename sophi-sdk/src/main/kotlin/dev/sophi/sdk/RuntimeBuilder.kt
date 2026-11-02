@@ -208,7 +208,7 @@ class RuntimeBuilder {
     fun agentsDir(dir: Path, onWarning: (String) -> Unit = { System.err.println(it) }): RuntimeBuilder =
         apply { agentsDirConfig = AgentsDirConfig(dir, onWarning) }
 
-    /** Registers the standard file/shell/search/date tool set — see [buildBuiltinTools]. */
+    /** Registers the standard file/shell/search/date tool set — see [buildBuiltinTools] — plus `session_search` over [sessionsDir]. */
     fun builtinTools(root: Path, braveApiKey: String? = null, sandboxed: Boolean = false): RuntimeBuilder =
         apply { builtinToolsConfig = BuiltinToolsConfig(root, braveApiKey, sandboxed) }
 
@@ -411,6 +411,7 @@ class RuntimeBuilder {
         runBlocking { manager.connect(mcpServers, deferOver) }.forEach { registry.register(it) }
         registry.registerToolSearchIfDeferred()
         val sm = FileSessionManager(sessionsDir)
+        if (builtinToolsConfig != null) registry.register(dev.sophi.core.tools.SessionSearchTool(sm, secretMask))
         val agentConfig = AgentConfig(
             model = model,
             maxTokens = harnessConfig?.maxTokens ?: maxTokens,
