@@ -143,4 +143,10 @@ class CliSettingsTest : FunSpec({
         s.live shouldBe true
         CLI_SETTINGS.single { it.key == "model" }.live shouldBe true
     }
+
+    test("other-agent-skills is an on/off setting, read at the next start") {
+        val s = CLI_SETTINGS.single { it.key == "other-agent-skills" }
+        s.kind shouldBe SettingKind.Bool
+        s.live shouldBe false
+    }
 })
