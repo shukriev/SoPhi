@@ -93,7 +93,7 @@ class CliRuntime(
 /**
  * Builds the whole agent runtime for an interactive `sophi` session.
  *
- * [onWarning] receives non-fatal setup messages (currently only memory's) so this function does
+ * [onWarning] receives non-fatal setup messages (memory's, and skills left out because they no longer match their pin) so this function does
  * not need to know whether the caller has a raw-mode terminal to print above.
  */
 internal suspend fun buildCliRuntime(
@@ -144,7 +144,7 @@ internal suspend fun buildCliRuntime(
     val skillRegistry = SkillRegistry.load(
         globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
         projectDir = Path.of(".sophi", "skills")
-    )
+    ).also { it.refused.forEach(onWarning) }
 
     // The builtin file/shell/search/date tools and the schedule tool are both registered by the
     // builder below (builtinTools()/schedule()), into this same registry.

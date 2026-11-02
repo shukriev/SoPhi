@@ -67,6 +67,12 @@ class InstallSkillTool(
             if (result.rejected.isNotEmpty()) {
                 appendLine("Rejected: " + result.rejected.entries.joinToString("; ") { (id, reasons) -> "$id (${reasons.joinToString(", ")})" })
             }
+            // The model can't confirm its own install: a skill the scan flags is only installed by
+            // the user, with `sophi skill install`.
+            if (result.findings.isNotEmpty()) {
+                appendLine("Held back by the install scan (the user can install these with `sophi skill install`): " +
+                    result.findings.entries.joinToString("; ") { (id, f) -> "$id (${f.joinToString(", ") { "${it.file}: ${it.reason}" }})" })
+            }
             if (isEmpty()) append("No skills found under ${args.source}.")
         }.trim()
     }
