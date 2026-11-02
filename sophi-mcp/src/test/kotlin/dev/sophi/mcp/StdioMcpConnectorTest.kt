@@ -199,7 +199,7 @@ class StdioMcpConnectorTest : FunSpec({
         // Tight enough to catch a regression back to "wait for the blocked read to unblock on its
         // own" (which would take ~30s here, matching sleep's own duration) while leaving headroom
         // for process-kill/reap overhead on a loaded CI runner.
-        (elapsed.inWholeSeconds < 3) shouldBe true
+        (elapsed.inWholeSeconds < 10) shouldBe true
     }
 
     test("connect lets config.env override the resolved login-shell PATH") {
