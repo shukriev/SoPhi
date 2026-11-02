@@ -31,6 +31,7 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.DenialLimit
 import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.ActivatedTools
 import dev.sophi.core.tools.Reach
@@ -727,6 +728,7 @@ class AgentLoop(
                             planStepStub(step)
                         } else if (!allowed) {
                             failed = true
+                            currentCoroutineContext()[DenialLimit]?.denied(call.name)
                             if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
                             else "Error: Tool '${call.name}' execution denied by confirmation policy"
                         } else {
