@@ -39,7 +39,8 @@ fun main(args: Array<String>) {
             VersionsCommand().subcommands(VersionsListCommand(), VersionsShowCommand(), VersionsRevertCommand()),
             EvalsCommand().subcommands(EvalsRunCommand()),
             TournamentCommand().subcommands(TournamentRunCommand(), TournamentPromoteCommand(), TournamentStatusCommand()),
-            ConfigCommand().subcommands(ConfigActivateCommand(), ConfigSeedCommand())
+            ConfigCommand().subcommands(ConfigActivateCommand(), ConfigSeedCommand()),
+            SetupCommand().subcommands(SetupLocalCommand())
         )
         .main(args)
     exitProcess(0)
