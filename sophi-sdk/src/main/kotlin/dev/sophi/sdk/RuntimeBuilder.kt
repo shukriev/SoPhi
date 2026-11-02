@@ -436,6 +436,7 @@ class RuntimeBuilder {
             val cfg = checkNotNull(builtinToolsConfig) { "checkpoints() needs builtinTools(root)" }
             CheckpointStore(cfg.root, home, onWarning = warn)
         }
+        val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         val loop = AgentLoop(
             p, registry, sm,
             compactor = ContextCompactor(p, Summariser(p, compactionMode, window, dev.sophi.ai.system1.Judgments.COMPACTOR)), compaction = compactionMode,
@@ -455,9 +456,9 @@ class RuntimeBuilder {
                 val current = metered.activeModel
                 supportsImagesFn?.invoke(current)
                     ?: (modelCatalog?.find(current, catalogProvider)?.vision ?: modelCatalog?.base(current)?.vision ?: false)
-            }
+            },
+            hooks = pluginRegistry,
         )
-        val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
             .also { pluginRegistry.register(it) }
         autoTitles?.let { onTitled -> pluginRegistry.register(SessionTitlePlugin(p, model, sm, onTitled)) }

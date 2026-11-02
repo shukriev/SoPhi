@@ -248,6 +248,8 @@ class AgentLoop(
     private val permissions: PermissionRules? = null,
     /** Whether the model this loop calls can see images; asked for every request, so a host's model switch applies at once. */
     private val supportsImages: () -> Boolean = { false },
+    /** Plugin hooks fired around tools, requests, confirmations and compaction. Null = the enclosing loop's (HookScope), if any. */
+    private val hooks: LoopHooks? = null,
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
@@ -444,9 +446,11 @@ class AgentLoop(
             // A nested loop built without a sink audits to the outer loop's, and obeys its rules.
             val sink = audit ?: currentCoroutineContext()[AuditScope]?.sink
             val rules = permissions ?: currentCoroutineContext()[PermissionScope]?.rules
+            val turnHooks = hooks ?: currentCoroutineContext()[HookScope]?.hooks
             var scope: CoroutineContext = ActivatedTools()
             if (sink != null) scope += AuditScope(sink)
             if (rules != null) scope += PermissionScope(rules)
+            if (turnHooks != null) scope += HookScope(turnHooks)
             withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble, inbox) }
         } catch (e: CancellationException) {
             val limit = currentCoroutineContext()[DenialLimit]?.takeIf { it.tripped }
@@ -525,9 +529,10 @@ class AgentLoop(
         val pendingRounds = turn.pendingRounds
         val loopGuardState = LoopGuardState(config.maxToolRounds)
         var nudged = false
+        val hooks = currentCoroutineContext()[HookScope]?.hooks
 
         while (true) {
-            val request = CompletionRequest(
+            val built = CompletionRequest(
                 // Asked every round, so a mid-turn switch to a model that can't see sends it no images.
                 messages = dev.sophi.ai.api.prepareForModel(messages.toList(), canSee = supportsImages()),
                 model = config.model,
@@ -536,6 +541,7 @@ class AgentLoop(
                 systemPrompt = config.systemPrompt,
                 tools = registry.definitions(currentCoroutineContext()[ActivatedTools]!!.names.toSet())
             )
+            val request = hooks?.beforeRequest(session.id, built) ?: built
 
             val contentBuf = StringBuilder()
             var pendingToolCalls: List<ToolCall>? = null
@@ -605,7 +611,11 @@ class AgentLoop(
                 sessionManager.save(session)
 
                 return if (compactor != null && compactor.needsCompaction(session, config, window)) {
-                    compactor.compact(session, config, onUsage = { runCatching { onUsage(it, "summarise") } }).also { sessionManager.save(it) }
+                    hooks?.compaction(session.id, after = false)
+                    compactor.compact(session, config, onUsage = { runCatching { onUsage(it, "summarise") } }).also {
+                        sessionManager.save(it)
+                        hooks?.compaction(it.id, after = true)
+                    }
                 } else {
                     session
                 }
@@ -618,21 +628,30 @@ class AgentLoop(
                     TurnStopReason.ToolRoundCeiling, onEvent
                 )
             }
-            messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = toolCalls))
+            // Hooks act before any check, so a rewritten call is classified, ruled on, planned and confirmed as rewritten.
+            val vetoes = mutableMapOf<String, String>()
+            val calls = if (hooks == null) toolCalls else toolCalls.map { call ->
+                when (val r = hooks.beforeTool(session.id, call.name, call.argumentsJson)) {
+                    is HookResult.Veto -> call.also { vetoes[it.id] = r.reason }
+                    is HookResult.Rewrite -> call.copy(argumentsJson = r.argumentsJson)
+                    else -> call
+                }
+            }
+            messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = calls))
             val roundIndex = pendingRounds.size
             pendingRounds.add(PendingEntry(
                 EntryRole.ASSISTANT, "",
                 mapOf(
                     "replay" to "false",
                     "toolCalls" to entryJson.encodeToString(
-                        toolCalls.map { ToolCallRecord(it.id, it.name, it.argumentsJson) })
+                        calls.map { ToolCallRecord(it.id, it.name, it.argumentsJson) })
                 )
             ))
 
             val rules = currentCoroutineContext()[PermissionScope]?.rules
             // Rules first: deny > ask > allow; no effect = no rule applies, the tier/grant/policy flow decides.
             val effects = mutableMapOf<String, Effect>()
-            val classified = toolCalls.map { call ->
+            val classified = calls.map { call ->
                 val tool = registry.getOrNull(call.name)
                 val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
                 val preview = tool?.confirmationPreview(call.argumentsJson)
@@ -655,7 +674,7 @@ class AgentLoop(
                 val unattended = currentCoroutineContext()[Unattended.Key] != null
                 classified.forEach { (call, req) ->
                     val effect = effects[req.callId]
-                    if (effect == Effect.DENY || req.riskLevel == RiskLevel.SAFE) return@forEach
+                    if (effect == Effect.DENY || req.riskLevel == RiskLevel.SAFE || req.callId in vetoes) return@forEach
                     val reach = reaches.getValue(call.id)
                     val hinted = reach == Reach.OUTSIDE_HINTED_READ && recorder.trustReadOnlyHints
                     val change = when (recorder.mode) {
@@ -672,7 +691,7 @@ class AgentLoop(
                     }
                 }
             }
-            val needsDecision = classified.filter { (_, req) -> req.callId !in held && req.callId !in hintedReads }.filter { (_, req) ->
+            val needsDecision = classified.filter { (_, req) -> req.callId !in held && req.callId !in hintedReads && req.callId !in vetoes }.filter { (_, req) ->
                 when (effects[req.callId]) {
                     Effect.ASK -> true
                     null -> req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
@@ -680,10 +699,16 @@ class AgentLoop(
                 }
             }
             val notes = DecisionNotes()
-            val decisions = if (needsDecision.isEmpty()) {
+            // ON_CONFIRMATION: a hook may deny, never allow, so it can't approve what a person would be asked.
+            val hookDenials = if (hooks == null) emptyMap() else needsDecision.mapNotNull { (_, req) ->
+                hooks.denies(session.id, req)?.let { req.callId to it }
+            }.toMap()
+            hookDenials.keys.forEach { notes.note(it, "hook") }
+            val asked = needsDecision.filter { it.second.callId !in hookDenials }
+            val decisions = if (asked.isEmpty()) {
                 emptyMap()
             } else {
-                val requests = needsDecision.map { it.second }
+                val requests = asked.map { it.second }
                 onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
                 try {
                     withContext(notes) { confirmationPolicy.confirm(requests) }
@@ -692,7 +717,7 @@ class AgentLoop(
                 }
             }
             val allowedCalls = classified.map { (call, req) ->
-                val allowed = if (req.callId in held) false else if (req.callId in hintedReads) true else when (effects[req.callId]) {
+                val allowed = if (req.callId in held || req.callId in vetoes) false else if (req.callId in hintedReads) true else when (effects[req.callId]) {
                     Effect.DENY -> false
                     Effect.ALLOW -> true
                     Effect.ASK -> decisions[req.callId] == true
@@ -725,20 +750,24 @@ class AgentLoop(
                         val start = System.currentTimeMillis()
                         val step = held[call.id]
                         fun audit(outcome: String, result: String) {
-                            val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else null
+                            val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook" else null
                             val plan = step?.let { "${recorder!!.planId}#$it" }
                             if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan)
                         }
                         var failed = false
                         val result = if (step != null) {
                             planStepStub(step)
+                        } else if (call.id in vetoes) {
+                            failed = true
+                            "Error: Tool '${call.name}' vetoed by a hook: ${vetoes[call.id]}"
                         } else if (!allowed) {
                             failed = true
                             currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson)
                             if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
-                            else if (currentCoroutineContext()[Unattended.Key] != null) "Error: Tool '${call.name}' execution denied by " +
-                                "confirmation policy: this run is unattended and nobody is here to approve it. Do without it, or finish and say what you needed."
-                            else "Error: Tool '${call.name}' execution denied by confirmation policy"
+                            else hookDenials[call.id]?.let { "Error: Tool '${call.name}' denied by a hook: $it" }
+                                ?: if (currentCoroutineContext()[Unattended.Key] != null) "Error: Tool '${call.name}' execution denied by " +
+                                    "confirmation policy: this run is unattended and nobody is here to approve it. Do without it, or finish and say what you needed."
+                                else "Error: Tool '${call.name}' execution denied by confirmation policy"
                         } else {
                             registry.getOrNull(call.name)
                                 ?.let { tool ->
@@ -762,7 +791,9 @@ class AgentLoop(
                         if (recorder != null && allowed && !failed && (reach == Reach.OUTSIDE_READ || reach == Reach.OUTSIDE_HINTED_READ)) {
                             recorder.read(call.name, call.argumentsJson, result.take(500), viaHint = reach == Reach.OUTSIDE_HINTED_READ)
                         }
-                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, System.currentTimeMillis() - start, call.argumentsJson))
+                        val took = System.currentTimeMillis() - start
+                        hooks?.afterTool(session.id, call.name, call.argumentsJson, result, failed, took)
+                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, took, call.argumentsJson))
                         ToolCallOutcome(
                             call,
                             Message(
@@ -817,7 +848,9 @@ class AgentLoop(
                 compactionsWithoutRelief = 0
             } else {
                 val stubbedBefore = stubbedToolCallIds(messages)
+                hooks?.compaction(session.id, after = false)
                 val compacted = compactInPlace(messages, turnStartIndex, config, turnUserContent, pendingRounds, projectedInputTokens, compactionTriggerTokens)
+                hooks?.compaction(session.id, after = true)
                 (stubbedToolCallIds(messages) - stubbedBefore).forEach { id ->
                     messages.firstNotNullOfOrNull { m -> m.toolCalls?.firstOrNull { it.id == id } }
                         ?.let { loopGuardState.forgive(it.name, it.argumentsJson) }

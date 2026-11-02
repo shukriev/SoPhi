@@ -213,6 +213,7 @@ internal suspend fun buildCliRuntime(
     } } catch (e: Throwable) { contextEngine.close(); throw e }
     val currentSession = (opts.sessionIdToResume?.let { runtime.sessionManager.load(it) }
         ?: runtime.sessionManager.create()).also { session = it }
+    runtime.sessionStarted(currentSession.id)
     hubClient = if (opts.noRemote) null else HubClient(opts.hubPort, currentSession.id)
     runCatching {
         runtime.sessionManager.saveConfigSnapshot(

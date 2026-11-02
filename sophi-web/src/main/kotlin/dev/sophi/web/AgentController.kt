@@ -8,7 +8,6 @@ import dev.sophi.core.session.SessionManager
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
-import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.web.api.ChatRequest
 import dev.sophi.web.api.ChatResponse
@@ -87,7 +86,7 @@ class AgentController(
             return ResponseEntity.notFound().build()
         }
         val updated = try {
-            agentLoop.turn(session, req.input, configWithContext(id, req.input), onEvent = pluginRegistry.turnEventBridge(id))
+            agentLoop.turn(session, req.input, configWithContext(id, req.input))
         } catch (e: Exception) {
             // Learning must never break responses: dispatch is best-effort, error still propagates.
             runCatching { pluginRegistry.dispatch(HookPoint.ON_ERROR, HookContext(id, error = e)) }
@@ -128,9 +127,7 @@ class AgentController(
             try {
                 lockFor(id).withLock {
                     val session = sessionManager.load(id)
-                    val bridge = pluginRegistry.turnEventBridge(id)
                     agentLoop.streamTurn(session, input, configWithContext(id, input)) { event ->
-                        bridge(event)
                         sseEventFor(event)?.let { emitter.send(it.build()) }
                     }
                 }

@@ -34,7 +34,6 @@ import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.Placement
 import dev.sophi.extensions.PluginRegistry
-import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.memory.MemoryPlugin
 import dev.sophi.mcp.McpClientManager
@@ -158,7 +157,16 @@ class SophiRuntime internal constructor(
         sessionManager.create(title).also { sessionManager.save(it) }.id.also { id ->
             // Snapshotting is best-effort learning metadata; never let it break session creation.
             runCatching { sessionManager.saveConfigSnapshot(id, config.model, config.systemPrompt) }
+            sessionStarted(id)
         }
+
+    /** The plugin hooks; a host running its own [AgentLoop] (/goal) passes these so its tools fire them too. */
+    val hooks: dev.sophi.core.agent.LoopHooks get() = pluginRegistry
+
+    /** Fires ON_SESSION_START. [newSession] calls it; a host that creates or resumes sessions itself calls it once per session. */
+    suspend fun sessionStarted(sessionId: String) {
+        runCatching { pluginRegistry.dispatch(HookPoint.ON_SESSION_START, HookContext(sessionId)) }
+    }
 
     suspend fun turn(sessionId: String, input: String): String = streamTurn(sessionId, input) { }
 
@@ -215,7 +223,6 @@ class SophiRuntime internal constructor(
         val turnConfig = if (stable.isEmpty()) config
             else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, stable.joinToString("\n\n")).joinToString("\n\n"))
         val preamble = volatile.takeIf { it.isNotEmpty() }?.let { "<context>\n${it.joinToString("\n\n")}\n</context>" }
-        val bridge = pluginRegistry.turnEventBridge(session.id)
         // Buffered here, not only in the caller's UI layer: an interrupted turn still has to
         // report what the assistant managed to say, or AFTER_TURN fires with a null
         // assistantReply and the hooks that encode the exchange drop the turn.
@@ -224,10 +231,9 @@ class SophiRuntime internal constructor(
             onLoopStart()
             val (updated, plan, hinted) = planFirstScopeWithReads(session.id, input) {
                 // A fresh place in the fallback chain per turn: the next turn tries the session's model again.
-                withContext(FallbackTurn { bridge(it); onEvent(it) }) {
+                withContext(FallbackTurn { onEvent(it) }) {
                     agentLoop.streamTurn(session, input, turnConfig, preamble, inbox, images) { event ->
                         if (event is TurnEvent.Token) partial.append(event.text)
-                        bridge(event)
                         onEvent(event)
                     }
                 }
@@ -396,6 +402,7 @@ class SophiRuntime internal constructor(
      * isn't configured — there is no outcome signal to give it, so none is fabricated.
      */
     suspend fun recordSessionEnd(sessionId: String) {
+        runCatching { pluginRegistry.dispatch(HookPoint.ON_SESSION_END, HookContext(sessionId)) }
         val mechanical = learningPlugin?.let { runCatching { it.recordSessionEnd(sessionId) }.getOrNull() }
         mechanical?.let { memoryPlugin?.recordSessionEnd(sessionId, success = it.outcome == "completed") }
     }

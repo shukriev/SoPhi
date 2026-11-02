@@ -82,6 +82,25 @@ class SophiRuntimeTest : FunSpec({
         runtime.newSession() shouldBe "sess-1"
     }
 
+    test("newSession fires ON_SESSION_START and recordSessionEnd fires ON_SESSION_END") {
+        val log = mutableListOf<Pair<HookPoint, String>>()
+        val spy = object : SophiPlugin {
+            override val name = "spy"
+            override fun hooks() = listOf(HookPoint.ON_SESSION_START, HookPoint.ON_SESSION_END).map { p ->
+                object : AgentHook {
+                    override val point = p
+                    override suspend fun invoke(context: HookContext) { log += p to context.sessionId }
+                }
+            }
+        }
+        every { sessionManager.create(null) } returns AgentSession("sess-3")
+        every { sessionManager.save(any()) } just runs
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry().register(spy), config)
+        rt.newSession()
+        rt.recordSessionEnd("sess-3")
+        log shouldBe listOf(HookPoint.ON_SESSION_START to "sess-3", HookPoint.ON_SESSION_END to "sess-3")
+    }
+
     test("newSession passes title to sessionManager") {
         every { sessionManager.create("My Chat") } returns AgentSession("sess-2", "My Chat")
         every { sessionManager.save(any()) } just runs
@@ -409,7 +428,7 @@ class SophiRuntimeTest : FunSpec({
         rt.toolNames() shouldBe emptyList()
     }
 
-    test("streamTurn forwards every TurnEvent to the caller's onEvent, and turnEventBridge hooks still fire") {
+    test("streamTurn forwards every TurnEvent to the caller's onEvent, and doesn't fire tool hooks from them") {
         val log = mutableListOf<HookPoint>()
         val hookPlugin = object : SophiPlugin {
             override val name = "hook-spy"
@@ -450,7 +469,8 @@ class SophiRuntimeTest : FunSpec({
 
         reply shouldBe "hello!"
         received shouldBe fakeEvents
-        log shouldBe listOf(HookPoint.BEFORE_TOOL, HookPoint.AFTER_TOOL)
+        // AgentLoop fires the tool hooks itself; firing them from events too would run each twice.
+        log shouldBe emptyList()
     }
 
     test("RuntimeBuilder build throws when no provider set") {

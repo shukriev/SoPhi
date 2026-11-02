@@ -1,11 +1,24 @@
 package dev.sophi.extensions
 
+import dev.sophi.ai.api.CompletionRequest
+import dev.sophi.core.agent.HookResult
+
+/** New values may be added; a plugin's `when` over this should keep an `else` branch. */
 enum class HookPoint {
     BEFORE_TURN,
     AFTER_TURN,
+    /** Fired by AgentLoop before any check; [AgentHook.decide] may return [HookResult.Veto] or [HookResult.Rewrite]. */
     BEFORE_TOOL,
     AFTER_TOOL,
-    ON_ERROR
+    ON_ERROR,
+    ON_SESSION_START,
+    ON_SESSION_END,
+    /** [HookContext.request] is the request; [AgentHook.decide] may return [HookResult.Request] to send another. */
+    BEFORE_PROVIDER_REQUEST,
+    BEFORE_COMPACTION,
+    AFTER_COMPACTION,
+    /** A call is about to be confirmed; [AgentHook.decide] may return [HookResult.Veto] to deny it. A hook can't approve. */
+    ON_CONFIRMATION
 }
 
 data class HookContext(
@@ -20,12 +33,20 @@ data class HookContext(
     val assistantReply: String? = null,
     val ambient: Boolean = false,
     /** Ambient text heard during a detected meeting: memory must not track commitments from it. */
-    val inMeeting: Boolean = false
+    val inMeeting: Boolean = false,
+    /** BEFORE_PROVIDER_REQUEST: the request about to be sent. */
+    val request: CompletionRequest? = null,
 )
 
 interface AgentHook {
     val point: HookPoint
-    suspend fun invoke(context: HookContext)
+    suspend fun invoke(context: HookContext) {}
+
+    /** Like [invoke], but may steer: see each [HookPoint] for the results it reads. Defaults to [invoke], then carry on. */
+    suspend fun decide(context: HookContext): HookResult {
+        invoke(context)
+        return HookResult.Continue
+    }
 }
 
 interface SophiPlugin {

@@ -21,7 +21,6 @@ import dev.sophi.core.agent.plan.PlanRunner
 import dev.sophi.core.agent.plan.PlanRunnerConfig
 import dev.sophi.core.agent.plan.StepCritic
 import dev.sophi.core.agent.plan.TreePlanner
-import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
@@ -29,7 +28,6 @@ import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
-import dev.sophi.extensions.turnEventBridge
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
@@ -162,7 +160,6 @@ class ScheduleEngine(
                 val session = sessionManager.create(title = "schedule:${task.name}")
                 val recorder = if (planFirst != PlanFirst.OFF && savePendingPlan != null) PlanRecorder(planFirst, trustReadOnlyHints) else null
                 sessionId = session.id
-                val bridge = pluginRegistry?.turnEventBridge(session.id) ?: { _: TurnEvent -> }
                 val scopedRegistry = when (val type = task.subagentType) {
                     null -> fullRegistry
                     else -> {
@@ -178,7 +175,7 @@ class ScheduleEngine(
                     confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
                     grants = task.toolGrants,
                     contextWindowTokens = contextWindowTokens,
-                    audit = audit, permissions = permissions
+                    audit = audit, permissions = permissions, hooks = pluginRegistry
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
                 // Same collectContext path every interactive entry point already uses (SophiRuntime.
@@ -204,7 +201,7 @@ class ScheduleEngine(
                         val effectiveConfig = if (extra == null) config
                             else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
                         val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended + (recorder ?: EmptyCoroutineContext)) {
-                            loop.turn(session, task.prompt, effectiveConfig, onEvent = bridge)
+                            loop.turn(session, task.prompt, effectiveConfig)
                         }
                         RunOutcome.Succeeded to (result.tip?.content ?: "")
                     }
@@ -224,7 +221,7 @@ class ScheduleEngine(
                             maxStepExecutions = mode.maxIterations, allowParallelSteps = true,
                             criticEnabled = criticEnabled
                         )
-                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, onEvent = bridge, planLog = planLog)
+                        val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, planLog = planLog)
                         val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended + (recorder ?: EmptyCoroutineContext)) {
                             runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
                         }
