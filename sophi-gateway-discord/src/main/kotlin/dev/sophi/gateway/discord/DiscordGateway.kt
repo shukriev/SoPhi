@@ -96,11 +96,12 @@ class DiscordGateway(
     private var codeIssuedMs = 0L
 
     /** Cards on the phone still showing buttons: key → the message, so it can be edited later. */
-    private class Card(val messageId: String, val content: String, val choices: List<String>)
+    private class Card(val messageId: String, val channelId: String, val content: String, val choices: List<String>)
     private val cards = ConcurrentHashMap<String, Card>()
     /** What a voice message was heard as, put before the reply to it. */
     private val heard = ConcurrentHashMap<String, String>()
-    private class Outgoing(val message: OutgoingMessage, val key: String?, val choices: List<String>)
+    /** [channelId] is fixed when queued; null: [personId] has no door, so it is dropped, never sent to the owner instead. */
+    private class Outgoing(val message: OutgoingMessage, val key: String?, val choices: List<String>, val channelId: String?, val personId: String? = null)
     private val outbox = Channel<Outgoing>(Channel.UNLIMITED)
     /** Cards waiting in [outbox], and those of them answered before they went out. */
     private val queuedKeys = ConcurrentHashMap.newKeySet<String>()
@@ -146,10 +147,8 @@ class DiscordGateway(
     fun bind(next: GatewayHost?) {
         hostJob?.cancel()
         val ended = cards.toMap().also { cards.clear() }
-        state.pairing?.let { p ->
-            ended.values.forEach { card ->
-                scope.launch { runCatching { client.edit(p.dmChannelId, card.messageId, OutgoingMessage(card.content + "\n" + ENDED_ON_MAC)) } }
-            }
+        ended.values.forEach { card ->
+            scope.launch { runCatching { client.edit(card.channelId, card.messageId, OutgoingMessage(card.content + "\n" + ENDED_ON_MAC)) } }
         }
         host.value = next
         hostJob = next?.let { d -> scope.launch { d.out.collect { onGatewayOut(it) } } }
@@ -299,33 +298,50 @@ class DiscordGateway(
                 if (out.key in queuedKeys) resolvedEarly += out.key
                 val card = cards.remove(out.key) ?: return
                 if (out.how != Resolution.ELSEWHERE) return
-                val p = state.pairing ?: return
-                runCatching { client.edit(p.dmChannelId, card.messageId, OutgoingMessage(card.content + "\nAnswered on the Mac")) }
+                runCatching { client.edit(card.channelId, card.messageId, OutgoingMessage(card.content + "\nAnswered on the Mac")) }
             }
             is GatewayOut.Reply -> {
                 val prefix = heard.remove(out.sessionId)?.let { "*Heard: $it*\n" }.orEmpty()
-                render(out.copy(text = prefix + out.text), nowMs(), zone).forEach { outbox.send(Outgoing(it, null, emptyList())) }
+                val channel = channelFor(out.personId)
+                render(out.copy(text = prefix + out.text), nowMs(), zone).forEach { outbox.send(Outgoing(it, null, emptyList(), channel, out.personId)) }
             }
-            is GatewayOut.Permission -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, emptyList())) }
-            is GatewayOut.Plan -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, emptyList())) }
-            is GatewayOut.Question -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, out.choices)) }
-            is GatewayOut.Notice -> render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, null, emptyList())) }
+            is GatewayOut.Permission -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, emptyList(), channelFor(null))) }
+            is GatewayOut.Plan -> if (fresh(out.key)) render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, emptyList(), channelFor(null))) }
+            is GatewayOut.Question -> if (fresh(out.key)) {
+                val channel = channelFor(out.personId)
+                render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, out.key, out.choices, channel, out.personId)) }
+            }
+            is GatewayOut.Notice -> {
+                val channel = channelFor(out.personId)
+                render(out, nowMs(), zone).forEach { outbox.send(Outgoing(it, null, emptyList(), channel, out.personId)) }
+            }
         }
     }
 
     /** A card not already on the phone or on its way there; claims it. */
     private fun fresh(key: String): Boolean = !cards.containsKey(key) && queuedKeys.add(key)
 
-    private suspend fun say(text: String) = outbox.send(Outgoing(OutgoingMessage(text), null, emptyList()))
+    /** The owner's DM for null or the owner's id, else that member's; null when they have no door. */
+    private fun channelFor(personId: String?): String? =
+        if (personId == null || personId == people.owner().id) state.pairing?.dmChannelId
+        else state.members.firstOrNull { it.personId == personId }?.dmChannelId
+
+    private suspend fun say(text: String, channelId: String? = state.pairing?.dmChannelId) =
+        outbox.send(Outgoing(OutgoingMessage(text), null, emptyList(), channelId))
 
     /** In order, and only while connected: what SoPhi sends while Discord is away waits for it. */
     private suspend fun sendOutbox() {
         for (o in outbox) {
-            val p = state.pairing ?: continue
+            val channel = o.channelId
+            if (channel == null) {
+                o.personId?.let { logLine("no door for $it") }
+                o.key?.let { queuedKeys.remove(it); resolvedEarly.remove(it) }
+                continue
+            }
             client.status.first { it is DiscordStatus.Connected }
             if (o.key != null && resolvedEarly.remove(o.key)) { queuedKeys.remove(o.key); continue }
-            val id = runCatching { client.send(p.dmChannelId, o.message) }.getOrElse { logLine("send failed: ${it.message}"); o.key?.let(queuedKeys::remove); continue }
-            if (o.key != null) { cards[o.key] = Card(id, o.message.content, o.choices); queuedKeys.remove(o.key) }
+            val id = runCatching { client.send(channel, o.message) }.getOrElse { logLine("send failed: ${it.message}"); o.key?.let(queuedKeys::remove); continue }
+            if (o.key != null) { cards[o.key] = Card(id, channel, o.message.content, o.choices); queuedKeys.remove(o.key) }
         }
     }
 

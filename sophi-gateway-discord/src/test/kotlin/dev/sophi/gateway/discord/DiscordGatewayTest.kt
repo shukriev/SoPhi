@@ -355,4 +355,30 @@ class DiscordGatewayTest : FunSpec({
         Files.readString(r.dir.resolve("phone.json")).contains("secret-token").shouldBeFalse()
         r.close()
     }
+    test("a member's reply goes to the member's DM") {
+        val r = Rig(); r.pair()
+        r.state.pairMember(Pairing("u2", "alex", "dm2", "p2"))
+        runBlocking { r.host.out.emit(GatewayOut.Reply("s1", "hi Alex", 0, personId = "p2")); waitFor { r.discord.sent.isNotEmpty() } }
+        r.discord.sent.single().first shouldBe "dm2"
+        r.close()
+    }
+
+    test("reply for an unpaired person is dropped") {
+        val r = Rig(); r.pair()
+        runBlocking { r.host.out.emit(GatewayOut.Reply("s1", "hi", 0, personId = "gone")); delay(200) }
+        r.discord.sent.shouldBeEmpty()
+        Files.readString(r.log) shouldContain "no door for gone"
+        r.close()
+    }
+
+    test("a member's question card is answered on the member's DM") {
+        val r = Rig(); r.pair()
+        r.state.pairMember(Pairing("u2", "alex", "dm2", "p2"))
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = "p2"))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.discord.sent.single().first shouldBe "dm2"
+        r.close()
+    }
 })

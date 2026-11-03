@@ -40,12 +40,13 @@ sealed class GatewayIn {
 
 enum class Resolution { BY_THIS_GATEWAY_ALLOWED, BY_THIS_GATEWAY_DENIED, BY_THIS_GATEWAY_ANSWERED, ELSEWHERE }
 
+/** [Reply], [Question] and [Notice] go to their [personId] (null: the owner); permissions and plans only ever to the owner. */
 @Serializable
 sealed class GatewayOut {
     abstract val createdAtMs: Long
 
     @Serializable @SerialName("reply")
-    data class Reply(val sessionId: String, val text: String, override val createdAtMs: Long) : GatewayOut()
+    data class Reply(val sessionId: String, val text: String, override val createdAtMs: Long, val personId: String? = null) : GatewayOut()
 
     /** [canAnswer] false: the host gets a note and the answer stays on the computer. */
     @Serializable @SerialName("permission")
@@ -57,6 +58,7 @@ sealed class GatewayOut {
     @Serializable @SerialName("question")
     data class Question(
         val key: String, val text: String, val choices: List<String>, val allowFreeText: Boolean, override val createdAtMs: Long,
+        val personId: String? = null,
     ) : GatewayOut()
 
     /** A plan-first plan: nothing ran yet. [steps] read as shown, secrets already masked. */
@@ -71,7 +73,7 @@ sealed class GatewayOut {
     data class Resolved(val key: String, val how: Resolution, override val createdAtMs: Long) : GatewayOut()
 
     @Serializable @SerialName("notice")
-    data class Notice(val title: String, val body: String, override val createdAtMs: Long) : GatewayOut()
+    data class Notice(val title: String, val body: String, override val createdAtMs: Long, val personId: String? = null) : GatewayOut()
 }
 
 /** What the host did with a [GatewayIn], decided before the gateway shows anything. */

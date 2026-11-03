@@ -3,6 +3,7 @@ package dev.sophi.gateway
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import kotlinx.serialization.json.Json
 
 class GatewayFormatTest : FunSpec({
     val from = GatewayAddress("p1", "discord:42")
@@ -15,6 +16,12 @@ class GatewayFormatTest : FunSpec({
             GatewayIn.AnswerQuestion(from, "k2", choiceIndex = 1, text = null),
             GatewayIn.AnswerPlan(from, "plan:p1", approve = false),
         ).forEach { decodeGatewayIn(encodeGatewayIn(it)).getOrThrow() shouldBe it }
+    }
+
+    test("a reply without personId still decodes") {
+        val json = Json { ignoreUnknownKeys = true; classDiscriminator = "type" }
+        val frame = json.decodeFromString(GatewayFrame.serializer(), """{"v":1,"body":{"type":"reply","sessionId":"s1","text":"hi","createdAtMs":0}}""")
+        (json.decodeFromJsonElement(GatewayOut.serializer(), frame.body) as GatewayOut.Reply).personId shouldBe null
     }
 
     test("unknown version is refused") {
