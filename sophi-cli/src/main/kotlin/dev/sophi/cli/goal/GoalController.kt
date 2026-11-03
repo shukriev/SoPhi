@@ -1,48 +1,33 @@
 package dev.sophi.cli.goal
 
-import dev.sophi.ai.api.LLMProvider
 import dev.sophi.cli.InputSource
 import dev.sophi.cli.LiveRegion
-import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.TurnEvent
-import dev.sophi.core.agent.plan.PlanFinalStatus
 import dev.sophi.core.agent.plan.PlanLog
-import dev.sophi.core.agent.plan.PlanOutcome
-import dev.sophi.core.agent.plan.PlanRunner
-import dev.sophi.core.agent.plan.PlanRunnerConfig
-import dev.sophi.core.agent.plan.Planner
-import dev.sophi.core.agent.plan.StepCritic
-import dev.sophi.core.agent.plan.StopCondition
 import dev.sophi.core.session.AgentSession
-import dev.sophi.core.session.EntryRole
-import dev.sophi.core.session.SessionManager
-import dev.sophi.core.undo.CheckpointStore
-import dev.sophi.core.undo.undoableRound
-import dev.sophi.learning.LearningPlugin
+import dev.sophi.sdk.GoalResult
+import dev.sophi.sdk.GoalStatus
+import dev.sophi.sdk.SophiRuntime
+import dev.sophi.sdk.runGoal
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
 
+/** /goal in the REPL: shows the plan, asks, renders the run and lets ESC stop it. The run itself is [runGoal]. */
 class GoalController(
-    private val agentLoop: AgentLoop,
-    private val sessionManager: SessionManager,
-    private val provider: LLMProvider,
-    private val planner: Planner,
-    private val critic: StepCritic,
-    private val runnerConfig: PlanRunnerConfig,
+    private val runtime: SophiRuntime,
     private val planLog: PlanLog,
     private val input: InputSource,
     private val liveRegion: LiveRegion,
     private val interactive: Boolean,
     private val tokenViewKey: Char,
     private val autoExitTokenView: Boolean,
-    private val learning: LearningPlugin?,
-    /** Snapshots before the run, so /undo reverses the whole goal in one step. Null = no checkpoints. */
-    private val checkpoints: CheckpointStore? = null,
+    /** Stronger model a low-confidence step escalates to; null = none. */
+    private val escalationModel: String? = null,
     /** Mirrored out to a connected companion, exactly as TurnController does for a chat turn. */
     private val onEvent: suspend (TurnEvent) -> Unit = {},
-    private val onTurnSettled: suspend (userInput: String, assistantReply: String, error: Throwable?) -> Unit,
-    /** Records the goal's outside changes into one plan, reviewed when the goal ends; null = off. */
+    /** Reviews the goal's recorded outside changes when it ends; null = plan-first off. */
     private val planFirst: dev.sophi.cli.PlanFirstHost? = null,
     private val output: (String) -> Unit
 ) {
@@ -53,103 +38,59 @@ class GoalController(
         }
 
         output("Planning…")
-        val plan = try {
-            planner.plan(args.task)
-        } catch (e: Exception) {
-            output("goal: planning failed — ${e.message}")
-            return GoalRunResult.Declined(session)
-        }
-
-        val stopCondition = args.check?.let { StopCondition.ShellCheck(it) } ?: StopCondition.LlmJudged
-
-        output("Plan ${plan.id} — ${plan.steps.size} steps:")
-        plan.steps.forEachIndexed { i, step ->
-            val dep = if (step.dependsOn.isEmpty()) "" else "   (after ${step.dependsOn.joinToString(", ")})"
-            output("  ${i + 1}. [${step.id}] ${step.instruction}$dep")
-        }
-        output(
-            when (stopCondition) {
-                is StopCondition.LlmJudged -> "Stop condition: LLM-judged"
-                is StopCondition.ShellCheck -> "Stop condition: shell check `${stopCondition.command}` (expect exit 0)"
+        lateinit var renderer: GoalRenderer
+        val approved = CompletableDeferred<Unit>()
+        suspend fun approve(plan: dev.sophi.core.agent.plan.Plan): Boolean {
+            output("Plan ${plan.id} — ${plan.steps.size} steps:")
+            plan.steps.forEachIndexed { i, step ->
+                val dep = if (step.dependsOn.isEmpty()) "" else "   (after ${step.dependsOn.joinToString(", ")})"
+                output("  ${i + 1}. [${step.id}] ${step.instruction}$dep")
             }
-        )
-
-        val approved = if (!interactive) {
-            true
-        } else {
-            output("Run this plan? [y/N] ")
-            val answer = input.readLine()?.trim()?.lowercase()
-            answer == "y" || answer == "yes"
-        }
-        if (!approved) {
-            output("Cancelled.")
-            return GoalRunResult.Declined(session)
+            output(args.check?.let { "Stop condition: shell check `$it` (expect exit 0)" } ?: "Stop condition: LLM-judged")
+            val yes = !interactive || run {
+                output("Run this plan? [y/N] ")
+                input.readLine()?.trim()?.lowercase() in setOf("y", "yes")
+            }
+            if (!yes) { output("Cancelled."); return false }
+            renderer = GoalRenderer(session, plan, liveRegion, output, autoExitTokenView)
+            approved.complete(Unit)
+            return true
         }
 
-        session.append(EntryRole.USER, args.task, mapOf("goal" to "true", "planId" to plan.id))
-
-        val renderer = GoalRenderer(session, plan, liveRegion, output, autoExitTokenView)
         // Two seams, one renderer: onProgress carries the plan-shaped boundaries, onEvent the raw
         // token stream of whichever step is in flight. PlanRunner fires the boundary first, so the
         // renderer has already reset its presenter before the first token of a step arrives.
-        val runner = PlanRunner(
-            agentLoop, sessionManager, provider, planner, critic, runnerConfig,
-            planLog = planLog,
-            onEvent = { onEvent(it); renderer.handleTurnEvent(it) },
-            onProgress = { renderer.handle(it) }
-        )
-
-        var recorded: dev.sophi.core.dryrun.ChangePlan? = null
-        suspend fun go() = runner.run(session.id, args.task, stopCondition, initialPlan = plan)
-        val outcome: Result<PlanOutcome>? = undoableRound(session, checkpoints, "goal") { coroutineScope {
-            val runDeferred = async { runCatching {
-                planFirst?.scope(session.id, args.task) { go() }?.let { (r, p) -> recorded = p; r } ?: go()
-            } }
-            val escDeferred = async { input.awaitControlKeys(tokenViewKey, onToggle = { renderer.toggleTokenView() }) }
+        // ESC listens only once the plan is approved, so it never competes with the y/N prompt.
+        val result: GoalResult? = coroutineScope {
+            val runDeferred = async {
+                runtime.runGoal(
+                    session, args.task, args.check, planLog, escalationModel, ::approve,
+                    onProgress = { renderer.handle(it) },
+                    onEvent = { onEvent(it); renderer.handleTurnEvent(it) },
+                )
+            }
+            val escDeferred = async {
+                approved.await()
+                input.awaitControlKeys(tokenViewKey, onToggle = { renderer.toggleTokenView() })
+            }
             select {
-                runDeferred.onAwait { result -> escDeferred.cancel(); result }
+                runDeferred.onAwait { r -> escDeferred.cancel(); r }
+                // runGoal records the interruption before its cancellation finishes; coroutineScope waits for it.
                 escDeferred.onAwait { runDeferred.cancel(); null }
             }
-        } }
+        }
 
-        val ran = when {
-            outcome == null -> {
-                session.append(
-                    EntryRole.ASSISTANT,
-                    "[goal interrupted]\n\n${renderer.lastStepOutput}",
-                    emptyMap()
-                )
-                runCatching { sessionManager.save(session) }
-                learning?.recordPlanOutcome(session.id, "goal \"${args.task.take(60)}\" → Interrupted")
-                onTurnSettled(args.task, renderer.lastStepOutput, null)
-                GoalRunResult.Ran(session)
+        when {
+            result == null -> Unit
+            result.status == GoalStatus.Declined -> return GoalRunResult.Declined(session)
+            result.status == GoalStatus.Failed && !approved.isCompleted -> {
+                output("goal: planning failed — ${result.error?.message}")
+                return GoalRunResult.Declined(session)
             }
-            outcome.isFailure -> {
-                val msg = outcome.exceptionOrNull()?.message ?: "unknown error"
-                session.append(EntryRole.ASSISTANT, "[goal failed: $msg]", emptyMap())
-                if (outcome.exceptionOrNull() is dev.sophi.ai.api.BudgetExceededException) output(dev.sophi.cli.BUDGET_HINT)
-                runCatching { sessionManager.save(session) }
-                onTurnSettled(args.task, "", outcome.exceptionOrNull())
-                GoalRunResult.Ran(session)
-            }
-            else -> {
-                val result = outcome.getOrThrow()
-                val statusWord = if (result.finalStatus == PlanFinalStatus.Met) "Met" else "Exhausted"
-                val plural = if (result.replans.size == 1) "" else "s"
-                val header = "[goal: $statusWord — ${result.totalSteps} steps, ${result.replans.size} replan$plural]"
-                session.append(EntryRole.ASSISTANT, "$header\n\n${result.finalOutput}", emptyMap())
-                runCatching { sessionManager.save(session) }
-                val note = buildString {
-                    append("goal \"${args.task.take(60)}\" → $statusWord (${result.totalSteps} steps, plan v${renderer.currentPlan.version})")
-                    result.replans.take(5).forEach { append("; replan at ${it.stepId}: ${it.reason}") }
-                }
-                learning?.recordPlanOutcome(session.id, note)
-                onTurnSettled(args.task, result.finalOutput, null)
-                GoalRunResult.Ran(session)
-            }
+            result.error is dev.sophi.ai.api.BudgetExceededException -> output(dev.sophi.cli.BUDGET_HINT)
         }
         // After the goal's own summary, so the replay note is the session's newest entry.
-        recorded?.let { planFirst?.review(it, session) }
-        return ran
+        result?.changePlan?.let { planFirst?.review(it, session) }
+        return GoalRunResult.Ran(session)
     }
 }

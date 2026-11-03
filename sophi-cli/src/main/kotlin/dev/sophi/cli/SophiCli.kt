@@ -15,7 +15,6 @@ import com.github.ajalt.mordant.rendering.TextColors
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
-import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
@@ -364,48 +363,18 @@ class SophiCli(
         val onEvent: suspend (dev.sophi.core.agent.TurnEvent) -> Unit = { event ->
             event.toHubEvent(session.id)?.let { hubClient?.publish(it) }
         }
-        // /goal drives PlanRunner directly rather than going through runtime.streamTurn, so it
-        // needs its own AgentLoop over the same registry and confirmation policy — the same
-        // arrangement buildPlanRunner makes for /plan. It is NOT built via buildPlanRunner
-        // because the preview flow has to generate the plan with the very planner the runner
-        // will later replan with, and buildPlanRunner owns its planner privately.
-        val goalPlanner = dev.sophi.core.agent.plan.LlmPlanner(
-            provider, model,
-            contextProvider = { goalPrompt -> cli.runtime.contextFor(session.id, goalPrompt) }
-        )
-        val goalLoop = AgentLoop(
-            provider, cli.registry, cli.runtime.sessionManager,
-            confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
-            audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules, hooks = cli.runtime.hooks
-        )
-        // /goal's planner, critic and runner keep the start model's id; the metered provider sends it to the active model.
         val switchModel: suspend (String) -> String? = { id ->
             val switch = modelSwitchWindow(resolved, catalog, id, cli.runtime.contextWindowTokens)
-            switch.window?.let { window ->
-                cli.runtime.switchModel(id, window)
-                goalLoop.contextWindowTokens = window
-            }
+            switch.window?.let { window -> cli.runtime.switchModel(id, window) }
             switch.error
         }
         val planFirstHost = cli.runtime.planFirst?.let { PlanFirstHost(cli.runtime, inputSource) { mordantTerminal.println(it) } }
         val goalController = dev.sophi.cli.goal.GoalController(
-            agentLoop = goalLoop,
-            sessionManager = cli.runtime.sessionManager, provider = provider,
-            planner = goalPlanner,
-            critic = dev.sophi.core.agent.plan.LlmStepCritic(provider, model),
-            runnerConfig = dev.sophi.core.agent.plan.PlanRunnerConfig(
-                model = model, maxTokens = maxTokens, systemPrompt = cli.runtime.config.systemPrompt,
-                escalationModel = goalEscalationModel, allowParallelSteps = false
-            ),
-            planLog = cli.planLog,
+            cli.runtime, cli.planLog,
             input = inputSource, liveRegion = liveRegion, interactive = sophiTerminal.isInteractive,
             tokenViewKey = tokenViewKey.singleOrNull() ?: DEFAULT_TOKEN_VIEW_KEY, autoExitTokenView = autoExitTokenView,
-            learning = learningPlugin,
-            checkpoints = cli.runtime.checkpointStore,
+            escalationModel = goalEscalationModel,
             onEvent = onEvent,
-            onTurnSettled = { userInput, assistantReply, error ->
-                cli.runtime.settleExternalTurn(session.id, userInput, assistantReply, error)
-            },
             planFirst = planFirstHost,
         ) { mordantTerminal.println(it) }
         val slashHandler = SlashHandler(

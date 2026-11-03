@@ -6,23 +6,17 @@ import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.cli.LiveRegion
 import dev.sophi.cli.ScriptedInputSource
-import dev.sophi.core.agent.AgentLoop
-import dev.sophi.core.agent.plan.Plan
-import dev.sophi.core.agent.plan.PlanRunnerConfig
+import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.core.agent.plan.PlanLog
-import dev.sophi.core.agent.plan.PlanStep
-import dev.sophi.core.agent.plan.Planner
-import dev.sophi.core.agent.plan.StepCritic
 import dev.sophi.core.session.AgentSession
-import dev.sophi.core.session.FileSessionManager
-import dev.sophi.core.session.SessionManager
-import dev.sophi.core.tools.BashTool
-import dev.sophi.core.tools.FileWriteTool
-import dev.sophi.core.tools.ToolRegistry
-import dev.sophi.core.undo.CheckpointStore
+import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.undo.FileRestorer
 import dev.sophi.learning.LearningConfig
-import dev.sophi.learning.LearningPlugin
+import dev.sophi.sdk.GoalResult
+import dev.sophi.sdk.GoalStatus
+import dev.sophi.sdk.RuntimeBuilder
+import dev.sophi.sdk.SophiRuntime
+import dev.sophi.sdk.runGoal
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
@@ -32,44 +26,50 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
-import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
 import kotlin.io.path.writeText
 
 private const val TEST_CONTEXT_WINDOW = 100_000
 
 class GoalControllerTest : FunSpec({
-    fun sessionManager(): SessionManager = FileSessionManager(createTempDirectory("goal-controller-test"))
+    /** The runtime /goal runs on; [setup] adds tools, plan-first, checkpoints, learning. */
+    fun runtime(provider: LLMProvider, setup: RuntimeBuilder.() -> Unit = {}): SophiRuntime = RuntimeBuilder().apply {
+        this.provider = provider; sessionsDir = tempdir().toPath(); model = "m"
+        confirmationPolicy(ConfirmationPolicy.ALLOW_ALL)
+        setup()
+    }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
+
+    /** Answers the planner with a one-step plan and every other completion (critic, judge) with [verdict]. */
+    fun LLMProvider.completes(verdict: String) {
+        coEvery { complete(any()) } answers {
+            val prompt = firstArg<CompletionRequest>().messages.joinToString { it.content }
+            val reply = if ("\"steps\"" in prompt) """{"steps":[{"id":"s1","instruction":"do it"}]}""" else verdict
+            LLMResponse.Text(reply, TokenUsage(1, 1))
+        }
+    }
 
     fun controller(
-        provider: LLMProvider,
-        planner: Planner,
-        sm: SessionManager = sessionManager(),
-        inputLines: List<String> = listOf("y"),
+        runtime: SophiRuntime,
+        input: ScriptedInputSource = ScriptedInputSource(listOf("y")),
         interactive: Boolean = true,
-        learning: LearningPlugin? = null,
         output: MutableList<String> = mutableListOf()
     ): Pair<GoalController, MutableList<String>> {
-        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
         val gc = GoalController(
-            agentLoop = loop, sessionManager = sm, provider = provider, planner = planner,
-            critic = StepCritic { _, _ -> 1.0 },
-            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
-            planLog = PlanLog(tempdir().toPath()),
-            input = ScriptedInputSource(inputLines),
+            runtime, PlanLog(tempdir().toPath()),
+            input = input,
             liveRegion = LiveRegion(StringBuilder()) { 80 },
             interactive = interactive, tokenViewKey = 'T', autoExitTokenView = true,
-            learning = learning, onTurnSettled = { _, _, _ -> }
+            planFirst = runtime.planFirst?.let { dev.sophi.cli.PlanFirstHost(runtime, input) { output.add(it) } },
         ) { output.add(it) }
         return gc to output
     }
-
-    fun singleStepPlan() = Plan(id = "plan_1", goalPrompt = "goal", steps = listOf(PlanStep(id = "s1", instruction = "do it")))
 
     test("a /goal whose critic keeps rejecting the stubbed step still plans each change once") {
         val okta = object : dev.sophi.core.tools.Tool {
@@ -86,27 +86,12 @@ class GoalControllerTest : FunSpec({
             if (n++ % 2 == 0) flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c$n", "okta__deactivate_user", """{"id":"00u9"}"""))))
             else flowOf(StreamEvent.Content("recorded"))
         }
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("NO", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        coEvery { planner.replan(any(), any(), any(), any()) } returns singleStepPlan().copy(id = "plan_2")
-        val sm = sessionManager()
-        val runtime = dev.sophi.sdk.RuntimeBuilder().apply {
-            this.provider = provider; sessionsDir = tempdir().toPath(); model = "m"
+        provider.completes("0") // the critic's zero confidence; the judge's not-YES
+        val runtime = runtime(provider) {
+            tool(okta)
             planFirst(dev.sophi.core.dryrun.PlanFirst.OUTSIDE, dir = tempdir().toPath())
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
-        val input = ScriptedInputSource(listOf("y", "s"))
-        val gc = GoalController(
-            agentLoop = AgentLoop(provider, ToolRegistry().register(okta), sm, contextWindowTokens = TEST_CONTEXT_WINDOW),
-            sessionManager = sm, provider = provider, planner = planner,
-            critic = StepCritic { _, _ -> 0.0 },
-            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false, maxReplans = 2),
-            planLog = PlanLog(tempdir().toPath()), input = input,
-            liveRegion = LiveRegion(StringBuilder()) { 80 },
-            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
-            learning = null, onTurnSettled = { _, _, _ -> },
-            planFirst = dev.sophi.cli.PlanFirstHost(runtime, input) {},
-        ) {}
+        }
+        val (gc, _) = controller(runtime, ScriptedInputSource(listOf("y", "s")))
 
         runBlocking { gc.run(AgentSession(id = "s1"), "offboard jane") }
 
@@ -129,27 +114,12 @@ class GoalControllerTest : FunSpec({
             flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "okta__deactivate_user", "{}")))),
             flowOf(StreamEvent.Content("planned")),
         )
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val sm = sessionManager()
-        val runtime = dev.sophi.sdk.RuntimeBuilder().apply {
-            this.provider = provider; sessionsDir = tempdir().toPath(); model = "m"
+        provider.completes("YES")
+        val runtime = runtime(provider) {
+            tool(okta)
             planFirst(dev.sophi.core.dryrun.PlanFirst.OUTSIDE, dir = tempdir().toPath())
-        }.contextWindowTokens(TEST_CONTEXT_WINDOW).build()
-        val input = ScriptedInputSource(listOf("y", "n"))
-        val output = mutableListOf<String>()
-        val gc = GoalController(
-            agentLoop = AgentLoop(provider, ToolRegistry().register(okta), sm, contextWindowTokens = TEST_CONTEXT_WINDOW),
-            sessionManager = sm, provider = provider, planner = planner,
-            critic = StepCritic { _, _ -> 1.0 },
-            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
-            planLog = PlanLog(tempdir().toPath()), input = input,
-            liveRegion = LiveRegion(StringBuilder()) { 80 },
-            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
-            learning = null, onTurnSettled = { _, _, _ -> },
-            planFirst = dev.sophi.cli.PlanFirstHost(runtime, input) { output.add(it) },
-        ) { output.add(it) }
+        }
+        val (gc, output) = controller(runtime, ScriptedInputSource(listOf("y", "n")))
 
         runBlocking { gc.run(AgentSession(id = "s1"), "offboard jane") }
 
@@ -160,25 +130,22 @@ class GoalControllerTest : FunSpec({
 
     test("declining the preview leaves session.entries empty, never calls planner.plan twice, and returns Declined") {
         val provider = mockk<LLMProvider>()
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val (gc, _) = controller(provider, planner, inputLines = listOf("n"))
+        provider.completes("YES")
+        val (gc, _) = controller(runtime(provider), ScriptedInputSource(listOf("n")))
         val session = AgentSession(id = "s1")
 
         val result = runBlocking { gc.run(session, "do the thing") }
 
         result.shouldBeInstanceOf<GoalRunResult.Declined>()
         session.entries.isEmpty() shouldBe true
-        coVerify(exactly = 1) { planner.plan(any(), any()) }
+        coVerify(exactly = 1) { provider.complete(any()) }
     }
 
     test("a met goal appends one USER entry, one replay=false entry per step, one replayed summary entry, and returns Ran") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("all done"))
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val (gc, output) = controller(provider, planner)
+        provider.completes("YES")
+        val (gc, output) = controller(runtime(provider))
         val session = AgentSession(id = "s1")
 
         val result = runBlocking { gc.run(session, "do the thing") }
@@ -193,10 +160,8 @@ class GoalControllerTest : FunSpec({
     test("PromptBuilder.build after a met goal yields exactly two prompt-visible messages") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("all done"))
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val (gc, _) = controller(provider, planner)
+        provider.completes("YES")
+        val (gc, _) = controller(runtime(provider))
         val session = AgentSession(id = "s1")
 
         runBlocking { gc.run(session, "do the thing") }
@@ -205,13 +170,16 @@ class GoalControllerTest : FunSpec({
     }
 
     test("a planner exception leaves the session untouched, prints planning failed, and returns Declined") {
-        val provider = mockk<LLMProvider>()
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } throws RuntimeException("provider down")
-        val (gc, output) = controller(provider, planner)
+        // LlmPlanner falls back to a one-step plan rather than throw, so the failure is stubbed at runGoal itself.
+        mockkStatic("dev.sophi.sdk.GoalRunKt")
+        val runtime = runtime(mockk())
+        coEvery { runtime.runGoal(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            GoalResult(GoalStatus.Failed, "", RuntimeException("provider down"))
+        val (gc, output) = controller(runtime)
         val session = AgentSession(id = "s1")
 
         val result = runBlocking { gc.run(session, "do the thing") }
+        unmockkStatic("dev.sophi.sdk.GoalRunKt")
 
         result.shouldBeInstanceOf<GoalRunResult.Declined>()
         session.entries.isEmpty() shouldBe true
@@ -221,9 +189,8 @@ class GoalControllerTest : FunSpec({
     test("a ShellCheck goal is constructed from --check and used as the stop condition") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val (gc, output) = controller(provider, planner)
+        provider.completes("YES")
+        val (gc, output) = controller(runtime(provider))
         val session = AgentSession(id = "s1")
 
         runBlocking { gc.run(session, "--check ./no-such-script.sh fix it") }
@@ -234,28 +201,25 @@ class GoalControllerTest : FunSpec({
     test("recordPlanOutcome is called once on a met goal when a LearningPlugin is wired") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        provider.completes("YES")
         val home = tempdir().toPath()
-        val learning = LearningPlugin(LearningConfig(home = home, scope = "/p"), model = "m")
-        val (gc, _) = controller(provider, planner, learning = learning)
+        val runtime = runtime(provider) { learning(LearningConfig(home = home, scope = "/p")) }
+        val (gc, _) = controller(runtime)
         val session = AgentSession(id = "s1")
 
         runBlocking { gc.run(session, "do the thing") }
-        runBlocking { learning.recordSessionEnd(session.id) }
+        runBlocking { runtime.learningPlugin!!.recordSessionEnd(session.id) }
 
         val lines = dev.sophi.learning.JsonlLog(home.resolve("session-outcomes.jsonl")).readAll()
-        lines.single() shouldContain "goal"
+        // AFTER_TURN also writes "open" rows (the steps' own turns, the settled goal); the closed one carries the note.
+        lines.single { "\"outcome\":\"completed\"" in it } shouldContain "goal"
     }
 
     test("non-interactive input auto-approves the preview without reading a line") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val (gc, _) = controller(provider, planner, inputLines = emptyList(), interactive = false)
+        provider.completes("YES")
+        val (gc, _) = controller(runtime(provider), ScriptedInputSource(emptyList()), interactive = false)
         val session = AgentSession(id = "s1")
 
         val result = runBlocking { gc.run(session, "do the thing") }
@@ -268,21 +232,9 @@ class GoalControllerTest : FunSpec({
             delay(200)
             emit(StreamEvent.Content("too late"))
         }
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+        provider.completes("YES")
         val scriptedInput = ScriptedInputSource(listOf("y"))
-        val sm = sessionManager()
-        val loop = AgentLoop(provider, ToolRegistry(), sm, contextWindowTokens = TEST_CONTEXT_WINDOW)
-        val gc = GoalController(
-            agentLoop = loop, sessionManager = sm, provider = provider, planner = planner,
-            critic = StepCritic { _, _ -> 1.0 },
-            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
-            planLog = PlanLog(tempdir().toPath()),
-            input = scriptedInput,
-            liveRegion = LiveRegion(StringBuilder()) { 80 },
-            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
-            learning = null, onTurnSettled = { _, _, _ -> }
-        ) {}
+        val (gc, _) = controller(runtime(provider), scriptedInput)
         val session = AgentSession(id = "s1")
 
         val result = runBlocking {
@@ -297,40 +249,28 @@ class GoalControllerTest : FunSpec({
     }
 
     test("/undo right after a goal reverses the files its steps wrote") {
-        val root = createTempDirectory("goal-root")
-        val store = CheckpointStore(root, createTempDirectory("goal-ckpt")) {}
+        val root = tempdir().toPath()
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returnsMany listOf(
             flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "write_file", """{"path":"x.txt","content":"hi"}""")))),
             flowOf(StreamEvent.Content("done"))
         )
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val sm = sessionManager()
-        val gc = GoalController(
-            agentLoop = AgentLoop(provider, ToolRegistry().register(FileWriteTool(root)), sm, contextWindowTokens = TEST_CONTEXT_WINDOW),
-            sessionManager = sm, provider = provider, planner = planner,
-            critic = StepCritic { _, _ -> 1.0 },
-            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
-            planLog = PlanLog(tempdir().toPath()),
-            input = ScriptedInputSource(listOf("y")),
-            liveRegion = LiveRegion(StringBuilder()) { 80 },
-            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
-            learning = null, checkpoints = store, onTurnSettled = { _, _, _ -> }
-        ) {}
+        provider.completes("YES")
+        val runtime = runtime(provider) { builtinTools(root); checkpoints(home = tempdir().toPath()) }
+        val store = runtime.checkpointStore!!
+        val (gc, _) = controller(runtime)
         // a chat round before the goal, as AgentLoop records it: checkpoint taken, then chat.txt written
         val session = AgentSession(id = "s1")
         val chatCheckpoint = store.snapshot()!!
         root.resolve("chat.txt").writeText("chat")
         session.append(dev.sophi.core.session.EntryRole.ASSISTANT, "wrote chat.txt", mapOf("toolCalls" to "[]", "checkpoint" to chatCheckpoint))
-        sm.save(session)
+        runBlocking { runtime.sessionManager.save(session) }
 
         runBlocking { gc.run(session, "write x") }
         root.resolve("x.txt").exists() shouldBe true
 
         // /undo works on the session as saved on disk
-        val saved = runBlocking { sm.load("s1") }
+        val saved = runBlocking { runtime.sessionManager.load("s1") }
         val plan = FileRestorer(store).plan(saved)!!
         plan.targetEntryId shouldBe saved.entries.single { it.content == "[goal file changes]" }.id
         FileRestorer(store).apply(saved, plan)
@@ -339,32 +279,19 @@ class GoalControllerTest : FunSpec({
     }
 
     test("a goal step's bash command that reaches outside the workspace shows up in /undo's warnings") {
-        val root = createTempDirectory("goal-root")
-        val store = CheckpointStore(root, createTempDirectory("goal-ckpt")) {}
+        val root = tempdir().toPath()
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returnsMany listOf(
             flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "bash", """{"command":"cat /etc/hosts > out.txt"}""")))),
             flowOf(StreamEvent.Content("done"))
         )
-        coEvery { provider.complete(any()) } returns LLMResponse.Text("YES", TokenUsage(1, 1))
-        val planner = mockk<Planner>()
-        coEvery { planner.plan(any(), any()) } returns singleStepPlan()
-        val sm = sessionManager()
-        val gc = GoalController(
-            agentLoop = AgentLoop(provider, ToolRegistry().register(BashTool(root)), sm, contextWindowTokens = TEST_CONTEXT_WINDOW),
-            sessionManager = sm, provider = provider, planner = planner,
-            critic = StepCritic { _, _ -> 1.0 },
-            runnerConfig = PlanRunnerConfig(model = "m", allowParallelSteps = false),
-            planLog = PlanLog(tempdir().toPath()),
-            input = ScriptedInputSource(listOf("y")),
-            liveRegion = LiveRegion(StringBuilder()) { 80 },
-            interactive = true, tokenViewKey = 'T', autoExitTokenView = true,
-            learning = null, checkpoints = store, onTurnSettled = { _, _, _ -> }
-        ) {}
+        provider.completes("YES")
+        val runtime = runtime(provider) { builtinTools(root); checkpoints(home = tempdir().toPath()) }
+        val (gc, _) = controller(runtime)
         val session = AgentSession(id = "s1")
 
         runBlocking { gc.run(session, "copy hosts") }
 
-        FileRestorer(store).plan(session)!!.warnings shouldBe listOf("cat /etc/hosts > out.txt")
+        FileRestorer(runtime.checkpointStore!!).plan(session)!!.warnings shouldBe listOf("cat /etc/hosts > out.txt")
     }
 })
