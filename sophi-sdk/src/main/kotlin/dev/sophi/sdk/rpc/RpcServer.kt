@@ -149,8 +149,9 @@ class RpcServer(
      */
     private fun CoroutineScope.startIfIdle(busy: () -> Unit = {}, first: suspend () -> Unit): Boolean = synchronized(lock) {
         if (turn != null) { busy(); return false }
-        // Lazy, so [turn] is set before the job can look at it.
-        val job = launch(start = CoroutineStart.LAZY) {
+        // Atomic: an abort before the body runs still goes through it, so the turn ends and frees [turn].
+        // The job only reads [turn] under [lock], which is held here until [turn] is set.
+        val job = launch(start = CoroutineStart.ATOMIC) {
             try {
                 first()
                 while (true) {
@@ -169,7 +170,6 @@ class RpcServer(
             }
         }
         turn = job
-        job.start()
         true
     }
 
@@ -181,9 +181,9 @@ class RpcServer(
     }
 
     private suspend fun turnOnce(input: String) {
-        emit(RpcEvent.TurnStarted(input))
         val partial = StringBuilder()
         try {
+            emit(RpcEvent.TurnStarted(input)) // inside the try: a cancelled job still ends the turn it announced
             session = runtime.streamTurn(session, input, inbox, onEvent = relay(partial))
             val last = session.branch().lastOrNull { it.role == EntryRole.ASSISTANT }
             emit(RpcEvent.TurnEnded(last?.content.orEmpty(), last?.metadata?.get("stopReason") ?: "Completed"))
@@ -196,9 +196,9 @@ class RpcServer(
     }
 
     private suspend fun goal(task: String, check: String?) {
-        emit(RpcEvent.TurnStarted(task))
         val partial = StringBuilder()
         try {
+            emit(RpcEvent.TurnStarted(task)) // inside the try: a cancelled job still ends the turn it announced
             val r = runtime.runGoal(session, task, check, planLog, onEvent = relay(partial))
             r.changePlan?.let { emit(RpcEvent.PlanReady(it.id, it.steps.size)) }
             val stop = if (r.status == GoalStatus.Failed) "Error" else "Completed"

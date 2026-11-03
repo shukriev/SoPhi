@@ -256,6 +256,19 @@ class RpcServerTest : FunSpec({
         r.last("turn_ended") shouldContain "\"reply\":\"again\""
     }
 
+    // All three lines are read before the turn's body gets the thread, so the abort lands before it starts.
+    test("abort before the turn starts still ends it, and the next prompt runs") {
+        val r = rig(streaming(text("again")))
+        r.send("""{"type":"prompt","text":"first"}""")
+        r.send("""{"type":"abort"}""")
+        r.send("""{"type":"prompt","text":"second"}""")
+        r.input.close()
+        withTimeout(10_000) { r.server.run(r.input) }
+        r.types().count { it == "turn_ended" } shouldBe 2
+        r.lines.first { type(it) == "turn_ended" } shouldContain "\"stopReason\":\"UserStopped\""
+        r.last("turn_ended") shouldContain "\"reply\":\"again\""
+    }
+
     // The race is between the reader seeing a busy turn and the turn going idle; threads make it show.
     test("a prompt sent as the turn ends is never lost") {
         repeat(40) {
