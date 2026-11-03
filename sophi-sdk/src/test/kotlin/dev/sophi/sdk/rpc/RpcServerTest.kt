@@ -21,6 +21,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -238,6 +239,37 @@ class RpcServerTest : FunSpec({
         r.last("turn_ended") shouldContain "\"reply\":\"B\""
         val users = r.runtime.sessionManager.load(r.session.id).entries.filter { it.role == EntryRole.USER }.map { it.content }
         users shouldContainAll listOf("first", "second")
+    }
+
+    test("abort then a prompt at once runs the prompt") {
+        val started = CompletableDeferred<Unit>()
+        val r = rig(streaming(flow { started.complete(Unit); awaitCancellation() }, text("again")))
+        val job = launch { r.server.run(r.input) }
+        r.send("""{"type":"prompt","text":"first"}""")
+        started.await()
+        r.send("""{"type":"abort"}""")
+        r.send("""{"type":"prompt","text":"second"}""")
+        r.input.close()
+        job.join()
+        r.types().count { it == "turn_started" } shouldBe 2
+        r.types().count { it == "turn_ended" } shouldBe 2
+        r.last("turn_ended") shouldContain "\"reply\":\"again\""
+    }
+
+    // The race is between the reader seeing a busy turn and the turn going idle; threads make it show.
+    test("a prompt sent as the turn ends is never lost") {
+        repeat(40) {
+            val r = rig(streaming(text("A"), text("B")))
+            val job = launch(Dispatchers.Default) { r.server.run(r.input) }
+            r.send("""{"type":"prompt","text":"first"}""")
+            r.awaitType("token")
+            r.send("""{"type":"prompt","text":"second"}""")
+            r.input.close()
+            withTimeout(10_000) { job.join() }
+            val users = r.runtime.sessionManager.load(r.session.id).entries.filter { it.role == EntryRole.USER }.map { it.content }
+            users shouldBe listOf("first", "second")
+            r.types().last() shouldBe "exited"
+        }
     }
 
     test("goal ends with goalStatus") {

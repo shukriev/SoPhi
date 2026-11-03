@@ -17,6 +17,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -105,7 +107,8 @@ class RpcServer(
             is RpcCommand.Prompt -> queueOrStart(cmd.text, steer = false)
             is RpcCommand.FollowUp -> queueOrStart(cmd.text, steer = false)
             is RpcCommand.Steer -> queueOrStart(cmd.text, steer = true)
-            is RpcCommand.Abort -> synchronized(lock) { turn }?.cancel() ?: emit(RpcEvent.Error("no turn is running", cmd.id))
+            // Joined, so a command read next sees the turn gone instead of queueing behind it.
+            is RpcCommand.Abort -> synchronized(lock) { turn }?.cancelAndJoin() ?: emit(RpcEvent.Error("no turn is running", cmd.id))
             is RpcCommand.Confirm ->
                 if (!confirmations.answer(cmd.callId, cmd.approved)) emit(RpcEvent.Error("no pending confirmation ${cmd.callId}", cmd.id))
             is RpcCommand.Goal -> if (!startIfIdle { goal(cmd.text, cmd.check) }) emit(RpcEvent.Error("a turn is running", cmd.id))
@@ -136,16 +139,16 @@ class RpcServer(
     }
 
     private fun CoroutineScope.queueOrStart(text: String, steer: Boolean) {
-        if (!startIfIdle { turnOnce(text) }) if (steer) inbox.steer(text) else inbox.followUp(text)
+        startIfIdle(busy = { if (steer) inbox.steer(text) else inbox.followUp(text) }) { turnOnce(text) }
     }
 
     /**
-     * Starts [first] and then whatever was queued behind it, unless a turn is running (false). Taking the
-     * next message and going idle happen under [lock], so a message queued just as the turn ends still runs.
-     * An abort drops what was queued.
+     * Starts [first] and then whatever was queued behind it; if a turn is running, calls [busy] instead and
+     * returns false. Queueing, taking the next message and going idle all happen under [lock], so a message
+     * queued just as the turn ends still runs. An abort drops what was queued.
      */
-    private fun CoroutineScope.startIfIdle(first: suspend () -> Unit): Boolean = synchronized(lock) {
-        if (turn != null) return false
+    private fun CoroutineScope.startIfIdle(busy: () -> Unit = {}, first: suspend () -> Unit): Boolean = synchronized(lock) {
+        if (turn != null) { busy(); return false }
         // Lazy, so [turn] is set before the job can look at it.
         val job = launch(start = CoroutineStart.LAZY) {
             try {
@@ -158,8 +161,11 @@ class RpcServer(
                     turnOnce(next)
                 }
             } catch (e: CancellationException) {
-                synchronized(lock) { inbox.drainAll(); turn = null }
+                synchronized(lock) { inbox.drainAll() }
                 throw e
+            } finally {
+                // Only this job's own slot: once it went idle above, a newer turn may hold [turn].
+                synchronized(lock) { if (turn === coroutineContext.job) turn = null }
             }
         }
         turn = job
