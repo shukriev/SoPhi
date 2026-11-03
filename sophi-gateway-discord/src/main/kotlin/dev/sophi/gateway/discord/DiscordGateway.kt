@@ -7,6 +7,7 @@ import dev.sophi.gateway.GatewayOut
 import dev.sophi.gateway.GatewayResult
 import dev.sophi.gateway.People
 import dev.sophi.gateway.Resolution
+import dev.sophi.gateway.Role
 import dev.sophi.gateway.photoMessage
 import dev.sophi.gateway.voiceMessage
 import kotlinx.coroutines.CoroutineScope
@@ -95,6 +96,14 @@ class DiscordGateway(
     private var wrongTries = 0
     private var codeIssuedMs = 0L
 
+    private class MemberCode(val code: String, val issuedMs: Long, var wrongTries: Int = 0)
+    private val liveMemberCodes = mutableMapOf<String, MemberCode>()   // guarded by itself
+    private val _memberCodes = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** personId → the code that person sends to pair; gone once they pair. */
+    val memberCodes: StateFlow<Map<String, String>> = _memberCodes
+    private val _members = MutableStateFlow(state.members)
+    val members: StateFlow<List<Pairing>> = _members
+
     /** Cards on the phone still showing buttons: key → the message, so it can be edited later. */
     private class Card(val messageId: String, val channelId: String, val content: String, val choices: List<String>)
     private val cards = ConcurrentHashMap<String, Card>()
@@ -168,11 +177,39 @@ class DiscordGateway(
         tokens.remove()
         state.clear()
         _paired.value = null
+        _members.value = emptyList()
+        synchronized(liveMemberCodes) { liveMemberCodes.clear(); publishMemberCodes() }
         _joinedServer.value = null
         cards.clear()
     }
 
+    /** The live code a household member sends to pair, issued if they have none (10 minutes, 5 wrong tries, as the owner's). */
+    fun memberCode(personId: String): String {
+        require(people.get(personId)?.role == Role.MEMBER) { "no household member $personId" }
+        return synchronized(liveMemberCodes) {
+            liveMemberCodes.getOrPut(personId) { MemberCode(newCode(), nowMs()) }.code.also { publishMemberCodes() }
+        }
+    }
+
+    /** Unpairs [personId] and drops their code and their cards on the phone; nothing else if they aren't paired. */
+    fun removeMember(personId: String) {
+        synchronized(liveMemberCodes) { if (liveMemberCodes.remove(personId) != null) publishMemberCodes() }
+        val channel = channelFor(personId) ?: return
+        state.unpairMember(personId)
+        _members.value = state.members
+        cards.entries.removeIf { it.value.channelId == channel }
+    }
+
+    private fun publishMemberCodes() { _memberCodes.value = liveMemberCodes.mapValues { it.value.code } }
+
     private fun refreshCode() {
+        synchronized(liveMemberCodes) {
+            var changed = false
+            liveMemberCodes.replaceAll { _, c ->
+                if (nowMs() - c.issuedMs > CODE_LIFETIME_MS || c.wrongTries >= WRONG_TRIES) MemberCode(newCode(), nowMs()).also { changed = true } else c
+            }
+            if (changed) publishMemberCodes()
+        }
         if (state.pairing != null) { _pairingCode.value = null; return }
         if (_pairingCode.value == null || nowMs() - codeIssuedMs > CODE_LIFETIME_MS || wrongTries >= WRONG_TRIES) {
             _pairingCode.value = newCode()
@@ -208,33 +245,51 @@ class DiscordGateway(
             }
             return
         }
-        if (authorId != pairing.userId) { logLine("ignored a DM from $authorId"); return }
-        val from = GatewayAddress(people.owner().id, "discord:$authorId")
+        val personId = if (authorId == pairing.userId) people.owner().id
+            else state.members.firstOrNull { it.userId == authorId }?.personId
+                ?: return pairMember(authorId, author.str("username").orEmpty(), channelId, content)
+        val from = GatewayAddress(personId, "discord:$authorId")
+        // Replies go to the sender's own door, never to the owner's.
+        val door = channelFor(personId)
         val attachments = (m["attachments"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
         val messageId = m.str("id") ?: "msg"
         when {
             attachments.isEmpty() && content.trim().equals("new", ignoreCase = true) ->
-                if (receive(GatewayIn.NewChat(from)) == GatewayResult.NewChatStarted) say(NEW_CHAT_STARTED)
+                if (receive(GatewayIn.NewChat(from)) == GatewayResult.NewChatStarted) say(NEW_CHAT_STARTED, door)
             attachments.isEmpty() -> receive(GatewayIn.Message(from, content))
-            ((m["flags"] as? JsonPrimitive)?.intOrNull ?: 0) and VOICE_FLAG != 0 -> onVoice(from, attachments.first(), messageId)
-            attachments.first().str("content_type")?.substringBefore(';') in PHOTO_TYPES -> onPhoto(from, attachments.first(), content, messageId)
-            else -> say(TAKES_TEXT_VOICE_PHOTOS)
+            ((m["flags"] as? JsonPrimitive)?.intOrNull ?: 0) and VOICE_FLAG != 0 -> onVoice(from, door, attachments.first(), messageId)
+            attachments.first().str("content_type")?.substringBefore(';') in PHOTO_TYPES -> onPhoto(from, door, attachments.first(), content, messageId)
+            else -> say(TAKES_TEXT_VOICE_PHOTOS, door)
         }
     }
 
-    private suspend fun onVoice(from: GatewayAddress, a: JsonObject, messageId: String) {
-        val transcriber = transcribe() ?: return say(VOICE_NEEDS_MODEL)
+    /** A DM from someone not paired: pairs them if it is a live member code, else counts a wrong try. */
+    private fun pairMember(userId: String, userName: String, channelId: String, content: String) {
+        val text = content.replace(" ", "").trim()
+        val personId = synchronized(liveMemberCodes) {
+            val match = liveMemberCodes.entries.firstOrNull { it.value.code == text }?.key
+            if (match == null) liveMemberCodes.values.forEach { it.wrongTries++ }
+            else { liveMemberCodes.remove(match); publishMemberCodes() }
+            match
+        }
+        if (personId == null || people.get(personId) == null) { logLine("ignored a DM from $userId"); return }
+        state.pairMember(Pairing(userId, userName, channelId, personId))
+        _members.value = state.members
+    }
+
+    private suspend fun onVoice(from: GatewayAddress, door: String?, a: JsonObject, messageId: String) {
+        val transcriber = transcribe() ?: return say(VOICE_NEEDS_MODEL, door)
         val seconds = (a["duration_secs"] as? JsonPrimitive)?.doubleOrNull ?: 0.0
         val size = (a["size"] as? JsonPrimitive)?.longOrNull ?: 0L
-        if (seconds > MAX_VOICE_SECONDS || size > MAX_VOICE_BYTES) return say(VOICE_TOO_LONG)
+        if (seconds > MAX_VOICE_SECONDS || size > MAX_VOICE_BYTES) return say(VOICE_TOO_LONG, door)
         val ogg = inbox.resolve("$messageId.ogg")
         val wav = inbox.resolve("$messageId.wav")
         try {
             val text = fetch(a.str("url").orEmpty(), MAX_VOICE_BYTES, ogg)
                 .mapCatching { oggOpusToWav16k(it, wav).getOrThrow(); wav }
                 .mapCatching { transcriber(it).getOrThrow() }
-                .getOrElse { logLine("voice message failed: ${it.message}"); return say("I couldn't hear that voice message. Try again, or type it.") }
-            if (text.isBlank()) return say("I couldn't hear that voice message. Try again, or type it.")
+                .getOrElse { logLine("voice message failed: ${it.message}"); return say("I couldn't hear that voice message. Try again, or type it.", door) }
+            if (text.isBlank()) return say("I couldn't hear that voice message. Try again, or type it.", door)
             val result = receive(GatewayIn.Message(from, voiceMessage(text), voice = true))
             if (result is GatewayResult.Sent) heard[result.sessionId] = text
         } finally {
@@ -242,15 +297,15 @@ class DiscordGateway(
         }
     }
 
-    private suspend fun onPhoto(from: GatewayAddress, a: JsonObject, caption: String, messageId: String) {
+    private suspend fun onPhoto(from: GatewayAddress, door: String?, a: JsonObject, caption: String, messageId: String) {
         val ext = PHOTO_TYPES.getValue(a.str("content_type")!!.substringBefore(';'))
         val size = (a["size"] as? JsonPrimitive)?.longOrNull ?: 0L
-        if (size > MAX_PHOTO_BYTES) return say(TAKES_TEXT_VOICE_PHOTOS)
+        if (size > MAX_PHOTO_BYTES) return say(TAKES_TEXT_VOICE_PHOTOS, door)
         val photo = fetch(a.str("url").orEmpty(), MAX_PHOTO_BYTES, inbox.resolve("$messageId.$ext"))
-            .getOrElse { logLine("photo failed: ${it.message}"); return say(TAKES_TEXT_VOICE_PHOTOS) }
+            .getOrElse { logLine("photo failed: ${it.message}"); return say(TAKES_TEXT_VOICE_PHOTOS, door) }
         val text = photoText(photo) ?: CANT_READ_PHOTOS
         val result = receive(GatewayIn.Message(from, photoMessage(caption, text), photoPath = photo.toString()))
-        if ((result as? GatewayResult.Sent)?.pictureDropped == true) say(BUSY_PHOTO)
+        if ((result as? GatewayResult.Sent)?.pictureDropped == true) say(BUSY_PHOTO, door)
     }
 
     private suspend fun onInteraction(i: JsonObject) {
@@ -260,17 +315,26 @@ class DiscordGateway(
         val user = (i["user"] as? JsonObject) ?: ((i["member"] as? JsonObject)?.get("user") as? JsonObject)
         val message = i["message"] as? JsonObject
         val original = message?.str("content").orEmpty()
-        val pairing = state.pairing
-        if (pairing == null || user?.str("id") != pairing.userId) {
-            val unchanged = message?.let { runCatching { discordJson.decodeFromJsonElement(OutgoingMessage.serializer(), it) }.getOrNull() }
-            return client.answerInteraction(id, token, unchanged ?: OutgoingMessage(original))
+        val unchanged = suspend {
+            val same = message?.let { runCatching { discordJson.decodeFromJsonElement(OutgoingMessage.serializer(), it) }.getOrNull() }
+            client.answerInteraction(id, token, same ?: OutgoingMessage(original))
         }
+        val pairing = state.pairing ?: return unchanged()
+        val userId = user?.str("id")
+        val ownerId = people.owner().id
+        val personId = (if (userId == pairing.userId) ownerId else state.members.firstOrNull { it.userId == userId }?.personId)
+            ?: return unchanged()
         val customId = ((i["data"] as? JsonObject)?.str("custom_id")).orEmpty()
         val kind = customId.substringBefore(':')
         val key = customId.substringAfter(':').substringBeforeLast(':')
         val last = customId.substringAfterLast(':')
+        // A member answers only their own question cards; the owner, everything but a member's question.
+        val shown = cards[key]?.channelId
+        val mine = if (personId == ownerId) kind != "q" || shown == null || shown == pairing.dmChannelId
+            else kind == "q" && shown != null && shown == channelFor(personId)
+        if (!mine) return unchanged()
         val current = host.value ?: return client.answerInteraction(id, token, OutgoingMessage("$original\n$ENDED_ON_MAC"))
-        val from = GatewayAddress(people.owner().id, "discord:${pairing.userId}")
+        val from = GatewayAddress(personId, "discord:$userId")
         val card = cards.remove(key)
         val (result, label) = when (kind) {
             "p" -> current.receive(GatewayIn.AnswerPermission(from, key, allow = last == "allow")) to null
@@ -326,7 +390,7 @@ class DiscordGateway(
         if (personId == null || personId == people.owner().id) state.pairing?.dmChannelId
         else state.members.firstOrNull { it.personId == personId }?.dmChannelId
 
-    private suspend fun say(text: String, channelId: String? = state.pairing?.dmChannelId) =
+    private suspend fun say(text: String, channelId: String?) =
         outbox.send(Outgoing(OutgoingMessage(text), null, emptyList(), channelId))
 
     /** In order, and only while connected: what SoPhi sends while Discord is away waits for it. */
