@@ -17,7 +17,7 @@ data class LocalServer(val kind: LocalServerKind?, val baseUrl: String, val mode
 
 const val NO_LOCAL_SERVER_MESSAGE: String =
     "No local model server found on :8080 (llama.cpp), :1234 (LM Studio) or :11434 (Ollama). " +
-        "Start one (e.g. `OLLAMA_CONTEXT_LENGTH=16384 ollama serve` then `ollama pull qwen3:8b`), pass --base-url, " +
+        "Start one (e.g. `OLLAMA_CONTEXT_LENGTH=16384 ollama serve` then `ollama pull qwen3:8b`, or `sophi setup local`), pass --base-url, " +
         "or use --provider claude --model <name> with ANTHROPIC_API_KEY set."
 
 fun defaultLocalCandidates(host: String = "127.0.0.1"): List<Pair<LocalServerKind, String>> =
