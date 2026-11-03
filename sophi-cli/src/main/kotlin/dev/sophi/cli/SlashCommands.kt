@@ -103,6 +103,14 @@ class SlashHandler(
                 else sessions.forEach { output("${it.id}  ${it.entryCount} entries") }
                 session
             }
+            "search" -> {
+                if (arg.isNullOrEmpty()) output("Usage: /search <words>")
+                else {
+                    val hits = dev.sophi.core.session.searchSessions(sessionManager, arg)
+                    output(if (hits.isEmpty()) "No sessions mention: $arg" else dev.sophi.core.tools.formatSessionHits(hits))
+                }
+                session
+            }
             "branch" -> {
                 val entries = session.branch()
                 if (entries.isEmpty()) output("(empty)")
@@ -207,7 +215,7 @@ class SlashHandler(
             }
             else -> {
                 output(
-                    "Unknown command: /$cmd  Available: /list /branch /checkout /undo /revert /compact /good /bad " +
+                    "Unknown command: /$cmd  Available: /list /search /branch /checkout /undo /revert /compact /good /bad " +
                         "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /mcp /plans"
                 )
                 session

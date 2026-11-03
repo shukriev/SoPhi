@@ -21,6 +21,9 @@ import dev.sophi.schedule.store.TaskStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import dev.sophi.core.agent.TurnStopReason
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -51,6 +54,17 @@ class ScheduleEngineDenialTest : FunSpec({
         return e to store
     }
 
+    val audited = java.util.concurrent.CopyOnWriteArrayList<dev.sophi.core.audit.AuditEntry>()
+    fun engineWithSessions(provider: LLMProvider): Triple<ScheduleEngine, TaskStore, FileSessionManager> {
+        val home = tempdir().toPath()
+        val store = TaskStore(home.resolve("tasks.json"))
+        val sessions = FileSessionManager(createTempDirectory("schedule-denial-test"))
+        val e = ScheduleEngine(store, RunLog(home.resolve("runs.jsonl")), provider, ToolRegistry().register(danger),
+            sessions, object : Notifier { override fun notify(task: ScheduledTask, run: RunRecord) {} }, model = "m", contextWindowTokens = 100_000,
+            audit = { audited += it })
+        return Triple(e, store, sessions)
+    }
+
     fun recurring(store: TaskStore) =
         store.add(ScheduledTask(name = "t", trigger = Trigger.Interval(3600), mode = TaskMode.Recurring, prompt = "run it"))
 
@@ -66,6 +80,36 @@ class ScheduleEngineDenialTest : FunSpec({
         record.summary shouldBe STOPPED
         notified.single().outcome shouldBe RunOutcome.Failed(STOPPED)
         verify(exactly = 1) { provider.stream(any()) }
+    }
+
+    test("the report shows each blocked call's arguments with secrets masked, and the session records why it stopped") {
+        val provider = mockk<LLMProvider>()
+        val secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"
+        val calls = listOf(ToolCall("c1", "danger", "{\"path\":\"/etc/hosts\"}"),
+            ToolCall("c2", "danger", "{\"api_key\":\"$secret\"}"), ToolCall("c3", "danger", "{}"))
+        every { provider.stream(any()) } returnsMany listOf(flowOf(StreamEvent.ToolCallsReady(calls)), flowOf(StreamEvent.Content("done")))
+        val (e, store, sessions) = engineWithSessions(provider)
+
+        val record = runBlocking { e.runNow(recurring(store).id) }!!
+
+        record.summary shouldContain "danger {\"path\":\"/etc/hosts\"}"
+        record.summary shouldContain "[REDACTED]"
+        record.summary shouldNotContain secret
+        val last = sessions.load(record.sessionId!!).entries.last()
+        last.metadata["stopReason"] shouldBe TurnStopReason.DeniedUnattended.name
+        last.content shouldBe record.summary
+        audited.map { it.decision } shouldBe listOf("denied", "denied", "denied")
+    }
+
+    test("an unattended denial tells the model nobody can approve it") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(capture(requests)) } returnsMany listOf(denied("c1"), flowOf(StreamEvent.Content("done")))
+        val (e, store) = engine(provider)
+
+        runBlocking { e.runNow(recurring(store).id) }
+
+        requests.last().messages.last().content shouldContain "nobody is here to approve"
     }
 
     test("two blocked actions don't stop the run") {

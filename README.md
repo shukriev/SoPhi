@@ -163,6 +163,7 @@ In-session slash commands:
 /settings [key [value]] open the settings menu, or show or set one setting
 /model [id]              show the model and its window, or switch to another one
 /jobs [kill <id>]        list background bash jobs, or stop one
+/search <words>          find past sessions that mention every word (the model has the same search as `session_search`)
 /feedback [list|delete <id>]   inspect and manage explicit feedback records
 /lessons [list|archive <id>|forget <id>]   inspect and manage learned lessons
 /memory [list|show <id>|threads|profile|why]   browse Jane's Theory memory (needs --memory)
