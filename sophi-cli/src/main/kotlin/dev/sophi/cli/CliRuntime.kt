@@ -110,6 +110,8 @@ internal suspend fun buildCliRuntime(
     fallbacks: List<dev.sophi.sdk.FallbackModel> = emptyList(),
     /** A real terminal someone sits at: registers ask_user and the desktop tools. Off in piped runs and tests by default. */
     interactive: Boolean = false,
+    /** Replaces the terminal prompt as the manual confirmation policy (rpc mode asks its client); god/auto wrap it as usual. */
+    manualConfirmation: ConfirmationPolicy? = null,
 ): CliRuntime {
     // Assigned once the runtime exists (below). The confirmation policy reads them lazily, which
     // is what breaks the cycle: the policy must exist before the runtime that owns the
@@ -121,7 +123,7 @@ internal suspend fun buildCliRuntime(
     // Loaded before anything else starts: a malformed rules file throws PermissionRulesException (R5), and the
     // confirmation policy needs the same instance the runtime enforces.
     val permissionRules = loadPermissionRules(Path.of("").toAbsolutePath())
-    val manualConfirmationPolicy: ConfirmationPolicy = RemoteAwareConfirmationPolicy(
+    val manualConfirmationPolicy: ConfirmationPolicy = manualConfirmation ?: RemoteAwareConfirmationPolicy(
         TerminalConfirmationPolicy(terminal, input, permissionRules),
         { hubClient },
         { requireNotNull(session) { "confirmation requested before the session was created" }.id }
