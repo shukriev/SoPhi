@@ -3,6 +3,9 @@ package dev.sophi.sdk
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.skills.SkillMetadata
 import dev.sophi.skills.SkillLoader
+import dev.sophi.skills.SkillLock
+import dev.sophi.skills.SkillPin
+import dev.sophi.skills.SkillRegistry
 import dev.sophi.skills.SkillVersionStore
 import dev.sophi.versioning.VersionStore
 import io.kotest.core.spec.style.FunSpec
@@ -61,6 +64,16 @@ class WriteSkillToolTest : FunSpec({
         runBlocking { tool.execute(updated) }
 
         SkillLoader().loadFile(globalDir.resolve("site-example-com.md")).metadata.description shouldBe "Updated notes"
+    }
+
+    test("execute() re-pins an installed skill it updates, so the skill keeps loading") {
+        runBlocking { tool.execute(VALID_ARGS) }
+        SkillLock.write(globalDir, mapOf("site-example-com" to SkillPin("https://example.com/skills.git", "abc", "stale")))
+
+        runBlocking { tool.execute(VALID_ARGS.replace("How to use example.com", "Updated notes")) }
+
+        SkillLock.read(globalDir).getValue("site-example-com").source shouldBe "write_skill"
+        SkillRegistry.load(projectDir, globalDir).get("site-example-com")?.metadata?.description shouldBe "Updated notes"
     }
 
     test("execute() rejects an id outside the site-<slug> pattern") {

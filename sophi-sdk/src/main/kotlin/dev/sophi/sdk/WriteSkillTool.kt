@@ -4,6 +4,7 @@ import com.charleskorn.kaml.Yaml
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.skills.SkillLoader
+import dev.sophi.skills.SkillLock
 import dev.sophi.skills.SkillMetadata
 import dev.sophi.skills.SkillVersion
 import dev.sophi.skills.SkillVersionStore
@@ -105,6 +106,8 @@ class WriteSkillTool(
         }
 
         resolved.writeText(content)
+        // An installed skill Sophi edits is pinned to the new content, or it would stop loading.
+        if ('/' !in args.id) SkillLock.repinIfPinned(targetDir, args.id, by = "write_skill")
 
         val reread = runCatching { SkillLoader().loadFile(resolved) }.getOrNull()
         if (reread == null || reread.metadata.title != args.title) {

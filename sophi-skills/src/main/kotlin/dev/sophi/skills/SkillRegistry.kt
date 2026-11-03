@@ -7,10 +7,11 @@ import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.io.path.nameWithoutExtension
 
-class SkillRegistry(private val skills: Map<String, Skill>) {
+/** [refused] says, one line per skill, which pinned skills were left out because their files no longer match the pin. */
+class SkillRegistry(private val skills: Map<String, Skill>, val refused: List<String> = emptyList()) {
     fun get(id: String): Skill? = skills[id]
 
-    fun filter(keep: (String) -> Boolean): SkillRegistry = SkillRegistry(skills.filterKeys(keep))
+    fun filter(keep: (String) -> Boolean): SkillRegistry = SkillRegistry(skills.filterKeys(keep), refused)
 
     fun all(): List<Pair<String, Skill>> =
         skills.entries.map { it.key to it.value }.sortedBy { it.first }
@@ -30,15 +31,25 @@ class SkillRegistry(private val skills: Map<String, Skill>) {
 
     companion object {
         fun load(globalDir: Path, projectDir: Path, loader: SkillLoader = SkillLoader()): SkillRegistry {
-            val global = loadDirTolerant(globalDir, loader)
-            val project = loadDirTolerant(projectDir, loader)
-            return SkillRegistry(global + project) // project entries win on id collision
+            val refused = mutableListOf<String>()
+            val global = loadDirTolerant(globalDir, loader, refused)
+            val project = loadDirTolerant(projectDir, loader, refused)
+            return SkillRegistry(global + project, refused) // project entries win on id collision
         }
 
-        private fun loadDirTolerant(dir: Path, loader: SkillLoader): Map<String, Skill> {
+        private fun loadDirTolerant(dir: Path, loader: SkillLoader, refused: MutableList<String>): Map<String, Skill> {
             if (!dir.isDirectory()) return emptyMap()
+            val pins = SkillLock.read(dir)
             val flat = dir.listDirectoryEntries("*.md")
                 .filter { it.isRegularFile() }
+                .filter { file ->
+                    val id = file.nameWithoutExtension
+                    val pin = pins[id] ?: return@filter true
+                    (runCatching { skillContentHash(dir, id) }.getOrNull() == pin.sha256).also { ok ->
+                        if (!ok) refused += "Skill '$id' in $dir was not loaded: its files changed since it was " +
+                            "installed from ${pin.source}. Reinstall it with --update, or remove it."
+                    }
+                }
                 .mapNotNull { file ->
                     runCatching { loader.loadFile(file) }.getOrNull()
                         ?.let { file.nameWithoutExtension to it }
