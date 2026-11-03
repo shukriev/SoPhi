@@ -249,7 +249,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         (rt.memoryPlugin.shouldNotBeNull().household() === household) shouldBe true
         rt.close()
         household.browse(dev.sophi.memory.BrowseFilter()) shouldBe emptyList()   // still open: the host owns it
-        build(withMemory = false).memoryPlugin.shouldBeNull()
+        build(withMemory = false).let { off -> try { off.memoryPlugin.shouldBeNull() } finally { off.close() } }
         household.close()
     }
 

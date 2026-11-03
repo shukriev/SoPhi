@@ -426,7 +426,7 @@ class DiscordGatewayTest : FunSpec({
         r.dm("new", author = "u2", channel = "dm2")
         r.dm("", author = "u2", channel = "dm2", extra = ""","attachments":[{"url":"https://cdn.discordapp.com/a.pdf","content_type":"application/pdf","size":1000}]""")
         runBlocking { waitFor { r.discord.sent.size == 2 } }
-        r.discord.sent shouldBe listOf("dm2" to OutgoingMessage(NEW_CHAT_STARTED), "dm2" to OutgoingMessage(TAKES_TEXT_VOICE_PHOTOS))
+        r.discord.sent shouldBe listOf("dm2" to OutgoingMessage(NEW_CHAT_STARTED_MEMBER), "dm2" to OutgoingMessage(TAKES_TEXT_VOICE_PHOTOS))
         r.close()
     }
 
@@ -579,6 +579,56 @@ class DiscordGatewayTest : FunSpec({
         runBlocking { delay(200) }
         r.state.members.shouldBeEmpty()
         r.gateway.memberCode(alex.id) shouldNotBe code
+        r.close()
+    }
+
+    test("a member taken out of People has no door left") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = alex.id))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.people.remove(alex.id).shouldBeTrue()   // without removeMember
+        r.dm("hi", author = "u2", channel = "dm2")
+        r.click("q:question:s1:q:0", user = "u2")
+        runBlocking { waitFor { r.logHas("ignored a DM from u2") && r.discord.answers.isNotEmpty() } }
+        r.discord.answers.single().content shouldBe "**SoPhi asks** · Chat\nSend email"
+        r.host.received.shouldBeEmpty()
+        r.close()
+    }
+
+    test("rebind ends a member's card with the member's copy") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = alex.id))
+            r.host.out.emit(GatewayOut.Permission("permission:s1", "s1", "Chat", "Send email", canAnswer = true, tainted = false, 1_000_000L))
+            waitFor { r.discord.sent.size == 2 }
+        }
+        r.gateway.bind(FakeGatewayHost())
+        runBlocking { waitFor { r.discord.edits.size == 2 } }
+        r.discord.edits.single { it.first == "dm2" }.third.content shouldEndWith "\n$QUESTION_ENDED_MEMBER"
+        r.discord.edits.single { it.first == "dm1" }.third.content shouldEndWith "\n$ENDED_ON_MAC"
+        r.close()
+    }
+
+    test("a notice for a member goes to the member's DM") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking { r.host.out.emit(GatewayOut.Notice("Reminder", "Bins out", 0, personId = alex.id)); waitFor { r.discord.sent.isNotEmpty() } }
+        r.discord.sent.single().first shouldBe "dm2"
+        r.close()
+    }
+
+    test("a member can't answer the owner's question card") {
+        val r = Rig(); r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.discord.sent.single().first shouldBe "dm1"
+        r.click("q:question:s1:q:0", user = "u2")
+        runBlocking { waitFor { r.discord.answers.isNotEmpty() } }
+        r.discord.answers.single().content shouldBe "**SoPhi asks** · Chat\nSend email"
+        r.host.received.shouldBeEmpty()
         r.close()
     }
 })

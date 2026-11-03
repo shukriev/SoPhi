@@ -44,6 +44,7 @@ const val VOICE_TOO_LONG = "That voice message is longer than 5 minutes. Send a 
 const val TAKES_TEXT_VOICE_PHOTOS = "SoPhi can take text, voice messages and photos for now."
 const val BUSY_PHOTO = "I was busy, so I read the text in your photo but didn't see the picture. Send it again after my reply if I should look at it."
 const val NEW_CHAT_STARTED = "Started a new Phone chat. The last one is still on your Mac."
+const val NEW_CHAT_STARTED_MEMBER = "Started a new chat."
 const val CANT_READ_PHOTOS = "(This computer can't read text in photos yet.)"
 
 private const val VOICE_FLAG = 1 shl 13
@@ -157,7 +158,7 @@ class DiscordGateway(
         hostJob?.cancel()
         val ended = cards.toMap().also { cards.clear() }
         ended.values.forEach { card ->
-            scope.launch { runCatching { client.edit(card.channelId, card.messageId, OutgoingMessage(card.content + "\n" + ENDED_ON_MAC)) } }
+            scope.launch { runCatching { client.edit(card.channelId, card.messageId, OutgoingMessage(card.content + "\n" + endedText(card.channelId))) } }
         }
         host.value = next
         hostJob = next?.let { d -> scope.launch { d.out.collect { onGatewayOut(it) } } }
@@ -249,8 +250,10 @@ class DiscordGateway(
             }
             return
         }
-        val personId = if (authorId == pairing.userId) people.owner().id
-            else state.members.firstOrNull { it.userId == authorId }?.personId
+        val ownerId = people.owner().id
+        val personId = if (authorId == pairing.userId) ownerId
+            else state.members.firstOrNull { it.userId == authorId }
+                ?.let { memberIn(it) ?: return logLine("ignored a DM from $authorId: no longer in People") }
                 ?: return pairMember(authorId, author.str("username").orEmpty(), channelId, content)
         val from = GatewayAddress(personId, "discord:$authorId")
         // Replies go to the sender's own door, never to the owner's.
@@ -259,7 +262,8 @@ class DiscordGateway(
         val messageId = m.str("id") ?: "msg"
         when {
             attachments.isEmpty() && content.trim().equals("new", ignoreCase = true) ->
-                if (receive(GatewayIn.NewChat(from)) == GatewayResult.NewChatStarted) say(NEW_CHAT_STARTED, door)
+                if (receive(GatewayIn.NewChat(from)) == GatewayResult.NewChatStarted)
+                    say(if (personId == ownerId) NEW_CHAT_STARTED else NEW_CHAT_STARTED_MEMBER, door)
             attachments.isEmpty() -> receive(GatewayIn.Message(from, content))
             ((m["flags"] as? JsonPrimitive)?.intOrNull ?: 0) and VOICE_FLAG != 0 -> onVoice(from, door, attachments.first(), messageId)
             attachments.first().str("content_type")?.substringBefore(';') in PHOTO_TYPES -> onPhoto(from, door, attachments.first(), content, messageId)
@@ -327,7 +331,7 @@ class DiscordGateway(
         val pairing = state.pairing ?: return unchanged()
         val userId = user?.str("id")
         val ownerId = people.owner().id
-        val personId = (if (userId == pairing.userId) ownerId else state.members.firstOrNull { it.userId == userId }?.personId)
+        val personId = (if (userId == pairing.userId) ownerId else state.members.firstOrNull { it.userId == userId }?.let(::memberIn))
             ?: return unchanged()
         val customId = ((i["data"] as? JsonObject)?.str("custom_id")).orEmpty()
         val kind = customId.substringBefore(':')
@@ -338,7 +342,7 @@ class DiscordGateway(
         val mine = if (personId == ownerId) kind != "q" || shown == null || shown == pairing.dmChannelId
             else kind == "q" && shown != null && shown == channelFor(personId)
         if (!mine) return unchanged()
-        val current = host.value ?: return client.answerInteraction(id, token, OutgoingMessage("$original\n$ENDED_ON_MAC"))
+        val current = host.value ?: return client.answerInteraction(id, token, OutgoingMessage("$original\n" + endedText(shown)))
         val from = GatewayAddress(personId, "discord:$userId")
         val card = cards.remove(key)
         val (result, label) = when (kind) {
@@ -389,6 +393,13 @@ class DiscordGateway(
 
     /** A card not already on the phone or on its way there; claims it. */
     private fun fresh(key: String): Boolean = !cards.containsKey(key) && queuedKeys.add(key)
+
+    /** [m]'s person, or null once they were taken out of People (the host may not have called [removeMember]). */
+    private fun memberIn(m: Pairing): String? = m.personId?.takeIf { people.get(it) != null }
+
+    /** How a card that ended reads: a member has no Mac to go to. */
+    private fun endedText(channelId: String?): String =
+        if (channelId == null || channelId == state.pairing?.dmChannelId) ENDED_ON_MAC else QUESTION_ENDED_MEMBER
 
     /** The owner's DM for null or the owner's id, else that member's; null when they have no door. */
     private fun channelFor(personId: String?): String? =
