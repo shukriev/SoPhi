@@ -187,6 +187,7 @@ class DiscordGateway(
     fun memberCode(personId: String): String {
         require(people.get(personId)?.role == Role.MEMBER) { "no household member $personId" }
         return synchronized(liveMemberCodes) {
+            rotateMemberCodes()
             liveMemberCodes.getOrPut(personId) { MemberCode(newCode(), nowMs()) }.code.also { publishMemberCodes() }
         }
     }
@@ -202,14 +203,17 @@ class DiscordGateway(
 
     private fun publishMemberCodes() { _memberCodes.value = liveMemberCodes.mapValues { it.value.code } }
 
-    private fun refreshCode() {
-        synchronized(liveMemberCodes) {
-            var changed = false
-            liveMemberCodes.replaceAll { _, c ->
-                if (nowMs() - c.issuedMs > CODE_LIFETIME_MS || c.wrongTries >= WRONG_TRIES) MemberCode(newCode(), nowMs()).also { changed = true } else c
-            }
-            if (changed) publishMemberCodes()
+    /** Replaces expired or spent member codes; checked before every match, not only by the 1-second loop. */
+    private fun rotateMemberCodes() = synchronized(liveMemberCodes) {
+        var changed = false
+        liveMemberCodes.replaceAll { _, c ->
+            if (nowMs() - c.issuedMs > CODE_LIFETIME_MS || c.wrongTries >= WRONG_TRIES) MemberCode(newCode(), nowMs()).also { changed = true } else c
         }
+        if (changed) publishMemberCodes()
+    }
+
+    private fun refreshCode() {
+        rotateMemberCodes()
         if (state.pairing != null) { _pairingCode.value = null; return }
         if (_pairingCode.value == null || nowMs() - codeIssuedMs > CODE_LIFETIME_MS || wrongTries >= WRONG_TRIES) {
             _pairingCode.value = newCode()
@@ -267,8 +271,9 @@ class DiscordGateway(
     private fun pairMember(userId: String, userName: String, channelId: String, content: String) {
         val text = content.replace(" ", "").trim()
         val personId = synchronized(liveMemberCodes) {
+            rotateMemberCodes()
             val match = liveMemberCodes.entries.firstOrNull { it.value.code == text }?.key
-            if (match == null) liveMemberCodes.values.forEach { it.wrongTries++ }
+            if (match == null) { liveMemberCodes.values.forEach { it.wrongTries++ }; rotateMemberCodes() }
             else { liveMemberCodes.remove(match); publishMemberCodes() }
             match
         }

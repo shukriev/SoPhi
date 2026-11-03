@@ -83,10 +83,11 @@ private class Rig(
     val gateway = DiscordGateway(
         discord, state, people, tokens,
         transcribe = { transcriber }, photoText = { "Total 42" }, inbox = dir.resolve("inbox"), log = log, scope = scope,
-        nowMs = { 1_000_000L }, zone = ZoneOffset.UTC,
+        nowMs = { now }, zone = ZoneOffset.UTC,
         fetch = { _, _, to -> Files.createDirectories(to.parent); Files.copy(fetchFrom!!, to); Result.success(to) },
         newCode = { codes.removeFirstOrNull() ?: "999999" },
     )
+    @Volatile var now = 1_000_000L
     val codes = mutableListOf("482913", "111111", "222222")
 
     init { gateway.start(); gateway.bind(host) }
@@ -554,6 +555,30 @@ class DiscordGatewayTest : FunSpec({
         val r = Rig(); r.pair()
         io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> { r.gateway.memberCode("nobody") }
         io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> { r.gateway.memberCode(r.people.owner().id) }
+        r.close()
+    }
+
+    test("a burst of wrong guesses spends the member code at once") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        val code = r.gateway.memberCode(alex.id)
+        repeat(5) { r.dm("000000", author = "u9", channel = "dm9") }
+        r.dm(code, author = "u9", channel = "dm9")   // no wait for the 1-second loop
+        runBlocking { delay(200) }
+        r.state.members.shouldBeEmpty()
+        r.gateway.memberCode(alex.id) shouldNotBe code
+        r.close()
+    }
+
+    test("an expired member code doesn't pair and isn't handed out") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        val code = r.gateway.memberCode(alex.id)
+        r.now += 10 * 60_000L + 1
+        r.dm(code, author = "u2", channel = "dm2")
+        runBlocking { delay(200) }
+        r.state.members.shouldBeEmpty()
+        r.gateway.memberCode(alex.id) shouldNotBe code
         r.close()
     }
 })
