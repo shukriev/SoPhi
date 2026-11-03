@@ -30,4 +30,6 @@ sealed class TurnEvent {
     data class HintedReads(val reads: List<dev.sophi.core.dryrun.PlanRead>) : TurnEvent()
     /** One model request finished: its [usage], and [generationMillis] from its first streamed event to its end (0 when none came). */
     data class RoundUsage(val usage: dev.sophi.ai.api.TokenUsage, val generationMillis: Long) : TurnEvent()
+    /** [from] was unavailable ([reason]), so the rest of this turn runs on [to], the next model of the fallback chain. */
+    data class ModelFallback(val from: String, val to: String, val reason: String) : TurnEvent()
 }

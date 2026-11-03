@@ -104,6 +104,8 @@ internal suspend fun buildCliRuntime(
     onWarning: (String) -> Unit = {},
     /** The cost meter already inside [provider] (under System 1); null = the runtime meters [provider] itself. */
     metered: dev.sophi.sdk.MeteredProvider? = null,
+    /** Tried in order when the model is unavailable (`--fallback-models`); empty = no fallback. */
+    fallbacks: List<dev.sophi.sdk.FallbackModel> = emptyList(),
     /** A real terminal someone sits at: registers ask_user and the desktop tools. Off in piped runs and tests by default. */
     interactive: Boolean = false,
 ): CliRuntime {
@@ -162,6 +164,7 @@ internal suspend fun buildCliRuntime(
     val runtime = try { Sophi.runtime {
         this.provider = provider
         this.metered = metered
+        fallback(*fallbacks.toTypedArray())
         jobsHome = opts.jobsHome
         model = opts.model
         maxTokens = opts.maxTokens

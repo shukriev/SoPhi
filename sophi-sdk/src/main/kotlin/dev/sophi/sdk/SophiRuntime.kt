@@ -223,10 +223,13 @@ class SophiRuntime internal constructor(
         return try {
             onLoopStart()
             val (updated, plan, hinted) = planFirstScopeWithReads(session.id, input) {
-                agentLoop.streamTurn(session, input, turnConfig, preamble, inbox, images) { event ->
-                    if (event is TurnEvent.Token) partial.append(event.text)
-                    bridge(event)
-                    onEvent(event)
+                // A fresh place in the fallback chain per turn: the next turn tries the session's model again.
+                withContext(FallbackTurn { bridge(it); onEvent(it) }) {
+                    agentLoop.streamTurn(session, input, turnConfig, preamble, inbox, images) { event ->
+                        if (event is TurnEvent.Token) partial.append(event.text)
+                        bridge(event)
+                        onEvent(event)
+                    }
                 }
             }
             if (plan != null) onEvent(TurnEvent.PlanReady(plan))

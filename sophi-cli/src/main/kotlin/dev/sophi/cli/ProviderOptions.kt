@@ -9,10 +9,12 @@ import com.github.ajalt.clikt.parameters.types.long
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.providers.LocalServer
 import dev.sophi.ai.providers.NO_LOCAL_SERVER_MESSAGE
+import dev.sophi.ai.providers.ProviderConfigException
 import dev.sophi.ai.providers.detectContextWindow
 import dev.sophi.ai.providers.discoverLocalServer
 import dev.sophi.ai.providers.isChatModel
 import dev.sophi.ai.providers.loadedChatModels
+import dev.sophi.sdk.FallbackModel
 import dev.sophi.sdk.ModelCatalog
 import dev.sophi.sdk.ModelInfo
 import java.net.InetAddress
@@ -173,4 +175,45 @@ internal fun modelSwitchWindow(
         error = "$id isn't in the model catalog — check the id, or add it to ~/.sophi/models.local.json"
     )
     return ModelSwitch(window = info.contextTokens ?: current)
+}
+
+/**
+ * The `--fallback-models` chain, comma-separated and tried in order when the session's model is unavailable:
+ * `name` is another model on the session's own server, `name@http://host:port/v1` one on another
+ * OpenAI-compatible server on this machine or network, `name@claude` Anthropic's API (cloud, billed,
+ * ANTHROPIC_API_KEY). An entry that can't be used is warned about and left out.
+ */
+internal fun fallbackChain(
+    spec: String,
+    resolved: ResolvedProvider,
+    catalog: ModelCatalog,
+    warn: (String) -> Unit,
+    build: (type: String, baseUrl: String?, model: String) -> LLMProvider,
+    probe: (String) -> LocalServer? = { url -> discoverLocalServer(listOf(null to url), Duration.ofSeconds(2)) },
+    detect: (LocalServer, String) -> Int? = { server, model -> detectContextWindow(server, model)?.tokens },
+): List<FallbackModel> = spec.split(',').map { it.trim() }.filter { it.isNotEmpty() }.mapNotNull { entry ->
+    val model = entry.substringBeforeLast('@')
+    val where = entry.substringAfterLast('@', "")
+    fun skip(why: String): FallbackModel? = null.also { warn("fallback $entry left out: $why") }
+    try {
+        when {
+            where.isEmpty() -> modelSwitchWindow(resolved, catalog, model, resolved.contextWindowTokens, detect)
+                .let { s -> s.window?.let { FallbackModel(model, it) } ?: skip(s.error ?: "no window") }
+            where == "claude" -> {
+                val info = catalog.find(model, "anthropic") ?: return@mapNotNull skip("$model isn't in the model catalog")
+                FallbackModel(model, info.contextTokens ?: 200_000, build("claude", null, model), info)
+            }
+            !isLocalHost(runCatching { URI(where).host }.getOrNull()) ->
+                skip("$where isn't on this machine or network; the one cloud fallback is name@claude")
+            else -> {
+                val url = where.trimEnd('/')
+                val window = probe(url)?.let { detect(it, model) } ?: 8192.also {
+                    warn("fallback $entry: couldn't read its context window from $url; assuming 8192")
+                }
+                FallbackModel(model, window, build("local", url, model))
+            }
+        }
+    } catch (e: ProviderConfigException) {
+        skip(e.message ?: "can't build its provider")
+    }
 }

@@ -46,6 +46,7 @@ val CLI_SETTINGS: List<Setting> = listOf(
     live("max-cost-usd", SettingKind.Decimal),
     next("provider", SettingKind.Choice(listOf("local", "openai-compat", "claude"))),
     next("base-url", SettingKind.Text),
+    next("fallback-models", SettingKind.Text),
     next("context-window-tokens", SettingKind.Int),
     next("max-tokens", SettingKind.Int),
     next("llm-timeout-seconds", SettingKind.Int),

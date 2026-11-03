@@ -84,6 +84,13 @@ class RuntimeBuilder {
     var metered: MeteredProvider? = null
     /** Stops the session's work once it has cost [maxUsd] dollars: the turn ends with TurnStopReason.BudgetExceeded. */
     fun budget(maxUsd: Double): RuntimeBuilder = apply { this.maxUsd = maxUsd }
+    private var fallbacks: List<FallbackModel> = emptyList()
+    /**
+     * Models to try, in order, when the session's model is unavailable (server down, model not loaded, 5xx):
+     * the rest of that turn runs on the next one, and the turn reports it (TurnEvent.ModelFallback).
+     * None by default. Only what is listed here is ever tried, so a cloud model is used only if you list one.
+     */
+    fun fallback(vararg models: FallbackModel): RuntimeBuilder = apply { fallbacks = models.toList() }
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
     var systemPrompt: String? = null
@@ -347,11 +354,12 @@ class RuntimeBuilder {
         val hostMeter = metered
         // A budget nothing is priced against would never trip: say so now, not after the bill.
         if (maxUsd != null && hostMeter == null) {
-            check(priced) { "budget(maxUsd) needs priced = true: a provider that isn't priced costs nothing, so the budget never trips" }
+            check(priced || fallbacks.any { it.price?.priced == true }) { "budget(maxUsd) needs priced = true: a provider that isn't priced costs nothing, so the budget never trips" }
             check(modelCatalog != null) { "budget(maxUsd) needs a modelCatalog to price requests against (ModelCatalog.bundled())" }
         }
         val metered = hostMeter ?: MeteredProvider.wrap(given, model, modelCatalog, priced, catalogProvider)
         maxUsd?.let { metered.meter.maxUsd = it }
+        if (fallbacks.isNotEmpty()) metered.fallbacks = fallbacks
         val inner: LLMProvider = if (hostMeter != null) given else metered
         val p = inner.let { s2 -> system1Config?.let { (home, warn) -> system1FromHome(s2, home, warn) } ?: s2 }
         val window = requireNotNull(contextWindowTokens) {
