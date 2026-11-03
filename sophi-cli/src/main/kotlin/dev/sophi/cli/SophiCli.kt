@@ -38,7 +38,6 @@ import dev.sophi.calendar.tools.ListCalendarEventsTool
 import dev.sophi.calendar.tools.ListCalendarsTool
 import dev.sophi.calendar.tools.UpdateCalendarEventTool
 import dev.sophi.extensions.PluginRegistry
-import dev.sophi.extensions.turnEventBridge
 import dev.sophi.learning.LearningConfig
 import dev.sophi.learning.LearningPlugin
 import dev.sophi.mcp.McpClientManager
@@ -358,8 +357,7 @@ class SophiCli(
             }
         }
         val liveRegion = LiveRegion(liveRegionSink) { mordantTerminal.info.width }
-        // The plugin-hook bridge now lives inside SophiRuntime.streamTurn, so this only has to
-        // mirror events out to a connected companion.
+        // Plugin hooks fire from AgentLoop itself, so this only has to mirror events out to a connected companion.
         val onEvent: suspend (dev.sophi.core.agent.TurnEvent) -> Unit = { event ->
             event.toHubEvent(session.id)?.let { hubClient?.publish(it) }
         }
@@ -375,7 +373,7 @@ class SophiCli(
         val goalLoop = AgentLoop(
             provider, cli.registry, cli.runtime.sessionManager,
             confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
-            audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules
+            audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules, hooks = cli.runtime.hooks
         )
         // /goal's planner, critic and runner keep the start model's id; the metered provider sends it to the active model.
         val switchModel: suspend (String) -> String? = { id ->

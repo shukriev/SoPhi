@@ -114,7 +114,8 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         llmProvider: LLMProvider,
         toolRegistry: ToolRegistry,
         sessionManager: SessionManager,
-        confirmationPolicy: ConfirmationPolicy
+        confirmationPolicy: ConfirmationPolicy,
+        pluginRegistry: PluginRegistry
     ): AgentLoop {
         val window = providerProperties.contextWindowTokens
             ?: throw IllegalStateException(
@@ -124,7 +125,8 @@ class AgentConfiguration(private val providerProperties: ProviderProperties) {
         return AgentLoop(
             llmProvider, toolRegistry, sessionManager,
             confirmationPolicy = confirmationPolicy,
-            contextWindowTokens = window
+            contextWindowTokens = window,
+            hooks = pluginRegistry
         )
     }
 }

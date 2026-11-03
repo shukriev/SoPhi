@@ -103,7 +103,8 @@ class AgentConfigurationTest : FunSpec({
             config.agentLoop(
                 mockk(), ToolRegistry(),
                 FileSessionManager(tempdir().toPath()),
-                ConfirmationPolicy.DENY_ALL
+                ConfirmationPolicy.DENY_ALL,
+                dev.sophi.extensions.PluginRegistry()
             )
         }
         ex.message!! shouldContain "sophi.provider.context-window-tokens"
@@ -116,7 +117,8 @@ class AgentConfigurationTest : FunSpec({
         val loop = config.agentLoop(
             mockk(), ToolRegistry(),
             FileSessionManager(tempdir().toPath()),
-            ConfirmationPolicy.DENY_ALL
+            ConfirmationPolicy.DENY_ALL,
+            dev.sophi.extensions.PluginRegistry()
         )
         loop.shouldBeInstanceOf<AgentLoop>()
     }
