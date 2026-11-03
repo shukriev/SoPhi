@@ -56,7 +56,11 @@ data class Memory(
     /** ISO day-of-week (1=Monday..7=Sunday) this memory's occurrences cluster around, only when
      *  day concentration ALSO clears the threshold -- null means "habitual but not day-specific"
      *  (e.g. a daily habit). */
-    val habitPreferredDayOfWeek: Int? = null
+    val habitPreferredDayOfWeek: Int? = null,
+    /** Looks like it belongs to the shared household; the host asks the user before sharing it. */
+    val householdCandidate: Boolean = false,
+    /** Names of the household members who shared this into the household memory, in order shared. */
+    val sharedBy: List<String> = emptyList()
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null

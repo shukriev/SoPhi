@@ -275,4 +275,15 @@ class PalaceStoreTest : FunSpec({
             }
         }
     }
+
+    test("a plain memory is written without the household fields") {
+        val home = tempdir().toPath()
+        val db = EmbeddedArcadeStore.open(home)
+        val s = PalaceStore(home, db)
+        s.upsertMemory(mem("mem_1"))
+        db.queryVertices("Memory").single().keys.let { ("householdCandidate" in it) shouldBe false; ("sharedBy" in it) shouldBe false }
+        s.upsertMemory(mem("mem_2").copy(householdCandidate = true, sharedBy = listOf("Alex")))
+        s.memories().getValue("mem_2").let { it.householdCandidate shouldBe true; it.sharedBy shouldBe listOf("Alex") }
+        s.close()
+    }
 })

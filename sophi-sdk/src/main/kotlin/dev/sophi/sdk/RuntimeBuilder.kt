@@ -94,6 +94,8 @@ class RuntimeBuilder {
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
     var systemPrompt: String? = null
+    /** The prompt that comes first, before [systemPrompt]. Defaults to [DefaultPrompt.BASE]; a host with fewer tools replaces it. */
+    var basePrompt: String = DefaultPrompt.BASE
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
     var memoryHome: Path = JanesPalaceConfig.DEFAULT_HOME
@@ -350,9 +352,16 @@ class RuntimeBuilder {
         embeddingProvider: EmbeddingProvider? = null,
         /** Each turn's recalled memories, before they go into it; see [MemoryPlugin]'s `onRecall`. */
         onRecall: (sessionId: String, memories: List<dev.sophi.memory.MemoryView>) -> Unit = { _, _ -> },
+        /** A new memory that looks like a household fact; see [MemoryPlugin]'s `onHouseholdCandidate`. */
+        onHouseholdCandidate: (sessionId: String, memory: dev.sophi.memory.MemoryView) -> Unit = { _, _ -> },
     ): RuntimeBuilder = apply {
-        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider, onRecall)
+        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider, onRecall, onHouseholdCandidate)
     }
+
+    private var householdMemory: JanesPalace? = null
+
+    /** The household's shared memory, recalled next to this runtime's own. Ignored when [memory] is off; never closed here. */
+    fun householdMemory(palace: JanesPalace): RuntimeBuilder = apply { householdMemory = palace }
 
     fun build(): SophiRuntime {
         val model = requireNotNull(model) { "model must be set before calling build()" }
@@ -502,7 +511,7 @@ class RuntimeBuilder {
                         p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                     )
                 }.fold(
-                    onSuccess = { palace -> MemoryPlugin(palace, onRecall = mc.onRecall).also { pluginRegistry.register(it) } },
+                    onSuccess = { palace -> MemoryPlugin(palace, onRecall = mc.onRecall, onHouseholdCandidate = mc.onHouseholdCandidate, household = householdMemory).also { pluginRegistry.register(it) } },
                     onFailure = { e ->
                         mc.onWarning("memory: disabled — couldn't open the memory database at $memoryHome (${e.message ?: "unknown error"})")
                         null
@@ -517,7 +526,7 @@ class RuntimeBuilder {
 
         val effectiveConfig = agentConfig.copy(
             systemPrompt = listOfNotNull(
-                DefaultPrompt.BASE, agentConfig.systemPrompt, learningSection, memorySection
+                basePrompt, agentConfig.systemPrompt, learningSection, memorySection
             ).joinToString("\n\n")
         )
 
@@ -584,6 +593,7 @@ private data class MemoryConfig(
     val onWarning: (String) -> Unit,
     val embeddingProvider: EmbeddingProvider? = null,
     val onRecall: (String, List<dev.sophi.memory.MemoryView>) -> Unit = { _, _ -> },
+    val onHouseholdCandidate: (String, dev.sophi.memory.MemoryView) -> Unit = { _, _ -> },
 )
 
 /**

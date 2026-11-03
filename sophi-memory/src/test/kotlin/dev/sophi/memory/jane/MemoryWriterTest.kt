@@ -22,6 +22,22 @@ class MemoryWriterTest : FunSpec({
         VerdictMemory(text = text, room = room, emph = emph, aff = aff, dur = dur,
             commitment = commitment, provenance = provenance)
 
+    test("household candidate only for plain user facts") {
+        suspend fun candidate(t: TurnObservation, sensitivity: String = "PERSONAL", provenance: String = "USER_DIRECT"): Boolean {
+            val (_, writer) = rig()
+            val v = VerdictMemory(text = "The family shops on Saturdays", room = "KNOWLEDGE", emph = 0.8, aff = 0.9,
+                sensitivity = sensitivity, provenance = provenance, household = true)
+            return writer.write(t, EncoderVerdict(listOf(v))).single().householdCandidate
+        }
+        candidate(turn) shouldBe true
+        candidate(turn, sensitivity = "SENSITIVE") shouldBe false
+        candidate(turn.copy(ambient = true)) shouldBe false
+        candidate(turn, provenance = "THIRD_PARTY") shouldBe false
+        // not asked for by the encoder -> not a candidate
+        rig().second.write(turn, EncoderVerdict(listOf(vm("The family shops on Saturdays", room = "KNOWLEDGE", emph = 0.8, aff = 0.9))))
+            .single().householdCandidate shouldBe false
+    }
+
     test("TurnObservation.ambient defaults to false") {
         TurnObservation("s1", "u", "a", 1_000L).ambient shouldBe false
         TurnObservation("s1", "u", "a", 1_000L, ambient = true).ambient shouldBe true

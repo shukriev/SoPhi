@@ -5,10 +5,16 @@ import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
+import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.TokenUsage
 import io.kotest.core.spec.style.FunSpec
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.runBlocking
 
 /** Scripted in-memory technique: lets plugin behavior be tested without the palace. */
 private class ScriptedTechnique : MemoryTechnique {
@@ -111,6 +117,79 @@ class MemoryPluginTest : FunSpec({
         val ms = kotlin.system.measureTimeMillis { plugin.close() }
         (ms < 5_000) shouldBe true
         t.observed.size shouldBe 0
+    }
+
+    test("a new household candidate is reported once; a merged one is not") {
+        val reply = { household: Boolean -> LLMResponse.Text(
+            """{"memories":[{"text":"The family shops on Saturdays","room":"KNOWLEDGE","emph":0.8,"aff":0.9,
+               "sensitivity":"PERSONAL","provenance":"USER_DIRECT","household":$household}],"profile":[]}""", TokenUsage(1, 1)) }
+        val llm = mockk<LLMProvider>()
+        coEvery { llm.complete(any()) } returns reply(true)
+        val palace = JanesPalace(
+            JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model"),
+            llm, FakeEmbeddingProvider(), "fake"
+        )
+        val got = java.util.concurrent.CopyOnWriteArrayList<Pair<String, MemoryView>>()
+        val plugin = MemoryPlugin(palace, onHouseholdCandidate = { sid, m -> got += sid to m })
+        val hook = plugin.hooks().single { it.point == HookPoint.AFTER_TURN }
+        hook.invoke(HookContext("s1", userInput = "we shop on Saturdays", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.size shouldBe 1
+        got.single().first shouldBe "s1"
+        got.single().second.metadata["household"] shouldBe "candidate"
+        got.single().second.id shouldBe palace.browse(BrowseFilter()).single().id
+
+        // same fact again: merges into the existing memory, nothing new to report
+        hook.invoke(HookContext("s1", userInput = "we shop on Saturdays", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.size shouldBe 1
+        plugin.close()
+    }
+
+    test("a throwing household callback does not break the turn") {
+        val llm = mockk<LLMProvider>()
+        coEvery { llm.complete(any()) } returns LLMResponse.Text(
+            """{"memories":[{"text":"The family shops on Saturdays","room":"KNOWLEDGE","emph":0.8,"aff":0.9,
+               "sensitivity":"PERSONAL","provenance":"USER_DIRECT","household":true}],"profile":[]}""", TokenUsage(1, 1))
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model"), llm, FakeEmbeddingProvider(), "fake")
+        val plugin = MemoryPlugin(palace, onHouseholdCandidate = { _, _ -> error("boom") })
+        plugin.hooks().single { it.point == HookPoint.AFTER_TURN }.invoke(HookContext("s1", userInput = "u", assistantReply = "a"))
+        plugin.drainEncodes()
+        palace.browse(BrowseFilter()).size shouldBe 1
+        plugin.close()
+    }
+
+    test("household recall comes after the personal one") {
+        val personal = ScriptedTechnique().apply { recallAnswer = MemoryBlock("P", listOf("m1")) }
+        val household = ScriptedTechnique().apply { recallAnswer = MemoryBlock("H", listOf("h1")) }
+        val seen = mutableListOf<String>()
+        val plugin = MemoryPlugin(personal, onRecall = { _, ms -> seen += ms.map { it.id } }, household = household)
+        plugin.contribute("s1", "hi") shouldBe "P\n\nShared by the household:\nH"
+        seen shouldBe listOf("m1", "h1")
+        personal.recallAnswer = null
+        plugin.contribute("s1", "hi") shouldBe "Shared by the household:\nH"
+        household.recallAnswer = null
+        plugin.contribute("s1", "hi") shouldBe null
+    }
+
+    test("a failing personal recall still gives the household one, and the reverse") {
+        val personal = ScriptedTechnique().apply { recallAnswer = MemoryBlock("P", listOf("m1")) }
+        val household = ScriptedTechnique().apply { recallAnswer = MemoryBlock("H", listOf("h1")) }
+        MemoryPlugin(personal, onRecall = { _, ms -> if (ms.single().id == "m1") error("no") }, household = household)
+            .contribute("s1", "hi") shouldBe "Shared by the household:\nH"
+        MemoryPlugin(personal, onRecall = { _, ms -> if (ms.single().id == "h1") error("no") }, household = household)
+            .contribute("s1", "hi") shouldBe "P"
+    }
+
+    test("closing the plugin leaves the household open") {
+        val cfg = { JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model") }
+        val household = JanesPalace(cfg(), llmProvider = null, embeddingProvider = FakeEmbeddingProvider())
+        runBlocking { household.rememberCommitment("pay rent", "s", System.currentTimeMillis()) }
+        val plugin = MemoryPlugin(JanesPalace(cfg(), llmProvider = null, embeddingProvider = null), household = household)
+        plugin.household() shouldBe household
+        plugin.close()
+        household.browse(BrowseFilter()).single().text shouldBe "pay rent"
+        household.close()
     }
 
     test("palace() returns the technique when it is a JanesPalace") {

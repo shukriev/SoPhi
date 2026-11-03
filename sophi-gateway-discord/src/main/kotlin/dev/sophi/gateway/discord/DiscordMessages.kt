@@ -27,6 +27,8 @@ data class ActionRow(val components: List<Button>, val type: Int = 1)
 data class OutgoingMessage(val content: String, val components: List<ActionRow> = emptyList())
 
 const val ENDED_ON_MAC = "This request ended on the Mac."
+/** A member's card when it ends: they don't have the Mac. */
+const val QUESTION_ENDED_MEMBER = "This question ended. Ask again if you still need it."
 
 private const val PART_SUFFIX_MAX = 8      // "\n(99/99)"
 private const val FENCE_CLOSE = "\n```"

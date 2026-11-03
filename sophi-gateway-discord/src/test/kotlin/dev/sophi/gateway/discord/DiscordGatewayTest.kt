@@ -1,5 +1,6 @@
 package dev.sophi.gateway.discord
 
+import dev.sophi.gateway.GatewayAddress
 import dev.sophi.gateway.GatewayHost
 import dev.sophi.gateway.GatewayIn
 import dev.sophi.gateway.GatewayOut
@@ -39,7 +40,8 @@ private class FakeDiscord : DiscordPort {
     override val status = MutableStateFlow<DiscordStatus>(DiscordStatus.Offline(null))
     override val events = MutableSharedFlow<DiscordAction.Dispatch>(extraBufferCapacity = 64)
     val sent = CopyOnWriteArrayList<Pair<String, OutgoingMessage>>()
-    val edits = CopyOnWriteArrayList<Pair<String, OutgoingMessage>>()
+    /** channelId, messageId, message */
+    val edits = CopyOnWriteArrayList<Triple<String, String, OutgoingMessage>>()
     val answers = CopyOnWriteArrayList<OutgoingMessage>()
     var started = 0
     var stopped = 0
@@ -48,7 +50,7 @@ private class FakeDiscord : DiscordPort {
     override fun stop() { stopped++; status.value = DiscordStatus.Offline(null) }
     override suspend fun openDm(userId: String) = "dm-$userId"
     override suspend fun send(channelId: String, message: OutgoingMessage): String { sent += channelId to message; return "m${ids.incrementAndGet()}" }
-    override suspend fun edit(channelId: String, messageId: String, message: OutgoingMessage) { edits += messageId to message }
+    override suspend fun edit(channelId: String, messageId: String, message: OutgoingMessage) { edits += Triple(channelId, messageId, message) }
     override suspend fun answerInteraction(id: String, token: String, message: OutgoingMessage) { answers += message }
 
     fun dispatch(type: String, json: String) = runBlocking { events.emit(DiscordAction.Dispatch(type, Json.parseToJsonElement(json).jsonObject)) }
@@ -75,24 +77,36 @@ private class Rig(
     val host = FakeGatewayHost()
     val tokens = MemoryTokens()
     val state = DiscordState(dir.resolve("phone.json"))
+    val people = People(dir.resolve("people.json"))
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val log: Path = dir.resolve("phone.log")
     val gateway = DiscordGateway(
-        discord, state, People(dir.resolve("people.json")), tokens,
+        discord, state, people, tokens,
         transcribe = { transcriber }, photoText = { "Total 42" }, inbox = dir.resolve("inbox"), log = log, scope = scope,
-        nowMs = { 1_000_000L }, zone = ZoneOffset.UTC,
+        nowMs = { now }, zone = ZoneOffset.UTC,
         fetch = { _, _, to -> Files.createDirectories(to.parent); Files.copy(fetchFrom!!, to); Result.success(to) },
         newCode = { codes.removeFirstOrNull() ?: "999999" },
     )
+    @Volatile var now = 1_000_000L
     val codes = mutableListOf("482913", "111111", "222222")
 
     init { gateway.start(); gateway.bind(host) }
     fun close() { gateway.stop(); scope.cancel() }
+    fun logHas(text: String) = Files.exists(log) && Files.readString(log).contains(text)
 
-    fun dm(content: String, author: String = "u1", extra: String = "") =
-        discord.dispatch("MESSAGE_CREATE", """{"id":"msg1","channel_id":"dm1","content":${Json.encodeToString(kotlinx.serialization.serializer<String>(), content)},"author":{"id":"$author","username":"sam"}$extra}""")
+    fun dm(content: String, author: String = "u1", extra: String = "", channel: String = "dm1") =
+        discord.dispatch("MESSAGE_CREATE", """{"id":"msg1","channel_id":"$channel","content":${Json.encodeToString(kotlinx.serialization.serializer<String>(), content)},"author":{"id":"$author","username":"sam"}$extra}""")
 
     fun pair() { runBlocking { waitFor { gateway.pairingCode.value != null } }; dm("482 913"); runBlocking { waitFor { state.pairing != null } } }
+
+    /** Owner paired, then Alex pairs from u2 on dm2 with the member code. */
+    fun pairAlex(): dev.sophi.gateway.Person {
+        pair()
+        val alex = people.add("Alex")
+        dm(gateway.memberCode(alex.id), author = "u2", channel = "dm2")
+        runBlocking { waitFor { state.members.isNotEmpty() } }
+        return alex
+    }
 
     fun click(customId: String, user: String = "u1") = discord.dispatch("INTERACTION_CREATE",
         """{"type":3,"id":"i1","token":"t1","user":{"id":"$user"},"data":{"custom_id":"$customId"},"message":{"content":"**SoPhi asks** · Chat\nSend email"}}""")
@@ -284,7 +298,7 @@ class DiscordGatewayTest : FunSpec({
         runBlocking { waitFor { r.discord.sent.isNotEmpty() } }
         runBlocking { r.host.out.emit(GatewayOut.Resolved("permission:s1", Resolution.ELSEWHERE, 1_000_000L)) }
         runBlocking { waitFor { r.discord.edits.isNotEmpty() } }
-        r.discord.edits.single().let { (id, m) -> id shouldBe "m1"; m.content shouldEndWith "\nAnswered on the Mac"; m.components.shouldBeEmpty() }
+        r.discord.edits.single().let { (_, id, m) -> id shouldBe "m1"; m.content shouldEndWith "\nAnswered on the Mac"; m.components.shouldBeEmpty() }
         r.close()
     }
 
@@ -295,7 +309,7 @@ class DiscordGatewayTest : FunSpec({
         val next = FakeGatewayHost()
         r.gateway.bind(next)
         runBlocking { waitFor { r.discord.edits.isNotEmpty() } }
-        r.discord.edits.single().second.content shouldEndWith "\n$ENDED_ON_MAC"
+        r.discord.edits.single().third.content shouldEndWith "\n$ENDED_ON_MAC"
         r.discord.stopped shouldBe 0
         runBlocking { waitFor { next.out.subscriptionCount.value > 0 } }
         runBlocking { next.out.emit(GatewayOut.Permission("permission:s1", "s1", "Chat", "Send email", canAnswer = true, tainted = false, 1_000_000L)) }
@@ -353,6 +367,268 @@ class DiscordGatewayTest : FunSpec({
         r.tokens.token shouldBe "secret-token"
         r.pair()
         Files.readString(r.dir.resolve("phone.json")).contains("secret-token").shouldBeFalse()
+        r.close()
+    }
+    test("a member's reply goes to the member's DM") {
+        val r = Rig(); r.pair()
+        r.state.pairMember(Pairing("u2", "alex", "dm2", "p2"))
+        runBlocking { r.host.out.emit(GatewayOut.Reply("s1", "hi Alex", 0, personId = "p2")); waitFor { r.discord.sent.isNotEmpty() } }
+        r.discord.sent.single().first shouldBe "dm2"
+        r.close()
+    }
+
+    test("reply for an unpaired person is dropped") {
+        val r = Rig(); r.pair()
+        runBlocking { r.host.out.emit(GatewayOut.Reply("s1", "hi", 0, personId = "gone")); delay(200) }
+        r.discord.sent.shouldBeEmpty()
+        Files.readString(r.log) shouldContain "no door for gone"
+        r.close()
+    }
+
+    test("a member's question card is answered on the member's DM") {
+        val r = Rig(); r.pair()
+        r.state.pairMember(Pairing("u2", "alex", "dm2", "p2"))
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = "p2"))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.discord.sent.single().first shouldBe "dm2"
+        r.close()
+    }
+
+    test("a member pairs with their code") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        val code = r.gateway.memberCode(alex.id)
+        code shouldBe "111111"
+        r.gateway.memberCode(alex.id) shouldBe code   // the live code, not a new one
+        r.gateway.memberCodes.value shouldBe mapOf(alex.id to "111111")
+        r.dm("111 111", author = "u2", channel = "dm2")
+        runBlocking { waitFor { r.state.members.isNotEmpty() } }
+        r.state.members.single() shouldBe Pairing("u2", "sam", "dm2", alex.id)
+        r.gateway.members.value shouldBe listOf(Pairing("u2", "sam", "dm2", alex.id))
+        r.gateway.memberCodes.value shouldBe emptyMap()
+        r.host.received.shouldBeEmpty()
+        r.close()
+    }
+
+    test("a member's message comes from the member") {
+        val r = Rig(); val alex = r.pairAlex()
+        r.dm("add eggs", author = "u2", channel = "dm2")
+        runBlocking { waitFor { r.host.received.isNotEmpty() } }
+        (r.host.received.single() as GatewayIn.Message).from shouldBe GatewayAddress(alex.id, "discord:u2")
+        r.close()
+    }
+
+    test("replies to a member's DM go to the member's channel") {
+        val r = Rig(); r.pairAlex()
+        r.host.result = { if (it is GatewayIn.NewChat) GatewayResult.NewChatStarted else GatewayResult.Sent("phone-1") }
+        r.dm("new", author = "u2", channel = "dm2")
+        r.dm("", author = "u2", channel = "dm2", extra = ""","attachments":[{"url":"https://cdn.discordapp.com/a.pdf","content_type":"application/pdf","size":1000}]""")
+        runBlocking { waitFor { r.discord.sent.size == 2 } }
+        r.discord.sent shouldBe listOf("dm2" to OutgoingMessage(NEW_CHAT_STARTED_MEMBER), "dm2" to OutgoingMessage(TAKES_TEXT_VOICE_PHOTOS))
+        r.close()
+    }
+
+    test("unknown user ignored with members paired") {
+        val r = Rig(); r.pairAlex()
+        r.dm("hi", author = "u9", channel = "dm9")
+        runBlocking { waitFor { r.logHas("ignored a DM from u9") } }
+        r.host.received.shouldBeEmpty()
+        r.close()
+    }
+
+    test("five wrong tries make a new member code") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        r.gateway.memberCode(alex.id) shouldBe "111111"
+        repeat(5) { r.dm("000000", author = "u9", channel = "dm9") }
+        runBlocking { waitFor { r.gateway.memberCodes.value[alex.id] == "222222" } }
+        r.dm("111111", author = "u9", channel = "dm9")
+        runBlocking { delay(100) }
+        r.state.members.shouldBeEmpty()
+        r.close()
+    }
+
+    test("the owner can't pair as a member") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        r.dm(r.gateway.memberCode(alex.id))
+        runBlocking { waitFor { r.host.received.isNotEmpty() } }
+        (r.host.received.single() as GatewayIn.Message).from.personId shouldBe r.people.owner().id
+        r.state.members.shouldBeEmpty()
+        r.close()
+    }
+
+    test("a member code sent in a server is ignored") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        r.dm(r.gateway.memberCode(alex.id), author = "u2", channel = "c1", extra = ""","guild_id":"g1"""")
+        runBlocking { waitFor { r.logHas("server message from u2") } }
+        r.state.members.shouldBeEmpty()
+        r.close()
+    }
+
+    test("member can't answer the owner's card") {
+        val r = Rig(); r.pairAlex()
+        runBlocking { r.host.out.emit(GatewayOut.Permission("permission:k1", "s1", "Chat", "Send email", canAnswer = true, tainted = false, 1_000_000L)) }
+        runBlocking { waitFor { r.discord.sent.isNotEmpty() } }
+        r.click("p:permission:k1:allow", user = "u2")
+        runBlocking { waitFor { r.discord.answers.isNotEmpty() } }
+        r.discord.answers.single().content shouldBe "**SoPhi asks** · Chat\nSend email"
+        r.host.received.shouldBeEmpty()
+        r.close()
+    }
+
+    test("a member never gets permission or plan cards") {
+        val r = Rig(); r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Permission("permission:k1", "s1", "Chat", "Send email", canAnswer = true, tainted = false, 1_000_000L))
+            r.host.out.emit(GatewayOut.Plan("plan:p1", "s1", "Chat", "offboard jane", listOf("okta deactivate_user"), canAnswer = true, 1_000_000L))
+            waitFor { r.discord.sent.size == 2 }
+        }
+        r.discord.sent.map { it.first } shouldBe listOf("dm1", "dm1")
+        r.close()
+    }
+
+    test("a member answers only their own question card") {
+        val r = Rig(); val alex = r.pairAlex()
+        r.host.result = { GatewayResult.Answered(true) }
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = alex.id))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.click("q:question:s1:q:0", user = "u1")   // the owner can't click it
+        runBlocking { waitFor { r.discord.answers.isNotEmpty() } }
+        r.discord.answers.single().content shouldBe "**SoPhi asks** · Chat\nSend email"
+        r.host.received.shouldBeEmpty()
+        r.click("q:question:s1:q:0", user = "u2")
+        runBlocking { waitFor { r.host.received.isNotEmpty() } }
+        (r.host.received.single() as GatewayIn.AnswerQuestion).let { it.from shouldBe GatewayAddress(alex.id, "discord:u2"); it.key shouldBe "question:s1:q" }
+        r.close()
+    }
+
+    test("a member's question card resolved elsewhere is edited on their DM") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = alex.id))
+            waitFor { r.discord.sent.isNotEmpty() }
+            r.host.out.emit(GatewayOut.Resolved("question:s1:q", Resolution.ELSEWHERE, 1_000_000L))
+            waitFor { r.discord.edits.isNotEmpty() }
+        }
+        r.discord.edits.single().first shouldBe "dm2"
+        r.close()
+    }
+
+    test("remove a member") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = alex.id))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.gateway.removeMember(alex.id)
+        r.state.members.shouldBeEmpty()
+        r.gateway.members.value.shouldBeEmpty()
+        r.dm("hi", author = "u2", channel = "dm2")
+        r.click("q:question:s1:q:0", user = "u2")
+        runBlocking { waitFor { r.logHas("ignored a DM from u2") && r.discord.answers.isNotEmpty() } }
+        r.host.received.shouldBeEmpty()
+        runBlocking { r.host.out.emit(GatewayOut.Resolved("question:s1:q", Resolution.ELSEWHERE, 1_000_000L)); delay(100) }
+        r.discord.edits.shouldBeEmpty()   // the card was dropped
+        r.gateway.removeMember(alex.id)   // not paired: a no-op
+        r.close()
+    }
+
+    test("removing a member drops their live code") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        val code = r.gateway.memberCode(alex.id)
+        r.gateway.removeMember(alex.id)
+        r.gateway.memberCodes.value shouldBe emptyMap()
+        r.dm(code, author = "u2", channel = "dm2")
+        runBlocking { waitFor { r.logHas("ignored a DM from u2") } }
+        r.state.members.shouldBeEmpty()
+        r.close()
+    }
+
+    test("a member code for an unknown person is refused") {
+        val r = Rig(); r.pair()
+        io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> { r.gateway.memberCode("nobody") }
+        io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> { r.gateway.memberCode(r.people.owner().id) }
+        r.close()
+    }
+
+    test("a burst of wrong guesses spends the member code at once") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        val code = r.gateway.memberCode(alex.id)
+        repeat(5) { r.dm("000000", author = "u9", channel = "dm9") }
+        r.dm(code, author = "u9", channel = "dm9")   // no wait for the 1-second loop
+        runBlocking { delay(200) }
+        r.state.members.shouldBeEmpty()
+        r.gateway.memberCode(alex.id) shouldNotBe code
+        r.close()
+    }
+
+    test("an expired member code doesn't pair and isn't handed out") {
+        val r = Rig(); r.pair()
+        val alex = r.people.add("Alex")
+        val code = r.gateway.memberCode(alex.id)
+        r.now += 10 * 60_000L + 1
+        r.dm(code, author = "u2", channel = "dm2")
+        runBlocking { delay(200) }
+        r.state.members.shouldBeEmpty()
+        r.gateway.memberCode(alex.id) shouldNotBe code
+        r.close()
+    }
+
+    test("a member taken out of People has no door left") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = alex.id))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.people.remove(alex.id).shouldBeTrue()   // without removeMember
+        r.dm("hi", author = "u2", channel = "dm2")
+        r.click("q:question:s1:q:0", user = "u2")
+        runBlocking { waitFor { r.logHas("ignored a DM from u2") && r.discord.answers.isNotEmpty() } }
+        r.discord.answers.single().content shouldBe "**SoPhi asks** · Chat\nSend email"
+        r.host.received.shouldBeEmpty()
+        r.close()
+    }
+
+    test("rebind ends a member's card with the member's copy") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0, personId = alex.id))
+            r.host.out.emit(GatewayOut.Permission("permission:s1", "s1", "Chat", "Send email", canAnswer = true, tainted = false, 1_000_000L))
+            waitFor { r.discord.sent.size == 2 }
+        }
+        r.gateway.bind(FakeGatewayHost())
+        runBlocking { waitFor { r.discord.edits.size == 2 } }
+        r.discord.edits.single { it.first == "dm2" }.third.content shouldEndWith "\n$QUESTION_ENDED_MEMBER"
+        r.discord.edits.single { it.first == "dm1" }.third.content shouldEndWith "\n$ENDED_ON_MAC"
+        r.close()
+    }
+
+    test("a notice for a member goes to the member's DM") {
+        val r = Rig(); val alex = r.pairAlex()
+        runBlocking { r.host.out.emit(GatewayOut.Notice("Reminder", "Bins out", 0, personId = alex.id)); waitFor { r.discord.sent.isNotEmpty() } }
+        r.discord.sent.single().first shouldBe "dm2"
+        r.close()
+    }
+
+    test("a member can't answer the owner's question card") {
+        val r = Rig(); r.pairAlex()
+        runBlocking {
+            r.host.out.emit(GatewayOut.Question("question:s1:q", "Which?", listOf("A", "B"), allowFreeText = false, 0))
+            waitFor { r.discord.sent.isNotEmpty() }
+        }
+        r.discord.sent.single().first shouldBe "dm1"
+        r.click("q:question:s1:q:0", user = "u2")
+        runBlocking { waitFor { r.discord.answers.isNotEmpty() } }
+        r.discord.answers.single().content shouldBe "**SoPhi asks** · Chat\nSend email"
+        r.host.received.shouldBeEmpty()
         r.close()
     }
 })

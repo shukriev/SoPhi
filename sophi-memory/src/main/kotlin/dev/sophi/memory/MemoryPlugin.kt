@@ -32,6 +32,10 @@ class MemoryPlugin(
      * outside text. If it throws, the recall is left out of the turn rather than injected unchecked.
      */
     private val onRecall: (sessionId: String, memories: List<MemoryView>) -> Unit = { _, _ -> },
+    /** Told once per memory a turn's encode newly stored that looks like it belongs to the household. */
+    private val onHouseholdCandidate: (sessionId: String, memory: MemoryView) -> Unit = { _, _ -> },
+    /** The household's shared memory, recalled after the personal one. The host owns it: [close] leaves it open. */
+    private val household: MemoryTechnique? = null,
 ) : SophiPlugin, ContextContributor {
     override val placement = Placement.VOLATILE
 
@@ -40,9 +44,17 @@ class MemoryPlugin(
     private val encodeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlight = CopyOnWriteArrayList<Job>()
 
-    override suspend fun contribute(sessionId: String, userInput: String): String? = runCatching {
-        val block = technique.recall(RecallQuery(sessionId, userInput, clock())) ?: return@runCatching null
-        if (block.memoryIds.isNotEmpty()) onRecall(sessionId, technique.views(block.memoryIds))
+    override suspend fun contribute(sessionId: String, userInput: String): String? {
+        val query = RecallQuery(sessionId, userInput, clock())
+        val personal = recall(technique, query)
+        val shared = household?.let { recall(it, query) }?.let { "Shared by the household:\n$it" }
+        return listOfNotNull(personal, shared).joinToString("\n\n").ifEmpty { null }
+    }
+
+    /** One palace's recall; a failure (or a throwing [onRecall]) leaves only that palace out of the turn. */
+    private suspend fun recall(from: MemoryTechnique, query: RecallQuery): String? = runCatching {
+        val block = from.recall(query) ?: return@runCatching null
+        if (block.memoryIds.isNotEmpty()) onRecall(query.sessionId, from.views(block.memoryIds))
         block.rendered
     }.getOrNull()
 
@@ -52,7 +64,14 @@ class MemoryPlugin(
             val input = context.userInput ?: return
             val reply = context.assistantReply ?: return
             val turn = TurnObservation(context.sessionId, input, reply, clock(), ambient = context.ambient, inMeeting = context.inMeeting)
-            val job = encodeScope.launch { runCatching { technique.observe(turn) } }
+            val job = encodeScope.launch {
+                runCatching {
+                    val palace = palace()
+                    if (palace == null) technique.observe(turn)
+                    else palace.observeStored(turn).filter { it.metadata["household"] == "candidate" }
+                        .forEach { m -> runCatching { onHouseholdCandidate(turn.sessionId, m) } }
+                }
+            }
             inFlight += job
             job.invokeOnCompletion { inFlight -= job }
         }
@@ -81,6 +100,9 @@ class MemoryPlugin(
 
     /** The palace-specific read surface (browse/threads/profileView), or null for any other technique. */
     fun palace(): dev.sophi.memory.jane.JanesPalace? = technique as? dev.sophi.memory.jane.JanesPalace
+
+    /** The household palace, or null when there is none (or it isn't a JanesPalace). */
+    fun household(): dev.sophi.memory.jane.JanesPalace? = household as? dev.sophi.memory.jane.JanesPalace
 
     /** Lets in-flight encodes finish (up to [drainTimeoutMs]) first: a session usually ends right after
      *  its last turn, whose encode is still running, and cancelling it would lose that turn's memories. */

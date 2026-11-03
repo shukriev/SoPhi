@@ -2,6 +2,8 @@ package dev.sophi.memory.jane
 
 import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.memory.TurnObservation
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.util.UUID
@@ -74,14 +76,10 @@ class MemoryWriter(
     internal suspend fun rememberCommitment(rawText: String, sessionId: String, nowMs: Long): Memory {
         val text = redact(rawText)
         val vector = embeddings.embed(listOf(text)).first()
-        val near = store.memories().values
-            .filter {
-                it.active && it.isCommitment && it.provenance == Provenance.USER_DIRECT &&
-                    it.sensitivity <= Sensitivity.PERSONAL && it.createdAt >= nowMs - config.commitmentExpiryMs
-            }
-            .map { it to (store.vectorFor(it.id)?.let { v -> cosine(vector, v) } ?: 0.0) }
-            .filter { it.second >= config.mergeThreshold }
-            .maxByOrNull { it.second }?.first
+        val near = nearest(vector) {
+            it.active && it.isCommitment && it.provenance == Provenance.USER_DIRECT &&
+                it.sensitivity <= Sensitivity.PERSONAL && it.createdAt >= nowMs - config.commitmentExpiryMs
+        }
         if (near != null) {
             // Re-confirmed: its open window restarts now (openCommitments filters by createdAt).
             return near.copy(isCommitment = true, createdAt = nowMs, reinforcedAt = nowMs).also { store.upsertMemory(it) }
@@ -103,6 +101,43 @@ class MemoryWriter(
         store.putEmbedding(memory.id, embeddingModelName, vector)
         return memory
     }
+
+    /**
+     * A fact a household member shared into this (household) palace. The same fact in the same room
+     * is one entry: a repeat share reinforces it and adds [by] to [Memory.sharedBy].
+     */
+    internal suspend fun share(source: Memory, by: String, nowMs: Long): Memory {
+        val vector = embeddings.embed(listOf(source.text)).first()
+        return shareLock.withLock { shareLocked(source, by, nowMs, vector) }
+    }
+
+    /** Two people sharing the same fact at once would both miss the other's copy and make two entries. */
+    private val shareLock = Mutex()
+
+    private fun shareLocked(source: Memory, by: String, nowMs: Long, vector: FloatArray): Memory {
+        nearest(vector) { it.active && it.room == source.room }?.let { near ->
+            return near.copy(
+                salience = min(1.0, near.salience + 0.05), reinforcedAt = nowMs,
+                sharedBy = if (by in near.sharedBy) near.sharedBy else near.sharedBy + by
+            ).also { store.upsertMemory(it) }
+        }
+        val memory = Memory(
+            id = "mem_" + UUID.randomUUID(), text = source.text, room = source.room,
+            salience = source.salience, signals = source.signals, sensitivity = source.sensitivity,
+            provenance = Provenance.USER_DIRECT, createdAt = nowMs, reinforcedAt = nowMs,
+            sourceSessionId = source.sourceSessionId, sharedBy = listOf(by)
+        )
+        store.upsertMemory(memory)
+        store.putEmbedding(memory.id, embeddingModelName, vector)
+        return memory
+    }
+
+    /** The most similar memory passing [filter], if it is at least [JanesPalaceConfig.mergeThreshold] alike. */
+    private fun nearest(vector: FloatArray, filter: (Memory) -> Boolean): Memory? = store.memories().values
+        .filter(filter)
+        .map { it to (store.vectorFor(it.id)?.let { v -> cosine(vector, v) } ?: 0.0) }
+        .filter { it.second >= config.mergeThreshold }
+        .maxByOrNull { it.second }?.first
 
     /** The encoder gave no usable verdict: the call failed, the reply was empty (e.g. a thinking model
      *  spent its whole budget), or it wasn't valid JSON. Otherwise this turn is invisible in telemetry. */
@@ -174,20 +209,22 @@ class MemoryWriter(
                 logCandidate(turn, "dropped_subject_mismatch", alpha, text, room, durOf(vm, room, turn.ambient))
                 continue
             }
+            val sensitivity = runCatching { Sensitivity.valueOf(vm.sensitivity) }.getOrDefault(Sensitivity.PERSONAL)
             val memory = Memory(
                 id = "mem_" + UUID.randomUUID(),
                 text = text,
                 room = room,
                 salience = alpha,
                 signals = SalienceSignals(rep, vm.emph.coerceIn(0.0, 1.0), nov, vm.aff.coerceIn(0.0, 1.0), 1.0, dur = durOf(vm, room, turn.ambient).first),
-                sensitivity = runCatching { Sensitivity.valueOf(vm.sensitivity) }.getOrDefault(Sensitivity.PERSONAL),
+                sensitivity = sensitivity,
                 provenance = provenance,
                 createdAt = turn.nowMs,
                 reinforcedAt = turn.nowMs,
                 sourceSessionId = turn.sessionId,
                 // Commitment tracking is chat-only in v1 (ADR-035): enforced here in code, not left
                 // to the prompt, since provenance can be THIRD_PARTY even outside an ambient turn.
-                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting)
+                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting),
+                householdCandidate = vm.household && !turn.ambient && provenance == Provenance.USER_DIRECT && sensitivity <= Sensitivity.PERSONAL
             )
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)

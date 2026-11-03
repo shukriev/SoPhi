@@ -43,6 +43,9 @@ Rules:
   film or TV dialogue, a news or sports broadcast, a podcast or interview, song
   lyrics, an advertisement, a lecture or audiobook — then it is not about the
   user's life. Store nothing from it, however dramatic it sounds.
+- household: true only when the memory is plainly about the shared home (plans, chores, shopping,
+  home details, shared appointments) and not about health, money, feelings, relationships,
+  other people, gifts or surprises, or work. Omit it otherwise.
 - NEVER store credentials, passwords, payment card or government ID numbers.
 - Facts about third parties' health/legal matters: generalized form only.
 - sensitivity: PERSONAL is the default for facts about the user's own life and work; SENSITIVE for

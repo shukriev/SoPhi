@@ -3,6 +3,8 @@ package dev.sophi.sdk
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.memory.jane.JanesPalace
+import dev.sophi.memory.jane.JanesPalaceConfig
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
@@ -12,6 +14,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlin.io.path.createTempDirectory
@@ -28,6 +31,47 @@ private fun stubProvider(): LLMProvider {
 }
 
 class RuntimeBuilderMemoryTest : FunSpec({
+
+    test("memory passes onHouseholdCandidate to the plugin") {
+        val provider = stubProvider()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text(
+            """{"memories":[{"text":"The family shops on Saturdays","room":"KNOWLEDGE","emph":0.8,"aff":0.9,
+               "sensitivity":"PERSONAL","provenance":"USER_DIRECT","household":true}],"profile":[]}""", TokenUsage(1, 1))
+        val got = java.util.concurrent.CopyOnWriteArrayList<Pair<String, dev.sophi.memory.MemoryView>>()
+        val builder = RuntimeBuilder()
+        builder.provider = provider
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        val rt = builder
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false),
+                onHouseholdCandidate = { sid, m -> got += sid to m }
+            )
+            .build()
+        val plugin = rt.memoryPlugin.shouldNotBeNull()
+        plugin.hooks().single { it.point == dev.sophi.extensions.HookPoint.AFTER_TURN }
+            .invoke(dev.sophi.extensions.HookContext("s1", userInput = "we shop on Saturdays", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.size shouldBe 1
+        got.single().first shouldBe "s1"
+        got.single().second.metadata["household"] shouldBe "candidate"
+        plugin.close()
+    }
+
+    test("basePrompt replaces the default") {
+        val builder = RuntimeBuilder()
+        builder.provider = stubProvider()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        builder.basePrompt = "Host base prompt."
+        builder.systemPrompt = "custom instructions"
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
+
+        rt.config.systemPrompt shouldBe "Host base prompt.\n\ncustom instructions"
+        rt.config.systemPrompt.shouldNotBeNull() shouldNotContain "When a browser tool's result"
+    }
 
     test("memory() left uncalled leaves memoryPlugin null and the prompt at just the default") {
         val builder = RuntimeBuilder()
@@ -224,6 +268,31 @@ class RuntimeBuilderMemoryTest : FunSpec({
                 warnings.single() shouldContain "an older Sophi may still be running"
             } finally { rt.close() }
         }
+    }
+
+    test("householdMemory reaches the memory plugin") {
+        val household = JanesPalace(
+            JanesPalaceConfig(home = createTempDirectory("sophi-sdk-household-test"), sessionModel = "test-model"),
+            llmProvider = null, embeddingProvider = null
+        )
+        fun build(withMemory: Boolean) = RuntimeBuilder().apply {
+            provider = stubProvider()
+            sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+            memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+            model = "test-model"
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).householdMemory(household).apply {
+            if (withMemory) memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false)
+            )
+        }.build()
+
+        val rt = build(withMemory = true)
+        (rt.memoryPlugin.shouldNotBeNull().household() === household) shouldBe true
+        rt.close()
+        household.browse(dev.sophi.memory.BrowseFilter()) shouldBe emptyList()   // still open: the host owns it
+        build(withMemory = false).let { off -> try { off.memoryPlugin.shouldBeNull() } finally { off.close() } }
+        household.close()
     }
 
     test("close() closes the memory plugin without throwing") {

@@ -16,6 +16,9 @@ import dev.sophi.memory.TurnObservation
 import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
 
+/** The session id the host gives ambient listening's turns (see [BrowseFilter.sourceSessionId]). */
+private const val AMBIENT_SESSION = "ambient"
+
 /**
  * The memory-palace implementation of MemoryTechnique — Jane (spec §3.3).
  * Providers are nullable so the CLI command group can operate on stored data alone:
@@ -82,17 +85,20 @@ class JanesPalace(
         return w.walk(query, vector)
     }
 
-    override suspend fun observe(turn: TurnObservation) {
-        val e = encoder ?: return
-        val w = writer ?: return
+    override suspend fun observe(turn: TurnObservation) { observeStored(turn) }
+
+    /** [observe], returning the memories it newly stored (merges into existing ones are not included). */
+    suspend fun observeStored(turn: TurnObservation): List<MemoryView> {
+        val e = encoder ?: return emptyList()
+        val w = writer ?: return emptyList()
         val recent = store.memories().values.filter { it.active }
             .sortedByDescending { it.createdAt }.take(config.recentWindow)
-        val verdict = e.encode(turn, recent) ?: run { w.logEncoderNoVerdict(turn); return }
+        val verdict = e.encode(turn, recent) ?: run { w.logEncoderNoVerdict(turn); return emptyList() }
         if (turn.ambient) {
             meetingScores.addLast(turn.nowMs to (verdict.meeting ?: 0.0).coerceIn(0.0, 1.0))
             while (meetingScores.size > 200) meetingScores.pollFirst()
         }
-        w.write(turn, verdict)
+        return w.write(turn, verdict).map { view(it, turn.nowMs) }
     }
 
     // Ambient meeting scores, newest last; bounded so a day of listening can't grow it.
@@ -107,6 +113,20 @@ class JanesPalace(
     /** A commitment the user confirmed; null when memory has no embedding provider. */
     suspend fun rememberCommitment(text: String, sessionId: String, nowMs: Long): Memory? =
         writer?.rememberCommitment(text, sessionId, nowMs)
+
+    /**
+     * Copies memory [memoryId] into the household palace [into], shared by [by]; this palace's memory is untouched.
+     * Null for an unknown, inactive, SENSITIVE or RESTRICTED memory, for one that isn't the user's own words
+     * (not USER_DIRECT, or heard by ambient listening: the copy is a trusted household fact), or when [into]
+     * has no embedding provider.
+     */
+    suspend fun share(memoryId: String, into: JanesPalace, by: String, nowMs: Long): MemoryView? {
+        val m = store.memories()[memoryId]?.takeIf {
+            it.active && it.sensitivity <= Sensitivity.PERSONAL && it.provenance == Provenance.USER_DIRECT &&
+                it.sourceSessionId != AMBIENT_SESSION
+        } ?: return null
+        return into.writer?.share(m, by, nowMs)?.let { into.view(it, nowMs) }
+    }
 
     override suspend fun consolidate(nowMs: Long): ConsolidationReport = consolidator.run(nowMs)
 
@@ -224,6 +244,7 @@ class JanesPalace(
             "provenance" to m.provenance.name,
             "source" to m.sourceSessionId,
             "state" to when { m.supersededBy != null -> "superseded"; m.softDeletedAt != null -> "soft-deleted"; else -> "active" }
-        )
+        ) + (if (m.householdCandidate) mapOf("household" to "candidate") else emptyMap()) +
+            (if (m.sharedBy.isNotEmpty()) mapOf("sharedBy" to m.sharedBy.joinToString(", ")) else emptyMap())
     )
 }

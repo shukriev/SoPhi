@@ -174,7 +174,9 @@ class PalaceStore(
         "actionablePattern" to actionablePattern, "isCommitment" to isCommitment,
         "occurrences" to occurrences, "habitConfidence" to habitConfidence,
         "habitPreferredHour" to habitPreferredHour, "habitPreferredDayOfWeek" to habitPreferredDayOfWeek
-    )
+    ) + // only when set, so a single-user record keeps its shape; neither is ever unset again
+        (if (householdCandidate) mapOf("householdCandidate" to true) else emptyMap()) +
+        (if (sharedBy.isNotEmpty()) mapOf("sharedBy" to sharedBy) else emptyMap())
     private fun Map<String, Any?>.toMemory(): Memory = Memory(
         id = memoryId(), text = get("text") as String, room = Room.valueOf(get("room") as String),
         salience = (get("salience") as Number).toDouble(),
@@ -198,7 +200,9 @@ class PalaceStore(
             ?: listOf((get("createdAt") as Number).toLong()),
         habitConfidence = (get("habitConfidence") as? Number)?.toDouble() ?: 0.0,
         habitPreferredHour = (get("habitPreferredHour") as? Number)?.toInt(),
-        habitPreferredDayOfWeek = (get("habitPreferredDayOfWeek") as? Number)?.toInt()
+        habitPreferredDayOfWeek = (get("habitPreferredDayOfWeek") as? Number)?.toInt(),
+        householdCandidate = get("householdCandidate") as? Boolean ?: false,
+        sharedBy = (get("sharedBy") as? List<*>)?.map { it as String } ?: emptyList()
     )
 
     private fun CausalEdge.toProperties(): Map<String, Any?> =
