@@ -24,6 +24,15 @@ class RuntimeBuilderBuiltinToolsTest : FunSpec({
         runtime.toolNames() shouldContain "read_file"
     }
 
+    test("session_search comes with the builtin tools") {
+        fun build(builtins: Boolean) = RuntimeBuilder().apply {
+            provider = mockk<LLMProvider>()
+            sessionsDir = tempdir().toPath()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model"; if (builtins) builtinTools(tempdir().toPath()) }.build()
+        build(true).toolNames() shouldContain "session_search"
+        build(false).toolNames() shouldNotContain "session_search"
+    }
+
     test("builder registers ask_user only with an asker") {
         fun build(ask: Boolean) = RuntimeBuilder().apply {
             provider = mockk<LLMProvider>()

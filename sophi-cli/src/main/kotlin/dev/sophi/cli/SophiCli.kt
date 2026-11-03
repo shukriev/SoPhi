@@ -295,7 +295,7 @@ class SophiCli(
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
-            "Type 'exit' or 'quit' to end. Commands: /list /branch /checkout /undo /revert /compact /good /bad " +
+            "Type 'exit' or 'quit' to end. Commands: /list /search /branch /checkout /undo /revert /compact /good /bad " +
                 "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs\n"
         )
         // containers a killed sophi left behind; off the start path, since asking Docker can take seconds
