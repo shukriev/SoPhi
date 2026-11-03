@@ -94,6 +94,8 @@ class RuntimeBuilder {
     var maxTokens: Int = 4096
     var temperature: Double = 0.7
     var systemPrompt: String? = null
+    /** The prompt that comes first, before [systemPrompt]. Defaults to [DefaultPrompt.BASE]; a host with fewer tools replaces it. */
+    var basePrompt: String = DefaultPrompt.BASE
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
     var memoryHome: Path = JanesPalaceConfig.DEFAULT_HOME
@@ -524,7 +526,7 @@ class RuntimeBuilder {
 
         val effectiveConfig = agentConfig.copy(
             systemPrompt = listOfNotNull(
-                DefaultPrompt.BASE, agentConfig.systemPrompt, learningSection, memorySection
+                basePrompt, agentConfig.systemPrompt, learningSection, memorySection
             ).joinToString("\n\n")
         )
 

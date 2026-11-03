@@ -60,6 +60,19 @@ class RuntimeBuilderMemoryTest : FunSpec({
         plugin.close()
     }
 
+    test("basePrompt replaces the default") {
+        val builder = RuntimeBuilder()
+        builder.provider = stubProvider()
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        builder.basePrompt = "Host base prompt."
+        builder.systemPrompt = "custom instructions"
+        val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
+
+        rt.config.systemPrompt shouldBe "Host base prompt.\n\ncustom instructions"
+        rt.config.systemPrompt.shouldNotBeNull() shouldNotContain "When a browser tool's result"
+    }
+
     test("memory() left uncalled leaves memoryPlugin null and the prompt at just the default") {
         val builder = RuntimeBuilder()
         builder.provider = stubProvider()
