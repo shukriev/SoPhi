@@ -122,7 +122,9 @@ private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
  * to one that actually finished.
  */
 enum class TurnStopReason {
-    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped, Error, BudgetExceeded
+    ToolRoundCeiling, LoopGuard, ContextExhausted, CompactionThrashing, EmptyResponse, OutputTruncated, UserStopped, Error, BudgetExceeded,
+    /** An unattended run hit [dev.sophi.core.tools.DenialLimit]: nobody could approve what it kept asking for. */
+    DeniedUnattended
 }
 
 /** OpenAI's finish_reason for "ran out of output tokens", shared by every compatible server. */
@@ -447,7 +449,11 @@ class AgentLoop(
             if (rules != null) scope += PermissionScope(rules)
             withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble, inbox) }
         } catch (e: CancellationException) {
-            if (!turn.persisted) withContext(NonCancellable) { saveStopped(session, userInput, turn) }
+            val limit = currentCoroutineContext()[DenialLimit]?.takeIf { it.tripped }
+            if (!turn.persisted) withContext(NonCancellable) {
+                if (limit == null) saveStopped(session, userInput, turn)
+                else saveStopped(session, userInput, turn, "the denial limit", limit.reason(), TurnStopReason.DeniedUnattended)
+            }
             throw e
         } catch (e: BudgetExceededException) {
             // A typed stop, not an error: the rounds so far are kept and the host can say how to raise the budget.
@@ -728,8 +734,10 @@ class AgentLoop(
                             planStepStub(step)
                         } else if (!allowed) {
                             failed = true
-                            currentCoroutineContext()[DenialLimit]?.denied(call.name)
+                            currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson)
                             if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
+                            else if (currentCoroutineContext()[Unattended.Key] != null) "Error: Tool '${call.name}' execution denied by " +
+                                "confirmation policy: this run is unattended and nobody is here to approve it. Do without it, or finish and say what you needed."
                             else "Error: Tool '${call.name}' execution denied by confirmation policy"
                         } else {
                             registry.getOrNull(call.name)
