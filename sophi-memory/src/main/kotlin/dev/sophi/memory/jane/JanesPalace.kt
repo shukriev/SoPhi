@@ -82,17 +82,20 @@ class JanesPalace(
         return w.walk(query, vector)
     }
 
-    override suspend fun observe(turn: TurnObservation) {
-        val e = encoder ?: return
-        val w = writer ?: return
+    override suspend fun observe(turn: TurnObservation) { observeStored(turn) }
+
+    /** [observe], returning the memories it newly stored (merges into existing ones are not included). */
+    suspend fun observeStored(turn: TurnObservation): List<MemoryView> {
+        val e = encoder ?: return emptyList()
+        val w = writer ?: return emptyList()
         val recent = store.memories().values.filter { it.active }
             .sortedByDescending { it.createdAt }.take(config.recentWindow)
-        val verdict = e.encode(turn, recent) ?: run { w.logEncoderNoVerdict(turn); return }
+        val verdict = e.encode(turn, recent) ?: run { w.logEncoderNoVerdict(turn); return emptyList() }
         if (turn.ambient) {
             meetingScores.addLast(turn.nowMs to (verdict.meeting ?: 0.0).coerceIn(0.0, 1.0))
             while (meetingScores.size > 200) meetingScores.pollFirst()
         }
-        w.write(turn, verdict)
+        return w.write(turn, verdict).map { view(it, turn.nowMs) }
     }
 
     // Ambient meeting scores, newest last; bounded so a day of listening can't grow it.
@@ -224,6 +227,6 @@ class JanesPalace(
             "provenance" to m.provenance.name,
             "source" to m.sourceSessionId,
             "state" to when { m.supersededBy != null -> "superseded"; m.softDeletedAt != null -> "soft-deleted"; else -> "active" }
-        )
+        ) + (if (m.householdCandidate) mapOf("household" to "candidate") else emptyMap())
     )
 }

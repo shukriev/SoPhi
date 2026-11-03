@@ -22,7 +22,9 @@ internal data class VerdictMemory(
     val provenance: String? = null,
     val causedBy: List<String> = emptyList(),
     val thread: String? = null,
-    val supersedes: String? = null
+    val supersedes: String? = null,
+    /** The encoder thinks this is about the shared home; MemoryWriter decides whether it counts. */
+    val household: Boolean = false
 )
 
 @Serializable

@@ -5,7 +5,12 @@ import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.PluginRegistry
 import dev.sophi.memory.jane.JanesPalace
 import dev.sophi.memory.jane.JanesPalaceConfig
+import dev.sophi.ai.api.LLMProvider
+import dev.sophi.ai.api.LLMResponse
+import dev.sophi.ai.api.TokenUsage
 import io.kotest.core.spec.style.FunSpec
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -111,6 +116,46 @@ class MemoryPluginTest : FunSpec({
         val ms = kotlin.system.measureTimeMillis { plugin.close() }
         (ms < 5_000) shouldBe true
         t.observed.size shouldBe 0
+    }
+
+    test("a new household candidate is reported once; a merged one is not") {
+        val reply = { household: Boolean -> LLMResponse.Text(
+            """{"memories":[{"text":"The family shops on Saturdays","room":"KNOWLEDGE","emph":0.8,"aff":0.9,
+               "sensitivity":"PERSONAL","provenance":"USER_DIRECT","household":$household}],"profile":[]}""", TokenUsage(1, 1)) }
+        val llm = mockk<LLMProvider>()
+        coEvery { llm.complete(any()) } returns reply(true)
+        val palace = JanesPalace(
+            JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model"),
+            llm, FakeEmbeddingProvider(), "fake"
+        )
+        val got = java.util.concurrent.CopyOnWriteArrayList<Pair<String, MemoryView>>()
+        val plugin = MemoryPlugin(palace, onHouseholdCandidate = { sid, m -> got += sid to m })
+        val hook = plugin.hooks().single { it.point == HookPoint.AFTER_TURN }
+        hook.invoke(HookContext("s1", userInput = "we shop on Saturdays", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.size shouldBe 1
+        got.single().first shouldBe "s1"
+        got.single().second.metadata["household"] shouldBe "candidate"
+        got.single().second.id shouldBe palace.browse(BrowseFilter()).single().id
+
+        // same fact again: merges into the existing memory, nothing new to report
+        hook.invoke(HookContext("s1", userInput = "we shop on Saturdays", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.size shouldBe 1
+        plugin.close()
+    }
+
+    test("a throwing household callback does not break the turn") {
+        val llm = mockk<LLMProvider>()
+        coEvery { llm.complete(any()) } returns LLMResponse.Text(
+            """{"memories":[{"text":"The family shops on Saturdays","room":"KNOWLEDGE","emph":0.8,"aff":0.9,
+               "sensitivity":"PERSONAL","provenance":"USER_DIRECT","household":true}],"profile":[]}""", TokenUsage(1, 1))
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model"), llm, FakeEmbeddingProvider(), "fake")
+        val plugin = MemoryPlugin(palace, onHouseholdCandidate = { _, _ -> error("boom") })
+        plugin.hooks().single { it.point == HookPoint.AFTER_TURN }.invoke(HookContext("s1", userInput = "u", assistantReply = "a"))
+        plugin.drainEncodes()
+        palace.browse(BrowseFilter()).size shouldBe 1
+        plugin.close()
     }
 
     test("palace() returns the technique when it is a JanesPalace") {

@@ -32,6 +32,8 @@ class MemoryPlugin(
      * outside text. If it throws, the recall is left out of the turn rather than injected unchecked.
      */
     private val onRecall: (sessionId: String, memories: List<MemoryView>) -> Unit = { _, _ -> },
+    /** Told once per memory a turn's encode newly stored that looks like it belongs to the household. */
+    private val onHouseholdCandidate: (sessionId: String, memory: MemoryView) -> Unit = { _, _ -> },
 ) : SophiPlugin, ContextContributor {
     override val placement = Placement.VOLATILE
 
@@ -52,7 +54,14 @@ class MemoryPlugin(
             val input = context.userInput ?: return
             val reply = context.assistantReply ?: return
             val turn = TurnObservation(context.sessionId, input, reply, clock(), ambient = context.ambient, inMeeting = context.inMeeting)
-            val job = encodeScope.launch { runCatching { technique.observe(turn) } }
+            val job = encodeScope.launch {
+                runCatching {
+                    val palace = palace()
+                    if (palace == null) technique.observe(turn)
+                    else palace.observeStored(turn).filter { it.metadata["household"] == "candidate" }
+                        .forEach { m -> runCatching { onHouseholdCandidate(turn.sessionId, m) } }
+                }
+            }
             inFlight += job
             job.invokeOnCompletion { inFlight -= job }
         }

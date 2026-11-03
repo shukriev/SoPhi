@@ -41,6 +41,12 @@ class EncoderJudgmentTest : FunSpec({
         golden("encoder-ambient.txt", encoder.buildPrompt(goldenAmbient, emptyList()))
     }
 
+    test("the encoder prompt asks for household and names what never is") {
+        val prompt = encoder.buildPrompt(goldenChat, emptyList())
+        prompt shouldContain "household"
+        listOf("health", "money", "feelings", "relationships", "other people", "gifts", "work").forEach { prompt shouldContain it }
+    }
+
     val chatInput = """{"turn":{"userInput":"Mila's violin moved to Tuesdays.","assistantReply":"Updated."},
         "recent":[{"id":"mem_d1","room":"ENTITIES","text":"The user's daughter Mila has violin lessons on Thursdays"}]}"""
 

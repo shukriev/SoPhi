@@ -88,6 +88,9 @@ internal fun encoderPrompt(userInput: String, assistantReply: String, ambient: B
         appendLine("  lyrics, an advertisement, a lecture or audiobook — then it is not about the")
         appendLine("  user's life. Store nothing from it, however dramatic it sounds.")
     }
+    appendLine("- household: true only when the memory is plainly about the shared home (plans, chores, shopping,")
+    appendLine("  home details, shared appointments) and not about health, money, feelings, relationships,")
+    appendLine("  other people, gifts or surprises, or work. Omit it otherwise.")
     appendLine("- NEVER store credentials, passwords, payment card or government ID numbers.")
     appendLine("- Facts about third parties' health/legal matters: generalized form only.")
     appendLine("- sensitivity: PERSONAL is the default for facts about the user's own life and work; SENSITIVE for")

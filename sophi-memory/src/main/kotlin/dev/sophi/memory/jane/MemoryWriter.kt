@@ -174,20 +174,22 @@ class MemoryWriter(
                 logCandidate(turn, "dropped_subject_mismatch", alpha, text, room, durOf(vm, room, turn.ambient))
                 continue
             }
+            val sensitivity = runCatching { Sensitivity.valueOf(vm.sensitivity) }.getOrDefault(Sensitivity.PERSONAL)
             val memory = Memory(
                 id = "mem_" + UUID.randomUUID(),
                 text = text,
                 room = room,
                 salience = alpha,
                 signals = SalienceSignals(rep, vm.emph.coerceIn(0.0, 1.0), nov, vm.aff.coerceIn(0.0, 1.0), 1.0, dur = durOf(vm, room, turn.ambient).first),
-                sensitivity = runCatching { Sensitivity.valueOf(vm.sensitivity) }.getOrDefault(Sensitivity.PERSONAL),
+                sensitivity = sensitivity,
                 provenance = provenance,
                 createdAt = turn.nowMs,
                 reinforcedAt = turn.nowMs,
                 sourceSessionId = turn.sessionId,
                 // Commitment tracking is chat-only in v1 (ADR-035): enforced here in code, not left
                 // to the prompt, since provenance can be THIRD_PARTY even outside an ambient turn.
-                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting)
+                isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting),
+                householdCandidate = vm.household && !turn.ambient && provenance == Provenance.USER_DIRECT && sensitivity <= Sensitivity.PERSONAL
             )
             store.upsertMemory(memory)
             store.putEmbedding(memory.id, embeddingModelName, vector)
