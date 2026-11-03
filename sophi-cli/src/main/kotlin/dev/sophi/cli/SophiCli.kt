@@ -17,7 +17,6 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.SubagentTool
-import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationPolicy
@@ -310,8 +309,6 @@ class SophiCli(
             }
         }
 
-        val compactor = ContextCompactor(provider, dev.sophi.core.context.Summariser(provider, cli.runtime.compactionMode, contextWindowTokens, dev.sophi.ai.system1.Judgments.COMPACTOR))
-
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /search /branch /checkout /undo /revert /compact /good /bad " +
@@ -412,7 +409,7 @@ class SophiCli(
             planFirst = planFirstHost,
         ) { mordantTerminal.println(it) }
         val slashHandler = SlashHandler(
-            cli.runtime.sessionManager, compactor, cli.runtime.config, learningPlugin,
+            cli.runtime.sessionManager, cli.runtime, cli.runtime.config, learningPlugin,
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
             skillRegistry = cli.skillRegistry,
             provider = provider, calendarProvider = cli.calendarProvider, confirmationPolicy = cli.confirmationPolicy,

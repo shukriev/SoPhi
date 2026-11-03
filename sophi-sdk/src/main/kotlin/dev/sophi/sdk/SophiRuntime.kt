@@ -26,10 +26,12 @@ import dev.sophi.core.dryrun.stepsHash
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.FileRestorer
+import dev.sophi.core.undo.RestorePlan
 import dev.sophi.extensions.HookContext
 import dev.sophi.extensions.HookPoint
 import dev.sophi.extensions.Placement
@@ -159,6 +161,41 @@ class SophiRuntime internal constructor(
             runCatching { sessionManager.saveConfigSnapshot(id, config.model, config.systemPrompt) }
             sessionStarted(id)
         }
+
+    /** Summarises the older part of [session] with the current model, saves it, and returns the compacted session. */
+    suspend fun compact(session: AgentSession): AgentSession {
+        val p = checkNotNull(provider) { "No provider" }
+        val compactor = dev.sophi.core.context.ContextCompactor(
+            p, dev.sophi.core.context.Summariser(p, compactionMode, contextWindowTokens, dev.sophi.ai.system1.Judgments.COMPACTOR),
+        )
+        return compactor.compact(session, config).also { sessionManager.save(it) }
+    }
+
+    /** The entries from the root to [session]'s tip. */
+    fun branch(session: AgentSession): List<SessionEntry> = session.branch()
+
+    /**
+     * What `checkout(session, entryId, files = true)` would restore: the files the rounds after [entryId] changed.
+     * Null when there is nothing to restore. Ask before the checkout; after it those rounds are off the branch.
+     */
+    fun checkoutPlan(session: AgentSession, entryId: String): RestorePlan? {
+        val branch = session.branch()
+        val at = branch.indexOfFirst { it.id == entryId }
+        return branch.getOrNull(at + 1)?.takeIf { at >= 0 }?.let { fileRestorer.plan(session, it.id) }
+    }
+
+    /**
+     * Moves [session]'s tip to [entryId] and saves it. With [files] the files the later rounds changed are
+     * restored too, without asking (a host that wants to ask uses [checkoutPlan]); returns what was restored.
+     * Unknown [entryId]: [IllegalArgumentException].
+     */
+    suspend fun checkout(session: AgentSession, entryId: String, files: Boolean = false): List<String> {
+        val plan = if (files) checkoutPlan(session, entryId) else null
+        session.checkout(entryId)
+        sessionManager.save(session) // the tip is saved, so a resume lands here
+        // Saved again even when the restore threw: the moves were already reversed.
+        return plan?.let { p -> try { fileRestorer.apply(session, p) } finally { sessionManager.save(session) } } ?: emptyList()
+    }
 
     /** The plugin hooks; a host running its own [AgentLoop] (/goal) passes these so its tools fire them too. */
     val hooks: dev.sophi.core.agent.LoopHooks get() = pluginRegistry

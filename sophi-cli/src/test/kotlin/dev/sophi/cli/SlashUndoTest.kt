@@ -6,11 +6,14 @@ import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.undo.FileMove
 import dev.sophi.core.undo.FileRestorer
+import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.sdk.Sophi
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.mockk.mockk
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
@@ -31,13 +34,21 @@ class SlashUndoTest : FunSpec({
         val dir = tempdir().toPath()
         val original = dir.resolve("a.txt")
         val moved = dir.resolve("a.txt.moved").also { it.writeText("a") }
-        val sm = FileSessionManager(tempdir().toPath())
+        val sessions = tempdir().toPath()
+        val sm = FileSessionManager(sessions)
+        val runtime = Sophi.runtime {
+            provider = mockk()
+            model = "test-model"
+            contextWindowTokens(100_000)
+            sessionsDir = sessions
+            confirmationPolicy(ConfirmationPolicy.ALLOW_ALL)
+        }
         val session = AgentSession(id = "s1")
         session.append(EntryRole.USER, "tidy")
         session.round(FileMove(original.toString(), moved.toString()))
         sm.save(session)
         val handler = SlashHandler(
-            sm, null, config,
+            sm, runtime, config,
             fileRestorer = if (withRestorer) FileRestorer(null) else null,
             input = ScriptedInputSource(emptyList(), answers.toList())
         ) { output.add(it) }
