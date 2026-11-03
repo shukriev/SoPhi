@@ -173,9 +173,10 @@ class PalaceStore(
         "hitsPositive" to hitsPositive, "hitsNegative" to hitsNegative,
         "actionablePattern" to actionablePattern, "isCommitment" to isCommitment,
         "occurrences" to occurrences, "habitConfidence" to habitConfidence,
-        "habitPreferredHour" to habitPreferredHour, "habitPreferredDayOfWeek" to habitPreferredDayOfWeek,
-        "householdCandidate" to householdCandidate, "sharedBy" to sharedBy
-    )
+        "habitPreferredHour" to habitPreferredHour, "habitPreferredDayOfWeek" to habitPreferredDayOfWeek
+    ) + // only when set, so a single-user record keeps its shape; neither is ever unset again
+        (if (householdCandidate) mapOf("householdCandidate" to true) else emptyMap()) +
+        (if (sharedBy.isNotEmpty()) mapOf("sharedBy" to sharedBy) else emptyMap())
     private fun Map<String, Any?>.toMemory(): Memory = Memory(
         id = memoryId(), text = get("text") as String, room = Room.valueOf(get("room") as String),
         salience = (get("salience") as Number).toDouble(),

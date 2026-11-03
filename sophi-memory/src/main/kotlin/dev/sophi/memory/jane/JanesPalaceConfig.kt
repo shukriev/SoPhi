@@ -86,7 +86,10 @@ data class JanesPalaceConfig(
      *  bystander's words. */
     val encoderTelemetry: Boolean = false,
     /** The shared server root when the palace lives there (ADR-041 M6); null = embedded at [home]. */
-    val sharedRoot: Path? = null
+    val sharedRoot: Path? = null,
+    /** False: recall writes no last-recall.txt and no recall records. For a palace several people share
+     *  (the household), where those would keep one person's question and session for the others to see. */
+    val keepRecallTrail: Boolean = true
 ) {
     companion object {
         val DEFAULT_HOME: Path = Path.of(System.getProperty("user.home"), ".sophi", "memory")

@@ -2,6 +2,8 @@ package dev.sophi.memory.jane
 
 import dev.sophi.ai.api.EmbeddingProvider
 import dev.sophi.memory.TurnObservation
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.util.UUID
@@ -106,6 +108,13 @@ class MemoryWriter(
      */
     internal suspend fun share(source: Memory, by: String, nowMs: Long): Memory {
         val vector = embeddings.embed(listOf(source.text)).first()
+        return shareLock.withLock { shareLocked(source, by, nowMs, vector) }
+    }
+
+    /** Two people sharing the same fact at once would both miss the other's copy and make two entries. */
+    private val shareLock = Mutex()
+
+    private fun shareLocked(source: Memory, by: String, nowMs: Long, vector: FloatArray): Memory {
         nearest(vector) { it.active && it.room == source.room }?.let { near ->
             return near.copy(
                 salience = min(1.0, near.salience + 0.05), reinforcedAt = nowMs,

@@ -58,7 +58,7 @@ class PalaceWalker(
         if (direct.isEmpty()) {
             if (prof.isEmpty()) return null
             val rendered = render(emptyList(), emptyList(), query.nowMs)
-            store.writeLastRecall(explain(query, emptyList()))
+            if (config.keepRecallTrail) store.writeLastRecall(explain(query, emptyList()))
             return MemoryBlock(rendered, emptyList())
         }
 
@@ -105,10 +105,10 @@ class PalaceWalker(
                 put("memoryId", JsonPrimitive(hit.memory.id)); put("sessionId", JsonPrimitive(query.sessionId))
             }.toString())
         }
-        selected.forEach { store.logRecall(RecallRecord(query.nowMs, it.memory.id, query.sessionId)) }
+        if (config.keepRecallTrail) selected.forEach { store.logRecall(RecallRecord(query.nowMs, it.memory.id, query.sessionId)) }
 
         val rendered = render(selected, threadLines, query.nowMs)
-        store.writeLastRecall(explain(query, selected))
+        if (config.keepRecallTrail) store.writeLastRecall(explain(query, selected))
         return MemoryBlock(rendered, selected.map { it.memory.id })
     }
 

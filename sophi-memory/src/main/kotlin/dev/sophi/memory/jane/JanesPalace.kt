@@ -16,6 +16,9 @@ import dev.sophi.memory.TurnObservation
 import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
 
+/** The session id the host gives ambient listening's turns (see [BrowseFilter.sourceSessionId]). */
+private const val AMBIENT_SESSION = "ambient"
+
 /**
  * The memory-palace implementation of MemoryTechnique — Jane (spec §3.3).
  * Providers are nullable so the CLI command group can operate on stored data alone:
@@ -113,10 +116,15 @@ class JanesPalace(
 
     /**
      * Copies memory [memoryId] into the household palace [into], shared by [by]; this palace's memory is untouched.
-     * Null for an unknown, inactive, SENSITIVE or RESTRICTED memory, or when [into] has no embedding provider.
+     * Null for an unknown, inactive, SENSITIVE or RESTRICTED memory, for one that isn't the user's own words
+     * (not USER_DIRECT, or heard by ambient listening: the copy is a trusted household fact), or when [into]
+     * has no embedding provider.
      */
     suspend fun share(memoryId: String, into: JanesPalace, by: String, nowMs: Long): MemoryView? {
-        val m = store.memories()[memoryId]?.takeIf { it.active && it.sensitivity <= Sensitivity.PERSONAL } ?: return null
+        val m = store.memories()[memoryId]?.takeIf {
+            it.active && it.sensitivity <= Sensitivity.PERSONAL && it.provenance == Provenance.USER_DIRECT &&
+                it.sourceSessionId != AMBIENT_SESSION
+        } ?: return null
         return into.writer?.share(m, by, nowMs)?.let { into.view(it, nowMs) }
     }
 
