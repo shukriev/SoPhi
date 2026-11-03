@@ -14,6 +14,7 @@ import io.mockk.mockk
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.runBlocking
 
 /** Scripted in-memory technique: lets plugin behavior be tested without the palace. */
 private class ScriptedTechnique : MemoryTechnique {
@@ -156,6 +157,39 @@ class MemoryPluginTest : FunSpec({
         plugin.drainEncodes()
         palace.browse(BrowseFilter()).size shouldBe 1
         plugin.close()
+    }
+
+    test("household recall comes after the personal one") {
+        val personal = ScriptedTechnique().apply { recallAnswer = MemoryBlock("P", listOf("m1")) }
+        val household = ScriptedTechnique().apply { recallAnswer = MemoryBlock("H", listOf("h1")) }
+        val seen = mutableListOf<String>()
+        val plugin = MemoryPlugin(personal, onRecall = { _, ms -> seen += ms.map { it.id } }, household = household)
+        plugin.contribute("s1", "hi") shouldBe "P\n\nShared by the household:\nH"
+        seen shouldBe listOf("m1", "h1")
+        personal.recallAnswer = null
+        plugin.contribute("s1", "hi") shouldBe "Shared by the household:\nH"
+        household.recallAnswer = null
+        plugin.contribute("s1", "hi") shouldBe null
+    }
+
+    test("a failing personal recall still gives the household one, and the reverse") {
+        val personal = ScriptedTechnique().apply { recallAnswer = MemoryBlock("P", listOf("m1")) }
+        val household = ScriptedTechnique().apply { recallAnswer = MemoryBlock("H", listOf("h1")) }
+        MemoryPlugin(personal, onRecall = { _, ms -> if (ms.single().id == "m1") error("no") }, household = household)
+            .contribute("s1", "hi") shouldBe "Shared by the household:\nH"
+        MemoryPlugin(personal, onRecall = { _, ms -> if (ms.single().id == "h1") error("no") }, household = household)
+            .contribute("s1", "hi") shouldBe "P"
+    }
+
+    test("closing the plugin leaves the household open") {
+        val cfg = { JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model") }
+        val household = JanesPalace(cfg(), llmProvider = null, embeddingProvider = FakeEmbeddingProvider())
+        runBlocking { household.rememberCommitment("pay rent", "s", System.currentTimeMillis()) }
+        val plugin = MemoryPlugin(JanesPalace(cfg(), llmProvider = null, embeddingProvider = null), household = household)
+        plugin.household() shouldBe household
+        plugin.close()
+        household.browse(BrowseFilter()).single().text shouldBe "pay rent"
+        household.close()
     }
 
     test("palace() returns the technique when it is a JanesPalace") {

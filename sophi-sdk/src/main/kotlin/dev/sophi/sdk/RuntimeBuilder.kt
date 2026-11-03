@@ -354,6 +354,11 @@ class RuntimeBuilder {
         memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider, onRecall)
     }
 
+    private var householdMemory: JanesPalace? = null
+
+    /** The household's shared memory, recalled next to this runtime's own. Ignored when [memory] is off; never closed here. */
+    fun householdMemory(palace: JanesPalace): RuntimeBuilder = apply { householdMemory = palace }
+
     fun build(): SophiRuntime {
         val model = requireNotNull(model) { "model must be set before calling build()" }
         // Innermost of the wrappers, so a judgment System 1 serves locally is never billed or refused.
@@ -502,7 +507,7 @@ class RuntimeBuilder {
                         p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                     )
                 }.fold(
-                    onSuccess = { palace -> MemoryPlugin(palace, onRecall = mc.onRecall).also { pluginRegistry.register(it) } },
+                    onSuccess = { palace -> MemoryPlugin(palace, onRecall = mc.onRecall, household = householdMemory).also { pluginRegistry.register(it) } },
                     onFailure = { e ->
                         mc.onWarning("memory: disabled — couldn't open the memory database at $memoryHome (${e.message ?: "unknown error"})")
                         null

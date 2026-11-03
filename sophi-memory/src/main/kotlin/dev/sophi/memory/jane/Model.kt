@@ -58,7 +58,9 @@ data class Memory(
      *  (e.g. a daily habit). */
     val habitPreferredDayOfWeek: Int? = null,
     /** Looks like it belongs to the shared household; the host asks the user before sharing it. */
-    val householdCandidate: Boolean = false
+    val householdCandidate: Boolean = false,
+    /** Names of the household members who shared this into the household memory, in order shared. */
+    val sharedBy: List<String> = emptyList()
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null

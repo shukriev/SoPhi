@@ -74,14 +74,10 @@ class MemoryWriter(
     internal suspend fun rememberCommitment(rawText: String, sessionId: String, nowMs: Long): Memory {
         val text = redact(rawText)
         val vector = embeddings.embed(listOf(text)).first()
-        val near = store.memories().values
-            .filter {
-                it.active && it.isCommitment && it.provenance == Provenance.USER_DIRECT &&
-                    it.sensitivity <= Sensitivity.PERSONAL && it.createdAt >= nowMs - config.commitmentExpiryMs
-            }
-            .map { it to (store.vectorFor(it.id)?.let { v -> cosine(vector, v) } ?: 0.0) }
-            .filter { it.second >= config.mergeThreshold }
-            .maxByOrNull { it.second }?.first
+        val near = nearest(vector) {
+            it.active && it.isCommitment && it.provenance == Provenance.USER_DIRECT &&
+                it.sensitivity <= Sensitivity.PERSONAL && it.createdAt >= nowMs - config.commitmentExpiryMs
+        }
         if (near != null) {
             // Re-confirmed: its open window restarts now (openCommitments filters by createdAt).
             return near.copy(isCommitment = true, createdAt = nowMs, reinforcedAt = nowMs).also { store.upsertMemory(it) }
@@ -103,6 +99,36 @@ class MemoryWriter(
         store.putEmbedding(memory.id, embeddingModelName, vector)
         return memory
     }
+
+    /**
+     * A fact a household member shared into this (household) palace. The same fact in the same room
+     * is one entry: a repeat share reinforces it and adds [by] to [Memory.sharedBy].
+     */
+    internal suspend fun share(source: Memory, by: String, nowMs: Long): Memory {
+        val vector = embeddings.embed(listOf(source.text)).first()
+        nearest(vector) { it.active && it.room == source.room }?.let { near ->
+            return near.copy(
+                salience = min(1.0, near.salience + 0.05), reinforcedAt = nowMs,
+                sharedBy = if (by in near.sharedBy) near.sharedBy else near.sharedBy + by
+            ).also { store.upsertMemory(it) }
+        }
+        val memory = Memory(
+            id = "mem_" + UUID.randomUUID(), text = source.text, room = source.room,
+            salience = source.salience, signals = source.signals, sensitivity = source.sensitivity,
+            provenance = Provenance.USER_DIRECT, createdAt = nowMs, reinforcedAt = nowMs,
+            sourceSessionId = source.sourceSessionId, sharedBy = listOf(by)
+        )
+        store.upsertMemory(memory)
+        store.putEmbedding(memory.id, embeddingModelName, vector)
+        return memory
+    }
+
+    /** The most similar memory passing [filter], if it is at least [JanesPalaceConfig.mergeThreshold] alike. */
+    private fun nearest(vector: FloatArray, filter: (Memory) -> Boolean): Memory? = store.memories().values
+        .filter(filter)
+        .map { it to (store.vectorFor(it.id)?.let { v -> cosine(vector, v) } ?: 0.0) }
+        .filter { it.second >= config.mergeThreshold }
+        .maxByOrNull { it.second }?.first
 
     /** The encoder gave no usable verdict: the call failed, the reply was empty (e.g. a thinking model
      *  spent its whole budget), or it wasn't valid JSON. Otherwise this turn is invisible in telemetry. */

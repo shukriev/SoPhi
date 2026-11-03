@@ -111,6 +111,15 @@ class JanesPalace(
     suspend fun rememberCommitment(text: String, sessionId: String, nowMs: Long): Memory? =
         writer?.rememberCommitment(text, sessionId, nowMs)
 
+    /**
+     * Copies memory [memoryId] into the household palace [into], shared by [by]; this palace's memory is untouched.
+     * Null for an unknown, inactive, SENSITIVE or RESTRICTED memory, or when [into] has no embedding provider.
+     */
+    suspend fun share(memoryId: String, into: JanesPalace, by: String, nowMs: Long): MemoryView? {
+        val m = store.memories()[memoryId]?.takeIf { it.active && it.sensitivity <= Sensitivity.PERSONAL } ?: return null
+        return into.writer?.share(m, by, nowMs)?.let { into.view(it, nowMs) }
+    }
+
     override suspend fun consolidate(nowMs: Long): ConsolidationReport = consolidator.run(nowMs)
 
     /**
@@ -227,6 +236,7 @@ class JanesPalace(
             "provenance" to m.provenance.name,
             "source" to m.sourceSessionId,
             "state" to when { m.supersededBy != null -> "superseded"; m.softDeletedAt != null -> "soft-deleted"; else -> "active" }
-        ) + (if (m.householdCandidate) mapOf("household" to "candidate") else emptyMap())
+        ) + (if (m.householdCandidate) mapOf("household" to "candidate") else emptyMap()) +
+            (if (m.sharedBy.isNotEmpty()) mapOf("sharedBy" to m.sharedBy.joinToString(", ")) else emptyMap())
     )
 }

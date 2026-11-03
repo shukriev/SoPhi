@@ -3,6 +3,8 @@ package dev.sophi.sdk
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.memory.jane.JanesPalace
+import dev.sophi.memory.jane.JanesPalaceConfig
 import dev.sophi.store.arcade.EmbeddedArcadeStore
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
@@ -224,6 +226,31 @@ class RuntimeBuilderMemoryTest : FunSpec({
                 warnings.single() shouldContain "an older Sophi may still be running"
             } finally { rt.close() }
         }
+    }
+
+    test("householdMemory reaches the memory plugin") {
+        val household = JanesPalace(
+            JanesPalaceConfig(home = createTempDirectory("sophi-sdk-household-test"), sessionModel = "test-model"),
+            llmProvider = null, embeddingProvider = null
+        )
+        fun build(withMemory: Boolean) = RuntimeBuilder().apply {
+            provider = stubProvider()
+            sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+            memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+            model = "test-model"
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).householdMemory(household).apply {
+            if (withMemory) memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false)
+            )
+        }.build()
+
+        val rt = build(withMemory = true)
+        (rt.memoryPlugin.shouldNotBeNull().household() === household) shouldBe true
+        rt.close()
+        household.browse(dev.sophi.memory.BrowseFilter()) shouldBe emptyList()   // still open: the host owns it
+        build(withMemory = false).memoryPlugin.shouldBeNull()
+        household.close()
     }
 
     test("close() closes the memory plugin without throwing") {
