@@ -73,7 +73,7 @@ check_plan_3() {
 # 'y' answers invoke_claude_code's always-HIGH_RISK confirmation prompt. Enlarged 2026-09-29 with a
 # budgets feature after bonsai-27b did the bare Decimal migration alone in 13 calls.
 setup_plan_4() { printf 'category,limit\nfood,15.00\nrent,800.00\ntransport,50.00\n' > data/budgets.csv; }
-turns_plan_4() { echo "/goal Two changes to the ledger package. (1) Migrate from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, and update the existing tests to the new types. (2) Add budgets: a new module ledger/budget.py with over_budget(entries, budgets), where budgets is a dict of category to Decimal limit, returning {category: overspend} for every category whose total exceeds its limit; and a CLI flag used as 'python3 -m ledger.cli <file> --budgets data/budgets.csv' (CSV columns category,limit) that, after the normal output, prints one line per over-budget category, sorted, like 'rent: over by 100.00'. The full test suite and the normal CLI output (python3 -m ledger.cli data/entries-2026.csv) must keep working. Work only inside $PWD."; echo y; }
+turns_plan_4() { echo "/goal Two changes to the ledger package. (1) Migrate from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, and update the existing tests to the new types. (2) Add budgets: a new module ledger/budget.py with over_budget(entries, budgets), where budgets is a dict of category to Decimal limit, returning {category: overspend} for every category whose total exceeds its limit; and a CLI flag used as 'python3 -m ledger.cli <file> --budgets data/budgets.csv' (CSV columns category,limit) that, after the normal output, prints one line per over-budget category, sorted, like 'rent: over by 100.00'. The full test suite and the normal CLI output (python3 -m ledger.cli data/entries-2026.csv) must keep working. Work only inside $PWD."; }
 check_plan_4() { suite_passes && cli_ok && hidden_passes plan_4_test; }
 
 # --- coding ---------------------------------------------------------------------------------
@@ -102,7 +102,7 @@ setup_coding_4() {
   printf 'currency,eur_rate\nUSD,0.92\nGBP,1.17\n' > data/rates.csv
   printf 'category,amount,currency\nfood,10.00,USD\nrent,100.00,EUR\ntravel,20.00,GBP\nfood,5.00,\nmisc,0.50,GBP\n' > data/entries-multi.csv
 }
-turns_coding_4() { echo "Add multi-currency support to the ledger and restructure it. (1) CSV entries may carry an optional third column 'currency' (empty or missing means EUR); exchange rates are in rates.csv next to the entries file (columns currency,eur_rate). load_entries must return amounts converted to EUR cents, rounding half up. (2) The CLI keeps its current output (converted to EUR) and gains a --by-currency flag, used as 'python3 -m ledger.cli <file> --by-currency', that prints one line per currency, sorted, like 'USD: 10.00', in the original currency. (3) Split ledger/report.py into a package ledger/report/ with loading.py (load_entries) and aggregate.py (total_by_category); existing imports such as 'from ledger.report import load_entries, total_by_category' must keep working. The existing test suite and the current CLI output for data/entries-2026.csv must stay the same. Work only inside $PWD."; echo y; }
+turns_coding_4() { echo "Add multi-currency support to the ledger and restructure it. (1) CSV entries may carry an optional third column 'currency' (empty or missing means EUR); exchange rates are in rates.csv next to the entries file (columns currency,eur_rate). load_entries must return amounts converted to EUR cents, rounding half up. (2) The CLI keeps its current output (converted to EUR) and gains a --by-currency flag, used as 'python3 -m ledger.cli <file> --by-currency', that prints one line per currency, sorted, like 'USD: 10.00', in the original currency. (3) Split ledger/report.py into a package ledger/report/ with loading.py (load_entries) and aggregate.py (total_by_category); existing imports such as 'from ledger.report import load_entries, total_by_category' must keep working. The existing test suite and the current CLI output for data/entries-2026.csv must stay the same. Work only inside $PWD."; }
 check_coding_4() {
   [ ! -e ledger/report.py ] && grep -q "def load_entries" ledger/report/loading.py 2>/dev/null \
     && grep -q "def total_by_category" ledger/report/aggregate.py && suite_passes && cli_ok \
@@ -242,7 +242,7 @@ check_browser_1() { answer_is SO-2044; }
 CASES+=(delegate-1)
 
 setup_delegate_1() { command -v claude >/dev/null || { echo "needs the claude CLI" >&2; return 77; }; }
-turns_delegate_1() { echo "Ask Claude Code to add a --version flag to the ledger CLI: 'python3 -m ledger.cli --version' must print exactly 'ledger 1.0' and exit 0, and normal usage must keep working. Then run it yourself to confirm. Work only inside $PWD."; echo y; }
+turns_delegate_1() { echo "Ask Claude Code to add a --version flag to the ledger CLI: 'python3 -m ledger.cli --version' must print exactly 'ledger 1.0' and exit 0, and normal usage must keep working. Then run it yourself to confirm. Work only inside $PWD."; }
 check_delegate_1() {
   [ "$(PYTHONDONTWRITEBYTECODE=1 python3 -m ledger.cli --version 2>/dev/null)" = "ledger 1.0" ] && cli_ok && suite_passes
 }

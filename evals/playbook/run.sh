@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One isolated Sophi run of a playbook case: a fresh user.home (seeded from home-seed/), a fresh copy
-# of the ledger fixture as cwd, and the case's turns piped to stdin (one line = one turn, EOF ends
-# the session). Usage: evals/playbook/run.sh <case-id> [run-number]
+# of the ledger fixture as cwd, and the case's turns sent as RPC commands (one line = one turn; /goal lines are goals) to
+# `sophi --mode rpc`. Usage: evals/playbook/run.sh <case-id> [run-number]
 # Env: SOPHI_JAR, PLAYBOOK_RUN_TIMEOUT (seconds per run, default 1200), PLAYBOOK_RUNS (run dirs; default ~/Library/Caches/sophi-playbook), LMSTUDIO_URL (default http://192.168.0.108:1234/v1), PLAYBOOK_MODEL (default qwen/qwen3-8b), SOPHI_FLAGS (default = --provider local + --god-mode --no-remote), AB_LABEL.
 set -o pipefail
 export PB="$(cd "$(dirname "$0")" && pwd)"
@@ -27,7 +27,51 @@ cd "$RUN/work" || exit 1
 
 # Only the calendar case may reach Calendar.app; every other run gets the osascript guard.
 case " ${CALENDAR_CASES[*]} " in *" $id "*) SPATH="$PATH" ;; *) SPATH="$PB/guardbin:$PATH" ;; esac
-session() { "$1" | PATH="$SPATH" java -Duser.home="$RUN/home" -jar "$JAR" "${FLAGS[@]}" 2>&1 | tee -a "$RUN/transcript.txt"; }
+is_delegate=no; case " ${DELEGATE_CASES[*]} " in *" $id "*) is_delegate=yes ;; esac
+trap '' PIPE  # a killed Sophi must not kill this script on the next write
+# Sends one command, then reads events (into events.jsonl) until the turn ends. Returns 1 if Sophi is gone.
+# Confirmations: only invoke_claude_code in a delegate case is approved; anything else is denied.
+await_turn() {
+  local ev ty c t ok
+  while IFS= read -r ev <&4; do
+    printf '%s\n' "$ev" >> "$RUN/events.jsonl"
+    ty="$(jq -r '.type' <<< "$ev")"
+    case "$ty" in
+      turn_ended) return 0 ;;
+      exited) return 1 ;;
+      confirmation_requested)
+        while IFS=$'\t' read -r c t; do
+          ok=false; [ "$t" = invoke_claude_code ] && [ $is_delegate = yes ] && ok=true
+          [ $ok = true ] || echo "rpc-client: denied $t" >> "$RUN/stderr.txt"
+          jq -nc --arg c "$c" --argjson ok $ok '{type:"confirm",callId:$c,approved:$ok}' >&3
+        done < <(jq -r '.requests[] | "\(.callId)\t\(.toolName)"' <<< "$ev") ;;
+    esac
+  done
+  return 1
+}
+# A turn line becomes a prompt, or a goal for '/goal [--check "<cmd>"] <task>' (same split as GoalArgs).
+turn_cmd() {
+  local l="$1" rest chk="" q='^--check[[:space:]]+"([^"]*)"[[:space:]]*(.*)$' u='^--check[[:space:]]+([^[:space:]]+)[[:space:]]+(.*)$'
+  if [ "${l#/goal }" = "$l" ]; then jq -nc --arg t "$l" '{type:"prompt",text:$t}'; return; fi
+  rest="${l#/goal }"
+  if [[ $rest =~ $q ]] || [[ $rest =~ $u ]]; then chk="${BASH_REMATCH[1]}"; rest="${BASH_REMATCH[2]}"; fi
+  jq -nc --arg t "$rest" --arg c "$chk" '{type:"goal",text:$t} + (if $c == "" then {} else {check:$c} end)'
+}
+# One Sophi process over a pair of FIFOs (bash 3.2 on macOS has no coproc). Reading events while a turn
+# runs is what keeps the client from deadlocking on a full pipe.
+session() {
+  local io pid line
+  io="$(mktemp -d)"; mkfifo "$io/in" "$io/out"
+  PATH="$SPATH" java -Duser.home="$RUN/home" -jar "$JAR" --mode rpc "${FLAGS[@]}" < "$io/in" > "$io/out" 2>> "$RUN/stderr.txt" & pid=$!
+  exec 3> "$io/in" 4< "$io/out"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    turn_cmd "$line" >&3 && await_turn || break
+  done < <("$1")
+  exec 3>&-                                                  # stdin EOF: Sophi finishes and exits
+  while IFS= read -r line <&4; do printf '%s\n' "$line" >> "$RUN/events.jsonl"; done
+  exec 4<&-; wait $pid; rm -rf "$io"
+}
 # Wall-clock cap per run (both sessions together). Past it, this run's Sophi is killed and the run
 # scores fail: seen live, coding-4 worked alone for 55 min and then the model stream died.
 CAP="${PLAYBOOK_RUN_TIMEOUT:-1200}"
@@ -44,19 +88,13 @@ S="$RUN/home/.sophi/sessions"
 calls="$(cat "$S"/*.jsonl 2>/dev/null | grep -F '\"name\":\"invoke_claude_code\"')"
 denials=$(cat "$S"/*.jsonl 2>/dev/null | grep -cF "Tool 'invoke_claude_code' execution denied")
 delegated=no; [ "$(grep -c . <<< "$calls")" -gt "$denials" ] && delegated=yes
-is_delegate=no; case " ${DELEGATE_CASES[*]} " in *" $id "*) is_delegate=yes ;; esac
 case " ${DELEGATION_REQUIRED[*]} " in *" $id "*) [ $delegated = no ] && result=fail ;; esac
 
 # A void run is not evidence about Sophi: it's excluded from pass counts (README A/B) and re-run.
-# Delegate cases script one 'y' for the invoke_claude_code prompt (it is always HIGH_RISK); any
-# other [y/N] prompt swallowed a scripted turn.
-prompts=$(grep -c '\[y/N\]' "$RUN/transcript.txt")
-allowed=0; [ $is_delegate = yes ] && allowed=$(grep -cE "wants to run 'invoke_claude_code'|- invoke_claude_code \(" "$RUN/transcript.txt")
 void=""
-[ "$prompts" -gt "$allowed" ] && void="a [y/N] prompt consumed a scripted turn — later turns are shifted"
 grep -qs 'evals/playbook' "$S"/*.jsonl && void="the session touched evals/playbook — it may have seen the answers"
-grep -q '\[error: ' "$RUN/transcript.txt" && void="the model backend errored mid-run"
-case " ${FLAGS[*]} " in *" --memory "*) grep -q '^memory: disabled' "$RUN/transcript.txt" && \
+jq -es 'any(.[]; .type == "turn_ended" and .stopReason == "Error")' "$RUN/events.jsonl" >/dev/null 2>&1 && void="the model backend errored mid-run"
+case " ${FLAGS[*]} " in *" --memory "*) jq -es 'any(.[]; .type == "ready" and .memory.enabled == false)' "$RUN/events.jsonl" >/dev/null 2>&1 && \
   void="memory was requested but switched itself off (embeddings endpoint) — memory cases would pass by other means" ;; esac
 [ -n "$calls" ] && grep -vqF "$(basename "$RUN")" <<< "$calls" && \
   void="invoke_claude_code was pointed OUTSIDE the run dir — check that project for changes Claude Code made"
@@ -64,4 +102,4 @@ case " ${FLAGS[*]} " in *" --memory "*) grep -q '^memory: disabled' "$RUN/transc
 [ -e "$RUN/.timed-out" ] && { echo "TIMEOUT: run exceeded ${CAP}s, scored fail (too slow is a result, not a void)"; result=fail; }
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%F)" "$id" "$n" "${AB_LABEL:-baseline}" "$result" "$delegated" "$RUN" >> "$RESULTS"
 echo "case=$id run=$n result=$result delegated=$delegated"
-echo "RUN=$RUN  (transcript.txt, home/.sophi/sessions/*.jsonl, home/.sophi/learning/)"
+echo "RUN=$RUN  (events.jsonl, stderr.txt, home/.sophi/sessions/*.jsonl, home/.sophi/learning/)"

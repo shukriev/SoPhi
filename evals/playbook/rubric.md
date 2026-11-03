@@ -4,7 +4,7 @@ Claude fills one scorecard per run at `runs/YYYY-MM-DD-<case>-<n>.md`.
 
 ## Rules
 
-1. **No evidence, no fault tag.** Quote the exact JSONL line (or transcript line) that shows the
+1. **No evidence, no fault tag.** Quote the exact JSONL line (or `events.jsonl` line) that shows the
    failure.
 2. **Exactly one fault tag and one prescription** per non-passing run.
 3. **Delegation.** `delegate-1` asks for delegation explicitly: it passes only if `invoke_claude_code`
