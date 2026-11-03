@@ -18,6 +18,11 @@ class StreamingTurnPresenterTest : FunSpec({
         after.text shouldContain "ask_user"
     }
 
+    test("a switch to a fallback model prints one line saying why") {
+        val line = StreamingTurnPresenter().feed(TurnEvent.ModelFallback("a", "b", "the server isn't answering"))
+        line shouldBe StreamingTurnPresenter.Rendered.ToolLine("↪ switched to b: a is unavailable (the server isn't answering)")
+    }
+
     test("ask_user pauses the live region like a confirmation until it finishes") {
         val p = StreamingTurnPresenter()
         p.feed(TurnEvent.ToolCallStarted("ask_user", "{}"))

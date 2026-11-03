@@ -199,6 +199,12 @@ class SophiCli(
         help = "Stop the session once its model requests have cost this many US dollars (cloud providers; 0 = no budget). " +
             "Change it mid-session with /settings max-cost-usd."
     ).double()
+    private val fallbackModels: String by option(
+        "--fallback-models",
+        help = "Models to switch to, in order, for the rest of a turn when the model is unavailable (server down, model not " +
+            "loaded): `name` on the same server, `name@http://host:port/v1` on another local server, `name@claude` for " +
+            "Anthropic's API (billed). Comma-separated; none by default."
+    ).default("")
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
@@ -220,6 +226,13 @@ class SophiCli(
         val provider = providerOptions.buildProvider(resolved) { plain ->
             dev.sophi.sdk.MeteredProvider.wrap(plain, model, catalog, resolved.cloud, resolved.catalogProvider).also { metered = it }
         }
+        val fallbacks = fallbackChain(fallbackModels, resolved, catalog, { System.err.println(it) }, build = { type, url, m ->
+            // The session's key goes only to the API it was given for, never to another server.
+            val key = if (type == "claude" && resolved.type == "claude") providerOptions.apiKey else null
+            dev.sophi.ai.providers.buildProviderFromType(
+                type, key, url, m, java.time.Duration.ofSeconds(providerOptions.timeoutSeconds), providerOptions.maxRetries,
+            )
+        })
         val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
@@ -256,6 +269,7 @@ class SophiCli(
             ),
             provider = provider,
             metered = metered,
+            fallbacks = fallbacks,
             interactive = sophiTerminal.isInteractive,
             terminal = mordantTerminal,
             input = inputSource,
