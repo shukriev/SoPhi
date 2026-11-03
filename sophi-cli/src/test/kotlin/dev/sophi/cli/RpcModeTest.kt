@@ -3,6 +3,8 @@ package dev.sophi.cli
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.StreamEvent
+import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.tools.Tool
 import kotlinx.coroutines.flow.flowOf
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
@@ -21,27 +23,43 @@ import java.io.PrintStream
 
 class RpcModeTest : FunSpec({
     /** Runs rpc mode on [stdin] against a fake model; returns the parsed stdout lines. */
-    suspend fun rpc(stdin: String, memory: Boolean = false) = ByteArrayOutputStream().let { bytes ->
+    suspend fun rpc(
+        stdin: String, memory: Boolean = false, lateLine: String? = null,
+        reply: () -> kotlinx.coroutines.flow.Flow<StreamEvent> = { flowOf(StreamEvent.Content("hello")) },
+        tools: List<Tool> = emptyList(),
+    ) = ByteArrayOutputStream().let { bytes ->
         val llm = mockk<LLMProvider>()
         every { llm.name } returns "fake"
-        every { llm.stream(any()) } answers { flowOf(StreamEvent.Content("hello")) }
+        every { llm.stream(any()) } answers { reply() }
         val dir = tempdir().toPath()
-        runRpc(
-            build = { manual, onWarning ->
+        // The real System.in, as in production: a read from it anywhere but the rpc reader would eat a command.
+        val realIn = System.`in`
+        val pipe = java.io.PipedOutputStream()
+        System.setIn(java.io.PipedInputStream(pipe))
+        pipe.write(stdin.toByteArray())
+        // Sent once the turn is well into its tool rounds, when a stdin read by anything else would be waiting for it.
+        val late = kotlin.concurrent.thread { Thread.sleep(1500); lateLine?.let { pipe.write(it.toByteArray()) }; pipe.close() }
+        try { runRpc(
+            build = { manual, onWarning, input ->
                 val opts = optionsFor(dir).let {
                     if (memory) it.copy(memoryEnabled = true, embeddingModel = "e", embeddingBaseUrl = "http://127.0.0.1:9/v1") else it
                 }
-                buildCliRuntime(opts, llm, Terminal(), ScriptedInputSource(emptyList()), onWarning, manualConfirmation = manual)
+                buildCliRuntime(opts, llm, Terminal(), input, onWarning, manualConfirmation = manual)
+                    .also { cli -> tools.forEach(cli.registry::register) }
             },
             switchModel = { _, _ -> null },
-            stdin = ByteArrayInputStream(stdin.toByteArray()),
+            stdin = System.`in`,
             stdout = PrintStream(bytes, true),
-        )
+        ) } finally { System.setIn(realIn); late.join() }
         bytes.toString().lines().filter { it.isNotBlank() }.map { Json.parseToJsonElement(it).jsonObject }
     }
 
     test("stdout carries only protocol lines") {
-        val events = rpc("""{"type":"prompt","text":"hi"}""" + "\n")
+        val real = System.out
+        val stray = ByteArrayOutputStream()
+        System.setOut(PrintStream(stray, true))
+        val events = try { rpc("""{"type":"prompt","text":"hi"}""" + "\n") } finally { System.setOut(real) }
+        stray.toString() shouldBe "" // a println to the real stdout would corrupt the protocol
         events.map { it["type"]!!.jsonPrimitive.content }.let {
             it.first() shouldBe "ready"
             it.last() shouldBe "exited"
@@ -52,6 +70,24 @@ class RpcModeTest : FunSpec({
         val memory = rpc("", memory = true).first()["memory"]!!.jsonObject
         memory["enabled"]!!.jsonPrimitive.boolean shouldBe false
         memory["reason"]!!.jsonPrimitive.contentOrNull!! shouldStartWith "memory:"
+    }
+
+    test("a tripped loop guard stops the turn without reading a client command from stdin") {
+        val broken = object : Tool {
+            override val name = "broken"
+            override val description = "always fails"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String = throw RuntimeException("nope")
+        }
+        val events = rpc(
+            """{"type":"prompt","text":"go"}""" + "\n",
+            lateLine = """{"type":"prompt","text":"again"}""" + "\n",
+            reply = { flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "broken", "{}")))) },
+            tools = listOf(broken),
+        )
+        // The second prompt arrives after the first turn was stopped; it must run, not be eaten by the guard's yes/no.
+        events.filter { it["type"]!!.jsonPrimitive.content == "turn_ended" }
+            .map { it["stopReason"]!!.jsonPrimitive.content } shouldBe listOf("LoopGuard", "LoopGuard")
     }
 
     test("--mode is not a setting") {

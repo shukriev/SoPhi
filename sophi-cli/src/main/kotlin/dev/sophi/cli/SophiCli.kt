@@ -276,12 +276,12 @@ class SophiCli(
         })
         val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
         if (mode == "rpc") return@runBlocking runRpc(
-            build = { manual, onWarning ->
+            build = { manual, onWarning, input ->
                 exitOnBadPermissionRules { buildCliRuntime(
                     // No hub in rpc mode, as with --no-remote.
                     opts = cliOptions(model, contextWindowTokens, embedding, resolved).copy(noRemote = true),
                     provider = provider, metered = metered, fallbacks = fallbacks,
-                    terminal = Terminal(), input = LegacyReadLineInputSource(), onWarning = onWarning, manualConfirmation = manual,
+                    terminal = Terminal(), input = input, onWarning = onWarning, manualConfirmation = manual,
                 ) }
             },
             switchModel = { cli, id -> switchModelTo(resolved, catalog, cli, id) },
@@ -518,25 +518,26 @@ private suspend fun endSession(cli: CliRuntime, say: (String) -> Unit) {
 
 /**
  * `--mode rpc`: [stdin] lines are commands, [stdout] gets only protocol lines. [build] makes the runtime
- * around the RPC confirmations (its manual policy) and reports setup warnings to its second argument.
+ * around the RPC confirmations (its manual policy), reports setup warnings to its second argument and
+ * gets an input source that never reads stdin (a read would swallow a client command; a tripped loop guard just stops the turn).
  */
 internal suspend fun runRpc(
-    build: suspend (ConfirmationPolicy, (String) -> Unit) -> CliRuntime,
+    build: suspend (ConfirmationPolicy, (String) -> Unit, InputSource) -> CliRuntime,
     switchModel: suspend (CliRuntime, String) -> String?,
     stdin: java.io.InputStream,
     stdout: java.io.PrintStream,
 ) = coroutineScope {
     lateinit var server: dev.sophi.sdk.rpc.RpcServer
     val confirmations = dev.sophi.sdk.rpc.RpcConfirmations { server.emit(it) }
-    var memoryWarning: String? = null
-    val cli = build(confirmations) { msg ->
+    val memoryWarning = java.util.concurrent.atomic.AtomicReference<String?>() // onWarning can fire from another thread
+    val cli = build(confirmations, { msg ->
         System.err.println(msg)
-        if (msg.startsWith("memory:")) memoryWarning = msg
-    }
+        if (msg.startsWith("memory:")) memoryWarning.set(msg)
+    }, NoOpInputSource)
     val memoryOn = cli.runtime.memoryPlugin != null
     server = dev.sophi.sdk.rpc.RpcServer(
         cli.runtime, cli.session, confirmations,
-        dev.sophi.sdk.rpc.MemoryStatus(memoryOn, memoryWarning.takeUnless { memoryOn }),
+        dev.sophi.sdk.rpc.MemoryStatus(memoryOn, memoryWarning.get().takeUnless { memoryOn }),
         { switchModel(cli, it) }, { stdout.println(it); stdout.flush() }, cli.planLog,
     )
     val lines = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
