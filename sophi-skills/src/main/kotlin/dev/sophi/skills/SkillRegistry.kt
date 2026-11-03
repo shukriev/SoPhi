@@ -30,11 +30,38 @@ class SkillRegistry(private val skills: Map<String, Skill>, val refused: List<St
             .map { it.key to it.value }.sortedBy { it.first }
 
     companion object {
-        fun load(globalDir: Path, projectDir: Path, loader: SkillLoader = SkillLoader()): SkillRegistry {
+        /** [foreignDirs]: other agents' skill dirs (see [foreignDirs]), read only; any SoPhi skill wins over
+         *  one of theirs with the same id, and a later dir over an earlier one. A foreign skill whose
+         *  frontmatter doesn't parse is skipped and reported to [onWarning]. */
+        fun load(
+            globalDir: Path,
+            projectDir: Path,
+            loader: SkillLoader = SkillLoader(),
+            foreignDirs: List<Path> = emptyList(),
+            onWarning: (String) -> Unit = {}
+        ): SkillRegistry {
+            val foreign = foreignDirs.fold(emptyMap<String, Skill>()) { acc, dir -> acc + loadForeignDir(dir, loader, onWarning) }
             val refused = mutableListOf<String>()
             val global = loadDirTolerant(globalDir, loader, refused)
             val project = loadDirTolerant(projectDir, loader, refused)
-            return SkillRegistry(global + project, refused) // project entries win on id collision
+            return SkillRegistry(foreign + global + project, refused) // project entries win on id collision
+        }
+
+        /** Where Claude Code and the `.agents` / agentskills.io convention keep `<name>/SKILL.md`
+         *  skills: user-wide first, so a project's own win. */
+        fun foreignDirs(home: Path, project: Path): List<Path> = listOf(home, project).flatMap {
+            listOf(it.resolve(".claude/skills"), it.resolve(".agents/skills"))
+        }
+
+        private fun loadForeignDir(dir: Path, loader: SkillLoader, onWarning: (String) -> Unit): Map<String, Skill> {
+            if (!dir.isDirectory()) return emptyMap()
+            return dir.listDirectoryEntries().map { it.resolve("SKILL.md") }.filter { it.isRegularFile() }
+                .mapNotNull { file ->
+                    runCatching { file.parent.name to loader.loadSkillMd(file) }
+                        .onFailure { onWarning("skills: skipping $file, its frontmatter doesn't parse (${it.message?.lineSequence()?.first()})") }
+                        .getOrNull()
+                }
+                .toMap()
         }
 
         private fun loadDirTolerant(dir: Path, loader: SkillLoader, refused: MutableList<String>): Map<String, Skill> {

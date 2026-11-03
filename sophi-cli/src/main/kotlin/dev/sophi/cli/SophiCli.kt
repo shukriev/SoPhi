@@ -169,6 +169,11 @@ class SophiCli(
         "--trust-read-only-hints",
         help = "In plan-first tasks, run a lookup without asking when its MCP server marks it read-only (default on)."
     ).flag("--no-trust-read-only-hints", default = true)
+    private val otherAgentSkills: Boolean by option(
+        "--other-agent-skills",
+        help = "Also offer skills written for other agents (<name>/SKILL.md in ~/.claude/skills, ~/.agents/skills " +
+            "and this project's .claude/skills and .agents/skills), read only; a SoPhi skill with the same name wins (default on)."
+    ).flag("--no-other-agent-skills", default = true)
     private val sandboxMode: String by option(
         "--sandbox",
         help = "Where bash runs: off (default), seatbelt (macOS sandbox: writes only to the workspace, temp " +
@@ -251,6 +256,7 @@ class SophiCli(
                 mcpConfigPath = mcpConfigPathStr,
                 planFirst = dev.sophi.core.dryrun.PlanFirst.valueOf(planFirstMode.uppercase()),
                 trustReadOnlyHints = trustReadOnlyHints,
+                otherAgentSkills = otherAgentSkills,
                 braveApiKey = braveApiKeyOption,
                 autoMode = autoMode,
                 godMode = godMode,

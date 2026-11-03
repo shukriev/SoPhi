@@ -68,6 +68,8 @@ data class CliOptions(
     val maxCostUsd: Double? = null,
     val planFirst: dev.sophi.core.dryrun.PlanFirst = dev.sophi.core.dryrun.PlanFirst.OUTSIDE,
     val trustReadOnlyHints: Boolean = true,
+    /** Also read Claude Code's and `.agents` `<name>/SKILL.md` skills (read only). */
+    val otherAgentSkills: Boolean = true,
 )
 
 /**
@@ -143,9 +145,13 @@ internal suspend fun buildCliRuntime(
 
     val agentsDir = Path.of(opts.agentsDir)
 
+    val foreignSkillDirs = if (opts.otherAgentSkills)
+        SkillRegistry.foreignDirs(Path.of(System.getProperty("user.home")), Path.of("")) else emptyList()
     val skillRegistry = SkillRegistry.load(
         globalDir = Path.of(System.getProperty("user.home"), ".sophi", "skills"),
-        projectDir = Path.of(".sophi", "skills")
+        projectDir = Path.of(".sophi", "skills"),
+        foreignDirs = foreignSkillDirs,
+        onWarning = onWarning
     ).also { it.refused.forEach(onWarning) }
 
     // The builtin file/shell/search/date tools and the schedule tool are both registered by the
@@ -183,7 +189,7 @@ internal suspend fun buildCliRuntime(
         agentsDir(agentsDir, onWarning)
         subagentDelegation()
         goalDecomposition(Path.of(opts.plansDir))
-        skillTools()
+        skillTools(foreignSkillDirs = foreignSkillDirs)
         loopGuard(loopGuardPolicy)
         if (interactive) { askUser(TerminalUserAsker(terminal, input)); desktop() }
         confirmationPolicy(confirmationPolicy)

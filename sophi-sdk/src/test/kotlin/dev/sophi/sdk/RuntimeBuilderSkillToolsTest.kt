@@ -63,4 +63,13 @@ class RuntimeBuilderSkillToolsTest : FunSpec({
         dir.resolve("mine.md").writeText("---\ntitle: Mine\ndescription: changed text\n---\nbody")
         load().get("mine")!!.metadata.description shouldBe "changed text"
     }
+
+    test("the skill loader reads other agents' SKILL.md dirs and notices a skill added there") {
+        val claude = tempdir().toPath()
+        val load = skillRegistryLoader(tempdir().toPath(), tempdir().toPath(), listOf(claude)) { true }
+        load().all() shouldBe emptyList()
+        claude.resolve("pdf").toFile().mkdirs()
+        claude.resolve("pdf/SKILL.md").writeText("---\nname: pdf\ndescription: PDFs\n---\nbody")
+        load().get("pdf")!!.metadata.description shouldBe "PDFs"
+    }
 })
