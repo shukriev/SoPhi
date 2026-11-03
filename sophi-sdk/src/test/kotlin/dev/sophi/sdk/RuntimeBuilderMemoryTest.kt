@@ -14,6 +14,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlin.io.path.createTempDirectory
@@ -30,6 +31,34 @@ private fun stubProvider(): LLMProvider {
 }
 
 class RuntimeBuilderMemoryTest : FunSpec({
+
+    test("memory passes onHouseholdCandidate to the plugin") {
+        val provider = stubProvider()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text(
+            """{"memories":[{"text":"The family shops on Saturdays","room":"KNOWLEDGE","emph":0.8,"aff":0.9,
+               "sensitivity":"PERSONAL","provenance":"USER_DIRECT","household":true}],"profile":[]}""", TokenUsage(1, 1))
+        val got = java.util.concurrent.CopyOnWriteArrayList<Pair<String, dev.sophi.memory.MemoryView>>()
+        val builder = RuntimeBuilder()
+        builder.provider = provider
+        builder.sessionsDir = createTempDirectory("sophi-sdk-memory-test")
+        builder.memoryHome = createTempDirectory("sophi-sdk-memory-home-test")
+        val rt = builder
+            .contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }
+            .memory(
+                embeddingModel = "nomic-embed-text", embeddingBaseUrl = "http://ignored-by-override",
+                embeddingProvider = StubEmbeddingProvider(shouldFail = false),
+                onHouseholdCandidate = { sid, m -> got += sid to m }
+            )
+            .build()
+        val plugin = rt.memoryPlugin.shouldNotBeNull()
+        plugin.hooks().single { it.point == dev.sophi.extensions.HookPoint.AFTER_TURN }
+            .invoke(dev.sophi.extensions.HookContext("s1", userInput = "we shop on Saturdays", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.size shouldBe 1
+        got.single().first shouldBe "s1"
+        got.single().second.metadata["household"] shouldBe "candidate"
+        plugin.close()
+    }
 
     test("memory() left uncalled leaves memoryPlugin null and the prompt at just the default") {
         val builder = RuntimeBuilder()
