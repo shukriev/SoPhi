@@ -15,9 +15,7 @@ import com.github.ajalt.mordant.rendering.TextColors
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
-import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.SubagentTool
-import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationPolicy
@@ -45,6 +43,7 @@ import dev.sophi.mcp.config.McpConfigLoader
 import dev.sophi.skills.SkillRegistry
 import dev.sophi.schedule.store.TaskStore
 import dev.sophi.schedule.tools.ScheduleTaskTool
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -210,8 +209,47 @@ class SophiCli(
             "Anthropic's API (billed). Comma-separated; none by default."
     ).default("")
 
+    private val mode: String by option(
+        "--mode",
+        help = "interactive (default) or rpc: JSON lines on stdin/stdout for programs (editors, scripts, the eval playbook); see docs"
+    ).choice("interactive", "rpc").default("interactive")
+
+    private fun cliOptions(model: String, contextWindowTokens: Int, embedding: EmbeddingChoice, resolved: ResolvedProvider) =
+        CliOptions(
+            model = model,
+            maxTokens = maxTokens,
+            contextWindowTokens = contextWindowTokens,
+            systemPrompt = systemPrompt,
+            sessionsDir = sessionsDirStr,
+            agentsDir = agentsDirStr,
+            scheduleDir = scheduleDirStr,
+            plansDir = plansDirStr,
+            mcpConfigPath = mcpConfigPathStr,
+            planFirst = dev.sophi.core.dryrun.PlanFirst.valueOf(planFirstMode.uppercase()),
+            trustReadOnlyHints = trustReadOnlyHints,
+            otherAgentSkills = otherAgentSkills,
+            braveApiKey = braveApiKeyOption,
+            autoMode = autoMode,
+            godMode = godMode,
+            memoryEnabled = memoryEnabled,
+            embeddingModel = embedding.model,
+            embeddingBaseUrl = embedding.baseUrl,
+            embeddingDimensions = embedding.dimensions,
+            baseUrl = resolved.baseUrl,
+            apiKey = providerOptions.apiKey,
+            llmTimeoutSeconds = providerOptions.timeoutSeconds,
+            hubPort = hubPort,
+            noRemote = noRemote,
+            sessionIdToResume = sessionId,
+            maxCostUsd = maxCostUsd,
+        )
+
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
+        // In rpc mode stdout is the protocol, so everything that prints (here and in the runtime) goes to stderr.
+        // UTF-8 whatever the locale: the protocol is JSON, and tokens are often not ASCII.
+        val protocolOut = java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), true, Charsets.UTF_8)
+        if (mode == "rpc") System.setOut(System.err)
         val catalog = loadModelCatalog()
         // Off the critical path: this run uses what was loaded above; a fresh file applies from the next start.
         if (catalogRefresh) kotlin.concurrent.thread(isDaemon = true, name = "sophi-catalog-refresh") {
@@ -238,40 +276,25 @@ class SophiCli(
             )
         })
         val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
+        if (mode == "rpc") return@runBlocking runRpc(
+            build = { manual, onWarning, input ->
+                exitOnBadPermissionRules { buildCliRuntime(
+                    // No hub in rpc mode, as with --no-remote.
+                    opts = cliOptions(model, contextWindowTokens, embedding, resolved).copy(noRemote = true),
+                    provider = provider, metered = metered, fallbacks = fallbacks,
+                    terminal = Terminal(), input = input, onWarning = onWarning, manualConfirmation = manual,
+                ) }
+            },
+            switchModel = { cli, id -> switchModelTo(resolved, catalog, cli, id) },
+            stdin = System.`in`, stdout = protocolOut,
+        )
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
         val inputSource: InputSource =
             if (sophiTerminal.isInteractive) JLineInputSource(sophiTerminal) else LegacyReadLineInputSource()
 
         val cli = exitOnBadPermissionRules { buildCliRuntime(
-            opts = CliOptions(
-                model = model,
-                maxTokens = maxTokens,
-                contextWindowTokens = contextWindowTokens,
-                systemPrompt = systemPrompt,
-                sessionsDir = sessionsDirStr,
-                agentsDir = agentsDirStr,
-                scheduleDir = scheduleDirStr,
-                plansDir = plansDirStr,
-                mcpConfigPath = mcpConfigPathStr,
-                planFirst = dev.sophi.core.dryrun.PlanFirst.valueOf(planFirstMode.uppercase()),
-                trustReadOnlyHints = trustReadOnlyHints,
-                otherAgentSkills = otherAgentSkills,
-                braveApiKey = braveApiKeyOption,
-                autoMode = autoMode,
-                godMode = godMode,
-                memoryEnabled = memoryEnabled,
-                embeddingModel = embedding.model,
-                embeddingBaseUrl = embedding.baseUrl,
-                embeddingDimensions = embedding.dimensions,
-                baseUrl = resolved.baseUrl,
-                apiKey = providerOptions.apiKey,
-                llmTimeoutSeconds = providerOptions.timeoutSeconds,
-                hubPort = hubPort,
-                noRemote = noRemote,
-                sessionIdToResume = sessionId,
-                maxCostUsd = maxCostUsd,
-            ),
+            opts = cliOptions(model, contextWindowTokens, embedding, resolved),
             provider = provider,
             metered = metered,
             fallbacks = fallbacks,
@@ -309,8 +332,6 @@ class SophiCli(
                 }
             }
         }
-
-        val compactor = ContextCompactor(provider, dev.sophi.core.context.Summariser(provider, cli.runtime.compactionMode, contextWindowTokens, dev.sophi.ai.system1.Judgments.COMPACTOR))
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
@@ -367,52 +388,18 @@ class SophiCli(
         val onEvent: suspend (dev.sophi.core.agent.TurnEvent) -> Unit = { event ->
             event.toHubEvent(session.id)?.let { hubClient?.publish(it) }
         }
-        // /goal drives PlanRunner directly rather than going through runtime.streamTurn, so it
-        // needs its own AgentLoop over the same registry and confirmation policy — the same
-        // arrangement buildPlanRunner makes for /plan. It is NOT built via buildPlanRunner
-        // because the preview flow has to generate the plan with the very planner the runner
-        // will later replan with, and buildPlanRunner owns its planner privately.
-        val goalPlanner = dev.sophi.core.agent.plan.LlmPlanner(
-            provider, model,
-            contextProvider = { goalPrompt -> cli.runtime.contextFor(session.id, goalPrompt) }
-        )
-        val goalLoop = AgentLoop(
-            provider, cli.registry, cli.runtime.sessionManager,
-            confirmationPolicy = cli.confirmationPolicy, contextWindowTokens = contextWindowTokens,
-            audit = cli.runtime.auditSink, permissions = cli.runtime.permissionRules, hooks = cli.runtime.hooks
-        )
-        // /goal's planner, critic and runner keep the start model's id; the metered provider sends it to the active model.
-        val switchModel: suspend (String) -> String? = { id ->
-            val switch = modelSwitchWindow(resolved, catalog, id, cli.runtime.contextWindowTokens)
-            switch.window?.let { window ->
-                cli.runtime.switchModel(id, window)
-                goalLoop.contextWindowTokens = window
-            }
-            switch.error
-        }
+        val switchModel: suspend (String) -> String? = { id -> switchModelTo(resolved, catalog, cli, id) }
         val planFirstHost = cli.runtime.planFirst?.let { PlanFirstHost(cli.runtime, inputSource) { mordantTerminal.println(it) } }
         val goalController = dev.sophi.cli.goal.GoalController(
-            agentLoop = goalLoop,
-            sessionManager = cli.runtime.sessionManager, provider = provider,
-            planner = goalPlanner,
-            critic = dev.sophi.core.agent.plan.LlmStepCritic(provider, model),
-            runnerConfig = dev.sophi.core.agent.plan.PlanRunnerConfig(
-                model = model, maxTokens = maxTokens, systemPrompt = cli.runtime.config.systemPrompt,
-                escalationModel = goalEscalationModel, allowParallelSteps = false
-            ),
-            planLog = cli.planLog,
+            cli.runtime, cli.planLog,
             input = inputSource, liveRegion = liveRegion, interactive = sophiTerminal.isInteractive,
             tokenViewKey = tokenViewKey.singleOrNull() ?: DEFAULT_TOKEN_VIEW_KEY, autoExitTokenView = autoExitTokenView,
-            learning = learningPlugin,
-            checkpoints = cli.runtime.checkpointStore,
+            escalationModel = goalEscalationModel,
             onEvent = onEvent,
-            onTurnSettled = { userInput, assistantReply, error ->
-                cli.runtime.settleExternalTurn(session.id, userInput, assistantReply, error)
-            },
             planFirst = planFirstHost,
         ) { mordantTerminal.println(it) }
         val slashHandler = SlashHandler(
-            cli.runtime.sessionManager, compactor, cli.runtime.config, learningPlugin,
+            cli.runtime.sessionManager, cli.runtime, cli.runtime.config, learningPlugin,
             scheduleDir = Path.of(scheduleDirStr), memoryPlugin = memoryPlugin,
             skillRegistry = cli.skillRegistry,
             provider = provider, calendarProvider = cli.calendarProvider, confirmationPolicy = cli.confirmationPolicy,
@@ -469,24 +456,7 @@ class SophiCli(
             engine.run(session)
         } finally {
             // TuiEngine.run returns on both exit paths (exit/quit and EOF); record the outcome once.
-            // Goes through SophiRuntime.recordSessionEnd, not learningPlugin directly, so memory's
-            // outcome-driven forgetting gets the same signal without this host wiring it itself.
-            runCatching { cli.runtime.recordSessionEnd(session.id) }
-            runCatching {
-                hubClient?.publish(HubEvent.SessionClosed(session.id)) // no-op if never connected
-                hubClient?.close()
-            }
-            runCatching {
-                memoryPlugin?.let { mp ->
-                    mp.consolidateIfDue()?.let { report ->
-                        if (report.total > 0) mordantTerminal.println(
-                            "memory: consolidated (merged=${report.merged} strengthened=${report.strengthened} " +
-                            "compressed=${report.compressed} pruned=${report.pruned} purged=${report.purged} " +
-                            "classified=${report.classified})")
-                    }
-                    mp.close()
-                }
-            }
+            endSession(cli) { mordantTerminal.println(it) }
             sophiTerminal.close()
             cli.runtime.close()
         }
@@ -514,5 +484,80 @@ private class LegacyReadLineInputSource : InputSource {
             offerAlways && line.equals("a", ignoreCase = true) -> ConfirmAnswer.ALWAYS
             else -> ConfirmAnswer.NO
         }
+    }
+}
+
+/** Switches the running session to [id]; returns why it could not, or null. */
+private suspend fun switchModelTo(resolved: ResolvedProvider, catalog: dev.sophi.sdk.ModelCatalog, cli: CliRuntime, id: String): String? {
+    val switch = modelSwitchWindow(resolved, catalog, id, cli.runtime.contextWindowTokens)
+    switch.window?.let { window -> cli.runtime.switchModel(id, window) }
+    return switch.error
+}
+
+/** The end of every session: record its outcome, tell the hub, consolidate and close memory, close the runtime's resources. */
+private suspend fun endSession(cli: CliRuntime, say: (String) -> Unit) {
+    val session = cli.session
+    // Goes through SophiRuntime.recordSessionEnd, not learningPlugin directly, so memory's
+    // outcome-driven forgetting gets the same signal without this host wiring it itself.
+    runCatching { cli.runtime.recordSessionEnd(session.id) }
+    runCatching {
+        cli.hubClient?.publish(HubEvent.SessionClosed(session.id)) // no-op if never connected
+        cli.hubClient?.close()
+    }
+    runCatching {
+        cli.runtime.memoryPlugin?.let { mp ->
+            mp.consolidateIfDue()?.let { report ->
+                if (report.total > 0) say(
+                    "memory: consolidated (merged=${report.merged} strengthened=${report.strengthened} " +
+                    "compressed=${report.compressed} pruned=${report.pruned} purged=${report.purged} " +
+                    "classified=${report.classified})")
+            }
+            mp.close()
+        }
+    }
+}
+
+/**
+ * `--mode rpc`: [stdin] lines are commands, [stdout] gets only protocol lines. [build] makes the runtime
+ * around the RPC confirmations (its manual policy), reports setup warnings to its second argument and
+ * gets an input source that never reads stdin (a read would swallow a client command; a tripped loop guard just stops the turn).
+ */
+internal suspend fun runRpc(
+    build: suspend (ConfirmationPolicy, (String) -> Unit, InputSource) -> CliRuntime,
+    switchModel: suspend (CliRuntime, String) -> String?,
+    stdin: java.io.InputStream,
+    stdout: java.io.PrintStream,
+) = coroutineScope {
+    lateinit var server: dev.sophi.sdk.rpc.RpcServer
+    val confirmations = dev.sophi.sdk.rpc.RpcConfirmations { server.emit(it) }
+    val memoryWarning = java.util.concurrent.atomic.AtomicReference<String?>() // onWarning can fire from another thread
+    // A runtime that cannot start is the only non-zero exit, announced by one `error` line.
+    val cli = try {
+        build(confirmations, { msg ->
+            System.err.println(msg)
+            if (msg.startsWith("memory:")) memoryWarning.set(msg)
+        }, NoOpInputSource)
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        stdout.println(dev.sophi.sdk.rpc.encodeRpcEvent(dev.sophi.sdk.rpc.RpcEvent.Error(e.message ?: "Sophi could not start; see stderr")))
+        stdout.flush()
+        throw e as? com.github.ajalt.clikt.core.ProgramResult ?: com.github.ajalt.clikt.core.ProgramResult(1)
+    }
+    val memoryOn = cli.runtime.memoryPlugin != null
+    server = dev.sophi.sdk.rpc.RpcServer(
+        cli.runtime, cli.session, confirmations,
+        dev.sophi.sdk.rpc.MemoryStatus(memoryOn, memoryWarning.get().takeUnless { memoryOn }),
+        { switchModel(cli, it) }, { stdout.println(it); stdout.flush() }, cli.planLog,
+    )
+    val lines = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    kotlin.concurrent.thread(isDaemon = true, name = "sophi-rpc-stdin") {
+        stdin.bufferedReader().useLines { it.forEach(lines::trySend) }
+        lines.close()
+    }
+    try {
+        server.run(lines)
+    } finally {
+        endSession(cli) { System.err.println(it) }
+        cli.runtime.close()
     }
 }

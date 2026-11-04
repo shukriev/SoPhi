@@ -74,9 +74,9 @@ val CLI_SETTINGS: List<Setting> = listOf(
 
 /**
  * Per-run (`session`), secret (API keys stay in env vars or flags, never in a plain file), or too
- * dangerous to switch on for every later run by one key press (`god-mode`).
+ * dangerous to switch on for every later run by one key press (`god-mode`), or how this one run talks to its caller (`mode`).
  */
-val EXCLUDED_FROM_SETTINGS = setOf("session", "api-key", "brave-api-key", "god-mode")
+val EXCLUDED_FROM_SETTINGS = setOf("session", "api-key", "brave-api-key", "god-mode", "mode")
 
 /** `~/.sophi/settings.json`: a flat object from setting key to string value. Keys it doesn't know are kept. */
 class CliSettingsStore(val file: Path = DEFAULT_SETTINGS_FILE, private val onWarning: (String) -> Unit) {

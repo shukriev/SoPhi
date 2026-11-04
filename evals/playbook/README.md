@@ -26,7 +26,7 @@ only the harness fixes that measurably help. Spec:
    scorecards) is gitignored and stays on this machine.
 3. **Score:** ask Claude Code:
    > Score playbook run: case `<id>`, run `<n>`, RUN=`<path>`. Read `evals/playbook/rubric.md`,
-   > the case in `cases.sh` and `catalogue.md`, then `$RUN/transcript.txt` and
+   > the case in `cases.sh` and `catalogue.md`, then `$RUN/events.jsonl`, `$RUN/stderr.txt` and
    > `$RUN/home/.sophi/sessions/*.jsonl`. Write `evals/playbook/runs/<date>-<id>-<n>.md`.
 4. **`unclear` → Claude-backed re-run:**
    `SOPHI_FLAGS="--provider claude --model claude-sonnet-5 --memory --embedding-base-url ${LMSTUDIO_URL:-http://192.168.0.108:1234/v1} --embedding-model text-embedding-nomic-embed-text-v1.5 --embedding-dimensions 768 --god-mode --no-remote" AB_LABEL=claude evals/playbook/run.sh <case>`

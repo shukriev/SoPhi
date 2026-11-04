@@ -5,7 +5,6 @@ import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.plan.PlanLog
-import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionManager
@@ -24,12 +23,14 @@ import dev.sophi.memory.MemoryPlugin
 import dev.sophi.memory.MemoryView
 import dev.sophi.memory.ProfileAction
 import dev.sophi.memory.jane.JanesPalace
+import dev.sophi.sdk.SophiRuntime
 import dev.sophi.skills.SkillRegistry
 import java.nio.file.Path
 
 class SlashHandler(
     private val sessionManager: SessionManager,
-    private val compactor: ContextCompactor?,
+    /** /branch, /checkout and /compact run on it; null = they report themselves unavailable. */
+    private val runtime: SophiRuntime?,
     config: AgentConfig,
     private val learning: LearningPlugin? = null,
     private val scheduleDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "schedule"),
@@ -112,7 +113,7 @@ class SlashHandler(
                 session
             }
             "branch" -> {
-                val entries = session.branch()
+                val entries = runtime?.branch(session) ?: session.branch()
                 if (entries.isEmpty()) output("(empty)")
                 else entries.forEachIndexed { i, e ->
                     output("${i + 1}. [${e.role}] ${e.id}  ${e.content.take(60)}")
@@ -121,12 +122,13 @@ class SlashHandler(
             }
             "checkout" -> {
                 if (arg != null && "--files" in arg.split(" ")) return handleCheckoutFiles(arg, session)
-                if (arg.isNullOrEmpty()) {
+                if (runtime == null) {
+                    output("Checkout is not available.")
+                } else if (arg.isNullOrEmpty()) {
                     output("Usage: /checkout <entry-id>")
                 } else {
                     try {
-                        session.checkout(arg)
-                        sessionManager.save(session) // the tip is saved, so a resume lands here
+                        runtime.checkout(session, arg)
                         output("Checked out entry $arg")
                     } catch (e: Exception) {
                         output("Error: ${e.message}")
@@ -146,12 +148,11 @@ class SlashHandler(
                 }
             }
             "compact" -> {
-                if (compactor == null) {
+                if (runtime?.provider == null) {
                     output("No compactor configured.")
                     session
                 } else {
-                    val compacted = compactor.compact(session, config)
-                    sessionManager.save(compacted)
+                    val compacted = runtime.compact(session)
                     output("Compacted to ${compacted.branch().size} entries.")
                     compacted
                 }
@@ -236,13 +237,11 @@ class SlashHandler(
         withRestorer(session) { restorer, current ->
             val id = arg.split(" ").firstOrNull { it.isNotEmpty() && !it.startsWith("--") }
             if (id == null) { output("Usage: /checkout <entry-id> [--files]"); return@withRestorer }
+            if (runtime == null) { output("Checkout is not available."); return@withRestorer }
             try {
-                val branch = current.branch()
-                val at = branch.indexOfFirst { it.id == id }
                 // The plan has to come first: after the checkout the later rounds are off the branch.
-                val plan = branch.getOrNull(at + 1)?.takeIf { at >= 0 }?.let { restorer.plan(current, it.id) }
-                current.checkout(id)
-                sessionManager.save(current)
+                val plan = runtime.checkoutPlan(current, id)
+                runtime.checkout(current, id)
                 output("Checked out entry $id")
                 if (plan != null) confirmAndApply(restorer, current, plan)
             } catch (e: Exception) {

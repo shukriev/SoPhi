@@ -4,7 +4,6 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.agent.AgentConfig
-import dev.sophi.core.context.ContextCompactor
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.ToggleableConfirmationPolicy
 import dev.sophi.core.session.AgentSession
@@ -17,7 +16,10 @@ import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
 import dev.sophi.schedule.store.TaskStore
+import dev.sophi.sdk.Sophi
+import dev.sophi.sdk.SophiRuntime
 import dev.sophi.skills.SkillRegistry
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
@@ -38,6 +40,15 @@ class SlashCommandsTest : FunSpec({
     beforeTest {
         clearMocks(sessionManager)
         output.clear()
+    }
+
+    /** A real runtime over a temp sessions dir: /branch, /checkout and /compact run on it. */
+    fun runtimeWith(llm: LLMProvider = mockk()): SophiRuntime = Sophi.runtime {
+        provider = llm
+        model = "test-model"
+        contextWindowTokens(100_000)
+        sessionsDir = tempdir().toPath()
+        confirmationPolicy(ConfirmationPolicy.ALLOW_ALL)
     }
 
     fun makeSession(pairs: Int = 0): AgentSession {
@@ -86,7 +97,8 @@ class SlashCommandsTest : FunSpec({
     }
 
     test("/branch shows numbered entries with role and content preview") {
-        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val rt = runtimeWith()
+        val handler = SlashHandler(rt.sessionManager, rt, config) { output.add(it) }
         val session = makeSession(pairs = 1)
         handler.handle("/branch", session)
         output shouldHaveSize 2
@@ -101,7 +113,8 @@ class SlashCommandsTest : FunSpec({
     }
 
     test("/checkout switches session tip to the given entry id") {
-        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val rt = runtimeWith()
+        val handler = SlashHandler(rt.sessionManager, rt, config) { output.add(it) }
         val session = makeSession(pairs = 2)
         val targetId = session.branch().first().id
         handler.handle("/checkout $targetId", session)
@@ -111,26 +124,31 @@ class SlashCommandsTest : FunSpec({
     }
 
     test("/checkout saves the session so a resume lands on the checked-out entry") {
-        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val rt = runtimeWith()
+        val handler = SlashHandler(rt.sessionManager, rt, config) { output.add(it) }
         val session = makeSession(pairs = 2)
         handler.handle("/checkout ${session.branch().first().id}", session)
-        verify(exactly = 1) { sessionManager.save(session) }
+        rt.sessionManager.load(session.id).tip?.id shouldBe session.branch().first().id
     }
 
     test("/checkout with a bad id saves nothing") {
-        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
-        handler.handle("/checkout nope", makeSession(pairs = 1))
-        verify(exactly = 0) { sessionManager.save(any()) }
+        val rt = runtimeWith()
+        val handler = SlashHandler(rt.sessionManager, rt, config) { output.add(it) }
+        val session = makeSession(pairs = 1)
+        handler.handle("/checkout nope", session)
+        shouldThrow<Exception> { rt.sessionManager.load(session.id) }
     }
 
     test("/checkout with no argument shows usage message") {
-        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val rt = runtimeWith()
+        val handler = SlashHandler(rt.sessionManager, rt, config) { output.add(it) }
         handler.handle("/checkout", AgentSession(id = "s1"))
         output shouldBe listOf("Usage: /checkout <entry-id>")
     }
 
     test("/checkout with invalid id outputs error without throwing") {
-        val handler = SlashHandler(sessionManager, null, config) { output.add(it) }
+        val rt = runtimeWith()
+        val handler = SlashHandler(rt.sessionManager, rt, config) { output.add(it) }
         handler.handle("/checkout nonexistent-id", AgentSession(id = "s1"))
         output shouldHaveSize 1
         output[0].startsWith("Error:") shouldBe true
@@ -139,11 +157,11 @@ class SlashCommandsTest : FunSpec({
     test("/compact compacts session, saves it, and reports entry count") {
         val provider = mockk<LLMProvider>()
         coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(0, 0))
-        val compactor = ContextCompactor(provider)
-        val handler = SlashHandler(sessionManager, compactor, config) { output.add(it) }
+        val rt = runtimeWith(provider)
+        val handler = SlashHandler(rt.sessionManager, rt, config) { output.add(it) }
         val session = makeSession(pairs = 4)  // 8 entries — more than keepRecentCount=4
-        handler.handle("/compact", session)
-        verify { sessionManager.save(any()) }
+        val compacted = handler.handle("/compact", session)
+        rt.sessionManager.load(compacted.id).branch().size shouldBe compacted.branch().size
         output shouldHaveSize 1
         output[0].startsWith("Compacted to") shouldBe true
     }

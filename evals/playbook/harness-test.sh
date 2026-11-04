@@ -11,7 +11,8 @@ expect() {  # expect <label> <case> <FAKE_DO> <expected "result=â€¦ delegated=â€
   if [ "$got" = "$4" ]; then echo "ok   $1"; else echo "FAIL $1: got '$got', want '$4'"; fails=$((fails+1)); fi
 }
 expect "plain pass"                 tool-1 "answer"                                    "result=pass delegated=no"
-expect "stray prompt voids"         tool-1 "answer ask:bash"                           "result=void delegated=no"
+expect "stray confirmation is denied, not void" tool-1 "answer ask:bash"              "result=pass delegated=no"
+expect "Sophi not starting voids"     tool-1 "nostart"                                   "result=void delegated=no"
 expect "answer leak voids"          tool-1 "answer leak"                               "result=void delegated=no"
 expect "backend error voids"        tool-1 "answer llmerror"                           "result=void delegated=no"
 expect "memory switched off voids"  tool-1 "answer memoff"                            "result=void delegated=no"
@@ -21,11 +22,12 @@ expect "outcome case: solo solve passes" plan-4 "solve:plan_4"                  
 expect "delegate-1: delegated + solved passes" delegate-1 "ask:invoke_claude_code call solve:delegate_1" "result=pass delegated=yes"
 expect "delegate-1: solved alone fails"  delegate-1 "solve:delegate_1"                             "result=fail delegated=no"
 expect "delegate-1: denied delegation fails" delegate-1 "ask:invoke_claude_code call denied solve:delegate_1" "result=fail delegated=no"
-expect "extra prompt voids"         plan-4 "ask:invoke_claude_code call ask:bash solve:plan_4" "result=void delegated=yes"
+expect "extra confirmation is denied, not void" plan-4 "ask:invoke_claude_code call ask:bash solve:plan_4" "result=pass delegated=yes"
+expect "goal turn is sent as a goal command" plan-4 "goalsolve:plan_4"                  "result=pass delegated=no"
 expect "delegating elsewhere voids" plan-4 "ask:invoke_claude_code call-elsewhere solve:plan_4" "result=void delegated=yes"
-for c in plan-4 coding-4 delegate-1; do  # delegate turns must answer the always-HIGH_RISK invoke_claude_code prompt
+for c in plan-4 coding-4 delegate-1; do  # delegate turns need no scripted 'y': the client answers confirmations
   t="$(cd "$(mktemp -d)" && source "$PB/cases.sh" && "turns_${c//-/_}")"
-  if [ "$(tail -1 <<< "$t")" = y ] && grep -q "Work only inside /" <<< "$t"; then echo "ok   $c scripts y + work-dir scope"; else echo "FAIL $c turns: $t"; fails=$((fails+1)); fi
+  if [ "$(tail -1 <<< "$t")" != y ] && grep -q "Work only inside /" <<< "$t"; then echo "ok   $c has no scripted y + work-dir scope"; else echo "FAIL $c turns: $t"; fails=$((fails+1)); fi
 done
 # .cal-before holds the user's real events: it must live outside the work dir Sophi can read.
 d="$(mktemp -d)"; mkdir "$d/work"
@@ -57,11 +59,15 @@ else echo "FAIL browser-1 server: pid '$pid' (run $out)"; fails=$((fails+1)); fi
 start=$(date +%s); got="$(PLAYBOOK_RUN_TIMEOUT=2 FAKE_DO="sleep:30 answer" "$PB/run.sh" tool-1 1 2>&1)"; el=$(( $(date +%s) - start ))
 if grep -q "result=fail" <<< "$got" && grep -q "^TIMEOUT" <<< "$got" && [ $el -lt 15 ]; then echo "ok   a run past the cap is killed and fails (${el}s)"
 else echo "FAIL run cap: ${el}s, $(grep -E '^(case|TIMEOUT)' <<< "$got" | tr '\n' ' ')"; fails=$((fails+1)); fi
+# a command answered with an error event (no turn) must not wait for a turn_ended until the cap
+start=$(date +%s); got="$(PLAYBOOK_RUN_TIMEOUT=20 FAKE_DO="error" "$PB/run.sh" tool-1 1 2>&1)"; el=$(( $(date +%s) - start ))
+if grep -q "result=fail delegated=no" <<< "$got" && ! grep -q "^TIMEOUT" <<< "$got" && [ $el -lt 15 ]; then echo "ok   an error event ends the wait (${el}s)"
+else echo "FAIL error event: ${el}s, $(grep -E '^(case|TIMEOUT)' <<< "$got" | tr '\n' ' ')"; fails=$((fails+1)); fi
 # run dirs: stable location (not the purged $TMPDIR), no doubled slash
 out="$(PLAYBOOK_RUNS="$PB_RUNS_ROOT/" FAKE_DO=answer "$PB/run.sh" tool-1 1 2>&1 | sed -n 's/^RUN=\([^ ]*\).*/\1/p')"
 case "$out" in "$PB_RUNS_ROOT"/sophi-pb-tool-1-1.*) [[ "$out" != *//* ]] && echo "ok   run dir under PLAYBOOK_RUNS, no //" || { echo "FAIL doubled slash: $out"; fails=$((fails+1)); } ;;
   *) echo "FAIL run dir: $out"; fails=$((fails+1)) ;; esac
 SOPHI_JAR=/nonexistent "$PB/run.sh" tool-1 1 >/dev/null 2>&1; rc=$?
 if [ $rc -eq 2 ]; then echo "ok   missing jar exits 2"; else echo "FAIL missing jar: exit $rc, want 2"; fails=$((fails+1)); fi
-[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 16 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
+[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 19 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
 rm -rf "$RESULTS" "$PB_RUNS_ROOT"; echo "$fails failure(s)"; exit $fails

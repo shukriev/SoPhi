@@ -4,7 +4,7 @@ Claude fills one scorecard per run at `runs/YYYY-MM-DD-<case>-<n>.md`.
 
 ## Rules
 
-1. **No evidence, no fault tag.** Quote the exact JSONL line (or transcript line) that shows the
+1. **No evidence, no fault tag.** Quote the exact JSONL line (or `events.jsonl` line) that shows the
    failure.
 2. **Exactly one fault tag and one prescription** per non-passing run.
 3. **Delegation.** `delegate-1` asks for delegation explicitly: it passes only if `invoke_claude_code`
@@ -12,10 +12,11 @@ Claude fills one scorecard per run at `runs/YYYY-MM-DD-<case>-<n>.md`.
    a correct end state passes however it was reached (solo is fine), and delegation is recorded in
    `results.tsv`. A plan-4/coding-4 *fail* where Sophi never tried to delegate gets
    `fault: missed-delegation`.
-4. **`result=void` runs are not scored.** `run.sh` voids a run when a `[y/N]` prompt swallowed a
-   scripted turn, the session touched `evals/playbook`, the model backend errored, or
-   `invoke_claude_code` was pointed outside the run dir (check that project for changes!). Fix the
-   cause and re-run; void rows are excluded from A/B counts.
+4. **`result=void` runs are not scored.** `run.sh` voids a run when Sophi did not start (no `ready` event),
+   a `turn_ended` had `stopReason` Error (model backend), memory was requested but is off, the session
+   touched `evals/playbook`, or `invoke_claude_code` was pointed outside the run dir (check that project for changes!). Fix the
+   cause and re-run; void rows are excluded from A/B counts. A `/goal` whose run failed ends with
+   `stopReason` Error, so it is voided like a backend error.
 5. **`unclear`** is the only tag that triggers a Claude-backed re-run (command in `README.md`).
    Claude passes → retag `model-capacity`. Claude fails → retag with the harness fault it shows.
 
