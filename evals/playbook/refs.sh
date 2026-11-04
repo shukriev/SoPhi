@@ -186,3 +186,7 @@ ref_browser_1() { echo SO-2044 > answer.txt; }
 
 ref_delegate_1() { perl -0pi -e 's/def main\(argv\):\n/def main(argv):\n    if "--version" in argv:\n        print("ledger 1.0")\n        return\n/' ledger/cli.py; }
 ref_assistant_6() { printf 'data platform lead\nTomas Berg owns the payments API\nfeature flags use the ff_ prefix\noffice: Riverside building\n' > answer.txt; }
+
+ref_patch_1() { grep -rl parse_amount --include='*.py' . | xargs perl -pi -e 's/\bparse_amount\b/parse_money/g'; }
+ref_jobs_1() { cp site/token.txt answer.txt; }
+ref_todo_1() { mkdir -p notes && echo one > notes/a.txt && echo two > notes/b.txt && echo three > notes/c.txt && ls notes | wc -l > answer.txt; }
