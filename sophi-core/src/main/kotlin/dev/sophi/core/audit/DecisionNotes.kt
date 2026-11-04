@@ -18,6 +18,9 @@ class DecisionNotes : AbstractCoroutineContextElement(Key) {
     }
 }
 
+/** The notes a person's answer writes (terminal, rpc client); any other note is a policy deciding on its own. */
+val PERSON_DECISIONS = setOf("user", "rpc")
+
 /** No-op without [DecisionNotes] in context. */
 suspend fun noteDecision(callId: String, rule: String) {
     currentCoroutineContext()[DecisionNotes]?.note(callId, rule)
