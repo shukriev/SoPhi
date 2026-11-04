@@ -192,34 +192,33 @@ class RpcServer(
         e.toRpcEvent(runtime::maskSecrets)?.let { emit(it) }
     }
 
-    private suspend fun turnOnce(input: String): RpcEvent.TurnEnded {
+    private suspend fun turnOnce(input: String) = announced(input, goal = false) { relay ->
+        session = runtime.streamTurn(session, input, inbox, onEvent = relay)
+        val last = session.branch().lastOrNull { it.role == EntryRole.ASSISTANT }
+        RpcEvent.TurnEnded(last?.content.orEmpty(), last?.metadata?.get("stopReason") ?: "Completed")
+    }
+
+    private suspend fun goal(task: String, check: String?) = announced(task, goal = true) { relay ->
+        val r = runtime.runGoal(session, task, check, planLog, onEvent = relay)
+        r.changePlan?.let { emit(RpcEvent.PlanReady(it.id, it.steps.size)) }
+        val stop = if (r.status == GoalStatus.Failed) "Error" else "Completed"
+        RpcEvent.TurnEnded(r.reply.ifEmpty { r.error?.message.orEmpty() }, stop, r.status.name)
+    }
+
+    /** Emits `turn_started`, runs [body], and turns a cancellation or failure into the matching `turn_ended`. */
+    private suspend fun announced(
+        input: String, goal: Boolean, body: suspend (suspend (TurnEvent) -> Unit) -> RpcEvent.TurnEnded,
+    ): RpcEvent.TurnEnded {
         val partial = StringBuilder()
         return try {
             emit(RpcEvent.TurnStarted(input)) // inside the try: a cancelled job still ends the turn it announced
-            session = runtime.streamTurn(session, input, inbox, onEvent = relay(partial))
-            val last = session.branch().lastOrNull { it.role == EntryRole.ASSISTANT }
-            RpcEvent.TurnEnded(last?.content.orEmpty(), last?.metadata?.get("stopReason") ?: "Completed")
+            body(relay(partial))
         } catch (e: CancellationException) {
-            withContext(NonCancellable) { emit(RpcEvent.TurnEnded(partial.toString(), "UserStopped")) }
+            val ended = RpcEvent.TurnEnded(partial.toString(), "UserStopped", GoalStatus.Interrupted.name.takeIf { goal })
+            withContext(NonCancellable) { emit(ended) }
             throw e
         } catch (e: Exception) {
-            RpcEvent.TurnEnded(e.message ?: e.toString(), "Error")
-        }
-    }
-
-    private suspend fun goal(task: String, check: String?): RpcEvent.TurnEnded {
-        val partial = StringBuilder()
-        return try {
-            emit(RpcEvent.TurnStarted(task)) // inside the try: a cancelled job still ends the turn it announced
-            val r = runtime.runGoal(session, task, check, planLog, onEvent = relay(partial))
-            r.changePlan?.let { emit(RpcEvent.PlanReady(it.id, it.steps.size)) }
-            val stop = if (r.status == GoalStatus.Failed) "Error" else "Completed"
-            RpcEvent.TurnEnded(r.reply.ifEmpty { r.error?.message.orEmpty() }, stop, r.status.name)
-        } catch (e: CancellationException) {
-            withContext(NonCancellable) { emit(RpcEvent.TurnEnded(partial.toString(), "UserStopped", GoalStatus.Interrupted.name)) }
-            throw e
-        } catch (e: Exception) {
-            RpcEvent.TurnEnded(e.message ?: e.toString(), "Error", GoalStatus.Failed.name)
+            RpcEvent.TurnEnded(e.message ?: e.toString(), "Error", GoalStatus.Failed.name.takeIf { goal })
         }
     }
 }
