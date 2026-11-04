@@ -15,6 +15,7 @@ import dev.sophi.cli.selfmod.runBuild
 import dev.sophi.cli.selfmod.runEvalGate
 import dev.sophi.cli.selfmod.scanDiff
 import dev.sophi.core.tools.RunClaudeCodeTool
+import dev.sophi.core.tools.isToolError
 import dev.sophi.schedule.store.ProposalStore
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
@@ -76,7 +77,7 @@ class ProposalImplement(
             }
             val codingArgs = """{"project_path":"${worktree.path}","task":${jsonQuote(proposal.title + " -- " + proposal.rationale + " -- " + proposal.suggestedAction)}}"""
             val codingResult = runBlocking { claudeCodeTool.execute(codingArgs) }
-            if (codingResult.startsWith("Error:")) return fail(proposal.id, worktree.path, branch, "coding step failed: $codingResult")
+            if (isToolError(codingResult)) return fail(proposal.id, worktree.path, branch, "coding step failed: $codingResult")
 
             if (budgetExceeded()) return fail(proposal.id, worktree.path, branch, "timeout")
             when (val scan = scanDiff(worktree.path, branchPointSha, maxChangedLines, gitCommand)) {
