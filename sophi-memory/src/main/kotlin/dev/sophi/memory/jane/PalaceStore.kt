@@ -58,6 +58,11 @@ class PalaceStore(
         db.upsertVertex("Memory", id, mapOf("embeddingModel" to model))
         putVec(id, vector)
     }
+    /** The memory and its vector in one transaction, so recall never meets a memory it can't find (index built first: it can't share a data transaction). */
+    fun putMemory(m: Memory, model: String, vector: FloatArray) {
+        ensureVecIndex(vector.size)
+        db.transaction { db.upsertVertex("Memory", m.id, m.toProperties() + ("embeddingModel" to model)); replaceVec(m.id, vector) }
+    }
     fun embeddings(): Map<String, FloatArray> =
         db.queryVertices(VEC).mapNotNull { v -> vectorOf(v["embedding"])?.let { v.memoryId() to it } }.toMap()
     fun embeddingModel(): String? = db.queryVertices("Memory").mapNotNull { it["embeddingModel"] as? String }.lastOrNull()
@@ -82,9 +87,11 @@ class PalaceStore(
     /** One MemoryVec per memory, inserted with its vector: an insert is indexed on the embedded and the remote
      *  store alike (an UPDATE isn't). Delete+insert in one transaction, so a replay after failover is harmless. */
     private fun putVec(id: String, vector: FloatArray) {
-        if (!vecIndexReady) { db.ensureVectorIndex(VEC, "embedding", vector.size); vecIndexReady = true }
-        db.transaction { db.deleteVertex(VEC, id); db.insertVertex(VEC, id, mapOf("embedding" to vector)) }
+        ensureVecIndex(vector.size)
+        db.transaction { replaceVec(id, vector) }
     }
+    private fun ensureVecIndex(size: Int) { if (!vecIndexReady) { db.ensureVectorIndex(VEC, "embedding", size); vecIndexReady = true } }
+    private fun replaceVec(id: String, vector: FloatArray) { db.deleteVertex(VEC, id); db.insertVertex(VEC, id, mapOf("embedding" to vector)) }
 
     /**
      * Palaces written before M6 kept each vector on its Memory vertex: move it into a MemoryVec, once.
