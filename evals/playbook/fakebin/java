@@ -3,13 +3,14 @@
 # Per prompt/goal line the FIRST turn performs the $FAKE_DO actions in order (later turns just end).
 home="${1#-Duser.home=}"; s="$home/.sophi/sessions/fake.jsonl"; mkdir -p "${s%/*}"
 ev() { jq -nc "$@"; }
+case " $FAKE_DO " in *" nostart "*) echo "usage error: no model server" >&2; exit 2 ;; esac
 mem=true; reason=null; case " $FAKE_DO " in *" memoff "*) mem=false; reason='"embeddings endpoint unreachable"' ;; esac
 ev --argjson m "$mem" --argjson r "$reason" '{type:"ready",sessionId:"fake",model:"m",provider:"p",memory:({enabled:$m}+(if $r then {reason:$r} else {} end))}'
 first=1
 while IFS= read -r line; do
   kind="$(jq -r '.type' <<< "$line")"
   [ "$kind" = prompt ] || [ "$kind" = goal ] || continue
-  ev '{type:"turn_started"}'
+  ev --arg i "$(jq -r '.text' <<< "$line")" '{type:"turn_started",input:$i}'
   stop=Completed
   if [ $first = 1 ]; then
     first=0

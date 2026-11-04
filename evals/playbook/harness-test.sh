@@ -12,6 +12,7 @@ expect() {  # expect <label> <case> <FAKE_DO> <expected "result=â€¦ delegated=â€
 }
 expect "plain pass"                 tool-1 "answer"                                    "result=pass delegated=no"
 expect "stray confirmation is denied, not void" tool-1 "answer ask:bash"              "result=pass delegated=no"
+expect "Sophi not starting voids"     tool-1 "nostart"                                   "result=void delegated=no"
 expect "answer leak voids"          tool-1 "answer leak"                               "result=void delegated=no"
 expect "backend error voids"        tool-1 "answer llmerror"                           "result=void delegated=no"
 expect "memory switched off voids"  tool-1 "answer memoff"                            "result=void delegated=no"
@@ -64,5 +65,5 @@ case "$out" in "$PB_RUNS_ROOT"/sophi-pb-tool-1-1.*) [[ "$out" != *//* ]] && echo
   *) echo "FAIL run dir: $out"; fails=$((fails+1)) ;; esac
 SOPHI_JAR=/nonexistent "$PB/run.sh" tool-1 1 >/dev/null 2>&1; rc=$?
 if [ $rc -eq 2 ]; then echo "ok   missing jar exits 2"; else echo "FAIL missing jar: exit $rc, want 2"; fails=$((fails+1)); fi
-[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 17 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
+[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 18 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
 rm -rf "$RESULTS" "$PB_RUNS_ROOT"; echo "$fails failure(s)"; exit $fails

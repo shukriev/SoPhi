@@ -4,7 +4,7 @@
 # setup_ returning 77 means "prerequisite missing on this machine" — skip, not fail.
 
 CASES=()
-# Cases whose turns script a 'y' for invoke_claude_code's always-HIGH_RISK prompt (the prompt is allowed).
+# Cases where the RPC client approves invoke_claude_code's always-HIGH_RISK confirmation (every other confirmation is denied).
 DELEGATE_CASES=(plan-4 coding-4 delegate-1)
 # Cases that only pass if Sophi actually delegated. plan-4/coding-4 are outcome cases: a correct solo
 # solve passes (bonsai-27b does them alone), and failing without trying to delegate is scored as
@@ -69,8 +69,8 @@ check_plan_3() {
   [ $ok -eq 0 ] && answer_is 964.55
 }
 
-# delegate: sized to exceed the local model; pass also requires invoke_claude_code (run.sh). The trailing
-# 'y' answers invoke_claude_code's always-HIGH_RISK confirmation prompt. Enlarged 2026-09-29 with a
+# delegate: sized to exceed the local model; pass also requires invoke_claude_code (run.sh).
+# The client approves invoke_claude_code's always-HIGH_RISK confirmation. Enlarged 2026-09-29 with a
 # budgets feature after bonsai-27b did the bare Decimal migration alone in 13 calls.
 setup_plan_4() { printf 'category,limit\nfood,15.00\nrent,800.00\ntransport,50.00\n' > data/budgets.csv; }
 turns_plan_4() { echo "/goal Two changes to the ledger package. (1) Migrate from integer cents to decimal.Decimal amounts: parse_amount must return a Decimal like Decimal('12.50'), format_amount must take a Decimal, and update the existing tests to the new types. (2) Add budgets: a new module ledger/budget.py with over_budget(entries, budgets), where budgets is a dict of category to Decimal limit, returning {category: overspend} for every category whose total exceeds its limit; and a CLI flag used as 'python3 -m ledger.cli <file> --budgets data/budgets.csv' (CSV columns category,limit) that, after the normal output, prints one line per over-budget category, sorted, like 'rent: over by 100.00'. The full test suite and the normal CLI output (python3 -m ledger.cli data/entries-2026.csv) must keep working. Work only inside $PWD."; }
@@ -238,7 +238,7 @@ check_browser_1() { answer_is SO-2044; }
 
 # --- delegation mechanics (2026-09-30) --------------------------------------------------------
 # Until now no run had ever delegated, so invoke_claude_code was untested end to end. This case asks
-# for it explicitly: tool call -> scripted 'y' -> `claude -p` in the run dir -> result back to Sophi.
+# for it explicitly: tool call -> client approves -> `claude -p` in the run dir -> result back to Sophi.
 CASES+=(delegate-1)
 
 setup_delegate_1() { command -v claude >/dev/null || { echo "needs the claude CLI" >&2; return 77; }; }

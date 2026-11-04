@@ -92,6 +92,7 @@ case " ${DELEGATION_REQUIRED[*]} " in *" $id "*) [ $delegated = no ] && result=f
 
 # A void run is not evidence about Sophi: it's excluded from pass counts (README A/B) and re-run.
 void=""
+jq -es 'any(.[]; .type == "ready")' "$RUN/events.jsonl" >/dev/null 2>&1 || void="Sophi did not start (see stderr.txt)"
 grep -qs 'evals/playbook' "$S"/*.jsonl && void="the session touched evals/playbook — it may have seen the answers"
 jq -es 'any(.[]; .type == "turn_ended" and .stopReason == "Error")' "$RUN/events.jsonl" >/dev/null 2>&1 && void="the model backend errored mid-run"
 case " ${FLAGS[*]} " in *" --memory "*) jq -es 'any(.[]; .type == "ready" and .memory.enabled == false)' "$RUN/events.jsonl" >/dev/null 2>&1 && \
