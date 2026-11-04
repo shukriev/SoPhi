@@ -286,4 +286,25 @@ class PalaceStoreTest : FunSpec({
         s.memories().getValue("mem_2").let { it.householdCandidate shouldBe true; it.sharedBy shouldBe listOf("Alex") }
         s.close()
     }
+
+    test("a memory is saved with its vector or not at all") {
+        val dir = tempdir().toPath()
+        val real = EmbeddedArcadeStore.open(dir)
+        var failVec = true
+        val db = object : ArcadeStore by real {
+            override fun insertVertex(type: String, id: String, properties: Map<String, Any?>) {
+                if (type == "MemoryVec" && failVec) error("disk full")
+                real.insertVertex(type, id, properties)
+            }
+        }
+        val s = PalaceStore(dir, db)
+        runCatching { s.putMemory(mem("mem_1"), "m", floatArrayOf(1f, 0f)) }.isFailure shouldBe true
+        s.memories().containsKey("mem_1") shouldBe false
+        failVec = false
+        s.putMemory(mem("mem_1"), "m", floatArrayOf(1f, 0f))
+        s.memories().getValue("mem_1").text shouldBe "text-mem_1"
+        s.vectorFor("mem_1")!!.toList() shouldBe listOf(1f, 0f)
+        s.embeddingModel() shouldBe "m"
+        s.close()
+    }
 })

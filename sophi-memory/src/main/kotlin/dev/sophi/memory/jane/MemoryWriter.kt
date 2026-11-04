@@ -97,8 +97,7 @@ class MemoryWriter(
             sourceSessionId = sessionId,
             isCommitment = true
         )
-        store.upsertMemory(memory)
-        store.putEmbedding(memory.id, embeddingModelName, vector)
+        store.putMemory(memory, embeddingModelName, vector)
         return memory
     }
 
@@ -127,8 +126,7 @@ class MemoryWriter(
             provenance = Provenance.USER_DIRECT, createdAt = nowMs, reinforcedAt = nowMs,
             sourceSessionId = source.sourceSessionId, sharedBy = listOf(by)
         )
-        store.upsertMemory(memory)
-        store.putEmbedding(memory.id, embeddingModelName, vector)
+        store.putMemory(memory, embeddingModelName, vector)
         return memory
     }
 
@@ -226,8 +224,7 @@ class MemoryWriter(
                 isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting),
                 householdCandidate = vm.household && !turn.ambient && provenance == Provenance.USER_DIRECT && sensitivity <= Sensitivity.PERSONAL
             )
-            store.upsertMemory(memory)
-            store.putEmbedding(memory.id, embeddingModelName, vector)
+            store.putMemory(memory, embeddingModelName, vector)
             stored += memory
             logCandidate(turn, "stored", alpha, text, room, durOf(vm, room, turn.ambient))
 

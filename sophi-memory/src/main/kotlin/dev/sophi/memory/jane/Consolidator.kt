@@ -222,10 +222,8 @@ class Consolidator(
                 // Every session the thread came from, so a host can still tell overheard or outside
                 // text inside the summary (e.g. "ambient,<chat id>").
                 sourceSessionId = members.map { it.sourceSessionId }.distinct().sorted().joinToString(","))
-            store.upsertMemory(summary)
-            store.vectorFor(members.first().id)?.let { v ->
-                store.putEmbedding(summary.id, store.embeddingModel() ?: "", v)
-            }
+            store.vectorFor(members.first().id)?.let { v -> store.putMemory(summary, store.embeddingModel() ?: "", v) }
+                ?: store.upsertMemory(summary)
             // Endpoints preserved: first -> summary -> last (spec §4.3); interior soft-deleted.
             store.upsertEdge(CausalEdge(members.first().id, summary.id, label, compressed = true))
             store.upsertEdge(CausalEdge(summary.id, members.last().id, label, compressed = true))
