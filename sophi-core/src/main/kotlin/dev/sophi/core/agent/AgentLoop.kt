@@ -643,9 +643,9 @@ class AgentLoop(
         }
 
         val undoMeta = mutableMapOf<String, String>()
-        // A delegate's nested loop runs DESTRUCTIVE tools of its own, whatever the delegate call itself rates.
+        // A delegate's nested loop (or a code_mode script) runs DESTRUCTIVE tools of its own, whatever the call itself rates.
         if (takeCheckpoint && checkpoints != null && classified.zip(allowedCalls).any { (c, a) ->
-                a.second && (c.second.riskLevel == RiskLevel.DESTRUCTIVE || registry.getOrNull(c.first.name).let { it is SubagentTool || it is DecomposeGoalTool })
+                a.second && (c.second.riskLevel == RiskLevel.DESTRUCTIVE || registry.getOrNull(c.first.name).let { it is SubagentTool || it is DecomposeGoalTool || it is dev.sophi.core.tools.CodeModeTool })
             }) {
             val start = System.currentTimeMillis()
             checkpoints.snapshot()?.let { undoMeta += mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }

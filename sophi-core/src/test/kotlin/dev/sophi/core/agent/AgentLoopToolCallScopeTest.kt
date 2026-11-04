@@ -10,6 +10,7 @@ import dev.sophi.core.permissions.PermissionRule
 import dev.sophi.core.permissions.PermissionRules
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.CodeModeTool
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
@@ -98,4 +99,16 @@ class AgentLoopToolCallScopeTest : FunSpec({
         r.started shouldBe listOf("driver", "risky")
     }
 
+    test("a code_mode script's call is denied and audited like the model's own") {
+        val (p, sm) = provider(ToolCall("c1", "code_mode", """{"code":"try { tools.risky({}) } catch (e) { return e.message }"}"""))
+        val risky = Risky()
+        val audit = mutableListOf<AuditEntry>()
+        val session = AgentLoop(p, ToolRegistry().register(CodeModeTool()).register(risky), sm,
+            confirmationPolicy = ConfirmationPolicy.DENY_ALL, contextWindowTokens = 100_000, audit = { audit += it })
+            .turn(AgentSession(id = "s"), "go", config)
+        risky.executed shouldBe 0
+        audit.single { it.tool == "risky" }.outcome shouldBe "denied"
+        audit.single { it.tool == "code_mode" }.result shouldStartWith "Error: Tool 'risky' execution denied"
+        session.entries.any { it.metadata["toolName"] == "risky" } shouldBe false
+    }
 })

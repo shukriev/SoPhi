@@ -128,6 +128,30 @@ class AgentLoopCheckpointTest : FunSpec({
         rounds(session).single().metadata shouldContainKey "checkpoint"
     }
 
+    test("a code_mode round takes one checkpoint, records its script's bash commands, and undo restores its changes") {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("b.txt").writeText("beta")
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home"))
+        val script = "tools.write_file({path: 'new.txt', content: 'fresh'}); tools.bash({command: 'rm b.txt; cat /etc/hosts > out.txt'}); return 'ok'"
+        val (provider, sm) = scripted(
+            use("c1", "code_mode", """{"code":${kotlinx.serialization.json.JsonPrimitive(script)}}"""),
+            LLMResponse.Text("ok", TokenUsage(1, 1)),
+        )
+        val loop = AgentLoop(provider, registry(root, createTempDirectory("trash"), dev.sophi.core.tools.CodeModeTool()), sm,
+            contextWindowTokens = 100_000, checkpoints = store)
+
+        val session = loop.turn(AgentSession(id = "s"), "go", config)
+        root.resolve("b.txt").exists() shouldBe false
+
+        val round = rounds(session).single()
+        round.metadata shouldContainKey "checkpoint"
+        round.metadata["outsideCommands"]!! shouldContain "cat /etc/hosts > out.txt"
+        val restorer = FileRestorer(store)
+        restorer.apply(session, restorer.plan(session)!!)
+        root.resolve("b.txt").exists() shouldBe true
+        root.resolve("new.txt").exists() shouldBe false
+    }
+
     test("a bash command reaching outside the root is recorded") {
         val root = createTempDirectory("ckpt-root")
         val store = CheckpointStore(root, createTempDirectory("ckpt-home"))
