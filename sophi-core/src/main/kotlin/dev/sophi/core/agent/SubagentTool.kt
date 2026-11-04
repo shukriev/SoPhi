@@ -125,7 +125,9 @@ class SubagentTool(
         )
         val config = AgentConfig(
             model = definition.model ?: parentConfig.model,
-            systemPrompt = definition.systemPrompt
+            systemPrompt = if (worktree == null) definition.systemPrompt else definition.systemPrompt +
+                "\n\nYou work in ${worktree.root}, a separate git worktree of this project on branch ${worktree.branch}. " +
+                "Keep every file and shell path inside it; your changes are committed to that branch when you finish."
         )
 
         if (worktree == null) return try {
@@ -140,10 +142,10 @@ class SubagentTool(
             answer = withContext(RoundChanges()) { nestedLoop.turn(subSession, args.prompt, config) }.tip?.content
                 ?: "Error: subagent produced no output"
         } finally {
-            sessionManager.save(subSession)
-            // finish is blocking git; it runs whether the turn returned, threw or was cancelled
+            // finish is blocking git that never throws; it runs whether the turn returned, threw or was cancelled
             val line = worktree.finish("subagent ${definition.name}: ${args.prompt}")
             if (answer != null) answer = "$answer\n\n$line"
+            sessionManager.save(subSession)
         }
         return answer!!
     }

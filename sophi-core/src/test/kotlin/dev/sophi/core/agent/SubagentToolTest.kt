@@ -582,6 +582,36 @@ class SubagentToolTest : FunSpec({
             sh(r, "git", "branch", "--list", "sophi-subagent/*").trim() shouldBe ""
         }
 
+        test("the subagent is told it works in the worktree") {
+            val r = repo()
+            val requests = mutableListOf<CompletionRequest>()
+            val provider = mockk<LLMProvider>()
+            every { provider.stream(any()) } answers {
+                requests.add(firstArg())
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+            }
+            val result = runBlocking(SessionIdContext("p")) { tool(r, provider).execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""") }
+            result shouldContain "No file changes"
+            requests.first().systemPrompt!! shouldContain "git worktree"
+            requests.first().systemPrompt!! shouldContain "You write."
+        }
+
+        test("the worktree is finished even when saving the sub-session fails") {
+            val r = repo()
+            val sm = io.mockk.spyk(FileSessionManager(createTempDirectory("subagent-test")))
+            every { sm.save(any()) } throws java.io.IOException("disk full")
+            val t = SubagentTool(
+                definitions = listOf(writer), provider = writesThenAnswers(), fullRegistry = ToolRegistry().register(writerAt(r)),
+                sessionManager = sm, parentConfig = AgentConfig(model = "m"), contextWindowTokens = TEST_CONTEXT_WINDOW,
+                worktrees = SubagentWorktrees(r, createTempDirectory("wt-home")) { listOf(writerAt(it)) },
+            )
+            shouldThrow<java.io.IOException> {
+                runBlocking(SessionIdContext("p")) { t.execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""") }
+            }
+            val branch = sh(r, "git", "branch", "--list", "sophi-subagent/*").trim().removePrefix("+").trim()
+            sh(r, "git", "show", "$branch:out.txt") shouldBe "x"
+        }
+
         test("an open failure returns an error without running the subagent") {
             val provider = mockk<LLMProvider>()
             val result = runBlocking(SessionIdContext("p")) {
