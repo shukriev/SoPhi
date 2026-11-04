@@ -187,6 +187,11 @@ class SophiCli(
         help = "Let the model run a subagent in its own git worktree off HEAD; its changes come back as a branch to review " +
             "and merge, and your working tree is never touched (default off)."
     ).flag("--no-subagent-worktrees", default = false)
+    private val codeMode: Boolean by option(
+        "--code-mode",
+        help = "Offer code_mode: the model may run a sandboxed JavaScript snippet that chains tool calls in one step; " +
+            "every call it makes is checked, confirmed and audited like a direct one (default off)."
+    ).flag("--no-code-mode", default = false)
     private val sandboxMode: String by option(
         "--sandbox",
         help = "Where bash runs: off (default), seatbelt (macOS sandbox: writes only to the workspace, temp " +
@@ -243,6 +248,7 @@ class SophiCli(
             trustReadOnlyHints = trustReadOnlyHints,
             otherAgentSkills = otherAgentSkills,
             subagentWorktrees = subagentWorktrees,
+            codeMode = codeMode,
             braveApiKey = braveApiKeyOption,
             autoMode = autoMode,
             godMode = godMode,
