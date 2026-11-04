@@ -70,6 +70,9 @@ data class CliOptions(
     val trustReadOnlyHints: Boolean = true,
     /** Also read Claude Code's and `.agents` `<name>/SKILL.md` skills (read only). */
     val otherAgentSkills: Boolean = true,
+    /** Review destructive calls nobody approved with [guardianModel] (null = the session's model). */
+    val guardian: Boolean = false,
+    val guardianModel: String? = null,
 )
 
 /**
@@ -203,6 +206,7 @@ internal suspend fun buildCliRuntime(
         onMcpSignInNeeded { server -> onWarning("$server needs you to sign in again — run `sophi mcp login $server`") }
         if (mcpConfigPath.exists()) mcpConfig(mcpConfigPath)
         planFirst(opts.planFirst, opts.trustReadOnlyHints)
+        if (opts.guardian) guardian(opts.guardianModel, opts.llmTimeoutSeconds.seconds)
         // Memory (Jane's Theory, experimental): resolve --memory's dependent flags here, but
         // delegate building/probing the embedding provider and JanesPalace to the shared
         // RuntimeBuilder.memory(), which sophi-companion also calls.

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Guardian (opt-in, setting `guardian`, `--guardian`): before a destructive call runs without a person approving it, the session's model (or `guardian-model`) reviews it and may hand it to a person or refuse it; a failed review asks. Verdicts are in the audit entry's new `guardian` field. SDK: `RuntimeBuilder.guardian(model, timeout)`, `LlmGuardian`.
 - `RuntimeBuilder.basePrompt`: a host can replace the default base prompt (`DefaultPrompt.BASE`) when its runtime has fewer tools.
 - People and sharing groundwork: People list with owner and members; each member pairs their own Discord with a code and gets their own replies; facts that look like household facts are reported to the host; a household memory recalled by every runtime and filled by `JanesPalace.share`.
 - `sophi setup local` (optional): for a machine with no model server, it lists what it will download (llama.cpp `b11717` for macOS arm64 or Linux x64/arm64, and the reference model Qwen3-8B Q4_K_M, about 4.7 GB), asks first, then downloads into `~/.sophi/local-model` with progress, resumes an interrupted download on the next run, and checks every file's SHA-256 (a mismatch deletes it). It prints the `llama-server` command to start; plain `sophi` then finds it on :8080. If Ollama, LM Studio or llama.cpp already runs, it says so and stops (`--force` to install anyway). Windows: not supported yet. SDK: `LocalModelInstaller`, `llamaCppEngineFor()`, `REFERENCE_MODEL` in `sophi-ai`.
