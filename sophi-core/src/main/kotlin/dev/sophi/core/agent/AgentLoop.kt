@@ -735,7 +735,7 @@ class AgentLoop(
                 checkpoints.snapshot()?.let { undoMeta += mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }
             }
             val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
-            // Recorded whether or not this loop knows the root: a host's undoableRound may (a /goal step's loop doesn't).
+            // Recorded whether or not this loop knows the root: an enclosing undoableRound (e.g. /goal's) may too.
             allowedCalls.filter { (c, ok) -> ok && c.name == "bash" }.forEach { (c, _) ->
                 runCatching { entryJson.parseToJsonElement(c.argumentsJson).jsonObject["command"]?.jsonPrimitive?.content }.getOrNull()
                     ?.let(changes::recordCommand)

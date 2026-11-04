@@ -145,21 +145,19 @@ class RpcServer(
     /**
      * Starts [first] and then whatever was queued behind it; if a turn is running, calls [busy] instead and
      * returns false. Queueing, taking the next message and going idle all happen under [lock], so a message
-     * queued just as the turn ends still runs. An abort drops what was queued.
+     * queued just as the turn ends still runs. An abort drops what was queued. Each turn returns its
+     * `turn_ended` unsent; [endTurn] sends it only after deciding whether to go idle.
      */
-    private fun CoroutineScope.startIfIdle(busy: () -> Unit = {}, first: suspend () -> Unit): Boolean = synchronized(lock) {
+    private fun CoroutineScope.startIfIdle(busy: () -> Unit = {}, first: suspend () -> RpcEvent.TurnEnded): Boolean = synchronized(lock) {
         if (turn != null) { busy(); return false }
         // Atomic: an abort before the body runs still goes through it, so the turn ends and frees [turn].
         // The job only reads [turn] under [lock], which is held here until [turn] is set.
         val job = launch(start = CoroutineStart.ATOMIC) {
             try {
-                first()
+                var ended = first()
                 while (true) {
-                    val next = synchronized(lock) {
-                        (inbox.drainSteers().takeIf { it.isNotEmpty() }?.joinToString("\n") ?: inbox.takeFollowUp())
-                            .also { if (it == null) turn = null }
-                    } ?: break
-                    turnOnce(next)
+                    val next = withContext(NonCancellable) { endTurn(ended) } ?: break
+                    ended = turnOnce(next)
                 }
             } catch (e: CancellationException) {
                 synchronized(lock) { inbox.drainAll() }
@@ -173,6 +171,20 @@ class RpcServer(
         true
     }
 
+    /**
+     * Takes the next queued message, or goes idle when there is none, then writes [ended]. Both happen under
+     * [writes], so a client never sees `turn_ended` while the server still counts the turn as running, and a
+     * turn started meanwhile cannot announce itself before this one has ended.
+     */
+    private suspend fun endTurn(ended: RpcEvent.TurnEnded): String? = writes.withLock {
+        val next = synchronized(lock) {
+            (inbox.drainSteers().takeIf { it.isNotEmpty() }?.joinToString("\n") ?: inbox.takeFollowUp())
+                .also { if (it == null) turn = null }
+        }
+        out(encodeRpcEvent(ended))
+        next
+    }
+
     /** Maps turn events to the wire, keeping what the assistant has said so far for an aborted turn's reply. */
     private fun relay(partial: StringBuilder): suspend (TurnEvent) -> Unit = { e ->
         if (e is TurnEvent.FollowUpStarted) partial.clear()
@@ -180,34 +192,34 @@ class RpcServer(
         e.toRpcEvent(runtime::maskSecrets)?.let { emit(it) }
     }
 
-    private suspend fun turnOnce(input: String) {
+    private suspend fun turnOnce(input: String): RpcEvent.TurnEnded {
         val partial = StringBuilder()
-        try {
+        return try {
             emit(RpcEvent.TurnStarted(input)) // inside the try: a cancelled job still ends the turn it announced
             session = runtime.streamTurn(session, input, inbox, onEvent = relay(partial))
             val last = session.branch().lastOrNull { it.role == EntryRole.ASSISTANT }
-            emit(RpcEvent.TurnEnded(last?.content.orEmpty(), last?.metadata?.get("stopReason") ?: "Completed"))
+            RpcEvent.TurnEnded(last?.content.orEmpty(), last?.metadata?.get("stopReason") ?: "Completed")
         } catch (e: CancellationException) {
             withContext(NonCancellable) { emit(RpcEvent.TurnEnded(partial.toString(), "UserStopped")) }
             throw e
         } catch (e: Exception) {
-            emit(RpcEvent.TurnEnded(e.message ?: e.toString(), "Error"))
+            RpcEvent.TurnEnded(e.message ?: e.toString(), "Error")
         }
     }
 
-    private suspend fun goal(task: String, check: String?) {
+    private suspend fun goal(task: String, check: String?): RpcEvent.TurnEnded {
         val partial = StringBuilder()
-        try {
+        return try {
             emit(RpcEvent.TurnStarted(task)) // inside the try: a cancelled job still ends the turn it announced
             val r = runtime.runGoal(session, task, check, planLog, onEvent = relay(partial))
             r.changePlan?.let { emit(RpcEvent.PlanReady(it.id, it.steps.size)) }
             val stop = if (r.status == GoalStatus.Failed) "Error" else "Completed"
-            emit(RpcEvent.TurnEnded(r.reply.ifEmpty { r.error?.message.orEmpty() }, stop, r.status.name))
+            RpcEvent.TurnEnded(r.reply.ifEmpty { r.error?.message.orEmpty() }, stop, r.status.name)
         } catch (e: CancellationException) {
             withContext(NonCancellable) { emit(RpcEvent.TurnEnded(partial.toString(), "UserStopped", GoalStatus.Interrupted.name)) }
             throw e
         } catch (e: Exception) {
-            emit(RpcEvent.TurnEnded(e.message ?: e.toString(), "Error", GoalStatus.Failed.name))
+            RpcEvent.TurnEnded(e.message ?: e.toString(), "Error", GoalStatus.Failed.name)
         }
     }
 }

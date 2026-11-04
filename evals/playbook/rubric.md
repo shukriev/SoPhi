@@ -15,7 +15,8 @@ Claude fills one scorecard per run at `runs/YYYY-MM-DD-<case>-<n>.md`.
 4. **`result=void` runs are not scored.** `run.sh` voids a run when Sophi did not start (no `ready` event),
    a `turn_ended` had `stopReason` Error (model backend), memory was requested but is off, the session
    touched `evals/playbook`, or `invoke_claude_code` was pointed outside the run dir (check that project for changes!). Fix the
-   cause and re-run; void rows are excluded from A/B counts.
+   cause and re-run; void rows are excluded from A/B counts. A `/goal` whose run failed ends with
+   `stopReason` Error, so it is voided like a backend error.
 5. **`unclear`** is the only tag that triggers a Claude-backed re-run (command in `README.md`).
    Claude passes → retag `model-capacity`. Claude fails → retag with the harness fault it shows.
 

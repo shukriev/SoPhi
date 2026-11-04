@@ -8,7 +8,11 @@ import dev.sophi.core.tools.Tool
 import kotlinx.coroutines.flow.flowOf
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
+import com.github.ajalt.clikt.core.ProgramResult
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import io.mockk.every
 import io.mockk.mockk
@@ -88,6 +92,22 @@ class RpcModeTest : FunSpec({
         // The second prompt arrives after the first turn was stopped; it must run, not be eaten by the guard's yes/no.
         events.filter { it["type"]!!.jsonPrimitive.content == "turn_ended" }
             .map { it["stopReason"]!!.jsonPrimitive.content } shouldBe listOf("LoopGuard", "LoopGuard")
+    }
+
+    test("a runtime that cannot start writes one error line and exits non-zero") {
+        val bytes = ByteArrayOutputStream()
+        val result = shouldThrow<ProgramResult> {
+            runRpc(
+                build = { _, _, _ -> throw IllegalStateException("no model server") },
+                switchModel = { _, _ -> null },
+                stdin = ByteArrayInputStream(ByteArray(0)),
+                stdout = PrintStream(bytes, true),
+            )
+        }
+        result.statusCode shouldNotBe 0
+        val line = bytes.toString().lines().filter { it.isNotBlank() }.single()
+        Json.parseToJsonElement(line).jsonObject["type"]!!.jsonPrimitive.content shouldBe "error"
+        line shouldContain "no model server"
     }
 
     test("--mode is not a setting") {

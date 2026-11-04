@@ -247,7 +247,8 @@ class SophiCli(
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
         // In rpc mode stdout is the protocol, so everything that prints (here and in the runtime) goes to stderr.
-        val protocolOut = System.out
+        // UTF-8 whatever the locale: the protocol is JSON, and tokens are often not ASCII.
+        val protocolOut = java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), true, Charsets.UTF_8)
         if (mode == "rpc") System.setOut(System.err)
         val catalog = loadModelCatalog()
         // Off the critical path: this run uses what was loaded above; a fresh file applies from the next start.
@@ -530,10 +531,18 @@ internal suspend fun runRpc(
     lateinit var server: dev.sophi.sdk.rpc.RpcServer
     val confirmations = dev.sophi.sdk.rpc.RpcConfirmations { server.emit(it) }
     val memoryWarning = java.util.concurrent.atomic.AtomicReference<String?>() // onWarning can fire from another thread
-    val cli = build(confirmations, { msg ->
-        System.err.println(msg)
-        if (msg.startsWith("memory:")) memoryWarning.set(msg)
-    }, NoOpInputSource)
+    // A runtime that cannot start is the only non-zero exit, announced by one `error` line.
+    val cli = try {
+        build(confirmations, { msg ->
+            System.err.println(msg)
+            if (msg.startsWith("memory:")) memoryWarning.set(msg)
+        }, NoOpInputSource)
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        stdout.println(dev.sophi.sdk.rpc.encodeRpcEvent(dev.sophi.sdk.rpc.RpcEvent.Error(e.message ?: "Sophi could not start; see stderr")))
+        stdout.flush()
+        throw e as? com.github.ajalt.clikt.core.ProgramResult ?: com.github.ajalt.clikt.core.ProgramResult(1)
+    }
     val memoryOn = cli.runtime.memoryPlugin != null
     server = dev.sophi.sdk.rpc.RpcServer(
         cli.runtime, cli.session, confirmations,

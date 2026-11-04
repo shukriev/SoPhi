@@ -7,9 +7,12 @@ import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
+import dev.sophi.core.credentials.SecretMask
+import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.sdk.RuntimeBuilder
+import dev.sophi.sdk.SophiRuntime
 import dev.sophi.sdk.toStreamFlow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
@@ -17,6 +20,8 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.collections.shouldNotContain
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -283,6 +288,38 @@ class RpcServerTest : FunSpec({
             users shouldBe listOf("first", "second")
             r.types().last() shouldBe "exited"
         }
+    }
+
+    // A client that answers turn_ended at once, on another thread; the sleep holds the turn's thread
+    // just after the write, so the reader handles the command before the turn could go idle late.
+    test("a session command sent right after turn_ended is acked") {
+        repeat(20) {
+            val r = rig(streaming(text("A")))
+            r.server = RpcServer(r.runtime, r.session, r.confirmations, MemoryStatus(false), { null }, { line ->
+                r.lines.add(line)
+                if (type(line) == "turn_ended") {
+                    r.input.trySend("""{"type":"branch","id":"b"}""")
+                    r.input.close()
+                    Thread.sleep(50)
+                }
+            })
+            val job = launch(Dispatchers.Default) { r.server.run(r.input) }
+            r.send("""{"type":"prompt","text":"first"}""")
+            withTimeout(10_000) { job.join() }
+            r.types() shouldNotContain "error"
+            r.types().takeLast(2) shouldBe listOf("ack", "exited")
+        }
+    }
+
+    test("confirmation_requested masks stored secrets") {
+        val mask = SecretMask().apply { add("sk-supersecret") }
+        val runtime = mockk<SophiRuntime> { every { maskSecrets(any()) } answers { mask.mask(firstArg()) } }
+        val lines = mutableListOf<String>()
+        val server = RpcServer(runtime, mockk(), RpcConfirmations {}, MemoryStatus(false), { null }, { lines.add(it) })
+        server.emit(RpcEvent.ConfirmationRequested(listOf(ConfirmationRequest(
+            "c1", "http", """{"token":"sk-supersecret"}""", RiskLevel.DESTRUCTIVE, preview = "curl -H sk-supersecret"))))
+        lines.single() shouldNotContain "sk-supersecret"
+        lines.single() shouldContain "[REDACTED:secret]"
     }
 
     test("goal ends with goalStatus") {

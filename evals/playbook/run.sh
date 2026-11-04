@@ -29,7 +29,8 @@ cd "$RUN/work" || exit 1
 case " ${CALENDAR_CASES[*]} " in *" $id "*) SPATH="$PATH" ;; *) SPATH="$PB/guardbin:$PATH" ;; esac
 is_delegate=no; case " ${DELEGATE_CASES[*]} " in *" $id "*) is_delegate=yes ;; esac
 trap '' PIPE  # a killed Sophi must not kill this script on the next write
-# Sends one command, then reads events (into events.jsonl) until the turn ends. Returns 1 if Sophi is gone.
+# Sends one command, then reads events (into events.jsonl) until the turn ends or the command is refused
+# with an `error` (logged; no turn_ended follows). Returns 1 if Sophi is gone.
 # Confirmations: only invoke_claude_code in a delegate case is approved; anything else is denied.
 await_turn() {
   local ev ty c t ok
@@ -37,7 +38,7 @@ await_turn() {
     printf '%s\n' "$ev" >> "$RUN/events.jsonl"
     ty="$(jq -r '.type' <<< "$ev")"
     case "$ty" in
-      turn_ended) return 0 ;;
+      turn_ended|error) return 0 ;;
       exited) return 1 ;;
       confirmation_requested)
         while IFS=$'\t' read -r c t; do

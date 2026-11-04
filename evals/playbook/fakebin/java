@@ -10,6 +10,8 @@ first=1
 while IFS= read -r line; do
   kind="$(jq -r '.type' <<< "$line")"
   [ "$kind" = prompt ] || [ "$kind" = goal ] || continue
+  # 'error': the first command is refused with an error event, no turn
+  case " $FAKE_DO " in *" error "*) [ $first = 1 ] && { first=0; ev '{type:"error",message:"refused"}'; continue; } ;; esac
   ev --arg i "$(jq -r '.text' <<< "$line")" '{type:"turn_started",input:$i}'
   stop=Completed
   if [ $first = 1 ]; then

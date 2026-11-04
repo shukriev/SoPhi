@@ -59,11 +59,15 @@ else echo "FAIL browser-1 server: pid '$pid' (run $out)"; fails=$((fails+1)); fi
 start=$(date +%s); got="$(PLAYBOOK_RUN_TIMEOUT=2 FAKE_DO="sleep:30 answer" "$PB/run.sh" tool-1 1 2>&1)"; el=$(( $(date +%s) - start ))
 if grep -q "result=fail" <<< "$got" && grep -q "^TIMEOUT" <<< "$got" && [ $el -lt 15 ]; then echo "ok   a run past the cap is killed and fails (${el}s)"
 else echo "FAIL run cap: ${el}s, $(grep -E '^(case|TIMEOUT)' <<< "$got" | tr '\n' ' ')"; fails=$((fails+1)); fi
+# a command answered with an error event (no turn) must not wait for a turn_ended until the cap
+start=$(date +%s); got="$(PLAYBOOK_RUN_TIMEOUT=20 FAKE_DO="error" "$PB/run.sh" tool-1 1 2>&1)"; el=$(( $(date +%s) - start ))
+if grep -q "result=fail delegated=no" <<< "$got" && ! grep -q "^TIMEOUT" <<< "$got" && [ $el -lt 15 ]; then echo "ok   an error event ends the wait (${el}s)"
+else echo "FAIL error event: ${el}s, $(grep -E '^(case|TIMEOUT)' <<< "$got" | tr '\n' ' ')"; fails=$((fails+1)); fi
 # run dirs: stable location (not the purged $TMPDIR), no doubled slash
 out="$(PLAYBOOK_RUNS="$PB_RUNS_ROOT/" FAKE_DO=answer "$PB/run.sh" tool-1 1 2>&1 | sed -n 's/^RUN=\([^ ]*\).*/\1/p')"
 case "$out" in "$PB_RUNS_ROOT"/sophi-pb-tool-1-1.*) [[ "$out" != *//* ]] && echo "ok   run dir under PLAYBOOK_RUNS, no //" || { echo "FAIL doubled slash: $out"; fails=$((fails+1)); } ;;
   *) echo "FAIL run dir: $out"; fails=$((fails+1)) ;; esac
 SOPHI_JAR=/nonexistent "$PB/run.sh" tool-1 1 >/dev/null 2>&1; rc=$?
 if [ $rc -eq 2 ]; then echo "ok   missing jar exits 2"; else echo "FAIL missing jar: exit $rc, want 2"; fails=$((fails+1)); fi
-[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 18 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
+[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 19 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
 rm -rf "$RESULTS" "$PB_RUNS_ROOT"; echo "$fails failure(s)"; exit $fails
