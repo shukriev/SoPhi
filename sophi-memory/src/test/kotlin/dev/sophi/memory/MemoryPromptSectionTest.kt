@@ -9,4 +9,9 @@ class MemoryPromptSectionTest : FunSpec({
         MemoryPromptSection.TEXT shouldContain "without any tool"
         MemoryPromptSection.TEXT shouldContain "Never write personal facts about the user into skills"
     }
+
+    // Seen live: asked to remember a badge number, the model said "Noted" though the encoder never keeps credentials.
+    test("the model says credentials are not remembered instead of confirming") {
+        MemoryPromptSection.TEXT shouldContain "never remembered"
+    }
 })
