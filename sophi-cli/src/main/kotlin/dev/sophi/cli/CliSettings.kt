@@ -58,6 +58,7 @@ val CLI_SETTINGS: List<Setting> = listOf(
     next("plan-first", SettingKind.Choice(listOf("outside", "every", "off"))),
     next("trust-read-only-hints", SettingKind.Bool),
     next("other-agent-skills", SettingKind.Bool),
+    next("subagent-worktrees", SettingKind.Bool),
     next("memory", SettingKind.Bool),
     next("embedding-model", SettingKind.Text),
     next("embedding-base-url", SettingKind.Text),

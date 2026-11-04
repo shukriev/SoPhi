@@ -66,6 +66,12 @@ class CliSettingsTest : FunSpec({
         warnings.any { "max-tokens" in it } shouldBe true
     }
 
+    test("subagent-worktrees is an on/off setting for the next start, off by default") {
+        CLI_SETTINGS.single { it.key == "subagent-worktrees" } shouldBe Setting("subagent-worktrees", SettingKind.Bool, live = false)
+        SophiCli(Path.of("/nonexistent/settings.json")).registeredOptions().single { "--subagent-worktrees" in it.names }
+            .secondaryNames shouldBe setOf("--no-subagent-worktrees")
+    }
+
     test("god mode is never a saved setting") {
         CLI_SETTINGS.none { it.key == "god-mode" } shouldBe true
     }
