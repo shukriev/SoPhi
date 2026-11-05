@@ -28,7 +28,8 @@ fun formatSessionHits(hits: List<SessionHit>): String = hits.joinToString("\n") 
 class SessionSearchTool(private val sessions: SessionManager, private val mask: SecretMask? = null) : Tool {
     override val name = "session_search"
     override val description = "Search past chat sessions for what was said or done, e.g. an earlier decision. " +
-        "Every word of the query must appear in one message (any case). Returns the newest matching sessions with id, title, date and a snippet."
+        "Every word of the query must appear in one message (any case). Returns the newest matching sessions with id, title, date and a snippet. " +
+        "Notes or conventions the user wrote down for you are skills: check the `skill` tool first."
     override val parametersJson = """
         {"type":"object","properties":{"query":{"type":"string","description":"words that must all appear"},"limit":{"type":"integer","description":"most sessions to return, 1-20 (default 8)"}},"required":["query"]}
     """.trimIndent()
@@ -42,6 +43,6 @@ class SessionSearchTool(private val sessions: SessionManager, private val mask: 
         if (args.query.isBlank()) return "Error: query is empty"
         val skip = currentCoroutineContext()[SessionIdContext]?.sessionId
         val hits = searchSessions(sessions, args.query, args.limit.coerceIn(1, 20), skip, mask)
-        return if (hits.isEmpty()) "No past sessions mention: ${args.query.trim()}" else formatSessionHits(hits)
+        return if (hits.isEmpty()) "No past sessions mention: ${args.query.trim()}. Notes the user wrote down for you may be a skill (`skill` tool)." else formatSessionHits(hits)
     }
 }
