@@ -75,6 +75,8 @@ data class CliOptions(
     val guardianModel: String? = null,
     /** Subagents may get their own git worktree (`delegate_to_subagent` `worktree: true`). */
     val subagentWorktrees: Boolean = false,
+    /** Offer `code_mode`: scripts that chain tool calls, each checked like a direct call. */
+    val codeMode: Boolean = false,
 )
 
 /**
@@ -195,6 +197,7 @@ internal suspend fun buildCliRuntime(
         context(contextEngine) { _ -> contextEngine.projectContaining(cwd)?.id }
         agentsDir(agentsDir, onWarning)
         subagentDelegation(worktrees = opts.subagentWorktrees)
+        if (opts.codeMode) codeMode()
         goalDecomposition(Path.of(opts.plansDir))
         skillTools(foreignSkillDirs = foreignSkillDirs)
         loopGuard(loopGuardPolicy)

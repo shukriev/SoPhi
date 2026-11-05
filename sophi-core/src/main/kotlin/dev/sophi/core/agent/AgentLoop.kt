@@ -508,6 +508,230 @@ class AgentLoop(
         sessionManager.save(session)
     }
 
+    /** Before-tool hooks, ahead of every check: a rewritten call is classified, ruled on, planned and confirmed as rewritten. */
+    private suspend fun applyBeforeToolHooks(hooks: LoopHooks?, sessionId: String, toolCalls: List<ToolCall>): Pair<List<ToolCall>, Map<String, String>> {
+        val vetoes = mutableMapOf<String, String>()
+        val calls = if (hooks == null) toolCalls else toolCalls.map { call ->
+            when (val r = hooks.beforeTool(sessionId, call.name, call.argumentsJson)) {
+                is HookResult.Veto -> call.also { vetoes[it.id] = r.reason }
+                is HookResult.Rewrite -> call.copy(argumentsJson = r.argumentsJson)
+                else -> call
+            }
+        }
+        return calls to vetoes
+    }
+
+    /**
+     * The one pipeline every tool call goes through, the model's own and those a tool makes via [ToolCallScope]: rules,
+     * plan-first, hook denials, confirmation, checkpoint ([takeCheckpoint]), undo records ([onUndo]), execution, audit,
+     * after-tool hook and events. [calls] already went through [applyBeforeToolHooks]; [vetoes] is what it vetoed.
+     */
+    private suspend fun executeCalls(
+        session: AgentSession, userInput: String, calls: List<ToolCall>, vetoes: Map<String, String>, onEvent: suspend (TurnEvent) -> Unit,
+        window: Int, takeCheckpoint: Boolean, onUndo: (Map<String, String>) -> Unit,
+    ): List<ToolCallOutcome> {
+        val hooks = currentCoroutineContext()[HookScope]?.hooks
+        val rules = currentCoroutineContext()[PermissionScope]?.rules
+        // Rules first: deny > ask > allow; no effect = no rule applies, the tier/grant/policy flow decides.
+        val effects = mutableMapOf<String, Effect>()
+        val classified = calls.map { call ->
+            val tool = registry.getOrNull(call.name)
+            val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
+            val preview = tool?.confirmationPreview(call.argumentsJson)
+            // A tool that throws computing its subjects (e.g. a NUL in a path) gets null: R3, fail closed, not a crashed round.
+            val subjects = if (rules == null) null else runCatching { tool?.permissionSubjects(call.argumentsJson) }.getOrNull()
+            val effect = rules?.decide(call.name, subjects)?.also { effects[call.id] = it }
+            // an allow written under an ask rule could never apply (ask beats allow), so "always" isn't offered
+            val always = if (rules == null || effect == Effect.ASK) null else PermissionRules.alwaysAllowRules(call.name, subjects)
+            call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always, askRule = effect == Effect.ASK)
+        }
+        // Plan-first: changes are held (recorded, not run) whatever a grant or allow/ask rule says; trusted
+        // read-only hints run without asking. Numbered here, in call order, before the parallel run.
+        val recorder = currentCoroutineContext()[PlanRecorder]
+        val reaches = if (recorder == null) emptyMap() else classified.associate { (call, _) ->
+            call.id to (registry.getOrNull(call.name)?.reach(call.argumentsJson) ?: Reach.LOCAL)
+        }
+        val held = mutableMapOf<String, Int>()
+        val hintedReads = mutableSetOf<String>()
+        if (recorder != null) {
+            val unattended = currentCoroutineContext()[Unattended.Key] != null
+            classified.forEach { (call, req) ->
+                val effect = effects[req.callId]
+                if (effect == Effect.DENY || req.riskLevel == RiskLevel.SAFE || req.callId in vetoes) return@forEach
+                val reach = reaches.getValue(call.id)
+                val hinted = reach == Reach.OUTSIDE_HINTED_READ && recorder.trustReadOnlyHints
+                val change = when (recorder.mode) {
+                    PlanFirst.OFF -> false
+                    PlanFirst.OUTSIDE -> reach == Reach.OUTSIDE_CHANGE
+                    PlanFirst.EVERY -> !hinted
+                }
+                val preAllowed = effect == Effect.ALLOW || call.name in grants
+                when {
+                    // Unattended, only tools the run was granted may be planned; the rest are denied as today.
+                    change && (!unattended || preAllowed) ->
+                        held[call.id] = recorder.record(call.name, call.argumentsJson, req.riskLevel, preAllowed)
+                    hinted && effect == null && (!unattended || preAllowed) -> hintedReads += call.id
+                }
+            }
+        }
+        val needsDecision = classified.filter { (_, req) -> req.callId !in held && req.callId !in hintedReads && req.callId !in vetoes }.filter { (_, req) ->
+            when (effects[req.callId]) {
+                Effect.ASK -> true
+                null -> req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
+                else -> false
+            }
+        }
+        val notes = DecisionNotes()
+        // ON_CONFIRMATION: a hook may deny, never allow, so it can't approve what a person would be asked.
+        val hookDenials = if (hooks == null) emptyMap() else needsDecision.mapNotNull { (_, req) ->
+            hooks.denies(session.id, req)?.let { req.callId to it }
+        }.toMap()
+        hookDenials.keys.forEach { notes.note(it, "hook") }
+        val asked = needsDecision.filter { it.second.callId !in hookDenials }
+        val decisions = if (asked.isEmpty()) {
+            emptyMap()
+        } else {
+            val requests = asked.map { it.second }
+            onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
+            try {
+                withContext(notes) { confirmationPolicy.confirm(requests) }
+            } finally {
+                onEvent(TurnEvent.ConfirmationFinished)
+            }
+        }
+        val decided = classified.map { (call, req) ->
+            val allowed = if (req.callId in held || req.callId in vetoes) false else if (req.callId in hintedReads) true else when (effects[req.callId]) {
+                Effect.DENY -> false
+                Effect.ALLOW -> true
+                Effect.ASK -> decisions[req.callId] == true
+                null -> req.riskLevel == RiskLevel.SAFE || req.toolName in grants || decisions[req.callId] == true
+            }
+            call to allowed
+        }
+        // Guardian: a second look at DESTRUCTIVE calls about to run that no person approved this round. It can
+        // only take an approval back (DENY) or hand it to a person (ASK); everything else stays as decided.
+        val verdicts = mutableMapOf<String, GuardianVerdict>()
+        currentCoroutineContext()[GuardianScope]?.guardian?.let { g ->
+            // ponytail: reviews run one after another; a round rarely has more than one destructive call
+            decided.zip(classified).forEach { (d, c) ->
+                val req = c.second
+                if (d.second && req.riskLevel == RiskLevel.DESTRUCTIVE && req.callId !in hintedReads && notes.rules[req.callId] !in PERSON_DECISIONS) {
+                    verdicts[req.callId] = g.review(req.toolName, registry.getOrNull(req.toolName)?.description.orEmpty(), req.argumentsJson, userInput)
+                }
+            }
+        }
+        val guardNotes = DecisionNotes()
+        val guardAsks = classified.map { it.second }.filter { verdicts[it.callId]?.effect == Effect.ASK }
+        val guardDecisions = if (guardAsks.isEmpty()) emptyMap() else {
+            // Routed like an ask rule: auto, threshold and god-mode policies hand it to their person.
+            val requests = guardAsks.map { req ->
+                req.copy(askRule = true, alwaysAllow = null, preview = "${req.preview ?: req.argumentsJson}\nguardian: ${verdicts.getValue(req.callId).reason}")
+            }
+            onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
+            try {
+                withContext(guardNotes) { confirmationPolicy.confirm(requests) }
+            } finally {
+                onEvent(TurnEvent.ConfirmationFinished)
+            }
+        }
+        val allowedCalls = decided.map { (call, allowed) ->
+            call to when (verdicts[call.id]?.effect) {
+                Effect.DENY -> false
+                Effect.ASK -> guardDecisions[call.id] == true
+                else -> allowed
+            }
+        }
+
+        val undoMeta = mutableMapOf<String, String>()
+        // A delegate's nested loop (or a code_mode script) runs DESTRUCTIVE tools of its own, whatever the call itself rates.
+        if (takeCheckpoint && checkpoints != null && classified.zip(allowedCalls).any { (c, a) ->
+                a.second && (c.second.riskLevel == RiskLevel.DESTRUCTIVE || registry.getOrNull(c.first.name).let { it is SubagentTool || it is DecomposeGoalTool || it is dev.sophi.core.tools.CodeModeTool })
+            }) {
+            val start = System.currentTimeMillis()
+            checkpoints.snapshot()?.let { undoMeta += mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }
+        }
+        val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
+        // Recorded whether or not this loop knows the root: an enclosing undoableRound (e.g. /goal's) may too.
+        allowedCalls.filter { (c, ok) -> ok && c.name == "bash" }.forEach { (c, _) ->
+            runCatching { entryJson.parseToJsonElement(c.argumentsJson).jsonObject["command"]?.jsonPrimitive?.content }.getOrNull()
+                ?.let(changes::recordCommand)
+        }
+        // In a finally, so a stopped round still tells /undo what it changed (saveStopped persists it).
+        val auditSink = currentCoroutineContext()[AuditScope]?.sink
+        val actor = currentCoroutineContext()[ActorContext]
+        return try { withContext(changes) {
+            allowedCalls.zip(classified) { (call, allowed), (_, req) ->
+                async {
+                    onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
+                    val start = System.currentTimeMillis()
+                    val step = held[call.id]
+                    fun audit(outcome: String, result: String) {
+                        val verdict = verdicts[call.id]
+                        val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook"
+                            else when (verdict?.effect) { Effect.DENY -> "guardian"; Effect.ASK -> guardNotes.rules[call.id] ?: "policy"; else -> null }
+                        val plan = step?.let { "${recorder!!.planId}#$it" }
+                        if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan,
+                            verdict?.let { "${it.effect.name.lowercase()}: ${it.reason}" })
+                    }
+                    var failed = false
+                    val result = if (step != null) {
+                        planStepStub(step)
+                    } else if (call.id in vetoes) {
+                        failed = true
+                        "Error: Tool '${call.name}' vetoed by a hook: ${vetoes[call.id]}"
+                    } else if (!allowed) {
+                        failed = true
+                        currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson)
+                        if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
+                        else if (verdicts[call.id]?.effect == Effect.DENY) "Error: Tool '${call.name}' denied by the guardian: ${verdicts.getValue(call.id).reason}"
+                        else hookDenials[call.id]?.let { "Error: Tool '${call.name}' denied by a hook: $it" }
+                            ?: if (currentCoroutineContext()[Unattended.Key] != null) "Error: Tool '${call.name}' execution denied by " +
+                                "confirmation policy: this run is unattended and nobody is here to approve it. Do without it, or finish and say what you needed."
+                            else "Error: Tool '${call.name}' execution denied by confirmation policy"
+                    } else {
+                        registry.getOrNull(call.name)
+                            ?.let { tool ->
+                                invalidArgumentsError(call.name, call.argumentsJson) // an "Error: " result, counted as failed below
+                                    ?: runCatching { tool.execute(call.argumentsJson) }
+                                    .getOrElse { e ->
+                                        // A stopped turn must stop its tools, not report them as failed.
+                                        if (e is CancellationException) { audit("cancelled", ""); throw e }
+                                        failed = true; "Error: ${e.message}"
+                                    }
+                            }
+                            ?: run { failed = true; "Error: Tool '${call.name}' not found" }
+                    }
+                    // Tools signal a handled failure by returning an "Error: "-prefixed string
+                    // just as often as by throwing (every built-in tool's own validation follows
+                    // this convention) — count both the same way for loop-guard/reliability purposes.
+                    failed = failed || isToolError(result)
+                    // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
+                    audit(if (step != null) "recorded" else if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
+                    val reach = reaches[call.id]
+                    if (recorder != null && allowed && !failed && (reach == Reach.OUTSIDE_READ || reach == Reach.OUTSIDE_HINTED_READ)) {
+                        recorder.read(call.name, call.argumentsJson, result.take(500), viaHint = reach == Reach.OUTSIDE_HINTED_READ)
+                    }
+                    val took = System.currentTimeMillis() - start
+                    hooks?.afterTool(session.id, call.name, call.argumentsJson, result, failed, took)
+                    onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, took, call.argumentsJson))
+                    ToolCallOutcome(
+                        call,
+                        Message(
+                            role = MessageRole.TOOL,
+                            content = truncateToolResult(result, window),
+                            toolCallId = call.id,
+                            toolName = call.name
+                        ),
+                        failed
+                    )
+                }
+            }.awaitAll()
+        } } finally {
+            undoMeta += undoRecord(changes)
+            if (undoMeta.isNotEmpty()) onUndo(undoMeta)
+        }
+    }
+
     private suspend fun runTurn(
         session: AgentSession,
         userInput: String,
@@ -637,14 +861,7 @@ class AgentLoop(
                 )
             }
             // Hooks act before any check, so a rewritten call is classified, ruled on, planned and confirmed as rewritten.
-            val vetoes = mutableMapOf<String, String>()
-            val calls = if (hooks == null) toolCalls else toolCalls.map { call ->
-                when (val r = hooks.beforeTool(session.id, call.name, call.argumentsJson)) {
-                    is HookResult.Veto -> call.also { vetoes[it.id] = r.reason }
-                    is HookResult.Rewrite -> call.copy(argumentsJson = r.argumentsJson)
-                    else -> call
-                }
-            }
+            val (calls, vetoes) = applyBeforeToolHooks(hooks, session.id, toolCalls)
             messages.add(Message(MessageRole.ASSISTANT, content = "", toolCalls = calls))
             val roundIndex = pendingRounds.size
             pendingRounds.add(PendingEntry(
@@ -655,205 +872,18 @@ class AgentLoop(
                         calls.map { ToolCallRecord(it.id, it.name, it.argumentsJson) })
                 )
             ))
-
-            val rules = currentCoroutineContext()[PermissionScope]?.rules
-            // Rules first: deny > ask > allow; no effect = no rule applies, the tier/grant/policy flow decides.
-            val effects = mutableMapOf<String, Effect>()
-            val classified = calls.map { call ->
-                val tool = registry.getOrNull(call.name)
-                val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
-                val preview = tool?.confirmationPreview(call.argumentsJson)
-                // A tool that throws computing its subjects (e.g. a NUL in a path) gets null: R3, fail closed, not a crashed round.
-                val subjects = if (rules == null) null else runCatching { tool?.permissionSubjects(call.argumentsJson) }.getOrNull()
-                val effect = rules?.decide(call.name, subjects)?.also { effects[call.id] = it }
-                // an allow written under an ask rule could never apply (ask beats allow), so "always" isn't offered
-                val always = if (rules == null || effect == Effect.ASK) null else PermissionRules.alwaysAllowRules(call.name, subjects)
-                call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always, askRule = effect == Effect.ASK)
+            // A tool that drives other tools (code_mode) runs each of them through this same pipeline, one call at a time.
+            val callScope = ToolCallScope { name, args ->
+                val inner = listOf(ToolCall("inner-" + java.util.UUID.randomUUID().toString().take(8), name, args))
+                val (one, veto) = applyBeforeToolHooks(hooks, session.id, inner)
+                // No checkpoint of its own: the round took one before the driving call. Its moves and bash commands
+                // still reach the round's undo record through the parent RoundChanges.
+                executeCalls(session, userInput, one, veto, onEvent, window, takeCheckpoint = false) {}.single().message.content
             }
-            // Plan-first: changes are held (recorded, not run) whatever a grant or allow/ask rule says; trusted
-            // read-only hints run without asking. Numbered here, in call order, before the parallel run.
-            val recorder = currentCoroutineContext()[PlanRecorder]
-            val reaches = if (recorder == null) emptyMap() else classified.associate { (call, _) ->
-                call.id to (registry.getOrNull(call.name)?.reach(call.argumentsJson) ?: Reach.LOCAL)
-            }
-            val held = mutableMapOf<String, Int>()
-            val hintedReads = mutableSetOf<String>()
-            if (recorder != null) {
-                val unattended = currentCoroutineContext()[Unattended.Key] != null
-                classified.forEach { (call, req) ->
-                    val effect = effects[req.callId]
-                    if (effect == Effect.DENY || req.riskLevel == RiskLevel.SAFE || req.callId in vetoes) return@forEach
-                    val reach = reaches.getValue(call.id)
-                    val hinted = reach == Reach.OUTSIDE_HINTED_READ && recorder.trustReadOnlyHints
-                    val change = when (recorder.mode) {
-                        PlanFirst.OFF -> false
-                        PlanFirst.OUTSIDE -> reach == Reach.OUTSIDE_CHANGE
-                        PlanFirst.EVERY -> !hinted
-                    }
-                    val preAllowed = effect == Effect.ALLOW || call.name in grants
-                    when {
-                        // Unattended, only tools the run was granted may be planned; the rest are denied as today.
-                        change && (!unattended || preAllowed) ->
-                            held[call.id] = recorder.record(call.name, call.argumentsJson, req.riskLevel, preAllowed)
-                        hinted && effect == null && (!unattended || preAllowed) -> hintedReads += call.id
-                    }
+            val toolOutcomes = withContext(callScope) {
+                executeCalls(session, userInput, calls, vetoes, onEvent, window, takeCheckpoint = true) { undo ->
+                    pendingRounds[roundIndex] = pendingRounds[roundIndex].let { it.copy(metadata = it.metadata + undo) }
                 }
-            }
-            val needsDecision = classified.filter { (_, req) -> req.callId !in held && req.callId !in hintedReads && req.callId !in vetoes }.filter { (_, req) ->
-                when (effects[req.callId]) {
-                    Effect.ASK -> true
-                    null -> req.riskLevel != RiskLevel.SAFE && req.toolName !in grants
-                    else -> false
-                }
-            }
-            val notes = DecisionNotes()
-            // ON_CONFIRMATION: a hook may deny, never allow, so it can't approve what a person would be asked.
-            val hookDenials = if (hooks == null) emptyMap() else needsDecision.mapNotNull { (_, req) ->
-                hooks.denies(session.id, req)?.let { req.callId to it }
-            }.toMap()
-            hookDenials.keys.forEach { notes.note(it, "hook") }
-            val asked = needsDecision.filter { it.second.callId !in hookDenials }
-            val decisions = if (asked.isEmpty()) {
-                emptyMap()
-            } else {
-                val requests = asked.map { it.second }
-                onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
-                try {
-                    withContext(notes) { confirmationPolicy.confirm(requests) }
-                } finally {
-                    onEvent(TurnEvent.ConfirmationFinished)
-                }
-            }
-            val decided = classified.map { (call, req) ->
-                val allowed = if (req.callId in held || req.callId in vetoes) false else if (req.callId in hintedReads) true else when (effects[req.callId]) {
-                    Effect.DENY -> false
-                    Effect.ALLOW -> true
-                    Effect.ASK -> decisions[req.callId] == true
-                    null -> req.riskLevel == RiskLevel.SAFE || req.toolName in grants || decisions[req.callId] == true
-                }
-                call to allowed
-            }
-            // Guardian: a second look at DESTRUCTIVE calls about to run that no person approved this round. It can
-            // only take an approval back (DENY) or hand it to a person (ASK); everything else stays as decided.
-            val verdicts = mutableMapOf<String, GuardianVerdict>()
-            currentCoroutineContext()[GuardianScope]?.guardian?.let { g ->
-                // ponytail: reviews run one after another; a round rarely has more than one destructive call
-                decided.zip(classified).forEach { (d, c) ->
-                    val req = c.second
-                    if (d.second && req.riskLevel == RiskLevel.DESTRUCTIVE && req.callId !in hintedReads && notes.rules[req.callId] !in PERSON_DECISIONS) {
-                        verdicts[req.callId] = g.review(req.toolName, registry.getOrNull(req.toolName)?.description.orEmpty(), req.argumentsJson, userInput)
-                    }
-                }
-            }
-            val guardNotes = DecisionNotes()
-            val guardAsks = classified.map { it.second }.filter { verdicts[it.callId]?.effect == Effect.ASK }
-            val guardDecisions = if (guardAsks.isEmpty()) emptyMap() else {
-                // Routed like an ask rule: auto, threshold and god-mode policies hand it to their person.
-                val requests = guardAsks.map { req ->
-                    req.copy(askRule = true, alwaysAllow = null, preview = "${req.preview ?: req.argumentsJson}\nguardian: ${verdicts.getValue(req.callId).reason}")
-                }
-                onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
-                try {
-                    withContext(guardNotes) { confirmationPolicy.confirm(requests) }
-                } finally {
-                    onEvent(TurnEvent.ConfirmationFinished)
-                }
-            }
-            val allowedCalls = decided.map { (call, allowed) ->
-                call to when (verdicts[call.id]?.effect) {
-                    Effect.DENY -> false
-                    Effect.ASK -> guardDecisions[call.id] == true
-                    else -> allowed
-                }
-            }
-
-            val undoMeta = mutableMapOf<String, String>()
-            // A delegate's nested loop runs DESTRUCTIVE tools of its own, whatever the delegate call itself rates.
-            if (checkpoints != null && classified.zip(allowedCalls).any { (c, a) ->
-                    a.second && (c.second.riskLevel == RiskLevel.DESTRUCTIVE || registry.getOrNull(c.first.name).let { it is SubagentTool || it is DecomposeGoalTool })
-                }) {
-                val start = System.currentTimeMillis()
-                checkpoints.snapshot()?.let { undoMeta += mapOf("checkpoint" to it, "checkpointMs" to "${System.currentTimeMillis() - start}") }
-            }
-            val changes = RoundChanges(currentCoroutineContext()[RoundChanges])
-            // Recorded whether or not this loop knows the root: an enclosing undoableRound (e.g. /goal's) may too.
-            allowedCalls.filter { (c, ok) -> ok && c.name == "bash" }.forEach { (c, _) ->
-                runCatching { entryJson.parseToJsonElement(c.argumentsJson).jsonObject["command"]?.jsonPrimitive?.content }.getOrNull()
-                    ?.let(changes::recordCommand)
-            }
-            // In a finally, so a stopped round still tells /undo what it changed (saveStopped persists it).
-            val auditSink = currentCoroutineContext()[AuditScope]?.sink
-            val actor = currentCoroutineContext()[ActorContext]
-            val toolOutcomes = try { withContext(changes) {
-                allowedCalls.zip(classified) { (call, allowed), (_, req) ->
-                    async {
-                        onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
-                        val start = System.currentTimeMillis()
-                        val step = held[call.id]
-                        fun audit(outcome: String, result: String) {
-                            val verdict = verdicts[call.id]
-                            val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook"
-                                else when (verdict?.effect) { Effect.DENY -> "guardian"; Effect.ASK -> guardNotes.rules[call.id] ?: "policy"; else -> null }
-                            val plan = step?.let { "${recorder!!.planId}#$it" }
-                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan,
-                                verdict?.let { "${it.effect.name.lowercase()}: ${it.reason}" })
-                        }
-                        var failed = false
-                        val result = if (step != null) {
-                            planStepStub(step)
-                        } else if (call.id in vetoes) {
-                            failed = true
-                            "Error: Tool '${call.name}' vetoed by a hook: ${vetoes[call.id]}"
-                        } else if (!allowed) {
-                            failed = true
-                            currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson)
-                            if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
-                            else if (verdicts[call.id]?.effect == Effect.DENY) "Error: Tool '${call.name}' denied by the guardian: ${verdicts.getValue(call.id).reason}"
-                            else hookDenials[call.id]?.let { "Error: Tool '${call.name}' denied by a hook: $it" }
-                                ?: if (currentCoroutineContext()[Unattended.Key] != null) "Error: Tool '${call.name}' execution denied by " +
-                                    "confirmation policy: this run is unattended and nobody is here to approve it. Do without it, or finish and say what you needed."
-                                else "Error: Tool '${call.name}' execution denied by confirmation policy"
-                        } else {
-                            registry.getOrNull(call.name)
-                                ?.let { tool ->
-                                    invalidArgumentsError(call.name, call.argumentsJson) // an "Error: " result, counted as failed below
-                                        ?: runCatching { tool.execute(call.argumentsJson) }
-                                        .getOrElse { e ->
-                                            // A stopped turn must stop its tools, not report them as failed.
-                                            if (e is CancellationException) { audit("cancelled", ""); throw e }
-                                            failed = true; "Error: ${e.message}"
-                                        }
-                                }
-                                ?: run { failed = true; "Error: Tool '${call.name}' not found" }
-                        }
-                        // Tools signal a handled failure by returning an "Error: "-prefixed string
-                        // just as often as by throwing (every built-in tool's own validation follows
-                        // this convention) — count both the same way for loop-guard/reliability purposes.
-                        failed = failed || isToolError(result)
-                        // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
-                        audit(if (step != null) "recorded" else if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
-                        val reach = reaches[call.id]
-                        if (recorder != null && allowed && !failed && (reach == Reach.OUTSIDE_READ || reach == Reach.OUTSIDE_HINTED_READ)) {
-                            recorder.read(call.name, call.argumentsJson, result.take(500), viaHint = reach == Reach.OUTSIDE_HINTED_READ)
-                        }
-                        val took = System.currentTimeMillis() - start
-                        hooks?.afterTool(session.id, call.name, call.argumentsJson, result, failed, took)
-                        onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, took, call.argumentsJson))
-                        ToolCallOutcome(
-                            call,
-                            Message(
-                                role = MessageRole.TOOL,
-                                content = truncateToolResult(result, window),
-                                toolCallId = call.id,
-                                toolName = call.name
-                            ),
-                            failed
-                        )
-                    }
-                }.awaitAll()
-            } } finally {
-                undoMeta += undoRecord(changes)
-                if (undoMeta.isNotEmpty()) pendingRounds[roundIndex] = pendingRounds[roundIndex].let { it.copy(metadata = it.metadata + undoMeta) }
             }
             // Successful calls never trip the failure guard, so a model can repeat one forever without
             // learning anything new. Tell it on the 3rd identical call; the guard steps in at the 6th.

@@ -297,6 +297,14 @@ class RuntimeBuilder {
     fun subagentDelegation(worktrees: Boolean = false): RuntimeBuilder =
         apply { subagentDelegationEnabled = true; subagentWorktrees = worktrees }
 
+    private var codeModeEnabled = false
+
+    /**
+     * Registers `code_mode`: the model runs a sandboxed JavaScript snippet whose `tools.<name>(args)` calls go through
+     * the same rules, confirmation, hooks, audit and undo as its own calls. Off by default.
+     */
+    fun codeMode(): RuntimeBuilder = apply { codeModeEnabled = true }
+
     /** Registers a `decompose_goal` tool; every plan version is logged under [plansDir] ([PlanLog] creates it if missing). */
     fun goalDecomposition(
         plansDir: Path,
@@ -418,6 +426,7 @@ class RuntimeBuilder {
             plugins.add(HintPlugin(engine, project, budget, HintGate(), knob("SOPHI_CONTEXT_HINT", "gated", "always", "off")))
         }
         userAsker?.let { registry.register(dev.sophi.core.tools.AskUserTool(it)) }
+        if (codeModeEnabled) registry.register(dev.sophi.core.tools.CodeModeTool())
         desktop?.let { d -> dev.sophi.core.tools.desktopTools(d, builtinToolsConfig?.root ?: Path.of("").toAbsolutePath()).forEach { registry.register(it) } }
         if (skillToolsEnabled) {
             val loadSkills = skillRegistryLoader(skillsDir, Path.of(".sophi", "skills"), foreignSkillDirs, includeAutoSkills)

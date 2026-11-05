@@ -38,6 +38,13 @@
             <artifactId>jsoup</artifactId>
             <version>1.19.1</version>
         </dependency>
+        <!-- code_mode: sandboxed JavaScript. 1.6 MB, MPL-2.0, no transitive dependencies. GraalJS was ~62 MB (see the
+             exclusions in sophi-store/pom.xml); its community edition has no CPU or memory limit either. -->
+        <dependency>
+            <groupId>org.mozilla</groupId>
+            <artifactId>rhino</artifactId>
+            <version>1.9.2</version>
+        </dependency>
         <dependency>
             <groupId>com.charleskorn.kaml</groupId>
             <artifactId>kaml-jvm</artifactId>

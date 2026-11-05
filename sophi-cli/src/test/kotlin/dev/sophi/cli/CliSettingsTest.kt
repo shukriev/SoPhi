@@ -160,4 +160,10 @@ class CliSettingsTest : FunSpec({
         CLI_SETTINGS.single { it.key == "guardian" }.let { it.kind shouldBe SettingKind.Bool; it.live shouldBe false }
         CLI_SETTINGS.single { it.key == "guardian-model" }.let { it.kind shouldBe SettingKind.Text; it.live shouldBe false }
     }
+
+    test("code-mode is an on/off setting, read at the next start") {
+        val s = CLI_SETTINGS.single { it.key == "code-mode" }
+        s.kind shouldBe SettingKind.Bool
+        s.live shouldBe false
+    }
 })
