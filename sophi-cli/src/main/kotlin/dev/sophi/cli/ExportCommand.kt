@@ -1,6 +1,7 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
@@ -41,16 +42,13 @@ class ExportCommand : CliktCommand(name = "export", help = "Export sessions as f
         .default("${System.getProperty("user.home")}/.sophi/sessions")
 
     override fun run() {
-        if (minJudgment !in setOf("success", "partial")) {
-            echo("Error: --min-judgment must be success|partial (got '$minJudgment')")
-            return
-        }
+        // UsageError, not echo-and-return: a script running `sophi export && train` must stop here.
+        if (minJudgment !in setOf("success", "partial"))
+            throw UsageError("--min-judgment must be success|partial (got '$minJudgment')")
         val splitValue = split?.let {
             val parsed = it.toDoubleOrNull()
-            if (parsed == null || parsed <= 0.0 || parsed > 1.0) {
-                echo("Error: --split must be a number in (0.0, 1.0] (got '$it')")
-                return
-            }
+            if (parsed == null || parsed <= 0.0 || parsed > 1.0)
+                throw UsageError("--split must be a number in (0.0, 1.0] (got '$it')")
             parsed
         }
         if (noRedact && !force) {

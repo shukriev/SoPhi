@@ -54,11 +54,13 @@ class ExportCommandTest : FunSpec({
     test("an unrecognized --min-judgment is rejected with a clear error, not a stack trace") {
         val result = ExportCommand().test("--min-judgment succes")
         result.output shouldContain "Error: --min-judgment must be success|partial"
+        result.statusCode shouldBe 1   // `sophi export && train` must stop
     }
 
     test("a --split outside (0.0, 1.0] is rejected with a clear error") {
         val result = ExportCommand().test("--split 1.5")
         result.output shouldContain "Error: --split must be a number in (0.0, 1.0]"
+        result.statusCode shouldBe 1   // `sophi export && train` must stop
     }
 
     test("--no-redact without --force prompts, and declining aborts without exporting") {

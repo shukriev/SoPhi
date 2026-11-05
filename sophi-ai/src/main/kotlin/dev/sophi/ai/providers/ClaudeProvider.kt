@@ -5,6 +5,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
+import dev.sophi.ai.api.ToolCall
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -47,6 +48,12 @@ class ClaudeProvider(
         chatModel.stream(request.toPrompt()).asFlow().collect { response ->
             val text = response.result?.output?.text
             if (!text.isNullOrEmpty()) emit(StreamEvent.Content(text))
+            // Spring AI joins each tool_use block's input_json_delta fragments and hands the calls over
+            // once, on the message_delta chunk. A no-input call streams no JSON at all, hence "{}".
+            val toolCalls = response.result?.output?.toolCalls.orEmpty()
+            if (toolCalls.isNotEmpty()) {
+                emit(StreamEvent.ToolCallsReady(toolCalls.map { ToolCall(it.id(), it.name(), it.arguments().ifBlank { "{}" }) }))
+            }
             val chunkUsage = response.metadata?.usage
             inputTokens = maxOf(inputTokens, chunkUsage?.promptTokens ?: 0)
             outputTokens = maxOf(outputTokens, chunkUsage?.completionTokens ?: 0)

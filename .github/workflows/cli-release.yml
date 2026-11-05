@@ -1,6 +1,7 @@
 name: CLI Release
 
-# Push a tag like `cli-v1.0.0` to publish. scripts/get-sophi.sh and scripts/get-sophi.ps1 install
+# Push a tag like `cli-v1.0.0`, or publish a release with that tag from the Releases page; CI
+# attaches the installers either way. scripts/get-sophi.sh and scripts/get-sophi.ps1 install
 # the newest `cli-v*` release, so the tag prefix is what keeps them clear of voice-tools releases.
 # Run it by hand (workflow_dispatch) to build and smoke-test every installer without publishing.
 on:
@@ -286,9 +287,13 @@ jobs:
           for f in sophi.jar sophi-macos-arm64.pkg sophi-macos-x64.pkg sophi-windows-x64.msi; do
             sha256sum "$f" > "$f.sha256"
           done
-          gh release create "${{ github.ref_name }}" * \
-            --repo "${{ github.repository }}" \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          # Publishing from the GitHub Releases page creates the release before this run starts,
+          # so attach the files to it instead of failing on "already exists".
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" * --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

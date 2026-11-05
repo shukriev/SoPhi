@@ -6,6 +6,7 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.system1.Judgments
+import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -20,7 +21,9 @@ internal data class VerdictLesson(
 
 @Serializable
 internal data class VerdictFeedback(
-    val entryIndex: Int, val polarity: String, val signal: String,
+    // Defaults, not required fields: one malformed item is dropped on its own instead of failing
+    // the whole decode and losing the judgment and lessons with it.
+    val entryIndex: Int = -1, val polarity: String = "", val signal: String = "",
     val evidence: String = "", val retryOf: Int? = null
 )
 
@@ -58,7 +61,12 @@ class SessionEvaluator(
                 ))
             }
             if (config.implicitFeedback && preferences != null) {
-                val filtered = verdict.feedback.filter { it.evidence.isNotBlank() }
+                // The quote must really be something the user wrote; one the model can't point to is dropped.
+                val userText = entries.filter { it.role == EntryRole.USER }.map { squash(it.content) }
+                val filtered = verdict.feedback.filter { fb ->
+                    fb.polarity in setOf("positive", "negative") && fb.entryIndex in entries.indices &&
+                        fb.evidence.isNotBlank() && squash(fb.evidence).let { q -> userText.any { q in it } }
+                }
                 // Pass 1: add every record first, tracking the id assigned to each entryIndex in
                 // this batch — this makes the second pass below independent of array order.
                 val idByEntryIndex = mutableMapOf<Int, String>()
@@ -128,8 +136,9 @@ class SessionEvaluator(
 Preference rules: you may emit lessons with "kind":"preference" describing durable user preferences.
 An explicit record with a reason justifies a preference lesson on its own.
 Implicit records justify one only when >= ${config.corroborationThreshold} records show the same pattern.
-Also, if this session's transcript shows the user correcting or rephrasing after an assistant reply,
-report it in "feedback" with the entryIndex, a signal, and a VERBATIM quote as evidence.
+Also, if this session's transcript shows the user correcting, rephrasing, frustrated or satisfied after
+an assistant reply, report it as a top-level "feedback" array in the same JSON object:
+"feedback":[{"entryIndex":N,"polarity":"negative|positive","signal":"user_corrected|user_rephrased|user_frustrated|user_satisfied","evidence":"a VERBATIM quote of the user","retryOf":null}]
 Use "retryOf" when a later reply is a retry of an earlier rejected one.
 Each trajectory line below is prefixed with a "[#N]" marker; N is the entryIndex value to cite
 in "entryIndex" and "retryOf" — do not invent indices.""")
@@ -185,3 +194,6 @@ internal fun sameLesson(a: String, b: String): Boolean {
     val sa = wa.toSet(); val sb = wb.toSet()
     return sa.isNotEmpty() && (sa intersect sb).size.toDouble() / (sa union sb).size >= 0.8
 }
+
+private val WHITESPACE = Regex("\\s+")
+private fun squash(s: String) = s.replace(WHITESPACE, " ").trim()

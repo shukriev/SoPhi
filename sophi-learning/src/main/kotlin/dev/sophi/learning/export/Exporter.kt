@@ -89,6 +89,7 @@ class Exporter(private val inputs: ExportInputs, private val userPatternsFile: P
                     ?.let { neg.sessionId to it }
                     ?: run { unpairable++; null }
             }
+            .filter { (_, line) -> seen.add(sha256(line)) || run { dups++; false } }   // same dedup as SFT
         val unpairedNegatives = inputs.activePreferences()
             .filter { o.scope == null || it.scope == o.scope }
             .filter { o.since == null || it.ts >= o.since }
