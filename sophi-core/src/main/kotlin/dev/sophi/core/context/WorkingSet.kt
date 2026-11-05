@@ -5,6 +5,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.ToolCall
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
+import dev.sophi.core.tools.isToolError
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -109,7 +110,7 @@ data class WorkingSet(
             val errors = mutableListOf<ToolError>()
             for (c in calls) {
                 val result = results[c.id]
-                if (result != null && result.startsWith("Error: ")) errors += ToolError(c.name, result.lineSequence().first().take(LINE_MAX))
+                if (result != null && isToolError(result)) errors += ToolError(c.name, result.lineSequence().first().take(LINE_MAX))
                 val arg = keyArg(c.name, c.argumentsJson) ?: continue
                 when (c.name) {
                     "read_file", "read_context", "write_file", "edit_file" -> {
