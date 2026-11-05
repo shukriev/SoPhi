@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -90,7 +91,11 @@ private class Rig(
     @Volatile var now = 1_000_000L
     val codes = mutableListOf("482913", "111111", "222222")
 
-    init { gateway.start(); gateway.bind(host) }
+    init {
+        gateway.start(); gateway.bind(host)
+        // Both flows drop what is emitted before anyone collects: wait until the gateway's collectors subscribed (CI flake).
+        runBlocking { withTimeout(5_000) { discord.events.subscriptionCount.first { it > 0 }; host.out.subscriptionCount.first { it > 0 } } }
+    }
     fun close() { gateway.stop(); scope.cancel() }
     fun logHas(text: String) = Files.exists(log) && Files.readString(log).contains(text)
 
