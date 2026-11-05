@@ -11,6 +11,7 @@ import dev.sophi.core.permissions.PermissionRules
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.CodeModeTool
+import dev.sophi.core.tools.LlmGuardian
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
@@ -19,6 +20,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
 import io.mockk.Runs
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -110,5 +112,25 @@ class AgentLoopToolCallScopeTest : FunSpec({
         audit.single { it.tool == "risky" }.outcome shouldBe "denied"
         audit.single { it.tool == "code_mode" }.result shouldStartWith "Error: Tool 'risky' execution denied"
         session.entries.any { it.metadata["toolName"] == "risky" } shouldBe false
+    }
+
+    test("the guardian reviews a destructive call a script makes, like the model's own") {
+        val (p, sm) = provider(ToolCall("c1", "code_mode", """{"code":"try { tools.risky({}) } catch (e) { return e.message }"}"""))
+        val wipe = object : Tool {
+            var executed = 0
+            override val name = "risky"
+            override val description = "deletes things"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed++; return "ok" }
+        }
+        val guard = mockk<LLMProvider>().also { coEvery { it.complete(any()) } returns LLMResponse.Text("DENY: wipes the disk", TokenUsage(1, 1)) }
+        val audit = mutableListOf<AuditEntry>()
+        AgentLoop(p, ToolRegistry().register(CodeModeTool()).register(wipe), sm, confirmationPolicy = ConfirmationPolicy.ALLOW_ALL,
+            contextWindowTokens = 100_000, audit = { audit += it }, guardian = LlmGuardian(guard, "g"))
+            .turn(AgentSession(id = "s"), "go", config)
+        wipe.executed shouldBe 0
+        audit.single { it.tool == "risky" }.guardian shouldBe "deny: wipes the disk"
+        audit.single { it.tool == "code_mode" }.result shouldStartWith "Error: Tool 'risky' denied by the guardian"
     }
 })
