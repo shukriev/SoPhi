@@ -14,6 +14,7 @@ import dev.sophi.core.audit.ActorContext
 import dev.sophi.core.audit.AuditScope
 import dev.sophi.core.audit.AuditSink
 import dev.sophi.core.audit.DecisionNotes
+import dev.sophi.core.audit.PERSON_DECISIONS
 import dev.sophi.core.audit.LOCAL_ACTOR
 import dev.sophi.core.audit.auditEntry
 import dev.sophi.core.audit.recordQuietly
@@ -36,6 +37,9 @@ import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.ActivatedTools
 import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.GuardianScope
+import dev.sophi.core.tools.GuardianVerdict
+import dev.sophi.core.tools.LlmGuardian
 import dev.sophi.core.tools.Unattended
 import dev.sophi.core.dryrun.PlanFirst
 import dev.sophi.core.dryrun.PlanRecorder
@@ -250,6 +254,8 @@ class AgentLoop(
     private val supportsImages: () -> Boolean = { false },
     /** Plugin hooks fired around tools, requests, confirmations and compaction. Null = the enclosing loop's (HookScope), if any. */
     private val hooks: LoopHooks? = null,
+    /** Reviews DESTRUCTIVE calls about to run that no person approved. Null = the enclosing loop's (GuardianScope), if any. */
+    private val guardian: LlmGuardian? = null,
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
@@ -267,7 +273,7 @@ class AgentLoop(
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
         effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long, ruleOverride: String? = null,
-        plan: String? = null,
+        plan: String? = null, guardianVerdict: String? = null,
     ) = sink.recordQuietly {
         val rule = ruleOverride ?: when {
             effect == Effect.DENY -> "rule:deny"
@@ -278,7 +284,7 @@ class AgentLoop(
             else -> notes.rules[req.callId] ?: "policy"
         }
         auditEntry(actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId, session.id, req.toolName, req.riskLevel,
-            req.argumentsJson, rule, outcome, result, start, plan)
+            req.argumentsJson, rule, outcome, result, start, plan, guardianVerdict)
     }
 
     /**
@@ -447,10 +453,12 @@ class AgentLoop(
             val sink = audit ?: currentCoroutineContext()[AuditScope]?.sink
             val rules = permissions ?: currentCoroutineContext()[PermissionScope]?.rules
             val turnHooks = hooks ?: currentCoroutineContext()[HookScope]?.hooks
+            val turnGuardian = guardian ?: currentCoroutineContext()[GuardianScope]?.guardian
             var scope: CoroutineContext = ActivatedTools()
             if (sink != null) scope += AuditScope(sink)
             if (rules != null) scope += PermissionScope(rules)
             if (turnHooks != null) scope += HookScope(turnHooks)
+            if (turnGuardian != null) scope += GuardianScope(turnGuardian)
             withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble, inbox) }
         } catch (e: CancellationException) {
             val limit = currentCoroutineContext()[DenialLimit]?.takeIf { it.tripped }
@@ -716,7 +724,7 @@ class AgentLoop(
                     onEvent(TurnEvent.ConfirmationFinished)
                 }
             }
-            val allowedCalls = classified.map { (call, req) ->
+            val decided = classified.map { (call, req) ->
                 val allowed = if (req.callId in held || req.callId in vetoes) false else if (req.callId in hintedReads) true else when (effects[req.callId]) {
                     Effect.DENY -> false
                     Effect.ALLOW -> true
@@ -724,6 +732,39 @@ class AgentLoop(
                     null -> req.riskLevel == RiskLevel.SAFE || req.toolName in grants || decisions[req.callId] == true
                 }
                 call to allowed
+            }
+            // Guardian: a second look at DESTRUCTIVE calls about to run that no person approved this round. It can
+            // only take an approval back (DENY) or hand it to a person (ASK); everything else stays as decided.
+            val verdicts = mutableMapOf<String, GuardianVerdict>()
+            currentCoroutineContext()[GuardianScope]?.guardian?.let { g ->
+                // ponytail: reviews run one after another; a round rarely has more than one destructive call
+                decided.zip(classified).forEach { (d, c) ->
+                    val req = c.second
+                    if (d.second && req.riskLevel == RiskLevel.DESTRUCTIVE && req.callId !in hintedReads && notes.rules[req.callId] !in PERSON_DECISIONS) {
+                        verdicts[req.callId] = g.review(req.toolName, registry.getOrNull(req.toolName)?.description.orEmpty(), req.argumentsJson, userInput)
+                    }
+                }
+            }
+            val guardNotes = DecisionNotes()
+            val guardAsks = classified.map { it.second }.filter { verdicts[it.callId]?.effect == Effect.ASK }
+            val guardDecisions = if (guardAsks.isEmpty()) emptyMap() else {
+                // Routed like an ask rule: auto, threshold and god-mode policies hand it to their person.
+                val requests = guardAsks.map { req ->
+                    req.copy(askRule = true, alwaysAllow = null, preview = "${req.preview ?: req.argumentsJson}\nguardian: ${verdicts.getValue(req.callId).reason}")
+                }
+                onEvent(TurnEvent.ConfirmationStarted(requests.map { it.toolName }))
+                try {
+                    withContext(guardNotes) { confirmationPolicy.confirm(requests) }
+                } finally {
+                    onEvent(TurnEvent.ConfirmationFinished)
+                }
+            }
+            val allowedCalls = decided.map { (call, allowed) ->
+                call to when (verdicts[call.id]?.effect) {
+                    Effect.DENY -> false
+                    Effect.ASK -> guardDecisions[call.id] == true
+                    else -> allowed
+                }
             }
 
             val undoMeta = mutableMapOf<String, String>()
@@ -750,9 +791,12 @@ class AgentLoop(
                         val start = System.currentTimeMillis()
                         val step = held[call.id]
                         fun audit(outcome: String, result: String) {
-                            val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook" else null
+                            val verdict = verdicts[call.id]
+                            val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook"
+                                else when (verdict?.effect) { Effect.DENY -> "guardian"; Effect.ASK -> guardNotes.rules[call.id] ?: "policy"; else -> null }
                             val plan = step?.let { "${recorder!!.planId}#$it" }
-                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan)
+                            if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan,
+                                verdict?.let { "${it.effect.name.lowercase()}: ${it.reason}" })
                         }
                         var failed = false
                         val result = if (step != null) {
@@ -764,6 +808,7 @@ class AgentLoop(
                             failed = true
                             currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson)
                             if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
+                            else if (verdicts[call.id]?.effect == Effect.DENY) "Error: Tool '${call.name}' denied by the guardian: ${verdicts.getValue(call.id).reason}"
                             else hookDenials[call.id]?.let { "Error: Tool '${call.name}' denied by a hook: $it" }
                                 ?: if (currentCoroutineContext()[Unattended.Key] != null) "Error: Tool '${call.name}' execution denied by " +
                                     "confirmation policy: this run is unattended and nobody is here to approve it. Do without it, or finish and say what you needed."

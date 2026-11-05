@@ -185,6 +185,8 @@ Known limits of the audit log:
 - Calls made through sophi-web are not audited yet.
 - A call cancelled before it starts (e.g. during confirmation) has no entry.
 
+**Guardian (opt-in).** With `guardian` on in `/settings` (or `--guardian` for one run), a destructive call about to run without your approval (an allow rule, a grant, auto mode or `--god-mode` let it through) is first shown to the model, which answers allow, ask or deny. Ask sends it to you as an ask rule would; deny refuses it and tells Sophi why. If the review fails or times out, you are asked. It never allows anything a rule or you refused, and never reviews a call you just approved. It uses the session's model unless `guardian-model` names another. Each verdict is in that call's audit entry as `guardian` (`deny: <reason>`, redacted). In the SDK, `RuntimeBuilder.guardian(model)`. Not yet applied to `sophi schedule` runs or `/plan`.
+
 **Permission rules.** `~/.sophi/permissions.json` (global) and `.sophi/permissions.json` (project) hold a JSON list of `{"tool", "pattern", "effect"}`, where `effect` is `allow`, `ask` or `deny`. `tool` and `pattern` are globs: `*` matches anything, including `/`, and `\*` is a literal star. A rule without `pattern` covers every call of that tool.
 
 ```json

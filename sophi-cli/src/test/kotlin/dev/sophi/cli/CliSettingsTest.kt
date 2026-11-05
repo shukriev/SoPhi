@@ -149,4 +149,9 @@ class CliSettingsTest : FunSpec({
         s.kind shouldBe SettingKind.Bool
         s.live shouldBe false
     }
+
+    test("guardian is an on/off setting and guardian-model a text one, read at the next start") {
+        CLI_SETTINGS.single { it.key == "guardian" }.let { it.kind shouldBe SettingKind.Bool; it.live shouldBe false }
+        CLI_SETTINGS.single { it.key == "guardian-model" }.let { it.kind shouldBe SettingKind.Text; it.live shouldBe false }
+    }
 })

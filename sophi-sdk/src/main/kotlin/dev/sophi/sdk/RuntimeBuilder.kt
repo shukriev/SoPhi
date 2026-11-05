@@ -53,6 +53,7 @@ import dev.sophi.skills.SkillInvocationStore
 import dev.sophi.skills.SkillRegistry
 import dev.sophi.versioning.VersionStore
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
@@ -257,6 +258,16 @@ class RuntimeBuilder {
 
     /** Enforces already-loaded [rules]. The last of [permissionRules] and this wins. */
     fun permissions(rules: dev.sophi.core.permissions.PermissionRules): RuntimeBuilder = apply { permissionRules = rules }
+
+    private var guardianConfig: Pair<String?, kotlin.time.Duration>? = null
+
+    /**
+     * Before a DESTRUCTIVE call runs without a person approving it (allow rule, grant, auto or god mode), [model]
+     * reviews it and may hand it to a person or refuse it; a failed review hands it to a person. Verdicts go to
+     * the audit log. Null [model] = the session's model (following a switchModel).
+     */
+    fun guardian(model: String? = null, timeout: kotlin.time.Duration = 30.seconds): RuntimeBuilder =
+        apply { guardianConfig = model to timeout }
 
     private var userAsker: dev.sophi.core.tools.UserAsker? = null
 
@@ -474,6 +485,8 @@ class RuntimeBuilder {
                     ?: (modelCatalog?.find(current, catalogProvider)?.vision ?: modelCatalog?.base(current)?.vision ?: false)
             },
             hooks = pluginRegistry,
+            // The start model's name: the metered provider sends it to the session's active model.
+            guardian = guardianConfig?.let { (m, t) -> dev.sophi.core.tools.LlmGuardian(p, m ?: model, t) },
         )
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
             .also { pluginRegistry.register(it) }

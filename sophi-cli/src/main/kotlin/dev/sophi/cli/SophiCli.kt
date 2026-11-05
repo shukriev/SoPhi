@@ -148,6 +148,15 @@ class SophiCli(
             "a rule has no opinion on) runs unattended for the whole session. Fixed once set — no " +
             "/auto toggle while in this mode. Overrides --auto if both are passed."
     ).flag("--no-god-mode", default = false)
+    private val guardian: Boolean by option(
+        "--guardian",
+        help = "Before a destructive call runs without your approval (allow rule, auto or god mode), the model " +
+            "reviews it and may ask you or refuse it; every verdict goes to the audit log (default off)."
+    ).flag("--no-guardian", default = false)
+    private val guardianModel: String? by option(
+        "--guardian-model",
+        help = "Model the guardian reviews with (default: the session's model)."
+    )
     private val goalEscalationModel: String? by option(
         "--goal-escalation-model",
         help = "Stronger model /goal escalates a plan step to when its confidence is below " +
@@ -242,6 +251,8 @@ class SophiCli(
             noRemote = noRemote,
             sessionIdToResume = sessionId,
             maxCostUsd = maxCostUsd,
+            guardian = guardian,
+            guardianModel = guardianModel?.takeIf { it.isNotBlank() },
         )
 
     override fun run() = runBlocking {
