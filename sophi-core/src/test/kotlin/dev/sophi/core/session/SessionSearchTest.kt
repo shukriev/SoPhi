@@ -76,7 +76,10 @@ class SessionSearchTest : FunSpec({
         out shouldContain "Earlier"
         out shouldNotContain "now"
         runBlocking { tool.execute("""{"query":"  "}""") } shouldStartWith "Error:"
-        runBlocking { tool.execute("""{"query":"zzz"}""") } shouldBe "No past sessions mention: zzz"
+        val miss = runBlocking { tool.execute("""{"query":"zzz"}""") }
+        miss shouldStartWith "No past sessions mention: zzz"
+        miss shouldContain "skill" // seen live (gemma, playbook tool-5): an empty search ended the hunt for notes kept in a skill
+        tool.description shouldContain "skill"
         runBlocking { withContext(ActorContext("bob")) { tool.execute("""{"query":"papaya"}""") } } shouldStartWith "Error:"
     }
 })
