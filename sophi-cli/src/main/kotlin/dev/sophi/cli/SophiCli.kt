@@ -182,6 +182,11 @@ class SophiCli(
         help = "Also offer skills written for other agents (<name>/SKILL.md in ~/.claude/skills, ~/.agents/skills " +
             "and this project's .claude/skills and .agents/skills), read only; a SoPhi skill with the same name wins (default on)."
     ).flag("--no-other-agent-skills", default = true)
+    private val subagentWorktrees: Boolean by option(
+        "--subagent-worktrees",
+        help = "Let the model run a subagent in its own git worktree off HEAD; its changes come back as a branch to review " +
+            "and merge, and your working tree is never touched (default off)."
+    ).flag("--no-subagent-worktrees", default = false)
     private val sandboxMode: String by option(
         "--sandbox",
         help = "Where bash runs: off (default), seatbelt (macOS sandbox: writes only to the workspace, temp " +
@@ -237,6 +242,7 @@ class SophiCli(
             planFirst = dev.sophi.core.dryrun.PlanFirst.valueOf(planFirstMode.uppercase()),
             trustReadOnlyHints = trustReadOnlyHints,
             otherAgentSkills = otherAgentSkills,
+            subagentWorktrees = subagentWorktrees,
             braveApiKey = braveApiKeyOption,
             autoMode = autoMode,
             godMode = godMode,

@@ -14,6 +14,13 @@ import kotlin.io.path.isRegularFile
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
+/**
+ * Config that runs a program: a repo SoPhi doesn't own (or the user's global config) would otherwise run it on every
+ * git call SoPhi makes, unconfirmed: core.fsmonitor on any index read, hooks on any hook-running command, and a
+ * committed nested repo's own clean filters when status looks inside it (ignoreSubmodules=dirty: it doesn't).
+ */
+internal val GIT_NO_EXEC = listOf("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=dirty")
+
 /** A gitignore line matching exactly [path] (relative to the work tree); a trailing `/` stays a directory match. */
 private fun anchored(path: String) = "/" + path.replace(Regex("""([\\*?\[!#\s])"""), "\\\\$1") + "\n"
 
@@ -66,10 +73,7 @@ class CheckpointStore(
         val log = Files.createTempFile("sophi-git", ".out")
         val stdin = input?.let { Files.createTempFile("sophi-git", ".in").apply { writeText(it) } }
         try {
-            // Config that runs a program: a repo SoPhi doesn't own (or the user's global config) would otherwise run it on
-            // every snapshot, unconfirmed: core.fsmonitor on any index read, hooks on any hook-running command, and a
-            // committed nested repo's own clean filters when status looks inside it (ignoreSubmodules=dirty: it doesn't).
-            val noExec = arrayOf("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=dirty")
+            val noExec = GIT_NO_EXEC.toTypedArray()
             // user's global config must not leak in: signing would prompt
             val cmd = if (userRepo) listOf(git, "--no-optional-locks", *noExec, *args) else listOf(
                 git, "--git-dir=$shadow", "--work-tree=$root", "-c", "user.name=sophi", "-c", "user.email=sophi@localhost",

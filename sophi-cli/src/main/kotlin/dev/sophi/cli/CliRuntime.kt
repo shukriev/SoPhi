@@ -73,6 +73,8 @@ data class CliOptions(
     /** Review destructive calls nobody approved with [guardianModel] (null = the session's model). */
     val guardian: Boolean = false,
     val guardianModel: String? = null,
+    /** Subagents may get their own git worktree (`delegate_to_subagent` `worktree: true`). */
+    val subagentWorktrees: Boolean = false,
 )
 
 /**
@@ -192,7 +194,7 @@ internal suspend fun buildCliRuntime(
         permissions(permissionRules)
         context(contextEngine) { _ -> contextEngine.projectContaining(cwd)?.id }
         agentsDir(agentsDir, onWarning)
-        subagentDelegation()
+        subagentDelegation(worktrees = opts.subagentWorktrees)
         goalDecomposition(Path.of(opts.plansDir))
         skillTools(foreignSkillDirs = foreignSkillDirs)
         loopGuard(loopGuardPolicy)

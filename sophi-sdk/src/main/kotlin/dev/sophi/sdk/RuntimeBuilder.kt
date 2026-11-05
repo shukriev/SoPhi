@@ -151,6 +151,7 @@ class RuntimeBuilder {
     private var permissionRules: dev.sophi.core.permissions.PermissionRules? = null
     private var contextConfig: Triple<ContextEngine, ProjectOf, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
+    private var subagentWorktrees: Boolean = false
     private var goalDecompositionPlansDir: Path? = null
     private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
     private var skillToolsEnabled: Boolean = false
@@ -290,8 +291,11 @@ class RuntimeBuilder {
      * Registers a `delegate_to_subagent` tool built from whatever [agentsDir] loaded — a no-op
      * if [agentsDir] was never called or found no definitions, matching [SubagentTool]'s own
      * "definitions is empty" guard. Safe to call without [agentsDir]; just inert.
+     * [worktrees]: the model may run a subagent in its own git worktree under `~/.sophi/worktrees`, with the
+     * [builtinTools] rooted there (needs [builtinTools]; ignored without it).
      */
-    fun subagentDelegation(): RuntimeBuilder = apply { subagentDelegationEnabled = true }
+    fun subagentDelegation(worktrees: Boolean = false): RuntimeBuilder =
+        apply { subagentDelegationEnabled = true; subagentWorktrees = worktrees }
 
     /** Registers a `decompose_goal` tool; every plan version is logged under [plansDir] ([PlanLog] creates it if missing). */
     fun goalDecomposition(
@@ -554,6 +558,17 @@ class RuntimeBuilder {
                     contextWindowTokens = window,
                     confirmationPolicy = confirmationPolicy,
                     currentWindow = { loop.contextWindowTokens },
+                    worktrees = builtinToolsConfig?.takeIf { subagentWorktrees }?.let { cfg ->
+                        val host = checkNotNull(bashSandbox)
+                        dev.sophi.core.agent.SubagentWorktrees(cfg.root) { wt ->
+                            // ponytail: no Docker in a worktree yet: its container would mount only the worktree and need closing
+                            check(host.mode != dev.sophi.core.tools.SandboxMode.DOCKER) { "the Docker sandbox can't run in a worktree yet" }
+                            val sandbox = dev.sophi.core.tools.BashSandbox(wt)
+                            sandbox.set(host.mode, host.network)?.let { error(it) }
+                            // no background jobs: one could outlive the worktree
+                            buildBuiltinTools(wt, cfg.braveApiKey, sandbox = sandbox, jobs = null)
+                        }
+                    },
                 )
             )
         }

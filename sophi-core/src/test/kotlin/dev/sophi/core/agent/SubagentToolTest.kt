@@ -510,4 +510,115 @@ class SubagentToolTest : FunSpec({
         val sub = sessionManager.load(sessionManager.list().single().id)
         sub.branch().first { it.role == dev.sophi.core.session.EntryRole.TOOL_RESULT }.content shouldContain "output truncated"
     }
+
+    context("worktrees") {
+        fun sh(dir: Path, vararg cmd: String): String {
+            val p = ProcessBuilder(*cmd).directory(dir.toFile()).redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            check(p.waitFor() == 0) { "${cmd.toList()} failed: $out" }
+            return out
+        }
+        fun repo(): Path = createTempDirectory("wt-repo").also { r ->
+            sh(r, "git", "init", "-q")
+            r.resolve("a.txt").toFile().writeText("a")
+            sh(r, "git", "add", "-A")
+            sh(r, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "init")
+        }
+        /** A write_file that writes `out.txt` under [root]. */
+        fun writerAt(root: Path) = object : Tool {
+            override val name = "write_file"
+            override val description = "Writes"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "ok".also { root.resolve("out.txt").toFile().writeText("x") }
+        }
+        val writer = AgentDefinition(name = "writer", description = "Writes", systemPrompt = "You write.", allowedTools = listOf("write_file"))
+        fun tool(root: Path, provider: LLMProvider, enabled: Boolean = true) = SubagentTool(
+            definitions = listOf(writer), provider = provider, fullRegistry = ToolRegistry().register(writerAt(root)),
+            sessionManager = FileSessionManager(createTempDirectory("subagent-test")), parentConfig = AgentConfig(model = "m"),
+            contextWindowTokens = TEST_CONTEXT_WINDOW,
+            worktrees = if (enabled) SubagentWorktrees(root, createTempDirectory("wt-home")) { listOf(writerAt(it)) } else null,
+        )
+        fun writesThenAnswers(): LLMProvider = mockk<LLMProvider>().also { p ->
+            every { p.stream(any()) } returnsMany listOf(
+                LLMResponse.ToolUse(listOf(ToolCall("c1", "write_file", "{}")), TokenUsage(1, 1)).toStreamFlow(),
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow(),
+            )
+        }
+
+        test("the schema offers worktree only when worktrees are set") {
+            val r = repo()
+            tool(r, mockk()).parametersJson shouldContain "\"worktree\""
+            tool(r, mockk(), enabled = false).parametersJson.contains("\"worktree\"") shouldBe false
+        }
+
+        test("worktree=true without worktrees runs in the shared tree") {
+            val r = repo()
+            val result = runBlocking(SessionIdContext("p")) {
+                tool(r, writesThenAnswers(), enabled = false).execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""")
+            }
+            result shouldBe "done"
+            r.resolve("out.txt").toFile().exists() shouldBe true
+        }
+
+        test("a worktree run writes on a branch, not in the main tree") {
+            val r = repo()
+            val result = runBlocking(SessionIdContext("p")) {
+                tool(r, writesThenAnswers()).execute("""{"subagent_type":"writer","prompt":"write it","worktree":true}""")
+            }
+            result.startsWith("done") shouldBe true
+            val branch = Regex("sophi-subagent/writer-[0-9a-f]{6}").find(result)!!.value
+            sh(r, "git", "show", "$branch:out.txt") shouldBe "x"
+            r.resolve("out.txt").toFile().exists() shouldBe false
+        }
+
+        test("a throwing nested turn still finishes the worktree") {
+            val r = repo()
+            val provider = mockk<LLMProvider>()
+            every { provider.stream(any()) } throws IllegalStateException("boom")
+            shouldThrow<IllegalStateException> {
+                runBlocking(SessionIdContext("p")) { tool(r, provider).execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""") }
+            }
+            sh(r, "git", "worktree", "list").lines().count { it.isNotBlank() } shouldBe 1
+            sh(r, "git", "branch", "--list", "sophi-subagent/*").trim() shouldBe ""
+        }
+
+        test("the subagent is told it works in the worktree") {
+            val r = repo()
+            val requests = mutableListOf<CompletionRequest>()
+            val provider = mockk<LLMProvider>()
+            every { provider.stream(any()) } answers {
+                requests.add(firstArg())
+                LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+            }
+            val result = runBlocking(SessionIdContext("p")) { tool(r, provider).execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""") }
+            result shouldContain "No file changes"
+            requests.first().systemPrompt!! shouldContain "git worktree"
+            requests.first().systemPrompt!! shouldContain "You write."
+        }
+
+        test("the worktree is finished even when saving the sub-session fails") {
+            val r = repo()
+            val sm = io.mockk.spyk(FileSessionManager(createTempDirectory("subagent-test")))
+            every { sm.save(any()) } throws java.io.IOException("disk full")
+            val t = SubagentTool(
+                definitions = listOf(writer), provider = writesThenAnswers(), fullRegistry = ToolRegistry().register(writerAt(r)),
+                sessionManager = sm, parentConfig = AgentConfig(model = "m"), contextWindowTokens = TEST_CONTEXT_WINDOW,
+                worktrees = SubagentWorktrees(r, createTempDirectory("wt-home")) { listOf(writerAt(it)) },
+            )
+            shouldThrow<java.io.IOException> {
+                runBlocking(SessionIdContext("p")) { t.execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""") }
+            }
+            val branch = sh(r, "git", "branch", "--list", "sophi-subagent/*").trim().removePrefix("+").trim()
+            sh(r, "git", "show", "$branch:out.txt") shouldBe "x"
+        }
+
+        test("an open failure returns an error without running the subagent") {
+            val provider = mockk<LLMProvider>()
+            val result = runBlocking(SessionIdContext("p")) {
+                tool(createTempDirectory("wt-plain"), provider).execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""")
+            }
+            result shouldContain "Error: worktree"
+            coVerify(exactly = 0) { provider.stream(any()) }
+        }
+    }
 })

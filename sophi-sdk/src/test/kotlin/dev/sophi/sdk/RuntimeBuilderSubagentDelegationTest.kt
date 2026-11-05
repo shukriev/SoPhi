@@ -60,6 +60,19 @@ class RuntimeBuilderSubagentDelegationTest : FunSpec({
         runtime.toolNames() shouldNotContain "delegate_to_subagent"
     }
 
+    test("subagentDelegation(worktrees = true) offers the worktree parameter; the default does not") {
+        val agentsDir = tempdir().toPath()
+        agentsDir.resolve("explorer.md").writeText("---\nname: explorer\ndescription: reads things\n---\nYou explore.")
+        fun schema(worktrees: Boolean) = RuntimeBuilder().apply {
+            provider = mockk()
+            sessionsDir = tempdir().toPath()
+        }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.builtinTools(tempdir().toPath())
+            .agentsDir(agentsDir).subagentDelegation(worktrees = worktrees).build()
+            .toolRegistry.get("delegate_to_subagent").parametersJson
+        schema(true).contains("\"worktree\"") shouldBe true
+        schema(false).contains("\"worktree\"") shouldBe false
+    }
+
     test("agentsDir() without subagentDelegation() does not register the tool") {
         val agentsDir = tempdir().toPath()
         agentsDir.resolve("explorer.md").writeText("---\nname: explorer\ndescription: reads things\n---\nYou explore.")
