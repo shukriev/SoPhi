@@ -67,7 +67,7 @@ class SkillRegistry(private val skills: Map<String, Skill>, val refused: List<St
         private fun loadDirTolerant(dir: Path, loader: SkillLoader, refused: MutableList<String>): Map<String, Skill> {
             if (!dir.isDirectory()) return emptyMap()
             val pins = SkillLock.read(dir)
-            val flat = dir.listDirectoryEntries("*.md")
+            val flat = dir.listDirectoryEntries("*.md").sorted() // listing order is filesystem-dependent
                 .filter { it.isRegularFile() }
                 .filter { file ->
                     val id = file.nameWithoutExtension
