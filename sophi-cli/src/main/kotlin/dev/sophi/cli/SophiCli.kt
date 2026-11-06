@@ -16,6 +16,7 @@ import com.github.ajalt.mordant.terminal.Terminal
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.SubagentTool
+import dev.sophi.core.agent.statusLine
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.tools.AutoModeConfirmationPolicy
 import dev.sophi.core.tools.ConfirmationPolicy
@@ -359,8 +360,16 @@ class SophiCli(
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /search /branch /checkout /undo /revert /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents\n"
         )
+        // A background subagent can end at any time relative to the prompt line: printAbove, as for warnings.
+        cli.runtime.subagents?.onChange = { info ->
+            if (info.status != dev.sophi.core.agent.BackgroundSubagents.Status.RUNNING) {
+                val msg = "subagent ${info.id} (${info.type}) " +
+                    if (info.status == dev.sophi.core.agent.BackgroundSubagents.Status.DONE) "done — subagent_result(\"${info.id}\")" else info.statusLine
+                if (sophiTerminal.isInteractive) sophiTerminal.printAbove(TextColors.cyan(msg).toString()) else mordantTerminal.println(TextColors.cyan(msg))
+            }
+        }
         // containers a killed sophi left behind; off the start path, since asking Docker can take seconds
         kotlin.concurrent.thread(isDaemon = true, name = "sophi-docker-orphans") {
             if (dev.sophi.core.tools.DockerSandbox.available) dev.sophi.core.tools.DockerSandbox.removeOrphans()
@@ -434,6 +443,7 @@ class SophiCli(
             permissions = cli.runtime.permissionRules,
             checkpoints = cli.runtime.checkpointStore,
             jobs = cli.runtime.jobs,
+            subagents = cli.runtime.subagents,
             mcp = { action, server ->
                 mcpAuth(action, server, Path.of(mcpConfigPathStr),
                     login = { c -> cli.runtime.mcpLogin(c, openInBrowser) }, logout = { cli.runtime.mcpLogout(it) })

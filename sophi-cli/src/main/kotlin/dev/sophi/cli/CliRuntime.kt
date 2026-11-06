@@ -196,7 +196,8 @@ internal suspend fun buildCliRuntime(
         permissions(permissionRules)
         context(contextEngine) { _ -> contextEngine.projectContaining(cwd)?.id }
         agentsDir(agentsDir, onWarning)
-        subagentDelegation(worktrees = opts.subagentWorktrees)
+        // nobody can answer for a background subagent: only --god-mode lets its calls through
+        subagentDelegation(worktrees = opts.subagentWorktrees, backgroundPolicy = if (opts.godMode) confirmationPolicy else ConfirmationPolicy.DENY_ALL)
         if (opts.codeMode) codeMode()
         goalDecomposition(Path.of(opts.plansDir))
         skillTools(foreignSkillDirs = foreignSkillDirs)
