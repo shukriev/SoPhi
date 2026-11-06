@@ -15,8 +15,10 @@ class TerminalUserAsker(private val terminal: Terminal, private val input: Input
     private val oneAtATime = Mutex()
 
     // The timeout covers waiting behind an earlier question too.
+    // An unattended run (a background subagent) asks behind the conversation: a prompt would be answered for the wrong thing.
     override suspend fun ask(question: UserQuestion, timeoutMs: Long?): Answer =
-        if (timeoutMs == null) oneAtATime.withLock { prompt(question) }
+        if (question.unattended) Answer.TimedOut
+        else if (timeoutMs == null) oneAtATime.withLock { prompt(question) }
         else withTimeoutOrNull(timeoutMs) { oneAtATime.withLock { prompt(question) } } ?: Answer.TimedOut
 
     private suspend fun prompt(q: UserQuestion): Answer {
