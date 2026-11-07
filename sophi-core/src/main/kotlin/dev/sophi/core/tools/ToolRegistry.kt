@@ -3,15 +3,19 @@ package dev.sophi.core.tools
 import dev.sophi.ai.api.ToolDefinition
 
 class ToolRegistry {
-    private val tools: MutableMap<String, Tool> = mutableMapOf()
+    // Replaced whole on each write, never mutated: an MCP server's list change registers from another thread
+    // while a turn reads, and each read sees one consistent, ordered snapshot.
+    @Volatile private var tools: Map<String, Tool> = emptyMap()
 
+    @Synchronized
     fun register(tool: Tool): ToolRegistry {
-        tools[tool.name] = tool
+        tools = tools + (tool.name to tool)
         return this
     }
 
+    @Synchronized
     fun unregister(name: String): ToolRegistry {
-        tools.remove(name)
+        tools = tools - name
         return this
     }
 
@@ -25,6 +29,7 @@ class ToolRegistry {
      * [TOOL_SEARCH_NAME] is registered; without it the model could never load a hidden tool.
      */
     fun definitions(activated: Set<String> = emptySet()): List<ToolDefinition> {
+        val tools = tools
         val hideDeferred = TOOL_SEARCH_NAME in tools
         return tools.values
             .filter { !(hideDeferred && it.deferred && it.name !in activated) }
@@ -34,6 +39,7 @@ class ToolRegistry {
     fun deferredNames(): List<String> = tools.values.filter { it.deferred }.map { it.name }.sorted()
 
     /** Registers [ToolSearchTool] once there is a deferred tool and none registered yet. */
+    @Synchronized
     fun registerToolSearchIfDeferred(): ToolRegistry {
         if (TOOL_SEARCH_NAME !in tools && deferredNames().isNotEmpty()) register(ToolSearchTool(this))
         return this
