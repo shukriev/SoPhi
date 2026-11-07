@@ -7,6 +7,12 @@ import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import io.modelcontextprotocol.kotlin.sdk.types.Method
+import io.modelcontextprotocol.kotlin.sdk.types.ToolListChangedNotification
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -32,7 +38,19 @@ class SdkMcpSession(
     private val client: Client,
     private val process: Process? = null,
     private val httpClient: HttpClient? = null
-) : McpSession {
+) : McpSession, ToolsChangeSource {
+
+    /** Only when the server advertises `tools.listChanged`; otherwise it will never send the notification. */
+    override fun onToolsChanged(handler: suspend () -> Unit) {
+        if (client.serverCapabilities?.tools?.listChanged != true) return
+        client.setNotificationHandler<ToolListChangedNotification>(Method.Defined.NotificationsToolsListChanged) {
+            CompletableDeferred<Unit>().also { done ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    try { handler() } finally { done.complete(Unit) }
+                }
+            }
+        }
+    }
 
     override suspend fun listTools(): List<RemoteToolInfo> =
         client.listTools().tools.map { tool ->

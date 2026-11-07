@@ -21,6 +21,13 @@ class McpClientManager(
 
     private val sessions = mutableMapOf<String, McpSession>()
 
+    /**
+     * Called when a server announces a changed tool list: the tools to register (always deferred, so
+     * ToolSearch can find them) and the names to unregister. Runs on a background thread.
+     */
+    @Volatile
+    var onToolsChanged: ((added: List<Tool>, removed: List<String>) -> Unit)? = null
+
     suspend fun connect(configs: List<McpServerConfig>, deferToolsOver: Int = DEFAULT_DEFER_TOOLS_OVER): List<Tool> =
         configs.flatMap { connectOne(it, deferToolsOver) }
 
@@ -44,6 +51,15 @@ class McpClientManager(
             val safeTools = config.safeTools.toSet()
             val remoteTools = session.listTools()
             val defer = remoteTools.size > deferToolsOver
+            var known = remoteTools.map { it.name }.toSet()
+            (session as? ToolsChangeSource)?.onToolsChanged {
+                val now = try { session.listTools() } catch (e: Exception) { return@onToolsChanged }
+                val added = now.filter { it.name !in known }
+                    .map { McpTool(session, config.name, it, safeTools, deferred = true, mask = mask::mask) }
+                val removed = (known - now.map { it.name }.toSet()).map { "${config.name}__$it" }
+                known = now.map { it.name }.toSet()
+                if (added.isNotEmpty() || removed.isNotEmpty()) onToolsChanged?.invoke(added, removed)
+            }
             remoteTools.map { McpTool(session, config.name, it, safeTools, deferred = defer, mask = mask::mask) }
         } catch (e: Exception) {
             val signIn = e.signInRequired()

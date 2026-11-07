@@ -461,6 +461,11 @@ class RuntimeBuilder {
             httpConnector = mcpWiring?.second ?: dev.sophi.mcp.StreamableHttpMcpConnector(auth = oauth),
             credentials = credentialStore, mask = secretMask,
         )
+        manager.onToolsChanged = { added, removed ->
+            removed.forEach { registry.unregister(it) }
+            added.forEach { registry.register(it) }
+            registry.registerToolSearchIfDeferred()
+        }
         runBlocking { manager.connect(mcpServers, deferOver) }.forEach { registry.register(it) }
         registry.registerToolSearchIfDeferred()
         val sm = FileSessionManager(sessionsDir)

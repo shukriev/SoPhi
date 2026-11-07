@@ -224,4 +224,15 @@ class ToolRegistryTest : FunSpec({
     test("deferredNames is sorted") {
         deferredRegistry(withSearch = true).deferredNames() shouldBe listOf("gh__create_issue", "gh__list_prs")
     }
+
+    test("tools registered from another thread (an MCP list change) never break a reader mid-turn") {
+        val registry = ToolRegistry().register(echoTool("base"))
+        val writer = Thread { repeat(20_000) { registry.register(echoTool("t$it")); registry.unregister("t${it - 1}") } }
+        writer.start()
+        while (writer.isAlive) {
+            registry.definitions().first().name shouldBe "base"
+            registry.deferredNames()
+        }
+        writer.join()
+    }
 })

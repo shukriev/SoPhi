@@ -3,6 +3,7 @@ package dev.sophi.mcp
 import dev.sophi.mcp.config.McpServerConfig
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.mcp.config.McpTransport
+import dev.sophi.core.tools.Tool
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
@@ -254,5 +255,31 @@ class McpClientManagerTest : FunSpec({
 
         tools.all { it.deferred } shouldBe true
         tools.map { it.riskLevel("{}") } shouldBe listOf(RiskLevel.SAFE, RiskLevel.DESTRUCTIVE)
+    }
+
+    test("a tools/list_changed notification re-lists the server: new tools arrive deferred, removed ones are reported") {
+        val session = object : McpSession, ToolsChangeSource {
+            var tools = listOf(RemoteToolInfo("a", "a", "{}"), RemoteToolInfo("b", "b", "{}"))
+            var fire: suspend () -> Unit = {}
+            override suspend fun listTools() = tools
+            override suspend fun callTool(name: String, argumentsJson: String) = ""
+            override suspend fun close() {}
+            override fun onToolsChanged(handler: suspend () -> Unit) { fire = handler }
+        }
+        val connector = mockk<McpConnector>()
+        coEvery { connector.connect(any()) } returns session
+        val manager = McpClientManager(stdioConnector = connector, httpConnector = mockk())
+        val changes = mutableListOf<Pair<List<Tool>, List<String>>>()
+        manager.onToolsChanged = { added, removed -> changes += added to removed }
+
+        runBlocking {
+            manager.connect(listOf(McpServerConfig(name = "s", transport = McpTransport.STDIO, command = listOf("z"))))
+            session.tools = listOf(RemoteToolInfo("b", "b", "{}"), RemoteToolInfo("c", "c", "{}"))
+            session.fire()
+        }
+
+        changes.size shouldBe 1
+        changes[0].first.map { it.name to it.deferred } shouldBe listOf("s__c" to true)
+        changes[0].second shouldBe listOf("s__a")
     }
 })
