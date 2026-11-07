@@ -1,0 +1,107 @@
+package dev.sophi.core.tools
+
+import dev.sophi.core.session.SessionIdContext
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
+import kotlin.io.path.exists
+import kotlin.io.path.readText
+
+class ResultStoreTest : FunSpec({
+    lateinit var dir: Path
+    lateinit var store: ResultStore
+    beforeTest { dir = tempdir().toPath(); store = ResultStore(dir, pageChars = 100) }
+
+    fun lines(n: Int) = (1..n).joinToString("\n") { "line %04d".format(it) } // 9 chars + newline each
+
+    fun read(s: ResultStore, id: String, page: Int? = null, session: String = "s1") = runBlocking {
+        withContext(SessionIdContext(session)) {
+            ResultReadTool(s).execute(if (page == null) """{"id":"$id"}""" else """{"id":"$id","page":$page}""")
+        }
+    }
+
+    test("a result that fits one page is unchanged and kept nowhere") {
+        val text = "x".repeat(100)
+        limitResult(text, 100, store, "s1") shouldBe (text to null)
+        dir.resolve("s1.results").exists() shouldBe false
+    }
+
+    test("an over-page result shows its start and end, its id and how to read more") {
+        val text = lines(100) // 999 chars
+        val (shown, id) = limitResult(text, 100, store, "s1")
+        id shouldBe "r1"
+        shown shouldStartWith text.take(66)
+        shown.endsWith(text.takeLast(33)) shouldBe true
+        shown shouldContain """[r1: 999 chars, 100 lines; showing the start and end; result_read("r1", 2) for the next page of 10]"""
+    }
+
+    test("result_read pages through to the end, and the pages put together are the whole result") {
+        val text = lines(100)
+        limitResult(text, 100, store, "s1")
+        val pages = (1..10).map { read(store, "r1", it) }
+        pages.last() shouldStartWith "[r1 page 10/10]\n"
+        pages.joinToString("") { it.substringAfter("]\n") } shouldBe text
+        read(store, "r1") shouldStartWith "[r1 page 2/10]\n" // page 1 is what the model already saw
+        read(store, "r1", 11).let { isToolError(it) shouldBe true; it shouldContain "10 pages" }
+    }
+
+    test("pages end at a line break when one is near the page's end") {
+        limitResult(lines(100), 100, store, "s1")
+        read(store, "r1", 1).substringAfter("]\n").endsWith("\n") shouldBe true
+    }
+
+    test("an unknown id, a malformed one, or another session's id is a tool error") {
+        limitResult(lines(100), 100, store, "s1")
+        isToolError(read(store, "r9")) shouldBe true
+        isToolError(read(store, "seven")) shouldBe true
+        isToolError(read(store, "r1", session = "s2")) shouldBe true
+    }
+
+    test("the stored copy has secrets redacted, and is readable only by its owner") {
+        val token = "ghp_" + "a".repeat(36)
+        val text = lines(50) + "\nGITHUB_TOKEN $token\n" + lines(50)
+        limitResult(text, 100, store, "s1")
+        val file = dir.resolve("s1.results/r1.txt")
+        file.readText() shouldNotContain token
+        file.readText() shouldContain "[REDACTED:github_token]"
+        PosixFilePermissions.toString(Files.getPosixFilePermissions(file)) shouldBe "rw-------"
+    }
+
+    test("past the session cap the oldest result is evicted, and its id says so") {
+        val small = ResultStore(dir, pageChars = 100, sessionCapBytes = 2_500)
+        repeat(3) { limitResult(lines(100), 100, small, "s1") } // 999 bytes each
+        read(small, "r1", 1) shouldBe "Error: r1 was evicted; run the call again"
+        read(small, "r3", 1) shouldStartWith "[r3 page 1/10]"
+    }
+
+    test("a result over the store cap keeps its head and tail and says so") {
+        val big = "a".repeat(MAX_RESULT_CHARS) + "b".repeat(1_000)
+        val (shown, _) = limitResult(big, 100, store, "s1")
+        shown shouldContain "only the first and last 1,000,000 chars are kept"
+        val kept = dir.resolve("s1.results/r1.txt").readText()
+        kept.startsWith("a".repeat(1_000_000)) shouldBe true
+        kept.endsWith("b".repeat(10)) shouldBe true
+        (kept.length < big.length) shouldBe true
+    }
+
+    test("ids keep counting across a restart, and old ones stay readable") {
+        limitResult(lines(100), 100, store, "s1")
+        val again = ResultStore(dir, pageChars = 100)
+        limitResult(lines(100), 100, again, "s1").second shouldBe "r2"
+        read(again, "r1", 1) shouldStartWith "[r1 page 1/10]"
+    }
+
+    test("without a store an over-page result still says how much there was") {
+        val (shown, id) = limitResult(lines(100), 100, null, "s1")
+        id shouldBe null
+        shown shouldContain "[999 chars, 100 lines; showing the start and end; the rest was not kept]"
+    }
+})
