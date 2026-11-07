@@ -158,6 +158,12 @@ class SophiCli(
         "--guardian-model",
         help = "Model the guardian reviews with (default: the session's model)."
     )
+    private val readCheck: String? by option(
+        "--read-check",
+        help = "Judge web pages, search results and MCP replies for instructions aimed at the agent before it reads " +
+            "them: off, shadow (record the verdict in the audit log, change nothing) or hold (keep a flagged one from " +
+            "the model until you /release it). Judged with the guardian's model. Default: shadow with --guardian, else off."
+    ).choice("off", "shadow", "hold")
     private val goalEscalationModel: String? by option(
         "--goal-escalation-model",
         help = "Stronger model /goal escalates a plan step to when its confidence is below " +
@@ -266,6 +272,7 @@ class SophiCli(
             maxCostUsd = maxCostUsd,
             guardian = guardian,
             guardianModel = guardianModel?.takeIf { it.isNotBlank() },
+            readCheck = readCheck?.let { if (it == "hold") dev.sophi.core.tools.GateMode.ENFORCE else dev.sophi.core.tools.GateMode.valueOf(it.uppercase()) },
         )
 
     override fun run() = runBlocking {
@@ -360,7 +367,7 @@ class SophiCli(
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /search /branch /checkout /undo /revert /compact /good /bad " +
-                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents\n"
+                "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents /release\n"
         )
         // A background subagent can end at any time relative to the prompt line: printAbove, as for warnings.
         cli.runtime.subagents?.onChange = { info ->
