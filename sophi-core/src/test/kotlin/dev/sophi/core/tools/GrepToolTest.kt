@@ -51,6 +51,12 @@ class GrepToolTest : FunSpec({
         result.lines().size shouldBe 1
     }
 
+    test("execute() returns every match when maxResults isn't given") {
+        root.resolve("a.txt").writeText((1..250).joinToString("\n") { "target" })
+        val result = runBlocking { tool.execute("""{"pattern":"target"}""") }
+        result.lines().size shouldBe 250
+    }
+
     test("execute() truncates and notes truncation past maxResults") {
         root.resolve("a.txt").writeText((1..5).joinToString("\n") { "target" })
         val result = runBlocking { tool.execute("""{"pattern":"target","maxResults":2}""") }

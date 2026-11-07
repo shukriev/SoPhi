@@ -95,6 +95,22 @@ class AgentLoopResultLimitTest : FunSpec({
         shown shouldContain "for the next page of 10]"
     }
 
+    test("a glob past its old 200-file cut loses nothing: every file is on some page") {
+        val root = tempdir().toPath()
+        (1..1_500).forEach { root.resolve("file$it.txt").toFile().writeText("x") }
+        val store = ResultStore(tempdir().toPath())
+        val registry = ToolRegistry().register(dev.sophi.core.tools.GlobTool(root)).register(ResultReadTool(store))
+        val session = AgentSession(id = "s")
+        val reads = (1..4).map { ToolCall("p$it", "result_read", """{"id":"r1","page":$it}""") }
+        withContext(SessionIdContext("root")) {
+            AgentLoop(ScriptedCallsProvider(listOf(ToolCall("g", "glob", """{"pattern":"*.txt"}""")) + reads), registry,
+                mockk<SessionManager>(relaxed = true), contextWindowTokens = 100_000).streamTurn(session, "go", config) {}
+        }
+        val pages = results(session).drop(1).filter { it.startsWith("[r1 page") }
+        pages.last() shouldStartWith "[r1 page 3/3]" // 1,500 names ≈ 18k chars; page 4 is an error
+        pages.joinToString("") { it.substringAfter("]\n") }.lines().filter { it.isNotEmpty() }.toSet().size shouldBe 1_500
+    }
+
     test("without result_read the loop still says how much was left out") {
         val (session, _) = run(lines(2_000), listOf(ToolCall("c1", "out", "{}")), store = null)
         results(session).single() shouldContain "showing the start and end; the rest was not kept"

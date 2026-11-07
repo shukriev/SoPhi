@@ -16,7 +16,6 @@ import java.util.concurrent.TimeUnit
 
 private const val DEFAULT_TIMEOUT_SECONDS = 120L
 private const val MAX_TIMEOUT_SECONDS = 300L
-private const val MAX_OUTPUT_CHARS = 100_000
 
 private val READ_ONLY_PREFIXES = listOf(
     "ls", "cat", "pwd", "echo", "head", "tail", "wc", "find",
@@ -157,7 +156,7 @@ class BashTool(
             var truncated = false
             runCatching {
                 process.inputStream.bufferedReader().forEachLine { line ->
-                    if (buffer.length < MAX_OUTPUT_CHARS) buffer.append(line).append('\n') else truncated = true
+                    if (buffer.length < MAX_RESULT_CHARS) buffer.append(line).append('\n') else truncated = true
                 }
             }
             if (truncated) buffer.append("... output truncated\n")

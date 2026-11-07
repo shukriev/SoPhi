@@ -15,7 +15,6 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 
-private const val MAX_RESPONSE_CHARS = 500_000
 private const val MAX_REDIRECTS = 5
 private val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
 
@@ -134,5 +133,5 @@ class FetchUrlTool(
     }
 
     private fun capped(body: String): String =
-        if (body.length > MAX_RESPONSE_CHARS) body.take(MAX_RESPONSE_CHARS) + "\n... response truncated" else body
+        if (body.length > MAX_RESULT_CHARS) body.take(MAX_RESULT_CHARS) + "\n... response truncated" else body
 }
