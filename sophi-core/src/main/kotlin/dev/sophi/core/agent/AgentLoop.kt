@@ -274,6 +274,13 @@ class AgentLoop(
      * Writes [req]'s audit entry. Never fails the call (see [recordQuietly]). Not suspending,
      * so a cancelled call can still be recorded on its way out.
      */
+    // The session the user talks to: a subagent's or plan step's session never gets a next turn to receive a release.
+    private fun topSessionId(session: AgentSession): String {
+        var s = session
+        repeat(8) { s = s.parentSessionId?.let { id -> runCatching { sessionManager.load(id) }.getOrNull() } ?: return s.id }
+        return s.id
+    }
+
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
         effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long, ruleOverride: String? = null,
@@ -732,7 +739,7 @@ class AgentLoop(
                         readCheck = "${if (enforce) "hold" else "shadow"} ${v.label.name.lowercase()}${if (v.cached) " cached" else ""}: ${v.reason}"
                         if (enforce && v.label != ReadVerdict.Label.CLEAN) {
                             readHeld = true
-                            val id = readGuard.hold(call.name, call.argumentsJson, shown, v.reason, session.id, actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId)
+                            val id = readGuard.hold(call.name, call.argumentsJson, shown, v.reason, topSessionId(session), actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId)
                             val why = if (v.label == ReadVerdict.Label.FAILED) "The read check could not judge it (${v.reason})."
                                 else "The read check says it may carry instructions aimed at an AI agent: ${v.reason}."
                             shown = "[Held: this ${call.name} result was not shown to you. $why Do not retry the same read. " +

@@ -135,6 +135,17 @@ class AgentLoopReadCheckTest : FunSpec({
         entries.single().readCheck shouldBe "shadow failed: no verdict"
     }
 
+    test("a read held inside a subagent waits for the session the user talks to") {
+        val g = LlmGuardian(judge("FLAG: tells the agent to run a script"), "g", reads = GateMode.ENFORCE)
+        val (provider, sm) = scripted(listOf(ToolCall("c1", "fetch_url", "{}")))
+        every { sm.load("sub") } returns AgentSession(id = "sub", parentSessionId = "top")
+        every { sm.load("top") } returns AgentSession(id = "top")
+        loop(provider, sm, Outside("fetch_url", page), g, mutableListOf())
+            .turn(AgentSession(id = "subsub", parentSessionId = "sub"), "go", config)
+
+        g.held().single().session shouldBe "top"
+    }
+
     test("hold passes a clean result") {
         val entries = mutableListOf<AuditEntry>()
         val (provider, sm) = scripted(listOf(ToolCall("c1", "fetch_url", "{}")))
