@@ -199,6 +199,11 @@ class SophiCli(
         help = "Offer code_mode: the model may run a sandboxed JavaScript snippet that chains tool calls in one step; " +
             "every call it makes is checked, confirmed and audited like a direct one (default off)."
     ).flag("--no-code-mode", default = false)
+    private val resultPageChars: Int by option(
+        "--result-page-chars",
+        help = "The most of one tool result the model sees at once (default 8000, at most 20% of the context window); " +
+            "the model reads the rest with result_read."
+    ).int().default(dev.sophi.core.tools.DEFAULT_RESULT_PAGE_CHARS)
     private val sandboxMode: String by option(
         "--sandbox",
         help = "Where bash runs: off (default), seatbelt (macOS sandbox: writes only to the workspace, temp " +
@@ -256,6 +261,7 @@ class SophiCli(
             otherAgentSkills = otherAgentSkills,
             subagentWorktrees = subagentWorktrees,
             codeMode = codeMode,
+            resultPageChars = resultPageChars,
             braveApiKey = braveApiKeyOption,
             autoMode = autoMode,
             godMode = godMode,
