@@ -1,6 +1,7 @@
 package dev.sophi.core.tools
 
 import dev.sophi.core.permissions.PermissionSubject
+import dev.sophi.core.permissions.pathSubject
 import dev.sophi.core.permissions.splitBashCommand
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -32,6 +33,28 @@ private val HIGH_RISK_BASH_SUBSTRINGS = listOf(
 private val SCRATCH_PATH_PREFIXES = listOf("/tmp/", "/private/tmp/", "./scratch/", "scratch/")
 private val SINGLE_FILE_RM = Regex("""^rm\s+(\S+)$""")
 
+// A shell word with nothing the shell expands: plain text, '...' (literal), or "..." without $ ` \ !.
+private const val LITERAL_WORD = """(?:[^\s'"\\${'$'}`;&|<>(){}\[\]*?~#!]+|'[^']*'|"[^"\\${'$'}`!]*")+"""
+private const val PLAIN_PATH = """([A-Za-z0-9._/+@%=:,-]+)"""
+private val ECHO_WRITE = Regex("""(?:echo|printf)(?:\s+$LITERAL_WORD)+\s+>>?\s*$PLAIN_PATH""")
+private val HEREDOC_WRITE = Regex("""cat\s*(?:>>?\s*$PLAIN_PATH\s*<<\s*(['"]?)(\w+)\2|<<\s*(['"]?)(\w+)\4\s*>>?\s*$PLAIN_PATH)""")
+
+/**
+ * The path a command writes when writing that one file is all it does: `echo`/`printf` of literal words, or a `cat`
+ * heredoc whose body is literal (quoted delimiter, or no `$`, backtick or backslash in it), into a plain path with `>`/`>>`.
+ * Anything else (pipes, `;`/`&&`, substitutions, variables, a second redirect, text after the heredoc) is null.
+ */
+private fun shellFileWriteTarget(command: String): String? {
+    val nl = command.indexOf('\n')
+    if (nl < 0) return ECHO_WRITE.matchEntire(command.trim())?.groupValues?.get(1)
+    val g = HEREDOC_WRITE.matchEntire(command.substring(0, nl).trim())?.groupValues ?: return null
+    val (target, quote, delim) = if (g[1].isNotEmpty()) Triple(g[1], g[2], g[3]) else Triple(g[6], g[4], g[5])
+    val body = command.substring(nl + 1).trimEnd().lines()
+    if (body.last() != delim || body.dropLast(1).any { it == delim }) return null
+    if (quote.isEmpty() && body.any { line -> line.any { it in "$`\\" } }) return null
+    return target
+}
+
 @Serializable
 private data class BashArgs(val command: String, val timeoutSeconds: Long? = null, val background: Boolean = false)
 
@@ -62,6 +85,7 @@ class BashTool(
             .getOrNull() ?: return RuleVerdict.LOW_RISK
         val trimmed = command.trim()
         if (HIGH_RISK_BASH_SUBSTRINGS.any { trimmed.contains(it) }) return RuleVerdict.HIGH_RISK
+        shellFileWriteTarget(command)?.let { return classifyPathRisk(root, it) }
         SINGLE_FILE_RM.matchEntire(trimmed)?.let { match ->
             val target = match.groupValues[1]
             if (SCRATCH_PATH_PREFIXES.any { target.startsWith(it) }) return RuleVerdict.LOW_RISK
@@ -74,6 +98,17 @@ class BashTool(
             // nothing to match (empty command, bare assignment) is null, never an empty list: that means "no subjects"
             ?.takeIf { it.isNotEmpty() }
             ?.map { PermissionSubject(it.text, allowable = !it.redirects && !it.assigns) }
+    /**
+     * write_file's permission subject for a command whose only effect is writing one file inside the workspace
+     * ([shellFileWriteTarget]), so write_file rules cover it too; null for any other command. Undo needs nothing more:
+     * such a command rates DESTRUCTIVE, so its round is checkpointed like a write_file round.
+     */
+    fun fileWriteSubject(argumentsJson: String): PermissionSubject? {
+        val command = runCatching { json.decodeFromString<BashArgs>(argumentsJson).command }.getOrNull() ?: return null
+        val target = shellFileWriteTarget(command) ?: return null
+        // outside the workspace (`..`, an absolute path, a symlink out) pathSubject spells it absolute
+        return pathSubject(root, root.resolve(target).normalize())?.takeUnless { it.text.startsWith("/") }
+    }
     override val parametersJson = """
         {"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeoutSeconds":{"type":"integer","description":"Max seconds to allow (default 120, capped at 300)"},"background":{"type":"boolean","description":"Start a long-running command (dev server, watcher, long build) and return at once with a job id; read it with bash_output, stop it with bash_kill"}},"required":["command"]}
     """.trimIndent()

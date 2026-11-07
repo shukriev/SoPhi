@@ -119,4 +119,41 @@ class BashToolTest : FunSpec({
         tool.ruleVerdict("not json") shouldBe RuleVerdict.LOW_RISK
         shouldThrowAny { runBlocking { tool.execute("not json") } }
     }
+
+    context("fileWriteSubject: a command that only writes one workspace file") {
+        fun target(command: String) = tool.fileWriteSubject("""{"command":${kotlinx.serialization.json.JsonPrimitive(command)}}""")?.text
+
+        test("recognises cat heredocs, echo and printf, > and >>") {
+            target("cat > f.txt <<'EOF'\nhello \$x `y`\nEOF") shouldBe "f.txt"
+            target("cat <<EOF > dir/f.txt\nplain body\nEOF\n") shouldBe "dir/f.txt"
+            target("cat >> f.txt <<\"END\"\nmore\nEND") shouldBe "f.txt"
+            target("echo \"x\" > f.txt") shouldBe "f.txt"
+            target("echo hi there >> ./a/../f.txt") shouldBe "f.txt"
+            target("printf '%s\\n' '\$literal' > out.txt") shouldBe "out.txt"
+        }
+
+        test("rejects anything else") {
+            listOf(
+                "echo x | tee f.txt", "echo x > f.txt && rm y", "echo x > f.txt; ls", "echo \$(whoami) > f.txt",
+                "echo `whoami` > f.txt", "echo \$HOME > f.txt", "echo x > \$OUT", "echo x > ../outside.txt",
+                "echo x > /etc/passwd", "cat > /etc/hosts <<'EOF'\nx\nEOF", "cat > f <<EOF\n\$(rm -rf x)\nEOF",
+                "cat > f <<EOF\nhome is \$HOME\nEOF", "cat > f <<'EOF'\nx\nEOF\nrm y", "echo x > ~/f.txt",
+                "echo x > f.txt 2>&1", "rm f.txt", "echo x>f.txt", "echo \"a\nb\" > f.txt > g.txt",
+            ).forEach { target(it) shouldBe null }
+        }
+
+        test("a write into the workspace through a symlink pointing outside is rejected") {
+            java.nio.file.Files.createSymbolicLink(root.resolve("out"), createTempDirectory("elsewhere"))
+            target("echo x > out/f.txt") shouldBe null
+        }
+
+        test("ruleVerdict rates the path as write_file does") {
+            tool.ruleVerdict("""{"command":"echo SECRET=1 > .env"}""") shouldBe RuleVerdict.HIGH_RISK
+        }
+
+        test("it still runs in bash") {
+            runBlocking { tool.execute("""{"command":${kotlinx.serialization.json.JsonPrimitive("cat > f.txt <<'EOF'\nhi \$x\nEOF")}}""") }
+            root.resolve("f.txt").toFile().readText() shouldBe "hi \$x\n"
+        }
+    }
 })
