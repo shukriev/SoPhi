@@ -30,6 +30,7 @@ import dev.sophi.core.prompt.PromptBuilder
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
+import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.ConfirmationPolicy
@@ -49,6 +50,10 @@ import dev.sophi.core.dryrun.PlanFirst
 import dev.sophi.core.dryrun.PlanRecorder
 import dev.sophi.core.dryrun.planStepStub
 import dev.sophi.core.tools.ToolRegistry
+import dev.sophi.core.tools.DEFAULT_RESULT_PAGE_CHARS
+import dev.sophi.core.tools.RESULT_READ_NAME
+import dev.sophi.core.tools.ResultReadTool
+import dev.sophi.core.tools.limitResult
 import dev.sophi.core.tools.isToolError
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.RoundChanges
@@ -114,11 +119,8 @@ private val SEARCH_TOOL_NAMES = setOf("glob", "grep")
  *  to keep a request roughly under budget without needing a real tokenizer per model. */
 private const val CHARS_PER_TOKEN_ESTIMATE = 4
 /**
- * Built-in tools (BashTool, FetchUrlTool) cap their own output, but a tool provided by an MCP
- * server — e.g. a browser snapshot — is outside our control and can return an arbitrarily large
- * result. A flat char cap can't be safe for every profile (100k chars is nothing against a 200k-
- * token Claude window but is most of a 32k-token local Ollama window), so this scales with the
- * actual configured window instead.
+ * The most of the window one result's page may take. The page is the configured one (8,000 chars by default) unless
+ * this is smaller: on a small local window 8,000 chars could still be most of it.
  */
 private const val MAX_TOOL_RESULT_FRACTION_OF_WINDOW = 0.2
 
@@ -263,13 +265,6 @@ class AgentLoop(
 ) {
     private val summariser = Summariser(provider, compaction, contextWindowTokens, dev.sophi.ai.system1.Judgments.LOOP_SUMMARISE)
 
-    /** Scaled to [contextWindowTokens] so no single tool result can claim more than
-     *  [MAX_TOOL_RESULT_FRACTION_OF_WINDOW] of whatever window this loop's model actually has. */
-    private fun truncateToolResult(result: String, windowTokens: Int): String {
-        val maxChars = (windowTokens * MAX_TOOL_RESULT_FRACTION_OF_WINDOW * CHARS_PER_TOKEN_ESTIMATE).toInt()
-        return if (result.length <= maxChars) result else result.take(maxChars) + "\n... output truncated"
-    }
-
     /**
      * Writes [req]'s audit entry. Never fails the call (see [recordQuietly]). Not suspending,
      * so a cancelled call can still be recorded on its way out.
@@ -284,7 +279,7 @@ class AgentLoop(
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
         effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long, ruleOverride: String? = null,
-        plan: String? = null, guardianVerdict: String? = null, readCheck: String? = null, readCheckMs: Long? = null,
+        plan: String? = null, guardianVerdict: String? = null, readCheck: String? = null, readCheckMs: Long? = null, resultId: String? = null,
     ) = sink.recordQuietly {
         val rule = ruleOverride ?: when {
             effect == Effect.DENY -> "rule:deny"
@@ -295,7 +290,7 @@ class AgentLoop(
             else -> notes.rules[req.callId] ?: "policy"
         }
         auditEntry(actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId, session.id, req.toolName, req.riskLevel,
-            req.argumentsJson, rule, outcome, result, start, plan, guardianVerdict, readCheck, readCheckMs)
+            req.argumentsJson, rule, outcome, result, start, plan, guardianVerdict, readCheck, readCheckMs, resultId)
     }
 
     /**
@@ -675,6 +670,10 @@ class AgentLoop(
         val actor = currentCoroutineContext()[ActorContext]
         // Off costs nothing: no judge call, no hashing.
         val readGuard = currentCoroutineContext()[GuardianScope]?.guardian?.takeIf { it.reads != GateMode.OFF }
+        // The one cut of a result: a page, at most a fifth of the window; the rest goes to result_read's store, kept per root session.
+        val store = (registry.getOrNull(RESULT_READ_NAME) as? ResultReadTool)?.store
+        val page = minOf(store?.pageChars ?: DEFAULT_RESULT_PAGE_CHARS, (window * MAX_TOOL_RESULT_FRACTION_OF_WINDOW * CHARS_PER_TOKEN_ESTIMATE).toInt())
+        val resultsSession = currentCoroutineContext()[SessionIdContext]?.sessionId ?: "default"
         return try { withContext(changes) {
             allowedCalls.zip(classified) { (call, allowed), (_, req) ->
                 async {
@@ -684,13 +683,13 @@ class AgentLoop(
                     var readCheck: String? = null
                     var readCheckMs: Long? = null
                     var readHeld = false
-                    fun audit(outcome: String, result: String) {
+                    fun audit(outcome: String, result: String, resultId: String? = null) {
                         val verdict = verdicts[call.id]
                         val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook" else if (readHeld) "read-check"
                             else when (verdict?.effect) { Effect.DENY -> "guardian"; Effect.ASK -> guardNotes.rules[call.id] ?: "policy"; else -> null }
                         val plan = step?.let { "${recorder!!.planId}#$it" }
                         if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan,
-                            verdict?.let { "${it.effect.name.lowercase()}: ${it.reason}" }, readCheck, readCheckMs)
+                            verdict?.let { "${it.effect.name.lowercase()}: ${it.reason}" }, readCheck, readCheckMs, resultId)
                     }
                     var failed = false
                     val result = if (step != null) {
@@ -725,29 +724,37 @@ class AgentLoop(
                     // this convention) — count both the same way for loop-guard/reliability purposes.
                     failed = failed || isToolError(result)
                     val outcome = if (step != null) "recorded" else if (!allowed) "denied" else if (failed) "error" else "ok"
-                    var shown = truncateToolResult(result, window)
+                    var text = result
+                    var held: String? = null
                     val tool = registry.getOrNull(call.name)
-                    // Read check: outside text is judged as it will be shown. An error from a tool that runs here (a refused
-                    // address) was written here; an MCP server's error is the server's text, so it is judged.
+                    // Read check: outside text is judged whole, before the limiter keeps it, so every page result_read can
+                    // later return was judged. An error from a tool that runs here (a refused address) was written here; an
+                    // MCP server's error is the server's text, so it is judged.
                     if (readGuard != null && allowed && step == null && tool?.outsideText == true && result.isNotBlank() &&
                         result != "No results found" && !(isToolError(result) && tool.reach(call.argumentsJson) == Reach.LOCAL)) {
-                        if (shown.length > READ_CHECK_LIMIT) shown = shown.take(READ_CHECK_LIMIT) + "\n... cut at the read-check limit"
+                        if (text.length > READ_CHECK_LIMIT) text = text.take(READ_CHECK_LIMIT) + "\n... cut at the read-check limit"
                         val checkStart = System.currentTimeMillis()
-                        val v = try { readGuard.checkRead(shown, userInput) } catch (e: CancellationException) { audit(outcome, result); throw e }
+                        val v = try { readGuard.checkRead(text, userInput) } catch (e: CancellationException) { audit(outcome, result); throw e }
                         readCheckMs = if (v.cached) 0 else System.currentTimeMillis() - checkStart
                         val enforce = readGuard.reads == GateMode.ENFORCE
                         readCheck = "${if (enforce) "hold" else "shadow"} ${v.label.name.lowercase()}${if (v.cached) " cached" else ""}: ${v.reason}"
                         if (enforce && v.label != ReadVerdict.Label.CLEAN) {
                             readHeld = true
-                            val id = readGuard.hold(call.name, call.argumentsJson, shown, v.reason, topSessionId(session), actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId)
+                            val id = readGuard.hold(call.name, call.argumentsJson, text, v.reason, topSessionId(session), actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId)
                             val why = if (v.label == ReadVerdict.Label.FAILED) "The read check could not judge it (${v.reason})."
                                 else "The read check says it may carry instructions aimed at an AI agent: ${v.reason}."
-                            shown = "[Held: this ${call.name} result was not shown to you. $why Do not retry the same read. " +
+                            held = "[Held: this ${call.name} result was not shown to you. $why Do not retry the same read. " +
                                 "Tell the user it was held; they can release it with /release $id.]"
                         }
                     }
+                    // A held result is never kept for result_read. result_read's page already fits: cutting it again would hide its end.
+                    val (shown, resultId) = when {
+                        held != null -> held to null
+                        call.name == RESULT_READ_NAME -> text to null
+                        else -> limitResult(text, page, store, resultsSession)
+                    }
                     // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
-                    audit(outcome, if (allowed) result else "")
+                    audit(outcome, if (allowed) result else "", resultId)
                     val reach = reaches[call.id]
                     if (recorder != null && allowed && !failed && (reach == Reach.OUTSIDE_READ || reach == Reach.OUTSIDE_HINTED_READ)) {
                         recorder.read(call.name, call.argumentsJson, result.take(500), viaHint = reach == Reach.OUTSIDE_HINTED_READ)
@@ -954,7 +961,7 @@ class AgentLoop(
             // of their results existed — so it alone can't see what was just appended. A round can
             // call several tools at once (e.g. a browsing task firing off a few browser_* calls
             // together), and their combined results can cross the budget even though none of them
-            // individually hit truncateToolResult's cap. Add a rough estimate of what just landed
+            // individually hit the result limiter's page. Add a rough estimate of what just landed
             // so the gate reacts to what's about to be sent next, not to stale pre-append usage.
             val projectedInputTokens = (roundUsage?.inputTokens ?: 0) +
                 toolResults.sumOf { it.content.length } / CHARS_PER_TOKEN_ESTIMATE

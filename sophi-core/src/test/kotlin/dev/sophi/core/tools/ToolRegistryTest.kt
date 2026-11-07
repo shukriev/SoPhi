@@ -209,6 +209,11 @@ class ToolRegistryTest : FunSpec({
         deferredRegistry(withSearch = false).definitions().map { it.name } shouldContain "gh__create_issue"
     }
 
+    test("subset() always keeps result_read: a long result names it") {
+        val registry = ToolRegistry().register(ResultReadTool(ResultStore(kotlin.io.path.createTempDirectory())))
+        registry.subset(emptyList()).names() shouldBe listOf("result_read")
+    }
+
     test("subset keeps the deferred flag") {
         deferredRegistry(withSearch = true).subset(listOf("gh__list_prs")).get("gh__list_prs").deferred shouldBe true
     }

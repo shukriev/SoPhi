@@ -12,7 +12,7 @@ import kotlin.coroutines.CoroutineContext
  */
 @Serializable
 data class AuditEntry(
-    val v: Int = 1,
+    val v: Int = 2,
     val ts: Long,
     val actor: String,
     val tenant: String? = null,
@@ -33,6 +33,8 @@ data class AuditEntry(
     val readCheck: String? = null,
     /** How long the read check took; 0 on a cache hit. */
     val readCheckMs: Long? = null,
+    /** The id result_read pages this call's whole result by (`r7`); null = the model saw all of it. */
+    val resultId: String? = null,
 )
 
 /** Where audit entries go. sophi-enterprise implements this for retention and export. Must not throw for ordinary failures. */
@@ -59,7 +61,7 @@ private const val REDACT_WINDOW = 20_000
 fun auditEntry(
     actor: String, tenant: String?, session: String, tool: String, risk: RiskLevel, argumentsJson: String,
     rule: String, outcome: String, result: String, start: Long, plan: String? = null, guardian: String? = null,
-    readCheck: String? = null, readCheckMs: Long? = null,
+    readCheck: String? = null, readCheckMs: Long? = null, resultId: String? = null,
 ) = AuditEntry(
     ts = start,
     actor = actor,
@@ -77,6 +79,7 @@ fun auditEntry(
     guardian = guardian?.let { runCatching { redactWindowed(it, REDACT_WINDOW).take(300) }.getOrDefault(UNREDACTABLE) },
     readCheck = readCheck?.let { runCatching { redactWindowed(it, REDACT_WINDOW).take(300) }.getOrDefault(UNREDACTABLE) },
     readCheckMs = readCheckMs,
+    resultId = resultId,
 )
 
 /** Builds and records an entry; anything thrown on the way, Errors included (a regex overflow), drops only this entry. */

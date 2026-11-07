@@ -208,5 +208,6 @@ class FileSessionManager(private val sessionsDir: Path) : SessionManager {
         synchronized(APPEND_LOCK) { onDisk.remove(sessionId) }
         Files.deleteIfExists(sessionsDir.resolve("$sessionId.jsonl"))
         Files.deleteIfExists(sessionsDir.resolve("$sessionId.meta.json"))
+        sessionsDir.resolve("$sessionId.results").toFile().deleteRecursively() // ResultStore's kept results
     }
 }

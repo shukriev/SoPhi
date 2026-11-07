@@ -509,7 +509,7 @@ class SubagentToolTest : FunSpec({
         )
         runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"explore","prompt":"read"}""") }
         val sub = sessionManager.load(sessionManager.list().single().id)
-        sub.branch().first { it.role == dev.sophi.core.session.EntryRole.TOOL_RESULT }.content shouldContain "output truncated"
+        sub.branch().first { it.role == dev.sophi.core.session.EntryRole.TOOL_RESULT }.content shouldContain "showing the start and end"
     }
 
     context("worktrees") {
