@@ -28,20 +28,20 @@ class RuntimeBuilderResultPageTest : FunSpec({
         val runtime = RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = sessions
-            resultPageChars = 300
+            resultPageChars = 500
             model = "test-model"
         }.contextWindowTokens(100_000).tool(object : Tool {
             override val name = "big"
             override val description = "long output"
             override val parametersJson = """{"type":"object","properties":{}}"""
-            override suspend fun execute(argumentsJson: String) = "y".repeat(1_000)
+            override suspend fun execute(argumentsJson: String) = "y".repeat(1_200)
         }).build()
 
         runtime.toolNames() shouldContain "result_read"
         val id = runBlocking { runtime.newSession() }
         runBlocking(SessionIdContext(id)) { runtime.turn(id, "go") }
         val shown = runtime.sessionManager.load(id).branch().first { it.role == EntryRole.TOOL_RESULT }.content
-        shown shouldContain """result_read("r1", 2) for the next page of 4"""
+        shown shouldContain """result_read("r1", 2) for the next page of 3"""
         sessions.resolve("$id.results/r1.txt").exists() shouldBe true
     }
 })

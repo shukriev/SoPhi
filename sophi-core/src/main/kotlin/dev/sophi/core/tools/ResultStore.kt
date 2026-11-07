@@ -22,6 +22,8 @@ const val RESULT_READ_NAME = "result_read"
 const val MAX_RESULT_CHARS = 2_000_000
 /** About 2k tokens: a few results per round still fit a 32k local window. */
 const val DEFAULT_RESULT_PAGE_CHARS = 8_000
+/** A floor for a configured 0 or a tiny window: below it a page shows too little to be worth a call. */
+private const val MIN_RESULT_PAGE_CHARS = 500
 private const val SESSION_CAP_BYTES = 50_000_000L
 private val ID = Regex("r(\\d{1,9})")
 private val FILE = Regex("r(\\d{1,9})\\.txt")
@@ -29,10 +31,12 @@ private val FILE = Regex("r(\\d{1,9})\\.txt")
 private fun n(i: Int) = String.format(Locale.ROOT, "%,d", i)
 
 /**
- * What the model sees of [result]: the result itself when it fits [pageChars], otherwise the head ⅔ and tail ⅓ of a
- * page around a marker giving its size and, when [store] kept it, its id and how to page it. The id is the second value.
+ * What the model sees of [result]: the result itself when it fits [page] (floored at [MIN_RESULT_PAGE_CHARS]), otherwise
+ * the head ⅔ and tail ⅓ of a page around a marker giving its size and, when [store] kept it, its id and how to page it.
+ * The id is the second value.
  */
-fun limitResult(result: String, pageChars: Int, store: ResultStore?, sessionId: String): Pair<String, String?> {
+fun limitResult(result: String, page: Int, store: ResultStore?, sessionId: String): Pair<String, String?> {
+    val pageChars = page.coerceAtLeast(MIN_RESULT_PAGE_CHARS)
     if (result.length <= pageChars) return result to null
     val kept = store?.put(sessionId, result, pageChars)
     val size = "${n(result.length)} chars, ${n(result.count { it == '\n' } + 1)} lines"
