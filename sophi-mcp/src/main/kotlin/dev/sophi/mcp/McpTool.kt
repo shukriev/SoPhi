@@ -32,6 +32,8 @@ class McpTool(
     override val name = "${serverName}__$remoteName"
     override val description = remoteTool.description
     override val parametersJson = remoteTool.inputSchemaJson
+    /** Whatever the call's [Reach]: a change's reply is the server's text too. */
+    override val outsideText = true
     override fun riskLevel(argumentsJson: String): RiskLevel =
         if (remoteName in safeTools) RiskLevel.SAFE else RiskLevel.DESTRUCTIVE
 

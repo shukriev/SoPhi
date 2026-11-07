@@ -30,6 +30,8 @@ interface Tool {
      * `tool_search` (see [ToolRegistry.definitions]). Only honoured while `tool_search` is registered.
      */
     val deferred: Boolean get() = false
+    /** True when the result carries text from outside this machine; the read check judges it. */
+    val outsideText: Boolean get() = false
     fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.SAFE
     /**
      * Fine-grained risk hint consulted only for calls that already cleared the SAFE bar (i.e.
