@@ -22,7 +22,8 @@ import kotlin.coroutines.CoroutineContext
  * Lookups are scoped to the parent session; a null session is the host, which sees and stops any.
  * [close] cancels every run: none outlives the runtime.
  */
-class BackgroundSubagents(private val maxRunning: Int = 3) : AutoCloseable {
+/** [closeTimeoutMs]: how long [close] waits for cancelled runs to save (a worktree run also commits its branch). */
+class BackgroundSubagents(private val maxRunning: Int = 3, private val closeTimeoutMs: Long = 30_000) : AutoCloseable {
     enum class Status { RUNNING, DONE, FAILED, CANCELLED }
 
     /** [text] is the answer when DONE, the reason when FAILED. */
@@ -133,12 +134,15 @@ class BackgroundSubagents(private val maxRunning: Int = 3) : AutoCloseable {
             .onEach { it.announced = true }.map { it.info() }
     }
 
+    /** Announces [taken] again next time: the turn they went into failed before the model could read them. */
+    fun putBack(taken: List<Info>) = synchronized(this) { taken.forEach { entries[it.id]?.announced = false } }
+
     override fun close() {
         val all = synchronized(this) { closed = true; entries.values.toList() }
         all.forEach { e -> synchronized(e) { if (e.status == Status.RUNNING) { e.status = Status.CANCELLED; e.job.cancel() } } }
         val jobs = all.map { it.job }
-        // Brief: lets each run's finally save its session before the process exits.
-        runBlocking { withTimeoutOrNull(5_000) { jobs.joinAll() } }
+        // Lets each run's finally save its session (and a worktree run commit its branch) before the process exits.
+        runBlocking { withTimeoutOrNull(closeTimeoutMs) { jobs.joinAll() } }
         scope.cancel()
     }
 }

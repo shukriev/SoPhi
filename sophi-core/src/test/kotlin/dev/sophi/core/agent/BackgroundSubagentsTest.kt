@@ -126,4 +126,21 @@ class BackgroundSubagentsTest : FunSpec({
         bg.start("s", "t", "d", "sub2", kotlin.coroutines.EmptyCoroutineContext) { "ok" }
         bg.close()
     }
+    test("putBack announces taken results again") {
+        BackgroundSubagents().use { bg ->
+            val id = bg.go { "x" }.id
+            bg.result(null, id, 5)
+            val taken = bg.takeFinished("s")
+            bg.putBack(taken)
+            bg.takeFinished("s").map { it.id } shouldBe listOf(id)
+        }
+    }
+
+    test("close waits up to closeTimeoutMs for a run to finish saving") {
+        var saved = false
+        val bg = BackgroundSubagents(closeTimeoutMs = 2_000)
+        bg.go { try { kotlinx.coroutines.awaitCancellation() } finally { Thread.sleep(600); saved = true } }
+        bg.close()
+        saved shouldBe true
+    }
 })

@@ -24,11 +24,16 @@ import kotlin.io.path.writeText
 class BackgroundSubagentsRuntimeTest : FunSpec({
 
     val requests = mutableListOf<CompletionRequest>()
+    var failNext = false
     fun runtime(delegation: Boolean = true): SophiRuntime {
         val agentsDir = tempdir().toPath()
         agentsDir.resolve("explorer.md").writeText("---\nname: explorer\ndescription: reads things\n---\nYou explore.")
         val provider = mockk<LLMProvider>()
-        every { provider.stream(any()) } answers { requests += firstArg<CompletionRequest>(); flowOf(StreamEvent.Content("ok")) }
+        every { provider.stream(any()) } answers {
+            requests += firstArg<CompletionRequest>()
+            if (failNext) { failNext = false; throw IllegalStateException("model down") }
+            flowOf(StreamEvent.Content("ok"))
+        }
         return RuntimeBuilder().apply {
             this.provider = provider
             sessionsDir = tempdir().toPath()
@@ -78,5 +83,16 @@ class BackgroundSubagentsRuntimeTest : FunSpec({
         val id = rt.subagents!!.start("s", "explorer", "look", "sub-1", EmptyCoroutineContext) { awaitCancellation() }.id
         rt.close()
         rt.subagents!!.list().single { it.id == id }.status shouldBe BackgroundSubagents.Status.CANCELLED
+    }
+    test("a turn that fails announces its results again in the next one") {
+        val rt = runtime()
+        val sessionId = rt.newSession()
+        val id = rt.subagents!!.start(sessionId, "explorer", "look", "sub-1", EmptyCoroutineContext) { "found it" }.id
+        rt.subagents!!.result(null, id, 5)
+        failNext = true
+        runCatching { withContext(SessionIdContext(sessionId)) { rt.turn(sessionId, "hello") } }.isFailure shouldBe true
+        withContext(SessionIdContext(sessionId)) { rt.turn(sessionId, "again") }
+        requests.last().messages.last { it.role == MessageRole.USER }.content shouldContain "$id (explorer) done: found it"
+        rt.close()
     }
 })
