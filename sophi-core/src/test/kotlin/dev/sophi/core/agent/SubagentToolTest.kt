@@ -26,6 +26,7 @@ import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 
 private const val TEST_CONTEXT_WINDOW = 100_000
+private const val RESUME_FOOTER = "\n\n(subagent session "
 
 class SubagentToolTest : FunSpec({
 
@@ -109,7 +110,7 @@ class SubagentToolTest : FunSpec({
 
         val result = runBlocking(SessionIdContext("parent-1")) { tool.execute("""{"subagent_type":"explore","prompt":"find auth code"}""") }
 
-        result shouldBe "Found it in Auth.kt"
+        result.substringBefore(RESUME_FOOTER) shouldBe "Found it in Auth.kt"
     }
 
     test("execute() persists the subagent session tagged with the parent session id") {
@@ -265,7 +266,7 @@ class SubagentToolTest : FunSpec({
 
         val result = runBlocking(SessionIdContext("parent-1")) { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
 
-        result shouldBe "depth-1 subagent result"
+        result.substringBefore(RESUME_FOOTER) shouldBe "depth-1 subagent result"
 
         // Two distinct subagent sessions were really created — one per delegation level —
         // proving genuine two-level recursion rather than a single level that merely saw the
@@ -317,7 +318,7 @@ class SubagentToolTest : FunSpec({
 
         val result = runBlocking(SessionIdContext("parent-1")) { depth0Tool.execute("""{"subagent_type":"recursive","prompt":"go"}""") }
 
-        result shouldBe "stopped"
+        result.substringBefore(RESUME_FOOTER) shouldBe "stopped"
 
         // The depth-1 SubagentTool (registered by overwrite into the scoped registry) must have
         // refused delegation itself, i.e. real recursion reached the boundary rather than the
@@ -437,7 +438,7 @@ class SubagentToolTest : FunSpec({
             tool.execute("""{"subagent_type":"operator","prompt":"do it","expected_tools":["lookup"]}""")
         }
 
-        result shouldBe "done"
+        result.substringBefore(RESUME_FOOTER) shouldBe "done"
     }
 
     test("execute() does not auto-grant a DESTRUCTIVE expected_tool — confirmation policy still gates it") {
@@ -556,7 +557,7 @@ class SubagentToolTest : FunSpec({
             val result = runBlocking(SessionIdContext("p")) {
                 tool(r, writesThenAnswers(), enabled = false).execute("""{"subagent_type":"writer","prompt":"w","worktree":true}""")
             }
-            result shouldBe "done"
+            result.substringBefore(RESUME_FOOTER) shouldBe "done"
             r.resolve("out.txt").toFile().exists() shouldBe true
         }
 

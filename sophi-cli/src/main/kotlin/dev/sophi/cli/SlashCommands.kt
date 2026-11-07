@@ -4,6 +4,7 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.calendar.provider.CalendarProvider
 import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.TurnEvent
+import dev.sophi.core.agent.statusLine
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
@@ -50,6 +51,8 @@ class SlashHandler(
     private val checkpoints: CheckpointStore? = null,
     /** Background bash jobs for /jobs; null = not available. */
     private val jobs: dev.sophi.core.tools.BashJobs? = null,
+    /** Background subagents for /subagents; null = not available. */
+    private val subagents: dev.sophi.core.agent.BackgroundSubagents? = null,
     /** `/mcp login|logout <server>`: the host signs in and reconnects (see [mcpAuth]); null = not available. */
     private val mcp: (suspend (action: String, server: String) -> String)? = null,
     /** Null: `/settings` reports it isn't available (a handler built without the CLI's wiring). */
@@ -91,6 +94,23 @@ class SlashHandler(
         if (all.isEmpty()) return output("No background jobs.")
         val now = System.currentTimeMillis()
         all.forEach { output("${it.id}  ${it.status}  ${(now - it.startedAtMs) / 1000}s  ${it.command}") }
+    }
+
+    private fun handleSubagents(arg: String?) {
+        val bg = subagents ?: return output("Background subagents aren't available.")
+        val words = arg?.split(" ")?.filter { it.isNotBlank() }.orEmpty()
+        if (words.firstOrNull() == "cancel") {
+            val id = words.getOrNull(1) ?: return output("Usage: /subagents cancel <id>")
+            val info = bg.cancel(null, id) ?: return output("No such subagent $id")
+            return output(if (info.status == dev.sophi.core.agent.BackgroundSubagents.Status.CANCELLED) "cancelled $id" else info.statusLine)
+        }
+        val all = bg.list()
+        if (all.isEmpty()) return output("No background subagents.")
+        val now = System.currentTimeMillis()
+        all.forEach {
+            val s = (now - it.startedAtMs) / 1000
+            output("${it.id}  ${it.status.name.lowercase()}  ${it.type}  ${if (s < 60) "${s}s" else "${s / 60}m"}  ${it.description}")
+        }
     }
 
     suspend fun handle(line: String, session: AgentSession): AgentSession {
@@ -208,6 +228,7 @@ class SlashHandler(
             "settings" -> { handleSettings(arg); session }
             "model" -> { handleModel(arg); session }
             "jobs" -> { handleJobs(arg); session }
+            "subagents" -> { handleSubagents(arg); session }
             "mcp" -> { handleMcp(arg); session }
             "plans" -> {
                 val words = arg?.split(" ")?.filter { it.isNotBlank() }.orEmpty()
@@ -217,7 +238,7 @@ class SlashHandler(
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /search /branch /checkout /undo /revert /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /mcp /plans"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents /mcp /plans"
                 )
                 session
             }

@@ -47,6 +47,12 @@ class TerminalUserAskerTest : FunSpec({
         runBlocking { asker().first.ask(q(), 50) } shouldBe Answer.TimedOut
     }
 
+    test("an unattended question (a background subagent) is never prompted") {
+        val (a, rec) = asker("1")
+        runBlocking { a.ask(q().copy(unattended = true, deadlineMs = 1), 60_000) } shouldBe Answer.TimedOut
+        rec.output() shouldNotContain "Sophi asks:"
+    }
+
     test("two questions in parallel are asked one after the other") {
         val (a, rec) = asker("1", "2", delayMs = 50)
         val answers = runBlocking { listOf(async { a.ask(q("First?"), null) }, async { a.ask(q("Second?"), null) }).awaitAll() }

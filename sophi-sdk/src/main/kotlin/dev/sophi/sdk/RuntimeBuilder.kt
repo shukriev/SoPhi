@@ -21,6 +21,9 @@ import dev.sophi.core.agent.AgentConfig
 import dev.sophi.core.agent.AgentDefinitionLoader
 import dev.sophi.core.agent.AgentLoop
 import dev.sophi.core.agent.LoopGuardPolicy
+import dev.sophi.core.agent.BackgroundSubagents
+import dev.sophi.core.agent.SubagentCancelTool
+import dev.sophi.core.agent.SubagentResultTool
 import dev.sophi.core.agent.SubagentTool
 import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.agent.plan.PlanLog
@@ -152,6 +155,7 @@ class RuntimeBuilder {
     private var contextConfig: Triple<ContextEngine, ProjectOf, Boolean>? = null
     private var subagentDelegationEnabled: Boolean = false
     private var subagentWorktrees: Boolean = false
+    private var subagentBackgroundPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL
     private var goalDecompositionPlansDir: Path? = null
     private var goalDecompositionOnProgress: suspend (PlanProgressEvent) -> Unit = {}
     private var skillToolsEnabled: Boolean = false
@@ -293,9 +297,10 @@ class RuntimeBuilder {
      * "definitions is empty" guard. Safe to call without [agentsDir]; just inert.
      * [worktrees]: the model may run a subagent in its own git worktree under `~/.sophi/worktrees`, with the
      * [builtinTools] rooted there (needs [builtinTools]; ignored without it).
+     * [backgroundPolicy]: what a background subagent's calls that would ask get, since nobody can answer for it.
      */
-    fun subagentDelegation(worktrees: Boolean = false): RuntimeBuilder =
-        apply { subagentDelegationEnabled = true; subagentWorktrees = worktrees }
+    fun subagentDelegation(worktrees: Boolean = false, backgroundPolicy: ConfirmationPolicy = ConfirmationPolicy.DENY_ALL): RuntimeBuilder =
+        apply { subagentDelegationEnabled = true; subagentWorktrees = worktrees; subagentBackgroundPolicy = backgroundPolicy }
 
     private var codeModeEnabled = false
 
@@ -556,7 +561,9 @@ class RuntimeBuilder {
             ).joinToString("\n\n")
         )
 
-        if (subagentDelegationEnabled && agentDefinitions.isNotEmpty()) {
+        val subagents = BackgroundSubagents().takeIf { subagentDelegationEnabled && agentDefinitions.isNotEmpty() }
+        if (subagents != null) {
+            registry.register(SubagentResultTool(subagents)).register(SubagentCancelTool(subagents))
             registry.register(
                 SubagentTool(
                     definitions = agentDefinitions,
@@ -578,6 +585,8 @@ class RuntimeBuilder {
                             buildBuiltinTools(wt, cfg.braveApiKey, sandbox = sandbox, jobs = null)
                         }
                     },
+                    background = subagents,
+                    backgroundPolicy = subagentBackgroundPolicy,
                 )
             )
         }
@@ -610,7 +619,7 @@ class RuntimeBuilder {
             loop, sm, pluginRegistry, effectiveConfig, manager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
             deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered, jobs,
-            credentialStore.takeIf { mcpClientManager == null }, oauth, planFirstSettings
+            credentialStore.takeIf { mcpClientManager == null }, oauth, planFirstSettings, subagents
         )
     }
 }
