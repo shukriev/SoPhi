@@ -183,9 +183,9 @@ class LlmGuardianTest : FunSpec({
         coEvery { p.complete(any()) } answers {
             val user = firstArg<CompletionRequest>().messages.last().content
             seen += user
-            LLMResponse.Text(if ("bad" in user) "FLAG: bad" else "CLEAN", TokenUsage(1, 1))
+            LLMResponse.Text(if ("xyz" in user) "FLAG: xyz" else "CLEAN", TokenUsage(1, 1))
         }
-        val text = "a".repeat(6000) + "b".repeat(5997) + "bad" + "c".repeat(6000)
+        val text = "a".repeat(6000) + "b".repeat(5997) + "xyz" + "c".repeat(6000)
         LlmGuardian(p, "m").checkRead(text, "q").label shouldBe ReadVerdict.Label.FLAG
         seen.size shouldBe 2
     }
