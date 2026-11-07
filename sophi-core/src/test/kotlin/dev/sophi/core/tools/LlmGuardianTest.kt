@@ -131,6 +131,8 @@ class LlmGuardianTest : FunSpec({
         val user = shown(root, "bash big.sh")
         user shouldNotContain "tail-marker"
         user shouldContain "truncated"
+    }
+
     test("read check: CLEAN with a reason, tagged as a safety judgment, the text fenced by a random marker") {
         val seen = mutableListOf<CompletionRequest>()
         val p = mockk<LLMProvider>()
