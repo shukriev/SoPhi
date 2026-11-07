@@ -13,3 +13,8 @@ interface McpSession {
     suspend fun callTool(name: String, argumentsJson: String): String
     suspend fun close()
 }
+
+/** A session that can say when its server's tool list changed (`notifications/tools/list_changed`). */
+interface ToolsChangeSource {
+    fun onToolsChanged(handler: suspend () -> Unit)
+}

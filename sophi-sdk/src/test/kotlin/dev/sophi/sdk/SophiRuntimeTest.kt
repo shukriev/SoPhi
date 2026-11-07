@@ -565,7 +565,7 @@ class SophiRuntimeTest : FunSpec({
 
     test("RuntimeBuilder.mcpConfig registers tools returned by McpClientManager.connect and build() closes it via SophiRuntime.close()") {
         val provider = mockk<LLMProvider>()
-        val mcpManager = mockk<McpClientManager>()
+        val mcpManager = mockk<McpClientManager>(relaxUnitFun = true)
         coEvery { mcpManager.connect(emptyList()) } returns emptyList()
         every { mcpManager.close() } just runs
 
