@@ -54,7 +54,7 @@ class LlmGuardian(
                     Message(
                         MessageRole.USER,
                         "User's request:\n${userRequest.take(2000)}\n\nTool: $toolName\nDescription: $toolDescription\n" +
-                            "Arguments:\n```\n${argumentsJson.take(4000)}\n```" + if (toolName == "bash") scripts(argumentsJson) else ""
+                            "Arguments:\n" + fenced(argumentsJson.take(4000)) + if (toolName == "bash") scripts(argumentsJson) else ""
                     ),
                 ),
                 model = model,
@@ -101,7 +101,13 @@ class LlmGuardian(
         val bytes = Files.newInputStream(file).use { it.readNBytes(SCRIPT_BYTES) }
         if (bytes.any { it == 0.toByte() }) return "binary, not read"
         val cut = if (size > SCRIPT_BYTES) "\n[truncated: first $SCRIPT_BYTES of $size bytes]" else ""
-        return "\n```\n${String(bytes, Charsets.UTF_8)}\n```$cut"
+        return "\n" + fenced(String(bytes, Charsets.UTF_8)) + cut
+    }
+
+    // A fence longer than any backtick run inside, so the text can't close it and write outside it.
+    private fun fenced(text: String): String {
+        val fence = "`".repeat(maxOf(3, (Regex("`+").findAll(text).maxOfOrNull { it.value.length } ?: 0) + 1))
+        return "$fence\n$text\n$fence"
     }
 
     // First capitalised verdict word wins, so a lowercase "ask" in an ALLOW reason is just prose.
