@@ -82,8 +82,8 @@ class AgentLoopResultLimitTest : FunSpec({
         val store = ResultStore(tempdir().toPath())
         val (session, _) = run(lines(2_000), listOf(ToolCall("c1", "out", "{}"), ToolCall("c2", "result_read", """{"id":"r1","page":1}""")), store)
         val page = results(session)[1]
-        page shouldStartWith "[r1 page 1/3]\n"
-        page.substringAfter("]\n") shouldBe lines(2_000).take(page.length - "[r1 page 1/3]\n".length)
+        page shouldStartWith "[r1 page 1/4]\n"
+        page.substringAfter("]\n") shouldBe lines(2_000).take(page.length - "[r1 page 1/4]\n".length)
     }
 
     test("the page shrinks to 20% of a small window") {

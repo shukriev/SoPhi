@@ -123,12 +123,16 @@ class ResultStore(
         return "[$id page $page/$pages]\n" + text.substring(bounds[page - 1], bounds[page])
     }
 
-    /** Page starts plus the end: fixed slices of [size], cut after the last line break when one is within the last 10%. */
+    /**
+     * Page starts plus the end: slices of [size], cut after the last line break when one is within the last 10%. Page 1
+     * is half a page, inside the ⅔ the limiter showed, so page 2 picks up before where the model stopped reading, never after
+     * (redaction can shift the stored text a little).
+     */
     private fun pageBounds(text: String, size: Int): List<Int> {
         val bounds = mutableListOf(0)
         var start = 0
-        while (start + size < text.length) {
-            val end = start + size
+        while (start + (if (start == 0) size / 2 else size) < text.length) {
+            val end = start + if (start == 0) size / 2 else size
             val nl = text.lastIndexOf('\n', end - 1)
             start = if (nl >= end - size / 10 && nl >= start) nl + 1 else end
             bounds += start

@@ -20,7 +20,7 @@ class ResultStoreTest : FunSpec({
     lateinit var store: ResultStore
     beforeTest { dir = tempdir().toPath(); store = ResultStore(dir, pageChars = 500) }
 
-    fun lines(n: Int) = (1..n).joinToString("\n") { "line %04d".format(it) } // 9 chars + newline each: 500 lines are 10 pages of 500
+    fun lines(n: Int) = (1..n).joinToString("\n") { "line %04d".format(it) } // 9 chars + newline each: 500 lines are a half page then 10 pages
 
     fun read(s: ResultStore, id: String, page: Int? = null, session: String = "s1") = runBlocking {
         withContext(SessionIdContext(session)) {
@@ -40,17 +40,17 @@ class ResultStoreTest : FunSpec({
         id shouldBe "r1"
         shown shouldStartWith text.take(333)
         shown.endsWith(text.takeLast(166)) shouldBe true
-        shown shouldContain """[r1: 4,999 chars, 500 lines; showing the start and end; result_read("r1", 2) for the next page of 10]"""
+        shown shouldContain """[r1: 4,999 chars, 500 lines; showing the start and end; result_read("r1", 2) for the next page of 11]"""
     }
 
     test("result_read pages through to the end, and the pages put together are the whole result") {
         val text = lines(500)
         limitResult(text, 500, store, "s1")
-        val pages = (1..10).map { read(store, "r1", it) }
-        pages.last() shouldStartWith "[r1 page 10/10]\n"
+        val pages = (1..11).map { read(store, "r1", it) }
+        pages.last() shouldStartWith "[r1 page 11/11]\n"
         pages.joinToString("") { it.substringAfter("]\n") } shouldBe text
-        read(store, "r1") shouldStartWith "[r1 page 2/10]\n" // page 1 is what the model already saw
-        read(store, "r1", 11).let { isToolError(it) shouldBe true; it shouldContain "10 pages" }
+        read(store, "r1") shouldStartWith "[r1 page 2/11]\n" // page 1 is what the model already saw
+        read(store, "r1", 12).let { isToolError(it) shouldBe true; it shouldContain "11 pages" }
     }
 
     test("pages end at a line break when one is near the page's end") {
@@ -79,7 +79,7 @@ class ResultStoreTest : FunSpec({
         val small = ResultStore(dir, pageChars = 500, sessionCapBytes = 12_500)
         repeat(3) { limitResult(lines(500), 500, small, "s1") } // 4,999 bytes each
         read(small, "r1", 1) shouldBe "Error: r1 was evicted; run the call again"
-        read(small, "r3", 1) shouldStartWith "[r3 page 1/10]"
+        read(small, "r3", 1) shouldStartWith "[r3 page 1/11]"
     }
 
     test("a result over the store cap keeps its head and tail and says so") {
@@ -96,17 +96,30 @@ class ResultStoreTest : FunSpec({
         limitResult(lines(500), 500, store, "s1")
         val again = ResultStore(dir, pageChars = 500)
         limitResult(lines(500), 500, again, "s1").second shouldBe "r2"
-        read(again, "r1", 1) shouldStartWith "[r1 page 1/10]"
+        read(again, "r1", 1) shouldStartWith "[r1 page 1/11]"
     }
 
     test("a page of 0 is floored, so paging still ends") {
         limitResult(lines(500), 0, store, "s1").second shouldBe "r1"
-        read(store, "r1", 10) shouldStartWith "[r1 page 10/10]"
+        read(store, "r1", 11) shouldStartWith "[r1 page 11/11]"
     }
 
     test("without a store an over-page result still says how much there was") {
         val (shown, id) = limitResult(lines(500), 500, null, "s1")
         id shouldBe null
         shown shouldContain "[4,999 chars, 500 lines; showing the start and end; the rest was not kept]"
+    }
+
+    test("what the model is shown plus result_read from page 2 on covers every line") {
+        val text = lines(500)
+        val (shown, id) = limitResult(text, 500, store, "s1")
+        val seen = StringBuilder(shown)
+        var page = 2
+        while (true) {
+            val r = read(store, id!!, page++)
+            if (r.startsWith("Error:")) break
+            seen.append(r)
+        }
+        (1..500).filter { "line %04d".format(it) !in seen } shouldBe emptyList()
     }
 })
