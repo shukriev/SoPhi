@@ -16,4 +16,14 @@ class BrowsingSitesSkillTest : FunSpec({
         skill.body shouldContain "write_skill"
         skill.body shouldContain "site-<hostname>"
     }
+
+    test("docs/skills/jvm-api-lookup.md parses cleanly via SkillLoader") {
+        val repoRoot = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
+            .first { it.resolve("docs/skills/jvm-api-lookup.md").toFile().exists() }
+        val skill = SkillLoader().loadFile(repoRoot.resolve("docs/skills/jvm-api-lookup.md"))
+
+        skill.metadata.tags shouldBe listOf("jvm", "javap", "dependencies")
+        skill.body shouldContain "javap -cp"
+        skill.body shouldContain "jar tf"
+    }
 })
