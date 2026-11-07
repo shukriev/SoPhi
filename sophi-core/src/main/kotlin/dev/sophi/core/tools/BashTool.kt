@@ -43,7 +43,7 @@ class BashTool(
 ) : Tool {
 
     override val name = "bash"
-    override val description = "Run a shell command in the working directory. To delete, move or rename files use delete_file / move_file instead: those can be undone."
+    override val description = "Run a shell command in the working directory. To delete, move or rename files use delete_file / move_file instead: those can be undone. Every command starts at the workspace root; a cd does not persist between calls, so use paths relative to the root."
     override fun riskLevel(argumentsJson: String): RiskLevel {
         val command = runCatching { json.decodeFromString<BashArgs>(argumentsJson).command }
             .getOrNull() ?: return RiskLevel.DESTRUCTIVE
