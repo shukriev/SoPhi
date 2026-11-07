@@ -211,4 +211,20 @@ class AgentLoopCheckpointTest : FunSpec({
         FileRestorer(store).let { it.apply(session, it.plan(session)!!) } shouldBe emptyList()
         root.resolve("gone.txt").exists() shouldBe true
     }
+
+    test("a file written by a bash heredoc is undone") {
+        val root = createTempDirectory("ckpt-root")
+        root.resolve("a.txt").writeText("old")
+        val store = CheckpointStore(root, createTempDirectory("ckpt-home"))
+        val (provider, sm) = scripted(
+            use("c1", "bash", """{"command":"cat > a.txt <<'EOF'\nnew\nEOF"}"""),
+            LLMResponse.Text("done", TokenUsage(1, 1)),
+        )
+        val session = AgentLoop(provider, registry(root, createTempDirectory("trash")), sm,
+            contextWindowTokens = 100_000, checkpoints = store).turn(AgentSession(id = "s"), "go", config)
+        String(root.resolve("a.txt").readBytes()) shouldBe "new\n"
+
+        FileRestorer(store).let { it.apply(session, it.plan(session)!!) } shouldBe emptyList()
+        String(root.resolve("a.txt").readBytes()) shouldBe "old"
+    }
 })
