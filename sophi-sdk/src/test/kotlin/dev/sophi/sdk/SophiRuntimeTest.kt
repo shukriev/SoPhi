@@ -276,7 +276,7 @@ class SophiRuntimeTest : FunSpec({
             toolRegistry(registry)
         }.build()
 
-        rt.toolNames() shouldBe listOf("before_build")
+        rt.toolNames() shouldBe listOf("before_build", "result_read")
 
         val afterBuild = object : Tool {
             override val name = "after_build"
@@ -286,7 +286,7 @@ class SophiRuntimeTest : FunSpec({
         }
         registry.register(afterBuild)
 
-        rt.toolNames() shouldBe listOf("after_build", "before_build")
+        rt.toolNames() shouldBe listOf("after_build", "before_build", "result_read")
     }
 
     test("the AgentSession overload returns the updated session and shares the id-based overload's choreography") {
@@ -425,7 +425,7 @@ class SophiRuntimeTest : FunSpec({
             loopGuard(LoopGuardPolicy.ALWAYS_CONTINUE)
         }.build()
 
-        rt.toolNames() shouldBe emptyList()
+        rt.toolNames() shouldBe listOf("result_read")
     }
 
     test("streamTurn forwards every TurnEvent to the caller's onEvent, and doesn't fire tool hooks from them") {

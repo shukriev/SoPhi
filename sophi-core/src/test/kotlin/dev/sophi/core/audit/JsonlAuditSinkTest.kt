@@ -29,7 +29,8 @@ class JsonlAuditSinkTest : FunSpec({
         val file = Files.createTempDirectory("audit").resolve("audit.jsonl")
         JsonlAuditSink(file).record(entry())
         val line = Files.readAllLines(file).single()
-        line shouldContain "\"v\":1"
+        line shouldContain "\"v\":2"
+        line shouldContain "\"resultId\":null"
         line shouldContain "\"tenant\":null"
         for (f in listOf("ts", "actor", "session", "tool", "risk", "args", "decision", "rule", "outcome", "result", "durationMs")) {
             line shouldContain "\"$f\":"

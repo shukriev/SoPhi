@@ -35,7 +35,7 @@ class RuntimeBuilderToolDescriptionOverrideTest : FunSpec({
             sessionsDir = tempdir().toPath()
         }.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.toolRegistry(registry).configVersion(version.id, versionStore).build()
 
-        runtime.toolNames() shouldBe listOf("greet")
+        runtime.toolNames() shouldBe listOf("greet", "result_read")
         registry.get("greet").description shouldBe "A rewritten description"
     }
 
