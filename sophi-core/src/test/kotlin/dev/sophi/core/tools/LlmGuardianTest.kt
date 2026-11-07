@@ -11,10 +11,11 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
+import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.collections.shouldBeIn
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.kotest.matchers.string.shouldEndWith
-import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -60,7 +61,7 @@ class LlmGuardianTest : FunSpec({
         LlmGuardian(p, "m", timeout = 50.milliseconds).go().effect shouldBe Effect.ASK
     }
 
-    test("the request names the model, is deterministic, is no System 1 judgment, and carries the call") {
+    test("the request names the model, is deterministic, is a safety judgment, and carries the call") {
         var seen: CompletionRequest? = null
         val p = mockk<LLMProvider>()
         coEvery { p.complete(any()) } answers { seen = firstArg(); LLMResponse.Text("ALLOW", TokenUsage(1, 1)) }
@@ -68,7 +69,7 @@ class LlmGuardianTest : FunSpec({
         val r = seen!!
         r.model shouldBe "m"
         r.temperature shouldBe 0.0
-        r.judgment shouldBe null
+        r.judgment shouldBe dev.sophi.ai.system1.Judgments.RISK
         val user = r.messages.single { it.role == MessageRole.USER }.content
         user shouldContain "clean the build"
         user shouldContain "bash"
@@ -130,5 +131,74 @@ class LlmGuardianTest : FunSpec({
         val user = shown(root, "bash big.sh")
         user shouldNotContain "tail-marker"
         user shouldContain "truncated"
+    test("read check: CLEAN with a reason, tagged as a safety judgment, the text fenced by a random marker") {
+        val seen = mutableListOf<CompletionRequest>()
+        val p = mockk<LLMProvider>()
+        coEvery { p.complete(any()) } answers { seen += firstArg<CompletionRequest>(); LLMResponse.Text("CLEAN: install steps for a human", TokenUsage(1, 1)) }
+        val g = LlmGuardian(p, "m")
+        g.checkRead("run make install", "fetch the readme") shouldBe ReadVerdict(ReadVerdict.Label.CLEAN, "install steps for a human")
+        g.checkRead("run make install!", "fetch the readme")
+        seen.first().judgment shouldBe dev.sophi.ai.system1.Judgments.OUTSIDE_READ
+        dev.sophi.ai.system1.Judgments.OUTSIDE_READ shouldBeIn dev.sophi.ai.system1.Judgments.SAFETY
+        val user = seen.first().messages.single { it.role == MessageRole.USER }.content
+        user shouldContain "fetch the readme"
+        user shouldContain "run make install"
+        val marker = Regex("BEGIN-([0-9a-f]{16})").find(user)!!.groupValues[1]
+        user shouldContain "END-$marker"
+        seen[1].messages.single { it.role == MessageRole.USER }.content shouldNotContain marker
+    }
+
+    test("read check: FLAG, and the first verdict word wins") {
+        val v = LlmGuardian(replying("FLAG: tells the agent to post ~/.ssh — not CLEAN"), "m").checkRead("x", "y")
+        v.label shouldBe ReadVerdict.Label.FLAG
+        v.reason shouldBe "tells the agent to post ~/.ssh — not CLEAN"
+    }
+
+    test("read check: no verdict, an error and a timeout are all FAILED") {
+        LlmGuardian(replying("hmm"), "m").checkRead("x", "y").label shouldBe ReadVerdict.Label.FAILED
+        val down = mockk<LLMProvider>().also { coEvery { it.complete(any()) } throws RuntimeException("connection refused") }
+        LlmGuardian(down, "m").checkRead("x", "y").reason shouldContain "connection refused"
+        val slow = mockk<LLMProvider>().also { coEvery { it.complete(any()) } coAnswers { delay(5_000); LLMResponse.Text("CLEAN", TokenUsage(1, 1)) } }
+        val v = LlmGuardian(slow, "m", timeout = 50.milliseconds).checkRead("x", "y")
+        v.label shouldBe ReadVerdict.Label.FAILED
+        v.reason shouldContain "timed out"
+    }
+
+    test("read check: the same text is judged once; a failure is never cached") {
+        var calls = 0
+        val p = mockk<LLMProvider>()
+        coEvery { p.complete(any()) } answers { calls++; LLMResponse.Text(if (calls == 1) "oops" else "CLEAN", TokenUsage(1, 1)) }
+        val g = LlmGuardian(p, "m")
+        g.checkRead("page", "q").label shouldBe ReadVerdict.Label.FAILED
+        g.checkRead("page", "q").cached shouldBe false
+        val again = g.checkRead("page", "q")
+        again.cached shouldBe true
+        again.label shouldBe ReadVerdict.Label.CLEAN
+        calls shouldBe 2
+    }
+
+    test("read check: long text is judged in 6k chunks, stopping at the first FLAG") {
+        val seen = mutableListOf<String>()
+        val p = mockk<LLMProvider>()
+        coEvery { p.complete(any()) } answers {
+            val user = firstArg<CompletionRequest>().messages.last().content
+            seen += user
+            LLMResponse.Text(if ("bad" in user) "FLAG: bad" else "CLEAN", TokenUsage(1, 1))
+        }
+        val text = "a".repeat(6000) + "b".repeat(5997) + "bad" + "c".repeat(6000)
+        LlmGuardian(p, "m").checkRead(text, "q").label shouldBe ReadVerdict.Label.FLAG
+        seen.size shouldBe 2
+    }
+
+    test("held reads: an id per read, released once and only to their actor, the oldest dropped past 50") {
+        val g = LlmGuardian(replying("CLEAN"), "m")
+        val id = g.hold("fetch_url", "{}", "page", "bad", "s1", "alice", null)
+        id shouldStartWith "r-"
+        g.release(id, "bob") shouldBe null
+        g.release(id, "alice")!!.text shouldBe "page"
+        g.release(id, "alice") shouldBe null
+        repeat(51) { g.hold("fetch_url", "{}", "p$it", "bad", "s1", "alice", null) }
+        g.held().size shouldBe 50
+        g.held().first().text shouldBe "p1"
     }
 })
