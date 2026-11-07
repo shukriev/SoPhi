@@ -504,7 +504,7 @@ class RuntimeBuilder {
             },
             hooks = pluginRegistry,
             // The start model's name: the metered provider sends it to the session's active model.
-            guardian = guardianConfig?.let { (m, t) -> dev.sophi.core.tools.LlmGuardian(p, m ?: model, t) },
+            guardian = guardianConfig?.let { (m, t) -> dev.sophi.core.tools.LlmGuardian(p, m ?: model, t, builtinToolsConfig?.root ?: Path.of("").toAbsolutePath()) },
         )
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
             .also { pluginRegistry.register(it) }
