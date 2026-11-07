@@ -97,6 +97,29 @@ class AgentLoopPermissionsTest : FunSpec({
         entries.single().outcome shouldBe "denied"
     }
 
+    test("a bash command that only writes one file answers to write_file rules") {
+        val root = createTempDirectory("ws")
+        val (provider, sm) = scripted(use(bash("cat > secret/key.txt <<'EOF'\nk\nEOF")), done)
+        loop(provider, sm, BashTool(root), permissions = rules(deny("write_file", "secret/**")))
+            .turn(AgentSession(id = "s"), "go", config)
+
+        root.resolve("secret").exists() shouldBe false
+        requests[1].messages.last { it.role == MessageRole.TOOL }.content shouldContain "denied by a permission rule"
+    }
+
+    test("a write_file allow rule lets a bash write of a matching file run unasked, any other bash still asks") {
+        val root = createTempDirectory("ws")
+        root.resolve("src").toFile().mkdir()
+        val (provider, sm) = scripted(use(bash("echo hi > src/a.txt"), bash("echo hi > b.txt").copy(id = "b2")), done)
+        loop(provider, sm, BashTool(root), policy = ConfirmationPolicy.DENY_ALL,
+            permissions = rules(PermissionRule("write_file", "src/**", Effect.ALLOW)))
+            .turn(AgentSession(id = "s"), "go", config)
+
+        root.resolve("src/a.txt").exists() shouldBe true
+        root.resolve("src/a.txt").exists() shouldBe true
+        root.resolve("b.txt").exists() shouldBe false
+    }
+
     test("a deny rule blocks SAFE and granted tools") {
         val look = FakeTool("look")
         val rm = FakeTool("rm", RiskLevel.DESTRUCTIVE)

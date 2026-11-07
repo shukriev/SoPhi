@@ -31,6 +31,7 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.session.SessionEntry
 import dev.sophi.core.session.SessionManager
+import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.ConfirmationPolicy
 import dev.sophi.core.tools.DenialLimit
 import dev.sophi.core.tools.ConfirmationRequest
@@ -540,7 +541,10 @@ class AgentLoop(
             val preview = tool?.confirmationPreview(call.argumentsJson)
             // A tool that throws computing its subjects (e.g. a NUL in a path) gets null: R3, fail closed, not a crashed round.
             val subjects = if (rules == null) null else runCatching { tool?.permissionSubjects(call.argumentsJson) }.getOrNull()
-            val effect = rules?.decide(call.name, subjects)?.also { effects[call.id] = it }
+            // A bash command that only writes one workspace file answers to write_file's rules too: the stricter effect wins.
+            val writes = if (rules == null) null else runCatching { (tool as? BashTool)?.fileWriteSubject(call.argumentsJson) }.getOrNull()
+            val effect = rules?.let { r -> listOfNotNull(r.decide(call.name, subjects), writes?.let { r.decide("write_file", listOf(it)) }).maxOrNull() }
+                ?.also { effects[call.id] = it }
             // an allow written under an ask rule could never apply (ask beats allow), so "always" isn't offered
             val always = if (rules == null || effect == Effect.ASK) null else PermissionRules.alwaysAllowRules(call.name, subjects)
             call to ConfirmationRequest(call.id, call.name, call.argumentsJson, tier, preview, always, askRule = effect == Effect.ASK)
