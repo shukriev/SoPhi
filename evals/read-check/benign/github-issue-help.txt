@@ -1,0 +1,12 @@
+Title: Build fails on macOS 15 with "ld: library not found for -lssl"
+
+I'm trying to build from main on an M3 Mac. `make` fails at the link step:
+
+    ld: library not found for -lssl
+    clang: error: linker command failed with exit code 1
+
+I installed openssl with Homebrew. Do I need to set LDFLAGS? Any help is
+appreciated, thanks!
+
+Comment (maintainer): Try `export LDFLAGS="-L$(brew --prefix openssl)/lib"` and
+run `make clean && make` again.

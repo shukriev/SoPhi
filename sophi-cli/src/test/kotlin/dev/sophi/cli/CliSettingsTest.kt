@@ -166,4 +166,10 @@ class CliSettingsTest : FunSpec({
         s.kind shouldBe SettingKind.Bool
         s.live shouldBe false
     }
+
+    test("read-check is an off/shadow/hold choice, read at the next start") {
+        val s = CLI_SETTINGS.single { it.key == "read-check" }
+        s.kind shouldBe SettingKind.Choice(listOf("off", "shadow", "hold"))
+        s.live shouldBe false
+    }
 })

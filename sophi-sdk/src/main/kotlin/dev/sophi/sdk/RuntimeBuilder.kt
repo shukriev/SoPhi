@@ -274,6 +274,18 @@ class RuntimeBuilder {
     fun guardian(model: String? = null, timeout: kotlin.time.Duration = 30.seconds): RuntimeBuilder =
         apply { guardianConfig = model to timeout }
 
+    private var readCheckConfig: Triple<dev.sophi.core.tools.GateMode, String?, kotlin.time.Duration>? = null
+
+    /**
+     * Before the model reads outside text (`fetch_url`, `web_search`, MCP results), [model] judges whether it carries
+     * instructions aimed at an AI agent. SHADOW records each verdict in the audit log and changes nothing; ENFORCE
+     * ("hold") shows the model a stub for anything not clean, until the session's owner calls [SophiRuntime.releaseRead].
+     * Without this call it is SHADOW when [guardian] is on, OFF otherwise. Null [model] = the guardian's, else the
+     * session's; the guardian and the read check share one model.
+     */
+    fun readCheck(mode: dev.sophi.core.tools.GateMode, model: String? = null, timeout: kotlin.time.Duration = 30.seconds): RuntimeBuilder =
+        apply { readCheckConfig = Triple(mode, model, timeout) }
+
     private var userAsker: dev.sophi.core.tools.UserAsker? = null
 
     /**
@@ -487,6 +499,12 @@ class RuntimeBuilder {
             CheckpointStore(cfg.root, home, onWarning = warn)
         }
         val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
+        val reads = readCheckConfig?.first ?: if (guardianConfig != null) dev.sophi.core.tools.GateMode.SHADOW else dev.sophi.core.tools.GateMode.OFF
+        // The start model's name: the metered provider sends it to the session's active model.
+        val guardian = if (guardianConfig == null && reads == dev.sophi.core.tools.GateMode.OFF) null else dev.sophi.core.tools.LlmGuardian(
+            p, readCheckConfig?.second ?: guardianConfig?.first ?: model, readCheckConfig?.third ?: guardianConfig?.second ?: 30.seconds,
+            builtinToolsConfig?.root ?: Path.of("").toAbsolutePath(), reviewCalls = guardianConfig != null, reads = reads,
+        )
         val loop = AgentLoop(
             p, registry, sm,
             compactor = ContextCompactor(p, Summariser(p, compactionMode, window, dev.sophi.ai.system1.Judgments.COMPACTOR)), compaction = compactionMode,
@@ -508,8 +526,7 @@ class RuntimeBuilder {
                     ?: (modelCatalog?.find(current, catalogProvider)?.vision ?: modelCatalog?.base(current)?.vision ?: false)
             },
             hooks = pluginRegistry,
-            // The start model's name: the metered provider sends it to the session's active model.
-            guardian = guardianConfig?.let { (m, t) -> dev.sophi.core.tools.LlmGuardian(p, m ?: model, t, builtinToolsConfig?.root ?: Path.of("").toAbsolutePath()) },
+            guardian = guardian,
         )
         SkillInvocationPlugin(SkillInvocationStore(skillsDir.resolve(".invocations.jsonl")))
             .also { pluginRegistry.register(it) }
@@ -624,7 +641,7 @@ class RuntimeBuilder {
             loop, sm, pluginRegistry, effectiveConfig, manager, learningPlugin, registry, p, window,
             skillsDir, memoryPlugin, agentDefinitions, schedulesDir, contextConfig?.takeIf { it.third }?.first, compactionMode,
             deferOver, checkpointStore, auditSink, permissionRules, bashSandbox, metered, jobs,
-            credentialStore.takeIf { mcpClientManager == null }, oauth, planFirstSettings, subagents
+            credentialStore.takeIf { mcpClientManager == null }, oauth, planFirstSettings, subagents, guardian
         )
     }
 }

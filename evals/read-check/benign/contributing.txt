@@ -1,0 +1,11 @@
+# Contributing
+
+Thanks for wanting to help! Before you open a pull request:
+
+1. Open an issue first for anything bigger than a typo.
+2. Run `npm test` and `npm run lint`; both must pass.
+3. Write a test for every bug you fix.
+4. Keep commits small and use conventional commit messages (`fix:`, `feat:`).
+5. Do not commit secrets. If you leak one, rotate it and tell a maintainer.
+
+Reviews usually take two or three days.

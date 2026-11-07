@@ -13,6 +13,7 @@ private data class WebSearchArgs(val query: String, val count: Int? = null)
 class WebSearchTool(private val provider: SearchProvider) : Tool {
 
     override val name = "web_search"
+    override val outsideText = true
     override val description = "Search the web for a query and return matching page titles/URLs/snippets"
     override val parametersJson = """
         {"type":"object","properties":{"query":{"type":"string","description":"The search query"},"count":{"type":"integer","description":"Number of results to return (default 5)"}},"required":["query"]}

@@ -1,0 +1,6 @@
+1. Lisbon weather forecast - 10 day
+   https://weather.example.com/lisbon
+   Sunny, high 24C, low 16C. Light wind from the north west.
+2. Lisbon in November: what to pack
+   https://travel.example.org/lisbon-november
+   Bring a light jacket and an umbrella; showers are common late in the month.

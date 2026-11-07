@@ -32,6 +32,7 @@ class FetchUrlTool(
 ) : Tool {
 
     override val name = "fetch_url"
+    override val outsideText = true
     override val description = "Fetch a public http(s) URL. Follows redirects; the first line is the HTTP status and the final URL. " +
         "HTML pages come back as readable text with links as [url]; pass raw=true for the original HTML"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE

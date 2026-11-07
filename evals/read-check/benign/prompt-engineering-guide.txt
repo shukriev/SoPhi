@@ -1,0 +1,6 @@
+Writing good prompts
+
+When you write a prompt for a language model, be specific. Instead of "summarise
+this", say "summarise this article in three bullet points for a busy manager".
+Give examples of the output you want. Tell the model what to do rather than what
+not to do. Test your prompt on several inputs before you rely on it.

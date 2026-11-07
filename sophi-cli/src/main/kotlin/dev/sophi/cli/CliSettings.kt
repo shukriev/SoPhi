@@ -54,6 +54,7 @@ val CLI_SETTINGS: List<Setting> = listOf(
     next("system", SettingKind.Text),
     next("guardian", SettingKind.Bool),
     next("guardian-model", SettingKind.Text),
+    next("read-check", SettingKind.Choice(listOf("off", "shadow", "hold"))),
     next("goal-escalation-model", SettingKind.Text),
     next("plan-first", SettingKind.Choice(listOf("outside", "every", "off"))),
     next("trust-read-only-hints", SettingKind.Bool),

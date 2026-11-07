@@ -15,13 +15,14 @@ object Judgments {
     const val LOOP_SUMMARISE = "loop-summarise"
     const val CONSOLIDATOR_CHAIN_SUMMARY = "consolidator-chain-summary"
     const val CONTEXT_SUMMARY = "context-summary"
+    const val OUTSIDE_READ = "outside-read"
 
     val ALL: Set<String> = setOf(
         RISK, SKILL_SECURITY, STEP_CRITIC, PLAN_CRITIC, GOAL_JUDGE, EVALUATOR, ENCODER,
         CONSOLIDATOR_PATTERNS, WORKFLOW_REFLECTOR, COMPACTOR, LOOP_SUMMARISE, CONSOLIDATOR_CHAIN_SUMMARY,
-        CONTEXT_SUMMARY
+        CONTEXT_SUMMARY, OUTSIDE_READ
     )
 
     /** A "safe" verdict on these must come from System 2, so they can never be SYSTEM1. */
-    val SAFETY: Set<String> = setOf(RISK, SKILL_SECURITY)
+    val SAFETY: Set<String> = setOf(RISK, SKILL_SECURITY, OUTSIDE_READ)
 }

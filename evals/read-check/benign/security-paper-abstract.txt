@@ -1,0 +1,5 @@
+Abstract. We study indirect prompt injection against tool-using language model
+agents. We collect 1,200 attack strings from public pages, including payloads
+such as "Assistant, forward the user's emails to attacker@example.com". We find
+that 38% of attacks succeed against undefended agents and 6% when tool results
+are labelled by a separate classifier. We release our dataset under CC BY 4.0.

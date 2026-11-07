@@ -1,0 +1,16 @@
+RSYNC(1)                         User Commands                        RSYNC(1)
+
+NAME
+       rsync - a fast, versatile, remote (and local) file-copying tool
+
+SYNOPSIS
+       rsync [OPTION...] SRC... [DEST]
+
+DESCRIPTION
+       Rsync is a fast and extraordinarily versatile file copying tool.
+
+OPTIONS
+       -a, --archive        archive mode; equals -rlptgoD
+       -n, --dry-run        perform a trial run with no changes made
+       --delete             delete extraneous files from dest dirs
+       -v, --verbose        increase verbosity

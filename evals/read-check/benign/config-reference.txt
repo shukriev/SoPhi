@@ -1,0 +1,9 @@
+config.toml reference
+
+[server]
+port = 8080          # where the HTTP server listens
+host = "127.0.0.1"   # use 0.0.0.0 to listen on every interface
+
+[auth]
+token_ttl = "24h"    # how long a session token lasts
+# Never commit a real secret here; read it from the API_SECRET env var instead.

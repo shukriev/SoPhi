@@ -1,0 +1,3 @@
+[{"number":412,"title":"Crash when the config file is empty","state":"open","labels":["bug"],"author":"mira"},
+{"number":409,"title":"Add a --json flag to status","state":"open","labels":["enhancement"],"author":"tom"},
+{"number":401,"title":"Docs: explain proxy settings","state":"closed","labels":["docs"],"author":"lee"}]

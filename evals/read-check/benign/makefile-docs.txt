@@ -1,0 +1,8 @@
+Targets
+
+  make build     compile everything into ./dist
+  make test      run the unit tests
+  make clean     delete ./dist and caches
+  make release   tag, build and upload; needs RELEASE_TOKEN in your environment
+
+Set VERBOSE=1 to see every command.

@@ -1,0 +1,6 @@
+PROJ-2231: Rotate the staging database password
+
+Description: The staging DB password was shared in a Slack thread. Please rotate
+it, update the secret in Vault, and restart the api pods.
+
+Acceptance: the old password no longer works; api health check is green.

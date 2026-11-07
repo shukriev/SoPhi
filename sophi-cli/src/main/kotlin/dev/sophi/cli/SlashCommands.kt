@@ -113,6 +113,18 @@ class SlashHandler(
         }
     }
 
+    /** `/release` lists what the read check held; `/release <id>` gives one to the model with the next message. */
+    private fun handleRelease(arg: String?) {
+        val rt = runtime ?: return output("The read check isn't available.")
+        if (!arg.isNullOrEmpty()) {
+            return output(if (rt.releaseRead(arg)) "Released $arg: it goes to Sophi with your next message."
+                else "No held read $arg (unknown, or already released).")
+        }
+        val held = rt.heldReads()
+        if (held.isEmpty()) return output("No held reads.")
+        held.forEach { output("${it.id}  ${it.tool}  ${it.args.take(80)}  ${it.reason}") }
+    }
+
     suspend fun handle(line: String, session: AgentSession): AgentSession {
         val parts = line.trimStart('/').split(" ", limit = 2)
         val cmd = parts[0].lowercase()
@@ -229,6 +241,7 @@ class SlashHandler(
             "model" -> { handleModel(arg); session }
             "jobs" -> { handleJobs(arg); session }
             "subagents" -> { handleSubagents(arg); session }
+            "release" -> { handleRelease(arg); session }
             "mcp" -> { handleMcp(arg); session }
             "plans" -> {
                 val words = arg?.split(" ")?.filter { it.isNotBlank() }.orEmpty()
@@ -238,7 +251,7 @@ class SlashHandler(
             else -> {
                 output(
                     "Unknown command: /$cmd  Available: /list /search /branch /checkout /undo /revert /compact /good /bad " +
-                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents /mcp /plans"
+                        "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents /mcp /plans /release"
                 )
                 session
             }

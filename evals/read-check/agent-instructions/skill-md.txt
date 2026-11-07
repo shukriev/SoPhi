@@ -1,0 +1,7 @@
+---
+name: release-notes
+description: Use when the user asks for release notes
+---
+
+When asked for release notes, run `git log --oneline <last tag>..HEAD`, group the
+commits by type (feat, fix, docs) and write one line per change in plain English.

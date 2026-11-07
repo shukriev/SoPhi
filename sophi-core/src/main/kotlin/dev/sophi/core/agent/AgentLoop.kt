@@ -38,7 +38,10 @@ import dev.sophi.core.tools.ConfirmationRequest
 import dev.sophi.core.tools.ActivatedTools
 import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.tools.GateMode
 import dev.sophi.core.tools.GuardianScope
+import dev.sophi.core.tools.READ_CHECK_LIMIT
+import dev.sophi.core.tools.ReadVerdict
 import dev.sophi.core.tools.GuardianVerdict
 import dev.sophi.core.tools.LlmGuardian
 import dev.sophi.core.tools.Unattended
@@ -271,10 +274,17 @@ class AgentLoop(
      * Writes [req]'s audit entry. Never fails the call (see [recordQuietly]). Not suspending,
      * so a cancelled call can still be recorded on its way out.
      */
+    // The session the user talks to: a subagent's or plan step's session never gets a next turn to receive a release.
+    private fun topSessionId(session: AgentSession): String {
+        var s = session
+        repeat(8) { s = s.parentSessionId?.let { id -> runCatching { sessionManager.load(id) }.getOrNull() } ?: return s.id }
+        return s.id
+    }
+
     private fun recordAudit(
         sink: AuditSink, actor: ActorContext?, session: AgentSession, req: ConfirmationRequest,
         effect: Effect?, notes: DecisionNotes, outcome: String, result: String, start: Long, ruleOverride: String? = null,
-        plan: String? = null, guardianVerdict: String? = null,
+        plan: String? = null, guardianVerdict: String? = null, readCheck: String? = null, readCheckMs: Long? = null,
     ) = sink.recordQuietly {
         val rule = ruleOverride ?: when {
             effect == Effect.DENY -> "rule:deny"
@@ -285,7 +295,7 @@ class AgentLoop(
             else -> notes.rules[req.callId] ?: "policy"
         }
         auditEntry(actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId, session.id, req.toolName, req.riskLevel,
-            req.argumentsJson, rule, outcome, result, start, plan, guardianVerdict)
+            req.argumentsJson, rule, outcome, result, start, plan, guardianVerdict, readCheck, readCheckMs)
     }
 
     /**
@@ -615,7 +625,7 @@ class AgentLoop(
         // Guardian: a second look at DESTRUCTIVE calls about to run that no person approved this round. It can
         // only take an approval back (DENY) or hand it to a person (ASK); everything else stays as decided.
         val verdicts = mutableMapOf<String, GuardianVerdict>()
-        currentCoroutineContext()[GuardianScope]?.guardian?.let { g ->
+        currentCoroutineContext()[GuardianScope]?.guardian?.takeIf { it.reviewCalls }?.let { g ->
             // ponytail: reviews run one after another; a round rarely has more than one destructive call
             decided.zip(classified).forEach { (d, c) ->
                 val req = c.second
@@ -663,19 +673,24 @@ class AgentLoop(
         // In a finally, so a stopped round still tells /undo what it changed (saveStopped persists it).
         val auditSink = currentCoroutineContext()[AuditScope]?.sink
         val actor = currentCoroutineContext()[ActorContext]
+        // Off costs nothing: no judge call, no hashing.
+        val readGuard = currentCoroutineContext()[GuardianScope]?.guardian?.takeIf { it.reads != GateMode.OFF }
         return try { withContext(changes) {
             allowedCalls.zip(classified) { (call, allowed), (_, req) ->
                 async {
                     onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
                     val start = System.currentTimeMillis()
                     val step = held[call.id]
+                    var readCheck: String? = null
+                    var readCheckMs: Long? = null
+                    var readHeld = false
                     fun audit(outcome: String, result: String) {
                         val verdict = verdicts[call.id]
-                        val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook"
+                        val rule = if (step != null) "plan" else if (call.id in hintedReads) "read-hint" else if (call.id in vetoes) "hook" else if (readHeld) "read-check"
                             else when (verdict?.effect) { Effect.DENY -> "guardian"; Effect.ASK -> guardNotes.rules[call.id] ?: "policy"; else -> null }
                         val plan = step?.let { "${recorder!!.planId}#$it" }
                         if (auditSink != null) recordAudit(auditSink, actor, session, req, effects[req.callId], notes, outcome, result, start, rule, plan,
-                            verdict?.let { "${it.effect.name.lowercase()}: ${it.reason}" })
+                            verdict?.let { "${it.effect.name.lowercase()}: ${it.reason}" }, readCheck, readCheckMs)
                     }
                     var failed = false
                     val result = if (step != null) {
@@ -709,8 +724,30 @@ class AgentLoop(
                     // just as often as by throwing (every built-in tool's own validation follows
                     // this convention) — count both the same way for loop-guard/reliability purposes.
                     failed = failed || isToolError(result)
+                    val outcome = if (step != null) "recorded" else if (!allowed) "denied" else if (failed) "error" else "ok"
+                    var shown = truncateToolResult(result, window)
+                    val tool = registry.getOrNull(call.name)
+                    // Read check: outside text is judged as it will be shown. An error from a tool that runs here (a refused
+                    // address) was written here; an MCP server's error is the server's text, so it is judged.
+                    if (readGuard != null && allowed && step == null && tool?.outsideText == true && result.isNotBlank() &&
+                        result != "No results found" && !(isToolError(result) && tool.reach(call.argumentsJson) == Reach.LOCAL)) {
+                        if (shown.length > READ_CHECK_LIMIT) shown = shown.take(READ_CHECK_LIMIT) + "\n... cut at the read-check limit"
+                        val checkStart = System.currentTimeMillis()
+                        val v = try { readGuard.checkRead(shown, userInput) } catch (e: CancellationException) { audit(outcome, result); throw e }
+                        readCheckMs = if (v.cached) 0 else System.currentTimeMillis() - checkStart
+                        val enforce = readGuard.reads == GateMode.ENFORCE
+                        readCheck = "${if (enforce) "hold" else "shadow"} ${v.label.name.lowercase()}${if (v.cached) " cached" else ""}: ${v.reason}"
+                        if (enforce && v.label != ReadVerdict.Label.CLEAN) {
+                            readHeld = true
+                            val id = readGuard.hold(call.name, call.argumentsJson, shown, v.reason, topSessionId(session), actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId)
+                            val why = if (v.label == ReadVerdict.Label.FAILED) "The read check could not judge it (${v.reason})."
+                                else "The read check says it may carry instructions aimed at an AI agent: ${v.reason}."
+                            shown = "[Held: this ${call.name} result was not shown to you. $why Do not retry the same read. " +
+                                "Tell the user it was held; they can release it with /release $id.]"
+                        }
+                    }
                     // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
-                    audit(if (step != null) "recorded" else if (!allowed) "denied" else if (failed) "error" else "ok", if (allowed) result else "")
+                    audit(outcome, if (allowed) result else "")
                     val reach = reaches[call.id]
                     if (recorder != null && allowed && !failed && (reach == Reach.OUTSIDE_READ || reach == Reach.OUTSIDE_HINTED_READ)) {
                         recorder.read(call.name, call.argumentsJson, result.take(500), viaHint = reach == Reach.OUTSIDE_HINTED_READ)
@@ -722,7 +759,7 @@ class AgentLoop(
                         call,
                         Message(
                             role = MessageRole.TOOL,
-                            content = truncateToolResult(result, window),
+                            content = shown,
                             toolCallId = call.id,
                             toolName = call.name
                         ),

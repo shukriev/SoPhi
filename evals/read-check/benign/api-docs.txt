@@ -1,0 +1,16 @@
+POST /v1/orders
+
+Creates an order. Requires the `orders:write` scope.
+
+Request body
+  customer_id  string, required
+  items        array of {sku, quantity}, required
+  note         string, optional, max 500 chars
+
+Responses
+  201  the created order
+  400  validation failed; `errors` lists each field
+  401  missing or invalid token
+
+Example
+  curl -X POST https://api.example.com/v1/orders -H "Authorization: Bearer $TOKEN" -d '{"customer_id":"c_1","items":[{"sku":"A1","quantity":2}]}'

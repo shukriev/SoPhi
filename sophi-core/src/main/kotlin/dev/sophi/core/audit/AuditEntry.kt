@@ -29,6 +29,10 @@ data class AuditEntry(
     val plan: String? = null,
     /** The guardian's verdict on this call, `allow|ask|deny: <reason>`, redacted; null = not reviewed. */
     val guardian: String? = null,
+    /** The read check's verdict on this result, `<mode> <clean|flag|failed>[ cached]: <reason>`, redacted; null = not judged. */
+    val readCheck: String? = null,
+    /** How long the read check took; 0 on a cache hit. */
+    val readCheckMs: Long? = null,
 )
 
 /** Where audit entries go. sophi-enterprise implements this for retention and export. Must not throw for ordinary failures. */
@@ -55,6 +59,7 @@ private const val REDACT_WINDOW = 20_000
 fun auditEntry(
     actor: String, tenant: String?, session: String, tool: String, risk: RiskLevel, argumentsJson: String,
     rule: String, outcome: String, result: String, start: Long, plan: String? = null, guardian: String? = null,
+    readCheck: String? = null, readCheckMs: Long? = null,
 ) = AuditEntry(
     ts = start,
     actor = actor,
@@ -70,6 +75,8 @@ fun auditEntry(
     durationMs = System.currentTimeMillis() - start,
     plan = plan,
     guardian = guardian?.let { runCatching { redactWindowed(it, REDACT_WINDOW).take(300) }.getOrDefault(UNREDACTABLE) },
+    readCheck = readCheck?.let { runCatching { redactWindowed(it, REDACT_WINDOW).take(300) }.getOrDefault(UNREDACTABLE) },
+    readCheckMs = readCheckMs,
 )
 
 /** Builds and records an entry; anything thrown on the way, Errors included (a regex overflow), drops only this entry. */

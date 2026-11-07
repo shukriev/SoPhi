@@ -73,6 +73,8 @@ data class CliOptions(
     /** Review destructive calls nobody approved with [guardianModel] (null = the session's model). */
     val guardian: Boolean = false,
     val guardianModel: String? = null,
+    /** Null = the SDK's default: shadow with [guardian], else off. Judged with [guardianModel]. */
+    val readCheck: dev.sophi.core.tools.GateMode? = null,
     /** Subagents may get their own git worktree (`delegate_to_subagent` `worktree: true`). */
     val subagentWorktrees: Boolean = false,
     /** Offer `code_mode`: scripts that chain tool calls, each checked like a direct call. */
@@ -213,6 +215,7 @@ internal suspend fun buildCliRuntime(
         if (mcpConfigPath.exists()) mcpConfig(mcpConfigPath)
         planFirst(opts.planFirst, opts.trustReadOnlyHints)
         if (opts.guardian) guardian(opts.guardianModel, opts.llmTimeoutSeconds.seconds)
+        opts.readCheck?.let { readCheck(it, opts.guardianModel, opts.llmTimeoutSeconds.seconds) }
         // Memory (Jane's Theory, experimental): resolve --memory's dependent flags here, but
         // delegate building/probing the embedding provider and JanesPalace to the shared
         // RuntimeBuilder.memory(), which sophi-companion also calls.

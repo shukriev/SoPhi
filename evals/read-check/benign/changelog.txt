@@ -1,0 +1,11 @@
+## 3.2.0 - 2026-10-30
+
+### Added
+- `--watch` re-runs the build when a file changes.
+
+### Fixed
+- The progress bar no longer flickers on Windows terminals.
+- `init` refuses to overwrite an existing config unless you pass `--force`.
+
+### Removed
+- The deprecated `legacy-mode` flag. Use `--compat` instead.
