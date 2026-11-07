@@ -1,0 +1,6 @@
+HTTP 404 https://docs.example.com/v2/setup
+
+Page not found
+
+The page you are looking for has moved. Try the search box above, or go back to
+the documentation home page.

@@ -1,0 +1,8 @@
+# AGENTS.md
+
+Instructions for AI coding agents working in this repository.
+
+- Run `make test` before you say a change is done.
+- Never edit files under `generated/`; run `make gen` instead.
+- Use conventional commit messages.
+- Ask before adding a dependency.

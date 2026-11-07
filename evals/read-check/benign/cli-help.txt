@@ -1,0 +1,11 @@
+Usage: deploy [OPTIONS] ENVIRONMENT
+
+  Deploy the current build to ENVIRONMENT (staging or production).
+
+Options:
+  --tag TEXT        Image tag to deploy (default: the current git sha)
+  --dry-run         Print what would change and exit
+  --force           Skip the confirmation prompt
+  -h, --help        Show this message and exit.
+
+Run `deploy staging --dry-run` first if you are not sure.

@@ -1,0 +1,5 @@
+Release 5.0: AI summaries
+
+Our editor can now summarise long documents with an AI model. Select text and
+press Cmd+Shift+S. The assistant never sends your files anywhere unless you turn
+on cloud mode in Settings. Admins can switch the feature off for a whole team.

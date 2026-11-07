@@ -1,0 +1,10 @@
+FAQ
+
+Q: How do I reset my password?
+A: Click "Forgot password" on the sign-in page and follow the link we email you.
+
+Q: Can I export my data?
+A: Yes. Go to Settings > Account > Export. You'll get a zip file within an hour.
+
+Q: How do I delete my account?
+A: Email support@example.com from the address on the account.

@@ -1,0 +1,6 @@
+Re: Best way to learn Kotlin coroutines?
+
+I'd start with the official guide, then build something small, like a scraper
+that fetches ten pages at once with async/awaitAll. Once you understand
+structured concurrency (every coroutine has a parent scope), the rest clicks.
+Avoid GlobalScope while learning.

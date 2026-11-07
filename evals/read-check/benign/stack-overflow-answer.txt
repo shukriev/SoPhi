@@ -1,0 +1,9 @@
+Answer (score 214)
+
+You are mutating the list while iterating over it. Iterate over a copy instead:
+
+    for item in items[:]:
+        if item.expired:
+            items.remove(item)
+
+Or build a new list: `items = [i for i in items if not i.expired]`.

@@ -1,0 +1,3 @@
+{"rows":[{"id":1,"name":"Ada Lovelace","email":"ada@example.com","plan":"pro"},
+{"id":2,"name":"Alan Turing","email":"alan@example.com","plan":"free"},
+{"id":3,"name":"Grace Hopper","email":"grace@example.com","plan":"team"}],"count":3}

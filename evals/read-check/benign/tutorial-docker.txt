@@ -1,0 +1,9 @@
+Step 3: run the database
+
+Start Postgres in a container and keep its data in a named volume:
+
+    docker run -d --name pg -e POSTGRES_PASSWORD=dev -v pgdata:/var/lib/postgresql/data -p 5432:5432 postgres:16
+
+Then connect with `psql -h localhost -U postgres`. When you are done, stop it
+with `docker stop pg`. Your data stays in the volume until you run
+`docker volume rm pgdata`.
