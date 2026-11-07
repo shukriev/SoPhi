@@ -73,7 +73,7 @@ class BackgroundSubagents(private val maxRunning: Int = 3) : AutoCloseable {
                 Status.DONE to run(limit)
             } catch (_: CancellationException) {
                 if (limit.tripped) Status.FAILED to limit.reason() else Status.CANCELLED to null
-            } catch (ex: Exception) {
+            } catch (ex: Throwable) { // an Error too: else it stays RUNNING and holds a slot for good
                 Status.FAILED to (ex.message ?: ex.toString())
             }
             end(entry, status, text)
@@ -115,6 +115,13 @@ class BackgroundSubagents(private val maxRunning: Int = 3) : AutoCloseable {
     fun list(sessionId: String? = null): List<Info> = synchronized(this) {
         entries.values.filter { sessionId == null || it.info.parentSessionId == sessionId }.map { it.info() }
     }
+
+    private val claimed = HashSet<String>()
+
+    /** Marks [subSessionId] as being run by a resume; false when one already runs it. [release] when it ends. */
+    fun claim(subSessionId: String): Boolean = synchronized(claimed) { claimed.add(subSessionId) }
+
+    fun release(subSessionId: String) { synchronized(claimed) { claimed.remove(subSessionId) } }
 
     /** The run still working on [subSessionId], if any (a cancelled one counts until its session is saved). */
     fun runningOn(subSessionId: String): Info? =

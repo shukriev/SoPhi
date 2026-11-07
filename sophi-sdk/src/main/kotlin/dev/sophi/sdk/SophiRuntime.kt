@@ -247,6 +247,8 @@ class SophiRuntime internal constructor(
         return current
     }
 
+    private val FENCE_END = Regex("</\\s*background_subagents\\s*>", RegexOption.IGNORE_CASE)
+
     /** Background subagents of [sessionId] that ended since the last turn, fenced as data; each is announced once. */
     private fun backgroundResults(sessionId: String): String? {
         val ended = subagents?.takeFinished(sessionId)?.takeIf { it.isNotEmpty() } ?: return null
@@ -254,7 +256,7 @@ class SophiRuntime internal constructor(
             val text = it.text.orEmpty()
             val line = if (it.status != dev.sophi.core.agent.BackgroundSubagents.Status.DONE) "${it.id} (${it.type}) ${it.statusLine}"
                 else "${it.id} (${it.type}) done: " + if (text.length > 2000) text.take(2000) + "… — subagent_result(\"${it.id}\") for all of it" else text
-            line.replace("</background_subagents>", "<\\/background_subagents>")
+            line.replace(FENCE_END) { "<\\/background_subagents>" } // a lambda: in a replacement string `\` is an escape
         }
     }
 

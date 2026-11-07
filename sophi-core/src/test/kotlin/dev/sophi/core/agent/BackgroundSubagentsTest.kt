@@ -119,4 +119,11 @@ class BackgroundSubagentsTest : FunSpec({
             bg.result("s", id, 5)?.status shouldBe Status.DONE
         }
     }
+    test("an Error from the run still ends it as FAILED and frees its slot") {
+        val bg = BackgroundSubagents(maxRunning = 1)
+        bg.start("s", "t", "d", "sub", kotlin.coroutines.EmptyCoroutineContext) { throw NotImplementedError("boom") }
+        bg.result(null, "b1", 5)!!.status shouldBe BackgroundSubagents.Status.FAILED
+        bg.start("s", "t", "d", "sub2", kotlin.coroutines.EmptyCoroutineContext) { "ok" }
+        bg.close()
+    }
 })

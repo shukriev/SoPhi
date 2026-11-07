@@ -5,6 +5,12 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.dryrun.PlanFirst
+import dev.sophi.core.dryrun.PlanRecorder
+import dev.sophi.core.permissions.Effect
+import dev.sophi.core.permissions.PermissionRule
+import dev.sophi.core.permissions.PermissionRules
+import dev.sophi.core.permissions.PermissionScope
 import dev.sophi.core.session.FileSessionManager
 import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.tools.ConfirmationPolicy
@@ -20,11 +26,18 @@ import io.kotest.matchers.string.shouldStartWith
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.coroutineScope
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import java.util.Collections
 import kotlin.io.path.createTempDirectory
+
+private class Marker : AbstractCoroutineContextElement(Key) { companion object Key : CoroutineContext.Key<Marker> }
 
 class SubagentBackgroundTest : FunSpec({
 
@@ -177,5 +190,72 @@ class SubagentBackgroundTest : FunSpec({
         tool(textProvider(), depth = 1).parametersJson shouldNotContain "\"background\""
         tool(textProvider(), bg = null).parametersJson shouldNotContain "\"background\""
         tool(textProvider(), depth = 1).parametersJson shouldContain "\"resume\""
+    }
+    test("an ask rule is denied in the background even when the background policy allows all") {
+        val bg = BackgroundSubagents()
+        val ask = PermissionRules(listOf(PermissionRule("danger", null, Effect.ASK)), emptyList(), null, null, emptySet())
+        withContext(PermissionScope(ask)) {
+            inSession { tool(dangerProvider(), bg, backgroundPolicy = ConfirmationPolicy.ALLOW_ALL).execute("""{"subagent_type":"operator","prompt":"act","background":true}""") }
+        }
+        bg.result(null, "b1", 5)!!.status shouldBe BackgroundSubagents.Status.DONE
+        executed shouldBe false
+        bg.close()
+    }
+
+    test("background is refused while plan-first records the turn") {
+        val bg = BackgroundSubagents()
+        withContext(PlanRecorder(PlanFirst.EVERY)) {
+            inSession { tool(textProvider(), bg).execute("""{"subagent_type":"explore","prompt":"look","background":true}""") }
+        } shouldStartWith "Error: background subagents don't run while plan-first is on"
+        bg.list() shouldBe emptyList()
+        bg.close()
+    }
+
+    test("a background run keeps the session and permissions but not the parent turn's other context") {
+        val seen = mutableListOf<Boolean>()
+        val probe = object : Tool {
+            override val name = "read_file"
+            override val description = "probe"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String {
+                seen += currentCoroutineContext()[Marker] != null
+                seen += currentCoroutineContext()[PermissionScope] != null
+                seen += currentCoroutineContext()[SessionIdContext]?.sessionId == "parent-1"
+                return "ok"
+            }
+        }
+        var n = 0
+        val provider = mockk<LLMProvider>().also { p ->
+            every { p.stream(any()) } answers {
+                if (++n == 1) LLMResponse.ToolUse(listOf(ToolCall("c1", "read_file", "{}")), TokenUsage(1, 0)).toStreamFlow()
+                else LLMResponse.Text("done", TokenUsage(1, 1)).toStreamFlow()
+            }
+        }
+        val bg = BackgroundSubagents()
+        val t = SubagentTool(listOf(explore), provider, ToolRegistry().register(probe), FileSessionManager(sessionsDir),
+            AgentConfig(model = "m"), 100_000, background = bg)
+        val rules = PermissionRules(emptyList(), emptyList(), null, null, emptySet())
+        withContext(Marker() + PermissionScope(rules)) {
+            inSession { t.execute("""{"subagent_type":"explore","prompt":"look","background":true}""") }
+        }
+        bg.result(null, "b1", 5)!!.status shouldBe BackgroundSubagents.Status.DONE
+        seen shouldBe listOf(false, true, true)
+        bg.close()
+    }
+
+    test("a session already running in the foreground can't be resumed twice") {
+        val id = sessionOf(inSession { tool(textProvider()).execute("""{"subagent_type":"explore","prompt":"q"}""") })
+        val gate = CompletableDeferred<Unit>()
+        val bg = BackgroundSubagents()
+        requests.clear()
+        coroutineScope {
+            val first = async { inSession { tool(textProvider(gate = gate), bg).execute("""{"subagent_type":"explore","prompt":"a","resume":"$id"}""") } }
+            while (requests.isEmpty()) kotlinx.coroutines.delay(10)
+            inSession { tool(textProvider(), bg).execute("""{"subagent_type":"explore","prompt":"b","resume":"$id"}""") } shouldBe
+                "Error: subagent session $id is already running; wait for it to finish"
+            gate.complete(Unit)
+            first.await() shouldStartWith "the answer"
+        }
+        bg.close()
     }
 })

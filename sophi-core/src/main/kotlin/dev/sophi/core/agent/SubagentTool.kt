@@ -1,22 +1,28 @@
 package dev.sophi.core.agent
 
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.core.audit.ActorContext
+import dev.sophi.core.audit.AuditScope
+import dev.sophi.core.audit.noteDecision
+import dev.sophi.core.dryrun.PlanRecorder
+import dev.sophi.core.permissions.PermissionScope
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.SessionIdContext
 import dev.sophi.core.session.SessionManager
 import dev.sophi.core.tools.ConfirmationPolicy
+import dev.sophi.core.tools.GuardianScope
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import dev.sophi.core.tools.Unattended
 import dev.sophi.core.undo.RoundChanges
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
 
 private const val DELEGATE_TOOL_NAME = "delegate_to_subagent"
@@ -64,6 +70,13 @@ class SubagentTool(
 
     private val bg = background.takeIf { depth == 0 }
 
+    /** Nobody can answer an ask rule or a guardian ASK behind the conversation: those are denied whatever [backgroundPolicy] says. */
+    private val unattendedPolicy = ConfirmationPolicy { requests ->
+        val (asks, rest) = requests.partition { it.askRule }
+        asks.associate { noteDecision(it.callId, "deny-all"); it.callId to false } +
+            if (rest.isEmpty()) emptyMap() else backgroundPolicy.confirm(rest)
+    }
+
     override val name = DELEGATE_TOOL_NAME
     override val description: String = if (definitions.isEmpty()) {
         "Delegate a task to a subagent. No agent types are currently configured."
@@ -95,7 +108,10 @@ class SubagentTool(
         }
 
         val inBackground = args.background && bg != null
-        val policy = if (inBackground) backgroundPolicy else confirmationPolicy
+        // Its changes would be recorded into this turn's plan, which is saved when the turn ends: lost or misattributed.
+        if (inBackground && coroutineContext[PlanRecorder] != null)
+            return "Error: background subagents don't run while plan-first is on; delegate without background"
+        val policy = if (inBackground) unattendedPolicy else confirmationPolicy
         val subSession = if (args.resume == null) sessionManager.create(
             title = "subagent:${definition.name}",
             parentSessionId = parentSessionId
@@ -109,77 +125,98 @@ class SubagentTool(
                 ?: return "Error: no subagent session ${args.resume} under this conversation"
             val type = loaded.title!!.removePrefix("subagent:")
             if (type != definition.name) return "Error: session ${args.resume} is a $type subagent; pass subagent_type \"$type\""
+            // Two resumes in one round run in parallel; only one may run the session, or the last save wins.
+            if (background != null && !background.claim(loaded.id))
+                return "Error: subagent session ${loaded.id} is already running; wait for it to finish"
             loaded
         }
+        val claimed = args.resume?.takeIf { background != null }
+        var handedOff = false
+        try {
 
-        val worktree = if (args.worktree && worktrees != null) {
-            try {
-                worktrees.open(definition.name)
-            } catch (e: IllegalStateException) {
+            val worktree = if (args.worktree && worktrees != null) {
+                try {
+                    worktrees.open(definition.name)
+                } catch (e: IllegalStateException) {
+                    return "Error: worktree: ${e.message}. Delegate again without worktree to work in the shared tree."
+                }
+            } else null
+            // In a worktree, the file/shell tools are rooted there instead, for this subagent and any it delegates to.
+            val registry = if (worktree == null) fullRegistry else try {
+                fullRegistry.subset(fullRegistry.names()).also { r ->
+                    worktrees!!.toolsAt(worktree.root).filter { r.getOrNull(it.name) != null }.forEach { r.register(it) }
+                }
+            } catch (e: Exception) {
+                worktree.finish("")
                 return "Error: worktree: ${e.message}. Delegate again without worktree to work in the shared tree."
             }
-        } else null
-        // In a worktree, the file/shell tools are rooted there instead, for this subagent and any it delegates to.
-        val registry = if (worktree == null) fullRegistry else try {
-            fullRegistry.subset(fullRegistry.names()).also { r ->
-                worktrees!!.toolsAt(worktree.root).filter { r.getOrNull(it.name) != null }.forEach { r.register(it) }
-            }
-        } catch (e: Exception) {
-            worktree.finish("")
-            return "Error: worktree: ${e.message}. Delegate again without worktree to work in the shared tree."
-        }
-        val scopedRegistry = registry.subset(definition.allowedTools)
-        if (definition.allowedTools.contains(DELEGATE_TOOL_NAME)) {
-            scopedRegistry.register(
-                SubagentTool(
-                    definitions = definitions,
-                    provider = provider,
-                    fullRegistry = registry,
-                    sessionManager = sessionManager,
-                    parentConfig = parentConfig,
-                    contextWindowTokens = contextWindowTokens,
-                    depth = depth + 1,
-                    maxDelegationDepth = maxDelegationDepth,
-                    confirmationPolicy = policy,
-                    currentWindow = currentWindow,
-                    // a subagent in a worktree shares it with its own subagents
-                    worktrees = worktrees.takeIf { worktree == null },
+            val scopedRegistry = registry.subset(definition.allowedTools)
+            if (definition.allowedTools.contains(DELEGATE_TOOL_NAME)) {
+                scopedRegistry.register(
+                    SubagentTool(
+                        definitions = definitions,
+                        provider = provider,
+                        fullRegistry = registry,
+                        sessionManager = sessionManager,
+                        parentConfig = parentConfig,
+                        contextWindowTokens = contextWindowTokens,
+                        depth = depth + 1,
+                        maxDelegationDepth = maxDelegationDepth,
+                        confirmationPolicy = policy,
+                        currentWindow = currentWindow,
+                        // a subagent in a worktree shares it with its own subagents
+                        worktrees = worktrees.takeIf { worktree == null },
+                    )
                 )
+            }
+
+            val nestedLoop = AgentLoop(
+                provider, scopedRegistry, sessionManager,
+                confirmationPolicy = policy,
+                grants = scopedRegistry.safeGrantsFrom(args.expectedTools),
+                contextWindowTokens = currentWindow?.invoke() ?: contextWindowTokens
             )
-        }
+            val config = AgentConfig(
+                model = definition.model ?: parentConfig.model,
+                systemPrompt = listOfNotNull(
+                    definition.systemPrompt,
+                    worktree?.let {
+                        "You work in ${it.root}, a separate git worktree of this project on branch ${it.branch}. " +
+                            "Keep every file and shell path inside it; your changes are committed to that branch when you finish."
+                    },
+                    UNATTENDED_PROMPT.takeIf { inBackground },
+                ).joinToString("\n\n")
+            )
+            val footer = "\n\n(subagent session ${subSession.id}; pass resume=\"${subSession.id}\" to continue it)"
+            if (!inBackground) return runNested(nestedLoop, subSession, args.prompt, config, worktree, definition.name) + footer
 
-        val nestedLoop = AgentLoop(
-            provider, scopedRegistry, sessionManager,
-            confirmationPolicy = policy,
-            grants = scopedRegistry.safeGrantsFrom(args.expectedTools),
-            contextWindowTokens = currentWindow?.invoke() ?: contextWindowTokens
-        )
-        val config = AgentConfig(
-            model = definition.model ?: parentConfig.model,
-            systemPrompt = listOfNotNull(
-                definition.systemPrompt,
-                worktree?.let {
-                    "You work in ${it.root}, a separate git worktree of this project on branch ${it.branch}. " +
-                        "Keep every file and shell path inside it; your changes are committed to that branch when you finish."
-                },
-                UNATTENDED_PROMPT.takeIf { inBackground },
-            ).joinToString("\n\n")
-        )
-        val footer = "\n\n(subagent session ${subSession.id}; pass resume=\"${subSession.id}\" to continue it)"
-        if (!inBackground) return runNested(nestedLoop, subSession, args.prompt, config, worktree, definition.name) + footer
-
-        val info = try {
-            // Its own job and dispatcher (it outlives this turn), and its own RoundChanges (this turn's undo round closes without it).
-            bg!!.start(
-                parentSessionId, definition.name, args.description ?: args.prompt.take(40), subSession.id,
-                coroutineContext.minusKey(Job).minusKey(ContinuationInterceptor) + Unattended + RoundChanges(),
-            ) { runNested(nestedLoop, subSession, args.prompt, config, worktree, definition.name) + footer }
-        } catch (e: IllegalStateException) {
-            worktree?.finish("")
-            return "Error: ${e.message}"
+            val info = try {
+                bg!!.start(
+                    parentSessionId, definition.name, args.description ?: args.prompt.take(40), subSession.id,
+                    inheritedByBackground(coroutineContext) + Unattended + RoundChanges(),
+                ) {
+                    try { runNested(nestedLoop, subSession, args.prompt, config, worktree, definition.name) + footer }
+                    finally { claimed?.let { background!!.release(it) } }
+                }
+            } catch (e: IllegalStateException) {
+                worktree?.finish("")
+                return "Error: ${e.message}"
+            }
+            handedOff = true
+            return "Started subagent ${info.id} (${definition.name}). Keep working; read its result with subagent_result(\"${info.id}\") — wait_seconds waits for it."
+        } finally {
+            if (!handedOff) claimed?.let { background!!.release(it) }
         }
-        return "Started subagent ${info.id} (${definition.name}). Keep working; read its result with subagent_result(\"${info.id}\") — wait_seconds waits for it."
     }
+
+    /**
+     * What a background run keeps of this turn's context: who it runs for, and the audit, permission, hook and guardian
+     * scopes. The rest (job, dispatcher, fallback place, plan recorder, this turn's tool-call scope) belongs to a turn
+     * that ends before the run does. It gets its own RoundChanges: this turn's undo round closes without it.
+     */
+    private fun inheritedByBackground(ctx: CoroutineContext): CoroutineContext =
+        listOfNotNull(ctx[SessionIdContext], ctx[ActorContext], ctx[AuditScope], ctx[PermissionScope], ctx[HookScope], ctx[GuardianScope])
+            .fold(EmptyCoroutineContext as CoroutineContext) { acc, e -> acc + e }
 
     private suspend fun runNested(
         nestedLoop: AgentLoop, subSession: AgentSession, prompt: String, config: AgentConfig,
