@@ -220,8 +220,10 @@ class MemoryConsolidate : CliktCommand(name = "consolidate", help = "Run the sle
     override fun run() = runBlocking {
         if (!yes && !confirmPrompt("Run the sleep cycle now?")) return@runBlocking echo("Aborted.")
         val report = palace(baseUrl, apiKey, chatModel = model).consolidate(System.currentTimeMillis())
+        // ponytail: echoes the default limit; palace() doesn't override it. Read it from the palace's config if that changes.
         echo("merged=${report.merged} strengthened=${report.strengthened} compressed=${report.compressed} " +
-            "pruned=${report.pruned} purged=${report.purged}")
+            "pruned=${report.pruned} purged=${report.purged}" +
+            if (report.capped) " capped=true (limit ${JanesPalaceConfig().maxDemotionsPerPass} per pass)" else "")
         if (model == null) echo("(compression skipped — pass --base-url and --model to enable)")
     }
 }

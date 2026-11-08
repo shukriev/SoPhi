@@ -35,26 +35,32 @@ class Consolidator(
     fun isDue(nowMs: Long): Boolean =
         (store.lastConsolidationMs() ?: Long.MIN_VALUE) + config.consolidationIntervalMs <= nowMs
 
+    /** Soft-deletes left this pass ([JanesPalaceConfig.maxDemotionsPerPass]); [capped] once one was skipped for it. */
+    private class Budget(var left: Int, var capped: Boolean = false)
+
     suspend fun run(nowMs: Long): ConsolidationReport {
-        val merged = merge(nowMs)
+        val budget = Budget(config.maxDemotionsPerPass)
+        val recalled = store.recallsSince(nowMs - config.recallProtectMs).mapTo(HashSet()) { it.memoryId }
+        val merged = merge(nowMs, budget)
         val strengthened = strengthen(nowMs)
         val classified = classifyPatterns(nowMs)
         val classifiedHabits = classifyHabits()
-        val compressResult = compress(nowMs)
-        val pruned = prune(nowMs)
+        val compressResult = compress(nowMs, budget, recalled)
+        val pruned = prune(nowMs, budget, recalled)
         val purged = if (config.autoPurgeEnabled) forgetEngine.purgeSoftDeleted(nowMs - config.softDeleteGraceMs, nowMs) else emptyList()
         store.markConsolidation(nowMs)
         val record = ConsolidationRecord(
             ts = nowMs, merged = merged.size, strengthened = strengthened, compressed = compressResult.threadsCompressed,
             pruned = pruned.size, softDeletedIds = merged + compressResult.softDeletedIds + pruned, purgedIds = purged,
-            autoPurgeEnabled = config.autoPurgeEnabled, classified = classified, classifiedHabits = classifiedHabits
+            autoPurgeEnabled = config.autoPurgeEnabled, classified = classified, classifiedHabits = classifiedHabits,
+            capped = budget.capped
         )
         historyStore.record(record)
         versionStore?.record(
             ArtifactType.MEMORY_CONSOLIDATION, record.id,
             consolidationRecordJson.encodeToString(record), ProducedBy.REFLECTION
         )
-        return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size, classified, classifiedHabits)
+        return ConsolidationReport(merged.size, strengthened, compressResult.threadsCompressed, pruned.size, purged.size, classified, classifiedHabits, budget.capped)
     }
 
     /**
@@ -133,7 +139,8 @@ class Consolidator(
         return count
     }
 
-    private fun merge(nowMs: Long): List<String> {
+    // Merge is not blocked by recall protection: the survivor keeps the absorbed content.
+    private fun merge(nowMs: Long, budget: Budget): List<String> {
         val absorbedAll = mutableListOf<String>()
         Room.entries.forEach { room ->
             val actives = store.memories().values.filter { it.active && it.room == room }
@@ -149,6 +156,8 @@ class Consolidator(
                     if (b.id in absorbed) continue
                     val va = store.vectorFor(a.id) ?: continue; val vb = store.vectorFor(b.id) ?: continue
                     if (cosine(va, vb) >= config.mergeThreshold) {
+                        if (budget.left == 0) { budget.capped = true; continue }
+                        budget.left--
                         survivorSalience = min(1.0, maxOf(survivorSalience, b.salience) + 0.05)
                         survivorOccurrences = (survivorOccurrences + b.occurrences).takeLast(config.habitMaxOccurrencesStored)
                         store.upsertMemory(a.copy(
@@ -184,7 +193,7 @@ class Consolidator(
 
     private data class CompressResult(val threadsCompressed: Int, val softDeletedIds: List<String>)
 
-    private suspend fun compress(nowMs: Long): CompressResult {
+    private suspend fun compress(nowMs: Long, budget: Budget, recalled: Set<String>): CompressResult {
         val llm = provider ?: return CompressResult(0, emptyList())
         val model = config.encoderModel ?: config.sessionModel ?: return CompressResult(0, emptyList())
         val all = store.memories()
@@ -200,6 +209,10 @@ class Consolidator(
                     priority(m, nowMs, config.halfLifeMs) < config.compressPriorityCeiling
             }
             if (!allOldAndLow) return@forEach
+            val interior = members.drop(1).dropLast(1)
+            if (interior.any { it.id in recalled }) return@forEach
+            // Whole thread or nothing: a half-compressed chain would lose its middle without a summary.
+            if (interior.size > budget.left) { budget.capped = true; return@forEach }
 
             val summaryText = runCatching {
                 when (val r = llm.complete(CompletionRequest(
@@ -228,7 +241,7 @@ class Consolidator(
             store.upsertEdge(CausalEdge(members.first().id, summary.id, label, compressed = true))
             store.upsertEdge(CausalEdge(summary.id, members.last().id, label, compressed = true))
             threadEdges.forEach { store.upsertEdge(it.copy(removed = true)) }
-            val interior = members.drop(1).dropLast(1)
+            budget.left -= interior.size
             interior.forEach { store.upsertMemory(it.copy(softDeletedAt = nowMs)) }
             softDeleted += interior.map { it.id }
             threadsCompressed++
@@ -236,14 +249,17 @@ class Consolidator(
         return CompressResult(threadsCompressed, softDeleted)
     }
 
-    private fun prune(nowMs: Long): List<String> {
+    private fun prune(nowMs: Long, budget: Budget, recalled: Set<String>): List<String> {
         val linked = store.edges().flatMap { listOf(it.fromId, it.toId) }.toSet()
-        return store.memories().values
+        val candidates = store.memories().values
             .filter {
-                it.active && it.id !in linked &&
+                it.active && it.id !in linked && it.id !in recalled &&
                     priority(it, nowMs, config.halfLifeMs) < config.pruneFloor / worthMultiplier(it, config)
             }
-            .onEach { store.upsertMemory(it.copy(softDeletedAt = nowMs)) }
+            .sortedBy { priority(it, nowMs, config.halfLifeMs) }
+        if (candidates.size > budget.left) budget.capped = true
+        return candidates.take(budget.left)
+            .onEach { store.upsertMemory(it.copy(softDeletedAt = nowMs)); budget.left-- }
             .map { it.id }
     }
 }
