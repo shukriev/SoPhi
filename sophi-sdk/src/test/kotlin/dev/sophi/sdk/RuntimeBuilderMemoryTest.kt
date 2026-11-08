@@ -1,6 +1,7 @@
 package dev.sophi.sdk
 
 import dev.sophi.ai.api.LLMProvider
+import dev.sophi.core.tools.DATA_FENCE_NOTE
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.memory.jane.JanesPalace
@@ -69,7 +70,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         builder.systemPrompt = "custom instructions"
         val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
-        rt.config.systemPrompt shouldBe "Host base prompt.\n\ncustom instructions"
+        rt.config.systemPrompt shouldBe "Host base prompt.\n\ncustom instructions\n\n$DATA_FENCE_NOTE"
         rt.config.systemPrompt.shouldNotBeNull() shouldNotContain "When a browser tool's result"
     }
 
@@ -81,7 +82,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         rt.memoryPlugin.shouldBeNull()
-        rt.config.systemPrompt shouldBe DefaultPrompt.BASE
+        rt.config.systemPrompt shouldBe "${DefaultPrompt.BASE}\n\n$DATA_FENCE_NOTE"
     }
 
     test("the default prompt comes first, ahead of a caller's own prompt and the memory section") {
@@ -215,7 +216,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .build()
 
         rt.memoryPlugin.shouldBeNull()
-        rt.config.systemPrompt shouldBe DefaultPrompt.BASE
+        rt.config.systemPrompt shouldBe "${DefaultPrompt.BASE}\n\n$DATA_FENCE_NOTE"
         warnings.single() shouldContain "memory: disabled — embeddings endpoint unreachable"
     }
 
@@ -239,7 +240,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .build()
 
         rt.memoryPlugin.shouldBeNull()
-        rt.config.systemPrompt shouldBe DefaultPrompt.BASE
+        rt.config.systemPrompt shouldBe "${DefaultPrompt.BASE}\n\n$DATA_FENCE_NOTE"
         warnings.single() shouldContain "memory: disabled — couldn't open the memory database"
         warnings.single() shouldNotContain "only one process"
     }

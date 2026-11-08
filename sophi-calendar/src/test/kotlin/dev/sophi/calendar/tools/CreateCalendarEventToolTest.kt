@@ -12,6 +12,14 @@ class CreateCalendarEventToolTest : FunSpec({
         CreateCalendarEventTool(FakeCalendarProvider()).riskLevel("{}") shouldBe dev.sophi.core.tools.RiskLevel.CAUTION
     }
 
+    test("calendar changes only write") {
+        val writes = setOf(dev.sophi.core.tools.EffectKind.WRITES)
+        val p = FakeCalendarProvider()
+        CreateCalendarEventTool(p).effects("{}") shouldBe writes
+        UpdateCalendarEventTool(p).effects("{}") shouldBe writes
+        DeleteCalendarEventTool(p).effects("{}") shouldBe writes
+    }
+
     test("create with required fields persists an event with the correctly parsed local start/end") {
         val provider = FakeCalendarProvider()
         val tool = CreateCalendarEventTool(provider)

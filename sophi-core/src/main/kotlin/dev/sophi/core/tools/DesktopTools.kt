@@ -99,9 +99,12 @@ private class DesktopTool(
     override val parametersJson: String,
     private val risk: RiskLevel,
     private val preview: ((String) -> String?)? = null,
+    private val does: (String) -> Set<EffectKind> = { emptySet() },
+    override val outsideText: Boolean = false,
     private val body: suspend (String) -> String,
 ) : Tool {
     override fun riskLevel(argumentsJson: String) = risk
+    override fun effects(argumentsJson: String) = does(argumentsJson)
     override fun confirmationPreview(argumentsJson: String) = preview?.invoke(argumentsJson)
     override suspend fun execute(argumentsJson: String): String =
         runCatching { body(argumentsJson) }.getOrElse { "Error: ${it.message}" }
@@ -117,18 +120,19 @@ fun desktopTools(desktop: Desktop, root: Path): List<Tool> = buildList {
     if (desktop.canClipboard) {
         add(DesktopTool(
             "clipboard_read", "Read the text on the user's clipboard (e.g. an error they just copied).",
-            """{"type":"object","properties":{}}""", RiskLevel.CAUTION,
+            """{"type":"object","properties":{}}""", RiskLevel.CAUTION, outsideText = true,
         ) { _ -> desktop.clipboardRead() })
         add(DesktopTool(
             "clipboard_write", "Put text on the user's clipboard so they can paste it.",
             """{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}""", RiskLevel.CAUTION,
-            { a -> str(a, "text")?.let { "Copy to clipboard: " + it.take(200) } },
+            { a -> str(a, "text")?.let { "Copy to clipboard: " + it.take(200) } }, { setOf(EffectKind.WRITES) },
         ) { a -> val text = str(a, "text") ?: return@DesktopTool "Error: \"text\" is required"; desktop.clipboardWrite(text); "Copied ${text.length} chars." })
     }
     if (desktop.canOpen) add(DesktopTool(
         "open", "Open an http(s) URL in the user's browser, or an existing file in its default app (e.g. a report you wrote). It won't run programs.",
         """{"type":"object","properties":{"target":{"type":"string","description":"An http(s) URL, or a file path relative to the working directory"}},"required":["target"]}""",
         RiskLevel.CAUTION, { a -> str(a, "target")?.let { "Open $it" } },
+        { a -> if (str(a, "target")?.trim()?.matches(Regex("(?i)https?://.*")) != false) setOf(EffectKind.PROCESS, EffectKind.NETWORK) else setOf(EffectKind.PROCESS) },
     ) { a ->
         val target = str(a, "target")?.trim().orEmpty()
         val web = target.startsWith("http://") || target.startsWith("https://")

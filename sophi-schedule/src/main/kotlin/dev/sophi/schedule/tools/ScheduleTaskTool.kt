@@ -44,6 +44,11 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
         val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
         return if (grantingPower) RiskLevel.DESTRUCTIVE else RiskLevel.SAFE
     }
+    /** Listing tasks or runs only reads; anything else (or unparseable) changes the schedule. The task's own calls are checked when it runs. */
+    override fun effects(argumentsJson: String): Set<dev.sophi.core.tools.EffectKind> {
+        val action = runCatching { json.decodeFromString(ManageTaskArgs.serializer(), argumentsJson).action }.getOrNull()
+        return if (action == "list" || action == "runs") emptySet() else setOf(dev.sophi.core.tools.EffectKind.WRITES)
+    }
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
         // Unparseable: execute() decodes the same type and throws before doing anything, so don't prompt —
         // let it fail with the parse error the model can act on. (riskLevel still fails closed; ADR-027.)

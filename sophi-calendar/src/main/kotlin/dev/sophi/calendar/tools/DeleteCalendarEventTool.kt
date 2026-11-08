@@ -18,6 +18,7 @@ class DeleteCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "delete_calendar_event"
     override val description = "Delete a calendar event by id"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(dev.sophi.core.tools.EffectKind.WRITES)
     override fun ruleVerdict(argumentsJson: String) = RuleVerdict.HIGH_RISK
     override val parametersJson = """
         {"type":"object","properties":{

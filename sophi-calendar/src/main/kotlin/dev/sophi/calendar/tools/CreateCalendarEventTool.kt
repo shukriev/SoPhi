@@ -46,6 +46,7 @@ private fun RecurrenceArgs.toModel(): Recurrence = Recurrence(
 class CreateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "create_calendar_event"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.CAUTION
+    override fun effects(argumentsJson: String) = setOf(dev.sophi.core.tools.EffectKind.WRITES)
     override val description = "Create a calendar event (optionally recurring or all-day) on the native OS calendar. " +
         "For a timed event, set 'start'/'end' to ISO-8601 local date-times (e.g. 2026-07-27T12:00:00) — never " +
         "epoch milliseconds. For an all-day event, set \"all_day\": true and use 'start_date'/'end_date' " +

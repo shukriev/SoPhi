@@ -62,6 +62,7 @@ class MoveFileTool(
     """.trimIndent()
 
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(EffectKind.WRITES)
 
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
         val args = runCatching { json.decodeFromString<MoveArgs>(argumentsJson) }.getOrNull()
@@ -104,6 +105,7 @@ class DeleteFileTool(
     """.trimIndent()
 
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(EffectKind.WRITES)
 
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
         val args = runCatching { json.decodeFromString<DeleteArgs>(argumentsJson) }.getOrNull()

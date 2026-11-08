@@ -54,6 +54,8 @@ import dev.sophi.core.tools.DEFAULT_RESULT_PAGE_CHARS
 import dev.sophi.core.tools.RESULT_READ_NAME
 import dev.sophi.core.tools.ResultReadTool
 import dev.sophi.core.tools.limitResult
+import dev.sophi.core.tools.callEffects
+import dev.sophi.core.tools.fenceAsData
 import dev.sophi.core.tools.isToolError
 import dev.sophi.core.undo.CheckpointStore
 import dev.sophi.core.undo.RoundChanges
@@ -290,7 +292,8 @@ class AgentLoop(
             else -> notes.rules[req.callId] ?: "policy"
         }
         auditEntry(actor?.actorId ?: LOCAL_ACTOR, actor?.tenantId, session.id, req.toolName, req.riskLevel,
-            req.argumentsJson, rule, outcome, result, start, plan, guardianVerdict, readCheck, readCheckMs, resultId)
+            req.argumentsJson, rule, outcome, result, start, plan, guardianVerdict, readCheck, readCheckMs, resultId,
+            registry.getOrNull(req.toolName)?.callEffects(req.argumentsJson).orEmpty())
     }
 
     /**
@@ -747,11 +750,14 @@ class AgentLoop(
                                 "Tell the user it was held; they can release it with /release $id.]"
                         }
                     }
-                    // A held result is never kept for result_read. result_read's page already fits: cutting it again would hide its end.
+                    // A held result is never kept for result_read. result_read's page already fits: cutting it again would hide
+                    // its end, and an outside result's page comes back already fenced. Outside text otherwise reaches the model fenced;
+                    // an error written here (a refused address) isn't outside text, and stays readable as an error (WorkingSet).
+                    val outside = tool?.outsideText == true && !(isToolError(result) && tool.reach(call.argumentsJson) == Reach.LOCAL)
                     val (shown, resultId) = when {
                         held != null -> held to null
                         call.name == RESULT_READ_NAME -> text to null
-                        else -> limitResult(text, page, store, resultsSession)
+                        else -> limitResult(text, page, store, resultsSession, outside).let { (s, id) -> (if (outside) fenceAsData(call.name, s) else s) to id }
                     }
                     // Before the suspending event: a turn cancelled while it is delivered still audits a call that ran.
                     audit(outcome, if (allowed) result else "", resultId)

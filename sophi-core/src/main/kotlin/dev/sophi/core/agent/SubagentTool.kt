@@ -96,6 +96,9 @@ class SubagentTool(
         return fullRegistry.worstRiskAmong(args.expectedTools)
     }
 
+    override fun effects(argumentsJson: String) = fullRegistry.effectsAmong(
+        runCatching { json.decodeFromString<SubagentArgs>(argumentsJson) }.getOrNull()?.expectedTools)
+
     override suspend fun execute(argumentsJson: String): String {
         val parentSessionId = coroutineContext[SessionIdContext]?.sessionId
             ?: error("no SessionIdContext — the host must wrap turns in it")
@@ -185,6 +188,7 @@ class SubagentTool(
                             "Keep every file and shell path inside it; your changes are committed to that branch when you finish."
                     },
                     UNATTENDED_PROMPT.takeIf { inBackground },
+                    dev.sophi.core.tools.DATA_FENCE_NOTE,
                 ).joinToString("\n\n")
             )
             val footer = "\n\n(subagent session ${subSession.id}; pass resume=\"${subSession.id}\" to continue it)"

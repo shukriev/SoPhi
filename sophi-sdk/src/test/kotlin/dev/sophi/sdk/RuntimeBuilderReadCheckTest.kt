@@ -72,7 +72,7 @@ class RuntimeBuilderReadCheckTest : FunSpec({
         runBlocking { runtime.turn(runtime.newSession(), "read it") }
 
         judged.single().judgment shouldBe Judgments.OUTSIDE_READ
-        toolMessage() shouldBe page
+        toolMessage() shouldBe dev.sophi.core.tools.fenceAsData("fetch_url", page)
         runtime.heldReads().shouldBeEmpty()
     }
 

@@ -21,6 +21,15 @@ class McpToolTest : FunSpec({
         McpTool(session, "okta", RemoteToolInfo("find_user", "", "{}", readOnlyHint = true), emptySet()).riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
     }
 
+    test("effects: a user-vouched safe tool only reaches the network; anything else may also write, hint or not") {
+        val session = mockk<McpSession>()
+        val n = dev.sophi.core.tools.EffectKind.NETWORK
+        val w = dev.sophi.core.tools.EffectKind.WRITES
+        McpTool(session, "okta", RemoteToolInfo("list_users", "", "{}"), setOf("list_users")).effects("{}") shouldBe setOf(n)
+        McpTool(session, "okta", RemoteToolInfo("find_user", "", "{}", readOnlyHint = true), emptySet()).effects("{}") shouldBe setOf(w, n)
+        McpTool(session, "okta", RemoteToolInfo("deactivate_user", "", "{}"), emptySet()).effects("{}") shouldBe setOf(w, n)
+    }
+
     test("name is namespaced with the server name") {
         val session = mockk<McpSession>()
         val tool = McpTool(session, "filesystem", RemoteToolInfo("read_file", "reads a file", "{}"), emptySet())

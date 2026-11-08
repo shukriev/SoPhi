@@ -60,6 +60,9 @@ class DecomposeGoalTool(
         return fullRegistry.worstRiskAmong(args.expectedTools)
     }
 
+    override fun effects(argumentsJson: String) = fullRegistry.effectsAmong(
+        runCatching { json.decodeFromString(DecomposeGoalArgs.serializer(), argumentsJson) }.getOrNull()?.expectedTools)
+
     override suspend fun execute(argumentsJson: String): String {
         val parentSessionId = coroutineContext[SessionIdContext]?.sessionId
             ?: error("no SessionIdContext — the host must wrap turns in it")

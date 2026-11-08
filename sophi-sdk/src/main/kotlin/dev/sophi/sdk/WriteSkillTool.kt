@@ -76,6 +76,7 @@ class WriteSkillTool(
     private val json = Json { ignoreUnknownKeys = true }
 
     override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(dev.sophi.core.tools.EffectKind.WRITES)
 
     override suspend fun execute(argumentsJson: String): String = synchronized(SkillVersionsLock) { write(argumentsJson) }
 
