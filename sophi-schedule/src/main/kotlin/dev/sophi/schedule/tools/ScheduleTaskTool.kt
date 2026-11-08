@@ -5,6 +5,7 @@ import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
 import dev.sophi.schedule.model.CronSchedules
+import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.ScheduledTask
 import dev.sophi.schedule.model.TaskMode
 import dev.sophi.schedule.model.Trigger
@@ -192,7 +193,8 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
         val tasks = store.list()
         if (tasks.isEmpty()) return "No scheduled tasks."
         return tasks.joinToString("\n") {
-            "${it.id}  ${if (it.enabled) "enabled" else "paused"}  ${it.name}  " +
+            val state = if (it.enabled) "enabled" else it.pausedReason?.let { r -> "paused after repeated failures ($r)" } ?: "paused"
+            "${it.id}  $state  ${it.name}  " +
                 "(${it.mode::class.simpleName}, ${renderTrigger(it.trigger)})"
         }
     }
@@ -216,7 +218,8 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
         if (records.isEmpty()) return "No run history."
         return records.joinToString("\n") { r ->
             val durationSec = (r.finishedAtMs - r.startedAtMs) / 1000.0
-            "${r.taskId}  ${r.outcome::class.simpleName}  " +
+            val why = when (val o = r.outcome) { is RunOutcome.Failed -> ": ${o.error}"; is RunOutcome.Skipped -> ": ${o.reason}"; else -> "" }
+            "${r.taskId}  ${r.outcome::class.simpleName}$why  " +
                 String.format(Locale.ROOT, "%.1fs", durationSec) + "  ${r.summary}"
         }
     }

@@ -81,6 +81,17 @@ internal fun planSearchTemperatures(env: (String) -> String? = System::getenv): 
  */
 private val PLAN_CRITIC_TIMEOUT = 300.seconds
 
+/** This many runs in a row failing with the same [causeKey] pause the task until the user resumes it. */
+internal const val FAILURE_STREAK = 3
+
+/**
+ * "Fails the same way": the error's first line with every digit-bearing token (counts, ports,
+ * durations, hex ids) collapsed, so "timed out after 300s" and "...120s" match.
+ * ponytail: string normalisation, not a classifier; two different causes with the same first line merge.
+ */
+internal fun causeKey(error: String): String =
+    error.lineSequence().first().lowercase().replace(Regex("[0-9a-f]*[0-9][0-9a-f]*"), "#").trim()
+
 class ScheduleEngine(
     private val taskStore: TaskStore,
     private val runLog: RunLog,
@@ -146,10 +157,13 @@ class ScheduleEngine(
     private suspend fun runTask(task: ScheduledTask): RunRecord {
         val startedAtMs = System.currentTimeMillis()
         var sessionId: String? = null
-        val record = if (wallClockBudgetExceeded(task, startedAtMs)) {
+        val record = if (task.pausedReason != null) {
+            RunRecord(task.id, startedAtMs, startedAtMs,
+                RunOutcome.Skipped("paused after $FAILURE_STREAK failed runs: ${task.pausedReason} (resume the task to run it again)"), "")
+        } else if (wallClockBudgetExceeded(task, startedAtMs)) {
             RunRecord(
                 task.id, startedAtMs, System.currentTimeMillis(),
-                RunOutcome.Failed(
+                RunOutcome.Skipped(
                     "wall-clock budget exceeded (${task.maxWallClockMsPerWindow}ms used within " +
                         "the trailing ${task.wallClockWindowMs}ms window)"
                 ), ""
@@ -261,10 +275,22 @@ class ScheduleEngine(
                 RunOutcome.Failed(e.message ?: "unknown error"), "", sessionId = sessionId)
         }
 
-        runLog.append(record)
-        taskStore.recordRun(task.id, record.finishedAtMs)
-        if (!record.summary.trim().equals("NO_RESCUE_NEEDED", ignoreCase = true)) notifier.notify(task, record)
-        return record
+        val pauseFor = (record.outcome as? RunOutcome.Failed)?.error?.takeIf { failingTheSameWay(task.id, it) }
+            ?.lineSequence()?.first()
+        val logged = if (pauseFor == null) record else record.copy(summary = listOf(record.summary,
+            "Paused: $FAILURE_STREAK runs in a row failed the same way. Fix the cause, then resume the task.").filter { it.isNotBlank() }.joinToString("\n"))
+        runLog.append(logged)
+        taskStore.recordRun(task.id, logged.finishedAtMs)
+        if (pauseFor != null) taskStore.update(task.id) { it.copy(enabled = false, pausedReason = pauseFor) }
+        if (!logged.summary.trim().equals("NO_RESCUE_NEEDED", ignoreCase = true)) notifier.notify(task, logged)
+        return logged
+    }
+
+    /** True when this failure and the task's previous [FAILURE_STREAK]-1 non-skipped runs all failed with the same [causeKey]. */
+    private fun failingTheSameWay(taskId: String, error: String): Boolean {
+        val previous = runLog.forTask(taskId).filter { it.outcome !is RunOutcome.Skipped }.takeLast(FAILURE_STREAK - 1)
+        return previous.size == FAILURE_STREAK - 1 &&
+            previous.all { (it.outcome as? RunOutcome.Failed)?.error?.let(::causeKey) == causeKey(error) }
     }
 
     private suspend fun replayChangePlan(task: ScheduledTask, planId: String, startedAtMs: Long): RunRecord {

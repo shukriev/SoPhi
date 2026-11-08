@@ -29,9 +29,9 @@ class TaskStore(private val path: Path) {
         if (idx < 0) return false
         val task = all[idx]
         val updated = if (enabled) {
-            task.copy(enabled = true, nextRunAtMs = initialNextRunAt(task.trigger))
+            task.copy(enabled = true, pausedReason = null, nextRunAtMs = initialNextRunAt(task.trigger))
         } else {
-            task.copy(enabled = false)
+            task.copy(enabled = false, pausedReason = null)
         }
         writeAll(all.toMutableList().also { it[idx] = updated })
         true
