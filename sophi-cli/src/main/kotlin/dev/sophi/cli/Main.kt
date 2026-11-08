@@ -40,7 +40,8 @@ fun main(args: Array<String>) {
             EvalsCommand().subcommands(EvalsRunCommand()),
             TournamentCommand().subcommands(TournamentRunCommand(), TournamentPromoteCommand(), TournamentStatusCommand()),
             ConfigCommand().subcommands(ConfigActivateCommand(), ConfigSeedCommand()),
-            SetupCommand().subcommands(SetupLocalCommand())
+            SetupCommand().subcommands(SetupLocalCommand()),
+            DoctorCommand()
         )
         .main(args)
     exitProcess(0)
