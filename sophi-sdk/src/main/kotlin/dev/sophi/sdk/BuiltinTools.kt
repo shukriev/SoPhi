@@ -21,6 +21,7 @@ import dev.sophi.core.tools.MoveFileTool
 import dev.sophi.core.tools.RunClaudeCodeTool
 import dev.sophi.core.tools.BashSandbox
 import dev.sophi.core.tools.SandboxMode
+import dev.sophi.core.tools.SqliteShowTool
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.core.permissions.PermissionRules
@@ -44,7 +45,7 @@ fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: St
     val tools = mutableListOf<Tool>(
         FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), ApplyPatchTool(root),
         BashTool(root, sandbox, jobs),
-        MoveFileTool(root), DeleteFileTool(root),
+        MoveFileTool(root), DeleteFileTool(root), SqliteShowTool(root),
         FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool(), TodoTool()
     )
     if (jobs != null) tools += listOf(BashOutputTool(jobs), BashKillTool(jobs))
