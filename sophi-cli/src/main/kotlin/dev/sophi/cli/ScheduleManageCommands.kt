@@ -14,7 +14,8 @@ class ScheduleList(private val home: Path, private val echo: (String) -> Unit) {
         val tasks = TaskStore(home.resolve("tasks.json")).list()
         if (tasks.isEmpty()) { echo("No scheduled tasks."); return }
         tasks.forEach {
-            echo("${it.id}  ${if (it.enabled) "enabled" else "paused"}  ${it.name}  (${it.mode::class.simpleName})")
+            val state = if (it.enabled) "enabled" else it.pausedReason?.let { r -> "paused after repeated failures ($r)" } ?: "paused"
+            echo("${it.id}  $state  ${it.name}  (${it.mode::class.simpleName})")
         }
     }
 }

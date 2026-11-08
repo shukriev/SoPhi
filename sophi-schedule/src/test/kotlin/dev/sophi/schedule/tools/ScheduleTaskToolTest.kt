@@ -297,4 +297,19 @@ class ScheduleTaskToolTest : FunSpec({
         val result = runBlocking { ScheduleTaskTool(s, runLog()).execute("""{"action":"list"}""") }
         result shouldContain "cron '0 9 * * *'"
     }
+
+    test("list and runs show an auto-paused task's reason and a run's failure or skip reason") {
+        val s = store()
+        val log = runLog()
+        val t = s.add(ScheduledTask(name = "feed", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p",
+            enabled = false, pausedReason = "invalid api key"))
+        log.append(RunRecord(t.id, 0, 1000, RunOutcome.Failed("invalid api key"), ""))
+        log.append(RunRecord(t.id, 0, 0, RunOutcome.Skipped("paused: invalid api key"), ""))
+        val tool = ScheduleTaskTool(s, log)
+
+        runBlocking { tool.execute("""{"action":"list"}""") } shouldContain "invalid api key"
+        val runs = runBlocking { tool.execute("""{"action":"runs","task_id":"${t.id}"}""") }
+        runs shouldContain "Failed: invalid api key"
+        runs shouldContain "Skipped: paused: invalid api key"
+    }
 })

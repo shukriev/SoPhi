@@ -11,6 +11,7 @@ object NotificationText {
             is RunOutcome.GoalMet -> "goal met"
             is RunOutcome.GoalExhausted -> "goal not met (max iterations)"
             is RunOutcome.Failed -> "failed: ${o.error}"
+            is RunOutcome.Skipped -> "skipped: ${o.reason}"
         }
         return "Sophi: ${task.name}" to "$outcomeText — ${run.summary.take(200)}"
     }

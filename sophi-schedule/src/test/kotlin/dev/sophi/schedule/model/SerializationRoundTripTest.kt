@@ -106,5 +106,6 @@ class SerializationRoundTripTest : FunSpec({
         """.trimIndent()
         val decoded = tolerantJson.decodeFromString<ScheduledTask>(oldFormatJson)
         decoded.toolGrants shouldBe emptySet()
+        decoded.pausedReason shouldBe null
     }
 })

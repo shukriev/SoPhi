@@ -17,7 +17,7 @@ data class ScheduledTask(
     /**
      * Opt-in cumulative wall-clock cap: if the sum of this task's own run durations within the
      * trailing [wallClockWindowMs] already meets or exceeds this, the next run is skipped
-     * (recorded as RunOutcome.Failed) before any session is created or provider called. Null
+     * (recorded as RunOutcome.Skipped) before any session is created or provider called. Null
      * (the default) means no budget — every existing task is unaffected.
      */
     val maxWallClockMsPerWindow: Long? = null,
@@ -26,6 +26,8 @@ data class ScheduledTask(
     /** An approved change plan to replay at trigger time, with no model run; [prompt] is then only its description. */
     val changePlanId: String? = null,
     val enabled: Boolean = true,
+    /** Why the engine paused this task (the same failure several runs in a row); null = not paused by the engine. */
+    val pausedReason: String? = null,
     val lastRunAtMs: Long? = null,
     val nextRunAtMs: Long? = null,
     val iterationCount: Int = 0,

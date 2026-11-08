@@ -13,6 +13,7 @@ class MacNotifier(
             is RunOutcome.GoalMet -> "goal met"
             is RunOutcome.GoalExhausted -> "goal not met (max iterations)"
             is RunOutcome.Failed -> "failed: ${o.error}"
+            is RunOutcome.Skipped -> "skipped: ${o.reason}"
         }
         val script = "display notification ${quote(run.summary.take(200))} " +
             "with title ${quote("Sophi: ${task.name}")} subtitle ${quote(outcomeText)}"

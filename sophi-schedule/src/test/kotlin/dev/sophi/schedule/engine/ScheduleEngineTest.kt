@@ -793,8 +793,7 @@ class ScheduleEngineTest : FunSpec({
         kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
 
         val record = runLog.forTask(task.id).last()
-        (record.outcome is RunOutcome.Failed) shouldBe true
-        (record.outcome as RunOutcome.Failed).error shouldContain "budget"
+        (record.outcome as RunOutcome.Skipped).reason shouldContain "budget"
         record.sessionId shouldBe null
         coVerify(exactly = 0) { provider.stream(any()) }
     }
