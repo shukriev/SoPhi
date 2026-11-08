@@ -10,6 +10,7 @@ import dev.sophi.versioning.VersionStore
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.readText
 
 @Serializable
@@ -47,9 +48,11 @@ class InstallSkillTool(
             .getOrNull() ?: return "Error: invalid arguments"
         val targetDir = resolveTargetDir(args.project)
         val result = runCatching {
-            installer.install(args.source, targetDir, args.only?.toSet() ?: emptySet()) { _, content ->
-                checkInstalledSkillContent(content)
-            }
+            installer.install(
+                args.source, targetDir, args.only?.toSet() ?: emptySet(),
+                validate = { _, content -> checkInstalledSkillContent(content) },
+                expectDigest = approved.remove(argumentsJson)
+            )
         }.getOrElse { return "Error: ${it.message}" }
 
         result.installed.forEach { id ->
@@ -80,8 +83,20 @@ class InstallSkillTool(
     override fun confirmationPreview(argumentsJson: String): String? {
         val args = runCatching { json.decodeFromString(InstallSkillArgs.serializer(), argumentsJson) }.getOrNull() ?: return null
         val targetDesc = if (args.project) "./.sophi/skills" else "~/.sophi/skills"
-        val onlyDesc = args.only?.let { " (only: ${it.joinToString(", ")})" } ?: " (all discovered skills)"
-        return "Install from ${args.source}$onlyDesc into $targetDesc. Content is fetched and scanned only " +
-            "after approval — exact skill ids aren't known until the source is cloned."
+        val p = runCatching { installer.preview(args.source, args.only?.toSet() ?: emptySet()) }
+            .getOrElse { return "Install from ${args.source} into $targetDesc. Couldn't fetch it to show what's inside: ${it.message}" }
+        approved[argumentsJson] = p.digest
+        return buildString {
+            append("Install from ${args.source}")
+            p.commit?.let { append(" at commit $it") }
+            appendLine(" into $targetDesc.")
+            appendLine("Skills: ${p.ids.joinToString(", ").ifEmpty { "none found" }}")
+            if (p.notFound.isNotEmpty()) appendLine("Not found: ${p.notFound.joinToString(", ")}")
+            p.findings.forEach { (id, f) -> appendLine("Scan flags $id (held back): ${f.joinToString(", ") { "${it.file}: ${it.reason}" }}") }
+            append("Only these files are installed; if the source changes before install, nothing is.")
+        }
     }
+
+    // ponytail: one entry per previewed call, never evicted; a session previews a handful of installs.
+    private val approved = ConcurrentHashMap<String, String>()
 }
