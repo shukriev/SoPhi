@@ -1,11 +1,14 @@
 package dev.sophi.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.path
+import dev.sophi.ai.providers.GgufException
+import dev.sophi.ai.providers.readGgufHeader
 import dev.sophi.sdk.ModelCatalog
 import dev.sophi.sdk.ModelInfo
 import java.io.ByteArrayOutputStream
@@ -26,13 +29,15 @@ private const val MAX_ROWS = 50
 class ModelsCommand(private val catalog: () -> ModelCatalog = { loadModelCatalog() }) : CliktCommand(
     name = "models",
     help = "Look up models in the catalog (window, price per 1M tokens, capabilities). " +
-        "It refreshes itself from models.dev once a day; ~/.sophi/models.local.json overrides entries."
+        "It refreshes itself from models.dev once a day; ~/.sophi/models.local.json overrides entries.",
+    invokeWithoutSubcommand = true,
 ) {
     private val query by argument(help = "Part of a provider/model id, e.g. claude or qwen3-8b").optional()
     private val refresh by option("--refresh", help = "Download the catalog from models.dev now").flag()
     private val out by option("--out", help = "With --refresh: write a gzipped snapshot here instead (how the bundled one is made)").path()
 
     override fun run() {
+        if (currentContext.invokedSubcommand != null) return
         if (refresh) return refreshNow()
         val hits = catalog().search(query ?: "")
         hits.take(MAX_ROWS).forEach { echo(row(it)) }
@@ -61,5 +66,17 @@ class ModelsCommand(private val catalog: () -> ModelCatalog = { loadModelCatalog
         val caps = listOfNotNull("tools".takeIf { m.tools }, "reasoning".takeIf { m.reasoning }, "vision".takeIf { m.vision }).joinToString(" ")
         return "${"${m.provider}/${m.id}".padEnd(48)} ${(m.contextTokens?.toString() ?: "-").padStart(8)}  " +
             "${"${usd(m.inputUsdPerM)}/${usd(m.outputUsdPerM)}".padEnd(16)} $caps".trimEnd()
+    }
+}
+
+class ModelsInspectCommand : CliktCommand(
+    name = "inspect",
+    help = "Show a GGUF file's architecture, quantization, parameters, context length and chat template, reading only its header",
+) {
+    private val file by argument(help = "Path to a .gguf file").path(mustExist = true, canBeDir = false, mustBeReadable = true)
+
+    override fun run() {
+        val info = try { readGgufHeader(file) } catch (e: GgufException) { throw CliktError("$file: ${e.message}") }
+        info.describe().forEach { echo(it) }
     }
 }
