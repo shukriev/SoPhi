@@ -203,9 +203,16 @@ class FetchUrlToolTest : FunSpec({
         }
     }
 
+    test("execute() keeps a body past the old 500k cut whole") {
+        val httpClient = mockk<HttpClient>()
+        every { httpClient.send(any<HttpRequest>(), any<HttpResponse.BodyHandler<String>>()) } returns response(200, "x".repeat(600_000))
+        val result = runBlocking { FetchUrlTool(httpClient).execute("""{"url":"http://93.184.216.34/big"}""") }
+        result.count { it == 'x' } shouldBe 600_000
+    }
+
     test("execute() truncates a response body larger than the cap") {
         val httpClient = mockk<HttpClient>()
-        every { httpClient.send(any<HttpRequest>(), any<HttpResponse.BodyHandler<String>>()) } returns response(200, "x".repeat(500_001))
+        every { httpClient.send(any<HttpRequest>(), any<HttpResponse.BodyHandler<String>>()) } returns response(200, "x".repeat(MAX_RESULT_CHARS + 1))
         val tool = FetchUrlTool(httpClient)
 
         val result = runBlocking { tool.execute("""{"url":"http://93.184.216.34/big"}""") }

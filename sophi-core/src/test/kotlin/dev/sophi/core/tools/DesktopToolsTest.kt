@@ -63,11 +63,9 @@ class DesktopToolsTest : FunSpec({
         calls.seen.single().first shouldBe listOf("open", root.resolve("report.html").toString())
     }
 
-    test("clipboard read is capped") {
+    test("clipboard read returns all of it: the loop's limiter pages a long one") {
         val t = tools(mac(Calls("x".repeat(20_000))), tempdir().toPath()).getValue("clipboard_read")
-        val out = exec(t, "{}")
-        out shouldEndWith "… (truncated)"
-        out.length shouldBe 16_000 + "\n… (truncated)".length
+        exec(t, "{}") shouldBe "x".repeat(20_000)
     }
 
     test("risk levels") {

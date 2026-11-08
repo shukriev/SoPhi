@@ -79,6 +79,8 @@ data class CliOptions(
     val subagentWorktrees: Boolean = false,
     /** Offer `code_mode`: scripts that chain tool calls, each checked like a direct call. */
     val codeMode: Boolean = false,
+    /** The most of one tool result the model sees at once; `result_read` pages the rest. */
+    val resultPageChars: Int = dev.sophi.core.tools.DEFAULT_RESULT_PAGE_CHARS,
 )
 
 /**
@@ -188,6 +190,7 @@ internal suspend fun buildCliRuntime(
         contextWindowTokens(opts.contextWindowTokens)
         opts.maxCostUsd?.takeIf { it > 0 }?.let { budget(it) }
         sessionsDir = Path.of(opts.sessionsDir)
+        resultPageChars = opts.resultPageChars
         // The learning and memory prompt sections are both appended by the builder; only the
         // caller's own system prompt goes here.
         systemPrompt = opts.systemPrompt

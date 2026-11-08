@@ -61,6 +61,7 @@ val CLI_SETTINGS: List<Setting> = listOf(
     next("other-agent-skills", SettingKind.Bool),
     next("subagent-worktrees", SettingKind.Bool),
     next("code-mode", SettingKind.Bool),
+    next("result-page-chars", SettingKind.Int),
     next("memory", SettingKind.Bool),
     next("embedding-model", SettingKind.Text),
     next("embedding-base-url", SettingKind.Text),

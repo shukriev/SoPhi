@@ -93,6 +93,12 @@ class BuildCliRuntimeTest : FunSpec({
         java.nio.file.Files.exists(dir.resolve("jobs/${ProcessHandle.current().pid()}/s/j1.log")) shouldBe true
     }
 
+    test("result_read pages at the options' result-page-chars") {
+        val dir = tempdir().toPath()
+        val cli = autoClose(buildCliRuntime(optionsFor(dir).copy(resultPageChars = 1_234), mockk<LLMProvider>(relaxed = true), Terminal(), ScriptedInputSource(emptyList())))
+        (cli.registry.get("result_read") as dev.sophi.core.tools.ResultReadTool).store.pageChars shouldBe 1_234
+    }
+
     test("ask_user is registered only in an interactive terminal") {
         build(interactive = true).registry.names() shouldContain "ask_user"
         build(interactive = false).registry.names() shouldNotContain "ask_user"

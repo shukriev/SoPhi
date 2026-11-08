@@ -80,7 +80,6 @@ class SystemDesktop(private val os: String, private val run: suspend (List<Strin
     }
 }
 
-private const val MAX_CLIPBOARD = 16_000
 private val SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:")
 // Documents and media only: a denylist of launchers never ends (.fileloc/.webloc follow to any app or URL scheme,
 // .py runs in Python Launcher), so anything else is refused.
@@ -119,7 +118,7 @@ fun desktopTools(desktop: Desktop, root: Path): List<Tool> = buildList {
         add(DesktopTool(
             "clipboard_read", "Read the text on the user's clipboard (e.g. an error they just copied).",
             """{"type":"object","properties":{}}""", RiskLevel.CAUTION,
-        ) { _ -> desktop.clipboardRead().let { if (it.length > MAX_CLIPBOARD) it.take(MAX_CLIPBOARD) + "\n… (truncated)" else it } })
+        ) { _ -> desktop.clipboardRead() })
         add(DesktopTool(
             "clipboard_write", "Put text on the user's clipboard so they can paste it.",
             """{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}""", RiskLevel.CAUTION,

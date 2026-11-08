@@ -13,6 +13,7 @@ import java.nio.file.StandardOpenOption
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.readLines
 import kotlin.io.path.listDirectoryEntries
+import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
 
 class FileSessionManagerTest : FunSpec({
@@ -253,6 +254,8 @@ class FileSessionManagerTest : FunSpec({
         val session = manager.create(title = "Doomed")
         session.append(EntryRole.USER, "hi")
         manager.save(session)
+
+        sessionsDir.resolve("${session.id}.results").createDirectories().resolve("r1.txt").writeText("kept")
 
         manager.delete(session.id)
 

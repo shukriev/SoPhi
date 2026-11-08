@@ -310,7 +310,7 @@ class AgentLoopTest : FunSpec({
 
         val toolResultMsg = capturedRequests[1].messages.last()
         toolResultMsg.content.length shouldBeLessThan hugeResult.length
-        toolResultMsg.content shouldContain "output truncated"
+        toolResultMsg.content shouldContain "showing the start and end"
     }
 
     test("turn() scales the tool-result truncation cap down for a smaller context window") {
@@ -348,7 +348,7 @@ class AgentLoopTest : FunSpec({
             return capturedRequests[1].messages.last().content.length
         }
 
-        truncatedLengthFor(32_768) shouldBeLessThan truncatedLengthFor(TEST_CONTEXT_WINDOW)
+        truncatedLengthFor(8_192) shouldBeLessThan truncatedLengthFor(TEST_CONTEXT_WINDOW)
     }
 
     test("turn() proactively compacts based on a round's newly-appended tool results, not stale prior-round usage") {

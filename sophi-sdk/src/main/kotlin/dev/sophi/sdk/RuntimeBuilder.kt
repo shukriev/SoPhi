@@ -101,6 +101,8 @@ class RuntimeBuilder {
     /** The prompt that comes first, before [systemPrompt]. Defaults to [DefaultPrompt.BASE]; a host with fewer tools replaces it. */
     var basePrompt: String = DefaultPrompt.BASE
     var sessionsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "sessions")
+    /** The most of one tool result the model sees at once; the rest is paged with `result_read`. A small window shrinks it to 20% of the window. */
+    var resultPageChars: Int = dev.sophi.core.tools.DEFAULT_RESULT_PAGE_CHARS
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
     var memoryHome: Path = JanesPalaceConfig.DEFAULT_HOME
     /** The shared server root memory lives on; null = shared only when [memoryHome] is the default (ADR-041 M6),
@@ -481,6 +483,7 @@ class RuntimeBuilder {
         runBlocking { manager.connect(mcpServers, deferOver) }.forEach { registry.register(it) }
         registry.registerToolSearchIfDeferred()
         val sm = FileSessionManager(sessionsDir)
+        registry.register(dev.sophi.core.tools.ResultReadTool(dev.sophi.core.tools.ResultStore(sessionsDir, resultPageChars)))
         if (builtinToolsConfig != null) registry.register(dev.sophi.core.tools.SessionSearchTool(sm, secretMask))
         val agentConfig = AgentConfig(
             model = model,

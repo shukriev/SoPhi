@@ -15,7 +15,6 @@ import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.ToolRegistry
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
-import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.longs.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -85,12 +84,12 @@ class AgentLoopBudgetTest : FunSpec({
         val l = loop(p, OutputTool(big))
         val session = AgentSession(id = "s")
         l.streamTurn(session, "one", config) {}
-        l.contextWindowTokens = 3_000 // 3000 * 0.2 * 4 = 2400 chars per tool result
+        l.contextWindowTokens = 3_000 // 3000 * 0.2 * 4 = a 2400-char page
         l.streamTurn(session, "two", config) {}
         val results = session.branch().filter { it.role == EntryRole.TOOL_RESULT }.map { it.content }
-        results[0].length shouldBeGreaterThanOrEqual 3_000
-        results[1] shouldContain "output truncated"
-        results[1].length shouldBe 2_400 + "\n... output truncated".length
+        results[0] shouldBe big
+        results[1] shouldContain "showing the start and end"
+        results[1].startsWith("x".repeat(1_600) + "\n…") shouldBe true
     }
 
     test("reasoning never reaches the saved history") {

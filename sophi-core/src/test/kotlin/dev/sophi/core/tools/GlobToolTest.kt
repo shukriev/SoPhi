@@ -20,6 +20,12 @@ class GlobToolTest : FunSpec({
         tool = GlobTool(root)
     }
 
+    test("execute() returns every match, past 200 too") {
+        (1..250).forEach { root.resolve("f$it.kt").writeText("x") }
+        val result = runBlocking { tool.execute("""{"pattern":"*.kt"}""") }
+        result.lines().size shouldBe 250
+    }
+
     test("execute() finds files matching a top-level pattern") {
         root.resolve("a.kt").writeText("x")
         root.resolve("b.md").writeText("x")

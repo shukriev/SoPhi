@@ -42,9 +42,12 @@ class BashToolTest : FunSpec({
         result shouldContain "Command exited with code 3"
     }
 
-    test("execute() truncates output larger than the cap") {
-        val result = runBlocking { tool.execute("""{"command":"yes x | head -n 60000"}""") }
-        result shouldContain "output truncated"
+    test("execute() keeps output up to the result store's cap, and marks a cut past it") {
+        val whole = runBlocking { tool.execute("""{"command":"yes x | head -n 60000"}""") }
+        whole shouldBe "x\n".repeat(60_000)
+        val cut = runBlocking { tool.execute("""{"command":"yes xxxxxxxxx | head -n 300000"}""") }
+        cut shouldContain "output truncated"
+        (cut.length <= MAX_RESULT_CHARS + 100) shouldBe true
     }
 
     test("execute() returns an error when the command times out") {

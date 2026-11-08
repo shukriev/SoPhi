@@ -9,7 +9,6 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.io.path.relativeTo
 
-private const val DEFAULT_MAX_RESULTS = 200
 private val DEFAULT_SKIP_DIRS = setOf(".git", "build", "target", "node_modules", ".gradle")
 
 @Serializable
@@ -46,7 +45,7 @@ class GlobTool(private val root: Path = Paths.get("").toAbsolutePath()) : Tool {
             .map { it.relativeTo(root).toString() }
             .sorted()
 
-        return if (matches.isEmpty()) "No files found" else matches.take(DEFAULT_MAX_RESULTS).joinToString("\n")
+        return if (matches.isEmpty()) "No files found" else matches.joinToString("\n")
     }
 }
 
