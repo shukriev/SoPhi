@@ -28,6 +28,28 @@ class AgentDefinitionTest : FunSpec({
         definition.systemPrompt shouldBe "You are a fast, read-only exploration subagent."
     }
 
+    test("parseAgentDefinition() reads deny and ask rules and drops allow rules: an agent can only tighten") {
+        val md = """
+            ---
+            name: researcher
+            description: Looks things up.
+            rules:
+              - kind: writes
+                effect: deny
+              - tool: fetch_url
+                effect: ask
+              - tool: "*"
+                effect: allow
+            ---
+            You look things up.
+        """.trimIndent()
+
+        parseAgentDefinition(md, source).rules shouldBe listOf(
+            dev.sophi.core.permissions.PermissionRule(kind = dev.sophi.core.tools.EffectKind.WRITES, effect = dev.sophi.core.permissions.Effect.DENY),
+            dev.sophi.core.permissions.PermissionRule("fetch_url", effect = dev.sophi.core.permissions.Effect.ASK),
+        )
+    }
+
     test("parseAgentDefinition() defaults model to null when absent") {
         val md = """
             ---

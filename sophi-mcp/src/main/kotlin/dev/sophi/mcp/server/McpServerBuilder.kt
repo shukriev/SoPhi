@@ -1,6 +1,7 @@
 package dev.sophi.mcp.server
 
 import dev.sophi.core.audit.AuditSink
+import dev.sophi.core.tools.callEffects
 import dev.sophi.core.audit.auditEntry
 import dev.sophi.core.audit.recordQuietly
 import dev.sophi.core.permissions.Effect
@@ -69,7 +70,8 @@ fun buildMcpServer(tools: List<Tool>, exposedNames: Set<String>, audit: AuditSin
             val argumentsJson = Json.encodeToString(request.arguments ?: JsonObject(emptyMap()))
             val risk = tool.riskLevel(argumentsJson)
             // A tool that throws computing its subjects gets null: R3, fail closed.
-            val effect = permissions?.decide(tool.name, runCatching { tool.permissionSubjects(argumentsJson) }.getOrNull())
+            val effect = permissions?.decide(tool.name, runCatching { tool.permissionSubjects(argumentsJson) }.getOrNull(),
+                tool.callEffects(argumentsJson))
             val ruleDenied = effect == Effect.DENY || effect == Effect.ASK
             fun audit(outcome: String, result: String) = audit?.recordQuietly {
                 val rule = when {

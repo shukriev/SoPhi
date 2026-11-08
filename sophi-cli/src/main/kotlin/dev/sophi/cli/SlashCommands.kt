@@ -447,7 +447,8 @@ class SlashHandler(
             return
         }
         fun line(r: dev.sophi.core.permissions.PermissionRule, where: String) =
-            "${r.effect.name.lowercase()} ${r.tool} ${r.pattern ?: "(any call)"}  ($where)"
+            "${r.effect.name.lowercase()} ${r.kind?.let { k -> (if (r.tool == "*") "any" else r.tool) + " ${k.name.lowercase()} call" } ?: r.tool} " +
+                "${r.pattern ?: "(any call)"}${if (r.unattended) ", unattended runs only" else ""}  ($where)"
         val global = rules.global
         val lines = rules.active.map { line(it, if (it in global) "global" else "project") } +
             rules.untrusted.map { line(it, "project, untrusted — /permissions trust") }

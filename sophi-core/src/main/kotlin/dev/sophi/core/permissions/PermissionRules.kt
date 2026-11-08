@@ -1,5 +1,6 @@
 package dev.sophi.core.permissions
 
+import dev.sophi.core.tools.EffectKind
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -24,9 +25,18 @@ enum class Effect {
     @SerialName("deny") DENY,
 }
 
-/** [tool] is a glob over tool names; a null [pattern] matches every call of the tool. */
+/**
+ * [tool] is a glob over tool names; a null [pattern] matches every call of the tool. A [kind] rule matches only calls
+ * that have that kind ([Tool.effects][dev.sophi.core.tools.Tool.effects]); an [unattended] rule only runs nobody watches.
+ */
 @Serializable
-data class PermissionRule(val tool: String, val pattern: String? = null, val effect: Effect)
+data class PermissionRule(
+    val tool: String = "*",
+    val pattern: String? = null,
+    val effect: Effect,
+    val kind: EffectKind? = null,
+    val unattended: Boolean = false,
+)
 
 /** What a call touches, for matching: a bash part, a path, a URL. [allowable] = false: no allow rule may match it (R4). */
 data class PermissionSubject(val text: String, val allowable: Boolean = true)
@@ -59,18 +69,41 @@ class PermissionRules(
     @Volatile
     private var snap = Snapshot(global, project, trusted)
 
-    val global: List<PermissionRule> get() = snap.global
+    /** Set by [tightened]: these rules are [base]'s plus [extra], and writes go to [base]. */
+    private var base: PermissionRules? = null
+    private var extra: List<PermissionRule> = emptyList()
+
+    val global: List<PermissionRule> get() = base?.global ?: snap.global
 
     /** Rules in effect: global, project deny/ask, trusted project allow. */
-    val active: List<PermissionRule> get() = snap.active
+    val active: List<PermissionRule> get() = base?.let { it.active + extra } ?: snap.active
 
     /** Project allow rules not trusted yet (R2). */
-    val untrusted: List<PermissionRule> get() = snap.untrusted
+    val untrusted: List<PermissionRule> get() = base?.untrusted ?: snap.untrusted
 
-    /** Null = no rule applies (the existing flow decides). [subjects] null = couldn't be computed (R3).
-     *  An empty list means "the tool has no subjects"; a subject-based tool with nothing to match passes null, never empty. */
-    fun decide(toolName: String, subjects: List<PermissionSubject>?): Effect? {
-        val rules = snap.active.filter { globMatches(it.tool, toolName) }
+    /**
+     * For a nested loop (a subagent, a scheduled task): these rules plus [more]'s deny and ask rules. [more]'s allow
+     * rules are dropped, so an agent can tighten what it may do but never loosen it. Writes ("always", trust) go here.
+     */
+    fun tightened(more: List<PermissionRule>): PermissionRules {
+        val strict = more.filter { it.effect != Effect.ALLOW }
+        if (strict.isEmpty()) return this
+        return PermissionRules(emptyList(), emptyList(), null, null, emptySet()).also { it.base = this; it.extra = strict }
+    }
+
+    private fun applies(r: PermissionRule, toolName: String, effects: Set<EffectKind>, unattended: Boolean) =
+        globMatches(r.tool, toolName) && (r.kind == null || r.kind in effects) && (!r.unattended || unattended)
+
+    /**
+     * Null = no rule applies (the existing flow decides). [subjects] null = couldn't be computed (R3).
+     * An empty list means "the tool has no subjects"; a subject-based tool with nothing to match passes null, never empty.
+     * [effects]: what the call does (default: everything, failing closed); [unattended]: nobody is there to ask.
+     */
+    fun decide(
+        toolName: String, subjects: List<PermissionSubject>?,
+        effects: Set<EffectKind> = EffectKind.entries.toSet(), unattended: Boolean = false,
+    ): Effect? {
+        val rules = active.filter { applies(it, toolName, effects, unattended) }
         fun any(effect: Effect, applies: (PermissionRule) -> Boolean) = rules.any { it.effect == effect && applies(it) }
         if (subjects == null) {
             return when {
@@ -93,9 +126,15 @@ class PermissionRules(
         }
     }
 
+    /** The kind rule behind an [effect] for this call, e.g. "network deny (unattended)", for a run's report; null = none. */
+    fun why(effect: Effect, toolName: String, effects: Set<EffectKind>, unattended: Boolean): String? =
+        active.firstOrNull { it.kind != null && it.effect == effect && applies(it, toolName, effects, unattended) }
+            ?.let { "${it.kind!!.name.lowercase()} ${it.effect.name.lowercase()}${if (it.unattended) " (unattended)" else ""}" }
+
     /** Trusts every project allow rule now in the file; persists the trust file. */
     @Synchronized
     fun trustProject() {
+        base?.let { it.trustProject(); return }
         val file = projectFile ?: return
         val trustPath = trustFile ?: return
         if (sameFile) return
@@ -108,6 +147,7 @@ class PermissionRules(
     /** "Always allow": appends [rules] to the project file (created if missing) and trusts them. */
     @Synchronized
     fun addProjectAllows(rules: List<PermissionRule>) {
+        base?.let { it.addProjectAllows(rules); return }
         val file = projectFile ?: throw IllegalStateException("no project file")
         // ponytail: read-modify-write is not locked across processes; a concurrent Sophi can lose a rule, add a file lock if it matters
         val onDisk = readRules(file) + rules

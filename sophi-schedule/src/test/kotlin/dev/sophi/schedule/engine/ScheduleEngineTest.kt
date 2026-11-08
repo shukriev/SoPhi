@@ -362,6 +362,35 @@ class ScheduleEngineTest : FunSpec({
         runLog.forTask(task.id).single().outcome shouldBe RunOutcome.Succeeded
     }
 
+    test("a task's own deny rules beat its grants: a granted tool the task's rules deny never runs") {
+        var executed = false
+        val granted = object : dev.sophi.core.tools.Tool {
+            override val name = "danger"
+            override val description = "risky"
+            override val parametersJson = "{}"
+            override fun riskLevel(argumentsJson: String) = dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+            override suspend fun execute(argumentsJson: String): String { executed = true; return "ran" }
+        }
+        val provider = mockk<LLMProvider>()
+        var callCount = 0
+        every { provider.stream(any()) } answers {
+            callCount++
+            if (callCount == 1) flowOf(StreamEvent.ToolCallsReady(listOf(dev.sophi.ai.api.ToolCall("c1", "danger", "{}"))))
+            else flowOf(StreamEvent.Content("done"))
+        }
+        val (engine, taskStore, _) = engine(provider, registry = ToolRegistry().register(granted))
+        taskStore.add(ScheduledTask(
+            name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "run it",
+            toolGrants = setOf("danger"),
+            rules = listOf(dev.sophi.core.permissions.PermissionRule(kind = dev.sophi.core.tools.EffectKind.NETWORK,
+                effect = dev.sophi.core.permissions.Effect.DENY)),
+        ))
+
+        kotlinx.coroutines.runBlocking { engine.tickOnce(nowMs = 1L) }
+
+        executed shouldBe false
+    }
+
     test("tickOnce denies a tool that's not in the task's toolGrants, unattended") {
         var executed = false
         val ungranted = object : dev.sophi.core.tools.Tool {
