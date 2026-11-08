@@ -10,6 +10,8 @@ import dev.sophi.core.tools.BashTool
 import dev.sophi.core.tools.TodoTool
 import dev.sophi.core.tools.DeleteFileTool
 import dev.sophi.core.tools.ApplyPatchTool
+import dev.sophi.core.tools.ArchiveExtractTool
+import dev.sophi.core.tools.ArchiveListTool
 import dev.sophi.core.tools.EditTool
 import dev.sophi.core.tools.FetchUrlTool
 import dev.sophi.core.tools.FileReadTool
@@ -45,7 +47,7 @@ fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: St
     val tools = mutableListOf<Tool>(
         FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), ApplyPatchTool(root),
         BashTool(root, sandbox, jobs),
-        MoveFileTool(root), DeleteFileTool(root), SqliteShowTool(root),
+        MoveFileTool(root), DeleteFileTool(root), SqliteShowTool(root), ArchiveListTool(root), ArchiveExtractTool(root),
         FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool(), TodoTool()
     )
     if (jobs != null) tools += listOf(BashOutputTool(jobs), BashKillTool(jobs))
