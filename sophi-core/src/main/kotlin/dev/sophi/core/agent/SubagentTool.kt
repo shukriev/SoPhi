@@ -177,7 +177,9 @@ class SubagentTool(
                 provider, scopedRegistry, sessionManager,
                 confirmationPolicy = policy,
                 grants = scopedRegistry.safeGrantsFrom(args.expectedTools),
-                contextWindowTokens = currentWindow?.invoke() ?: contextWindowTokens
+                contextWindowTokens = currentWindow?.invoke() ?: contextWindowTokens,
+                // the loop adds these to the parent's rules (AgentLoop.turn): they only tighten
+                permissions = definition.rules.takeIf { it.isNotEmpty() }?.let { dev.sophi.core.permissions.PermissionRules.EMPTY.tightened(it) },
             )
             val config = AgentConfig(
                 model = definition.model ?: parentConfig.model,

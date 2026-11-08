@@ -11,6 +11,8 @@ data class ScheduledTask(
     val mode: TaskMode,
     val prompt: String,
     val toolGrants: Set<String> = emptySet(),
+    /** Deny and ask rules this task's runs add to the user's; allow rules here are ignored, grants are [toolGrants]. */
+    val rules: List<dev.sophi.core.permissions.PermissionRule> = emptyList(),
     val subagentType: String? = null,
     /**
      * Opt-in cumulative wall-clock cap: if the sum of this task's own run durations within the

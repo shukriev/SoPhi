@@ -32,6 +32,16 @@ class SlashPermissionsTest : FunSpec({
         text shouldContain "allow bash git status  (project, untrusted — /permissions trust)"
     }
 
+    test("/permissions shows kind rules by what they match") {
+        val dir = Files.createTempDirectory("perm")
+        Files.writeString(dir.resolve("g.json"), """[{"kind":"network","effect":"deny","unattended":true},{"kind":"writes","pattern":"src/*","effect":"ask"}]""")
+        val out = mutableListOf<String>()
+        runBlocking { handler(PermissionRules.load(dir.resolve("g.json"), dir.resolve("p.json"), dir.resolve("t.json")), out).handle("/permissions", AgentSession(id = "s")) }
+        val text = out.joinToString("\n")
+        text shouldContain "deny any network call (any call), unattended runs only  (global)"
+        text shouldContain "ask any writes call src/*  (global)"
+    }
+
     test("/permissions trust activates them") {
         val (rules, out) = setup()
         runBlocking { handler(rules, out).handle("/permissions trust", AgentSession(id = "s")) }

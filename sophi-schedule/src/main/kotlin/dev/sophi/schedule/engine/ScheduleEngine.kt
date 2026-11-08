@@ -175,7 +175,7 @@ class ScheduleEngine(
                     confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
                     grants = task.toolGrants,
                     contextWindowTokens = contextWindowTokens,
-                    audit = audit, permissions = permissions, hooks = pluginRegistry
+                    audit = audit, permissions = taskRules(task, permissions), hooks = pluginRegistry
                 )
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
                 // Same collectContext path every interactive entry point already uses (SophiRuntime.
@@ -284,6 +284,12 @@ class ScheduleEngine(
      * false when that budget is unset (the default) — every existing task is unaffected. Derived
      * entirely from RunLog's existing startedAtMs/finishedAtMs; no new persistence.
      */
+    /** The user's rules plus the task's and its subagent definition's deny and ask rules: a task can only tighten. */
+    private fun taskRules(task: ScheduledTask, user: dev.sophi.core.permissions.PermissionRules?): dev.sophi.core.permissions.PermissionRules? {
+        val own = task.rules + task.subagentType?.let { t -> agentDefinitions.find { it.name == t }?.rules }.orEmpty()
+        return if (own.isEmpty()) user else (user ?: dev.sophi.core.permissions.PermissionRules.EMPTY).tightened(own)
+    }
+
     private fun wallClockBudgetExceeded(task: ScheduledTask, nowMs: Long): Boolean {
         val budget = task.maxWallClockMsPerWindow ?: return false
         val windowStart = nowMs - task.wallClockWindowMs

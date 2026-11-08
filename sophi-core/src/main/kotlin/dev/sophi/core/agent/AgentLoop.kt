@@ -55,6 +55,7 @@ import dev.sophi.core.tools.RESULT_READ_NAME
 import dev.sophi.core.tools.ResultReadTool
 import dev.sophi.core.tools.limitResult
 import dev.sophi.core.tools.callEffects
+import dev.sophi.core.tools.EffectKind
 import dev.sophi.core.tools.fenceAsData
 import dev.sophi.core.tools.isToolError
 import dev.sophi.core.undo.CheckpointStore
@@ -460,7 +461,9 @@ class AgentLoop(
             // Fresh per turn (and per nested AgentLoop): tool_search activations die with the turn.
             // A nested loop built without a sink audits to the outer loop's, and obeys its rules.
             val sink = audit ?: currentCoroutineContext()[AuditScope]?.sink
-            val rules = permissions ?: currentCoroutineContext()[PermissionScope]?.rules
+            // A loop built with its own rules inside another loop's turn only adds their deny and ask: it can't loosen the outer ones.
+            val outer = currentCoroutineContext()[PermissionScope]?.rules
+            val rules = if (permissions == null || outer == null || outer === permissions) permissions ?: outer else outer.tightened(permissions.active)
             val turnHooks = hooks ?: currentCoroutineContext()[HookScope]?.hooks
             val turnGuardian = guardian ?: currentCoroutineContext()[GuardianScope]?.guardian
             var scope: CoroutineContext = ActivatedTools()
@@ -543,6 +546,8 @@ class AgentLoop(
         val rules = currentCoroutineContext()[PermissionScope]?.rules
         // Rules first: deny > ask > allow; no effect = no rule applies, the tier/grant/policy flow decides.
         val effects = mutableMapOf<String, Effect>()
+        val kindsOf = mutableMapOf<String, Set<EffectKind>>()
+        val unattended = currentCoroutineContext()[Unattended.Key] != null
         val classified = calls.map { call ->
             val tool = registry.getOrNull(call.name)
             val tier = tool?.riskLevel(call.argumentsJson) ?: RiskLevel.SAFE
@@ -551,7 +556,10 @@ class AgentLoop(
             val subjects = if (rules == null) null else runCatching { tool?.permissionSubjects(call.argumentsJson) }.getOrNull()
             // A bash command that only writes one workspace file answers to write_file's rules too: the stricter effect wins.
             val writes = if (rules == null) null else runCatching { (tool as? BashTool)?.fileWriteSubject(call.argumentsJson) }.getOrNull()
-            val effect = rules?.let { r -> listOfNotNull(r.decide(call.name, subjects), writes?.let { r.decide("write_file", listOf(it)) }).maxOrNull() }
+            val kinds = tool?.callEffects(call.argumentsJson).orEmpty().also { kindsOf[call.id] = it }
+            val effect = rules?.let { r ->
+                listOfNotNull(r.decide(call.name, subjects, kinds, unattended), writes?.let { r.decide("write_file", listOf(it), setOf(EffectKind.WRITES), unattended) }).maxOrNull()
+            }
                 ?.also { effects[call.id] = it }
             // an allow written under an ask rule could never apply (ask beats allow), so "always" isn't offered
             val always = if (rules == null || effect == Effect.ASK) null else PermissionRules.alwaysAllowRules(call.name, subjects)
@@ -702,7 +710,8 @@ class AgentLoop(
                         "Error: Tool '${call.name}' vetoed by a hook: ${vetoes[call.id]}"
                     } else if (!allowed) {
                         failed = true
-                        currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson)
+                        currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson,
+                            effects[call.id]?.let { rules?.why(it, call.name, kindsOf[call.id].orEmpty(), unattended) })
                         if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
                         else if (verdicts[call.id]?.effect == Effect.DENY) "Error: Tool '${call.name}' denied by the guardian: ${verdicts.getValue(call.id).reason}"
                         else hookDenials[call.id]?.let { "Error: Tool '${call.name}' denied by a hook: $it" }

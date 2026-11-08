@@ -19,9 +19,11 @@ class DenialLimit(private val job: Job, val max: Int = 3) : AbstractCoroutineCon
     private val blocked = CopyOnWriteArrayList<String>()
     val tripped: Boolean get() = blocked.size >= max
 
-    fun denied(tool: String, argumentsJson: String = "{}") {
+    /** [rule]: the kind rule that blocked it, e.g. "network deny (unattended)"; null = no kind rule (a tool rule, no grant). */
+    fun denied(tool: String, argumentsJson: String = "{}", rule: String? = null) {
         val args = runCatching { redactArguments(argumentsJson, budget = MAX_ARGS) }.getOrDefault(UNREDACTABLE).trim()
-        blocked += if (args == "{}" || args.isEmpty()) tool else "$tool ${if (args.length > MAX_ARGS) args.take(MAX_ARGS) + "…" else args}"
+        val call = if (args == "{}" || args.isEmpty()) tool else "$tool ${if (args.length > MAX_ARGS) args.take(MAX_ARGS) + "…" else args}"
+        blocked += if (rule == null) call else "$call (blocked by rule: $rule)"
         if (tripped) job.cancel()
     }
 

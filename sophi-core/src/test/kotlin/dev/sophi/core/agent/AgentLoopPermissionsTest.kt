@@ -216,6 +216,65 @@ class AgentLoopPermissionsTest : FunSpec({
         rm.executed shouldBe 0
     }
 
+    class NetTool(name: String) : Tool by FakeTool(name) {
+        var executed = 0
+        override fun effects(argumentsJson: String) = setOf(dev.sophi.core.tools.EffectKind.NETWORK)
+        override suspend fun execute(argumentsJson: String): String { executed++; return "page" }
+    }
+    val denyNetwork = PermissionRule(kind = dev.sophi.core.tools.EffectKind.NETWORK, effect = Effect.DENY)
+
+    test("a kind rule blocks a tool by what its call does, not by its name") {
+        val fetch = NetTool("fetch")
+        val local = FakeTool("local")
+        val (provider, sm) = scripted(use(ToolCall("c1", "fetch", "{}"), ToolCall("c2", "local", "{}")), done)
+        loop(provider, sm, fetch, local, permissions = rules(denyNetwork)).turn(AgentSession(id = "s"), "go", config)
+
+        fetch.executed shouldBe 0
+        local.executed shouldBe 1
+    }
+
+    test("an unattended kind rule blocks only unattended runs, and the run's report names it") {
+        val unattendedDeny = rules(denyNetwork.copy(unattended = true))
+        val attended = NetTool("fetch")
+        val (p1, sm1) = scripted(use(ToolCall("c1", "fetch", "{}")), done)
+        loop(p1, sm1, attended, permissions = unattendedDeny).turn(AgentSession(id = "s"), "go", config)
+        attended.executed shouldBe 1
+
+        val unattended = NetTool("fetch")
+        val (p2, sm2) = scripted(use(ToolCall("c1", "fetch", "{}")), done)
+        val limit = dev.sophi.core.tools.DenialLimit(kotlinx.coroutines.Job())
+        withContext(dev.sophi.core.tools.Unattended + limit) {
+            loop(p2, sm2, unattended, permissions = unattendedDeny).turn(AgentSession(id = "s"), "go", config)
+        }
+        unattended.executed shouldBe 0
+        limit.reason() shouldContain "fetch (blocked by rule: network deny (unattended))"
+    }
+
+    test("a nested loop built with its own looser rules still obeys the outer deny") {
+        val fetch = NetTool("fetch")
+        val (provider, sm) = scripted(use(ToolCall("c1", "fetch", "{}")), done)
+        val inner = loop(provider, sm, fetch, permissions = rules(PermissionRule("*", null, Effect.ALLOW)))
+        withContext(dev.sophi.core.permissions.PermissionScope(rules(denyNetwork))) {
+            inner.turn(AgentSession(id = "s"), "go", config)
+        }
+        fetch.executed shouldBe 0
+    }
+
+    test("a subagent definition's rules tighten its own loop only, and its allow rules are dropped") {
+        val fetch = NetTool("fetch")
+        val (provider, sm) = scripted(
+            use(ToolCall("d1", "delegate_to_subagent", """{"subagent_type":"worker","prompt":"look it up"}""")),
+            use(ToolCall("c1", "fetch", "{}")), done, use(ToolCall("c2", "fetch", "{}")), done,
+        )
+        val worker = AgentDefinition("worker", "does work", "You work.", allowedTools = listOf("fetch"), rules = listOf(denyNetwork))
+        val subagent = SubagentTool(listOf(worker), provider, ToolRegistry().register(fetch),
+            FileSessionManager(createTempDirectory("perm-sub")), config, 100_000)
+        withContext(SessionIdContext("p")) {
+            loop(provider, sm, subagent, fetch, permissions = rules()).turn(AgentSession(id = "p"), "go", config)
+        }
+        fetch.executed shouldBe 1 // the parent's own fetch ran; the worker's was denied
+    }
+
     test("requests carry alwaysAllow when it can be offered") {
         val seen = mutableListOf<ConfirmationRequest>()
         val policy = ConfirmationPolicy { reqs -> seen += reqs; reqs.associate { it.callId to false } }
