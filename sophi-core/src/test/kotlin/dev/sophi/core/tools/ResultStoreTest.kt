@@ -122,4 +122,14 @@ class ResultStoreTest : FunSpec({
         }
         (1..500).filter { "line %04d".format(it) !in seen } shouldBe emptyList()
     }
+
+    test("an outside result's pages come back fenced as data, also after a restart; a local result's don't") {
+        limitResult(lines(500), 500, store, "s1", outside = true)
+        limitResult(lines(500), 500, store, "s1")
+        read(store, "r1", 3) shouldStartWith "[r1 page 3/11]\n<tool_data source=\"r1\">"
+        read(store, "r2", 3) shouldNotContain "<tool_data"
+        val restarted = ResultStore(dir, pageChars = 500)
+        read(restarted, "r1", 3) shouldContain "<tool_data source=\"r1\">"
+        read(restarted, "r2", 3) shouldNotContain "<tool_data"
+    }
 })

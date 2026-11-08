@@ -26,7 +26,9 @@ const val DEFAULT_RESULT_PAGE_CHARS = 8_000
 private const val MIN_RESULT_PAGE_CHARS = 500
 private const val SESSION_CAP_BYTES = 50_000_000L
 private val ID = Regex("r(\\d{1,9})")
-private val FILE = Regex("r(\\d{1,9})\\.txt")
+/** `r7.txt`, or `r7.out.txt` for text from outside, whose pages come back fenced as data. */
+private val FILE = Regex("r(\\d{1,9})(\\.out)?\\.txt")
+private fun fileName(i: Int, outside: Boolean) = "r$i${if (outside) ".out" else ""}.txt"
 
 private fun n(i: Int) = String.format(Locale.ROOT, "%,d", i)
 
@@ -35,10 +37,10 @@ private fun n(i: Int) = String.format(Locale.ROOT, "%,d", i)
  * the head ⅔ and tail ⅓ of a page around a marker giving its size and, when [store] kept it, its id and how to page it.
  * The id is the second value.
  */
-fun limitResult(result: String, page: Int, store: ResultStore?, sessionId: String): Pair<String, String?> {
+fun limitResult(result: String, page: Int, store: ResultStore?, sessionId: String, outside: Boolean = false): Pair<String, String?> {
     val pageChars = page.coerceAtLeast(MIN_RESULT_PAGE_CHARS)
     if (result.length <= pageChars) return result to null
-    val kept = store?.put(sessionId, result, pageChars)
+    val kept = store?.put(sessionId, result, pageChars, outside)
     val size = "${n(result.length)} chars, ${n(result.count { it == '\n' } + 1)} lines"
     val cut = if (result.length > MAX_RESULT_CHARS) "; only the first and last ${n(MAX_RESULT_CHARS / 2)} chars are kept" else ""
     val marker = if (kept == null) "[$size; showing the start and end; the rest was not kept]"
@@ -56,7 +58,7 @@ class ResultStore(
     val pageChars: Int = DEFAULT_RESULT_PAGE_CHARS,
     private val sessionCapBytes: Long = SESSION_CAP_BYTES,
 ) {
-    private class Kept(val pageChars: Int, val bytes: Long)
+    private class Kept(val pageChars: Int, val bytes: Long, val outside: Boolean)
     /** [kept] in id order, so the first is the oldest. */
     private class Results(var next: Int, val kept: LinkedHashMap<Int, Kept>)
     private val sessions = HashMap<String, Results>()
@@ -69,9 +71,10 @@ class ResultStore(
     // ponytail: a result written before a restart pages at the configured size, not the window-capped one it was shown at
     private fun results(sessionId: String) = sessions.getOrPut(sessionId) {
         val files = runCatching { folder(sessionId).listDirectoryEntries() }.getOrDefault(emptyList())
-            .mapNotNull { f -> FILE.matchEntire(f.fileName.toString())?.let { it.groupValues[1].toInt() to f } }.sortedBy { it.first }
+            .mapNotNull { f -> FILE.matchEntire(f.fileName.toString())?.let { Triple(it.groupValues[1].toInt(), f, it.groupValues[2].isNotEmpty()) } }
+            .sortedBy { it.first }
         Results(next = (files.lastOrNull()?.first ?: 0) + 1,
-            kept = files.associateTo(LinkedHashMap()) { (i, f) -> i to Kept(pageChars, runCatching { f.fileSize() }.getOrDefault(0)) })
+            kept = files.associateTo(LinkedHashMap()) { (i, f, out) -> i to Kept(pageChars, runCatching { f.fileSize() }.getOrDefault(0), out) })
     }
 
     /**
@@ -79,7 +82,7 @@ class ResultStore(
      * null when it couldn't be kept (redaction or the write failed): nothing unredacted is ever written.
      */
     @Synchronized
-    fun put(sessionId: String, result: String, pageChars: Int): Pair<String, Int>? = runCatching {
+    fun put(sessionId: String, result: String, pageChars: Int, outside: Boolean = false): Pair<String, Int>? = runCatching {
         // ponytail: redaction runs inline, ~1 s per MB of output; move it off the call's path if big results get common
         val redacted = redactSecrets(result)
         val text = if (redacted.length <= MAX_RESULT_CHARS) redacted
@@ -91,19 +94,19 @@ class ResultStore(
         while (r.kept.isNotEmpty() && total + bytes > sessionCapBytes) {
             val (oldest, k) = r.kept.entries.first()
             r.kept.remove(oldest)
-            folder.resolve("r$oldest.txt").deleteIfExists()
+            folder.resolve(fileName(oldest, k.outside)).deleteIfExists()
             total -= k.bytes
         }
         Files.createDirectories(folder)
         val i = r.next++
-        val file = folder.resolve("r$i.txt")
+        val file = folder.resolve(fileName(i, outside))
         try {
             Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
         } catch (_: UnsupportedOperationException) {
             // Not a POSIX file system (Windows): the user profile's ACLs already apply.
         }
         file.writeText(text)
-        r.kept[i] = Kept(pageChars, bytes)
+        r.kept[i] = Kept(pageChars, bytes, outside)
         "r$i" to pageBounds(text, pageChars).size - 1
     }.getOrNull()
 
@@ -113,14 +116,15 @@ class ResultStore(
         val i = ID.matchEntire(id)?.groupValues?.get(1)?.toInt() ?: return "Error: no result $id; ids look like r7"
         val r = results(sessionId)
         val kept = r.kept[i] ?: return if (i < r.next) "Error: $id was evicted; run the call again" else "Error: no result $id in this session"
-        val text = runCatching { folder(sessionId).resolve("r$i.txt").readText() }.getOrElse {
+        val text = runCatching { folder(sessionId).resolve(fileName(i, kept.outside)).readText() }.getOrElse {
             r.kept.remove(i)
             return "Error: $id was evicted; run the call again"
         }
         val bounds = pageBounds(text, kept.pageChars)
         val pages = bounds.size - 1
         if (page !in 1..pages) return "Error: $id has $pages pages; ask for page 1 to $pages"
-        return "[$id page $page/$pages]\n" + text.substring(bounds[page - 1], bounds[page])
+        val slice = text.substring(bounds[page - 1], bounds[page])
+        return "[$id page $page/$pages]\n" + if (kept.outside) fenceAsData(id, slice) else slice
     }
 
     /**

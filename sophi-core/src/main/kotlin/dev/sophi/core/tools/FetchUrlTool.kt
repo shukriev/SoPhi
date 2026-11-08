@@ -35,6 +35,7 @@ class FetchUrlTool(
     override val description = "Fetch a public http(s) URL. Follows redirects; the first line is the HTTP status and the final URL. " +
         "HTML pages come back as readable text with links as [url]; pass raw=true for the original HTML"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(EffectKind.NETWORK)
     override val parametersJson = """
         {"type":"object","properties":{"url":{"type":"string","description":"The http(s) URL to fetch"},"raw":{"type":"boolean","description":"Return the original HTML instead of readable text (default false)"}},"required":["url"]}
     """.trimIndent()

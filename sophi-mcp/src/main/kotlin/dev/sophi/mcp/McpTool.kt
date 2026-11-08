@@ -1,5 +1,6 @@
 package dev.sophi.mcp
 
+import dev.sophi.core.tools.EffectKind
 import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.mcp.auth.signInRequired
@@ -36,6 +37,9 @@ class McpTool(
     override val outsideText = true
     override fun riskLevel(argumentsJson: String): RiskLevel =
         if (remoteName in safeTools) RiskLevel.SAFE else RiskLevel.DESTRUCTIVE
+    // ponytail: a server's hints never remove a kind (removals default off, decision 2); add a trust flag when one is wanted
+    override fun effects(argumentsJson: String) =
+        if (remoteName in safeTools) setOf(EffectKind.NETWORK) else setOf(EffectKind.WRITES, EffectKind.NETWORK)
 
     override fun reach(argumentsJson: String): Reach = when {
         remoteName in safeTools -> Reach.OUTSIDE_READ

@@ -26,6 +26,10 @@ class ScheduleTaskToolTest : FunSpec({
         ScheduleTaskTool(store(), runLog()).name shouldContain "manage_scheduled_task"
     }
 
+    test("managing a schedule only writes; the task's own calls are checked when it runs") {
+        ScheduleTaskTool(store(), runLog()).effects("""{"action":"create"}""") shouldBe setOf(dev.sophi.core.tools.EffectKind.WRITES)
+    }
+
     test("create with trigger_type=interval and mode=recurring persists a task") {
         val s = store()
         val tool = ScheduleTaskTool(s, runLog())

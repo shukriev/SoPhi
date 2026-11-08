@@ -14,6 +14,21 @@ enum class RuleVerdict { LOW_RISK, HIGH_RISK, UNKNOWN }
 enum class Reach { LOCAL, OUTSIDE_READ, OUTSIDE_HINTED_READ, OUTSIDE_CHANGE }
 
 /**
+ * What a call does, next to how risky it is ([RiskLevel]): changes state anywhere, starts a program here, or talks to
+ * another machine. No kinds = reads local state only. (Not `Effect`: that is a rule's allow/ask/deny.)
+ */
+@kotlinx.serialization.Serializable
+enum class EffectKind {
+    @kotlinx.serialization.SerialName("writes") WRITES,
+    @kotlinx.serialization.SerialName("process") PROCESS,
+    @kotlinx.serialization.SerialName("network") NETWORK,
+}
+
+/** [Tool.effects], failing closed: a call whose effects can't be worked out is assumed to do everything. */
+fun Tool.callEffects(argumentsJson: String): Set<EffectKind> =
+    runCatching { effects(argumentsJson) }.getOrDefault(EffectKind.entries.toSet())
+
+/**
  * A tool reports a handled failure by returning text that starts with this (or by throwing).
  * The agent loop, mcp-serve and the MCP client all read failures through [isToolError].
  */
@@ -33,6 +48,12 @@ interface Tool {
     /** True when the result carries text from outside this machine; the read check judges it. */
     val outsideText: Boolean get() = false
     fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.SAFE
+    /**
+     * What this call does. The default fails closed: a SAFE call does nothing, anything else is assumed to do every
+     * kind, so a rule against a kind also stops a tool that never said what it does.
+     */
+    fun effects(argumentsJson: String): Set<EffectKind> =
+        if (riskLevel(argumentsJson) == RiskLevel.SAFE) emptySet() else EffectKind.entries.toSet()
     /**
      * Fine-grained risk hint consulted only for calls that already cleared the SAFE bar (i.e.
      * riskLevel() returned CAUTION or DESTRUCTIVE) — used by auto mode to decide whether a

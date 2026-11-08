@@ -41,6 +41,7 @@ class InstallSkillTool(
     private val json = Json { ignoreUnknownKeys = true }
 
     override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(dev.sophi.core.tools.EffectKind.WRITES, dev.sophi.core.tools.EffectKind.NETWORK)
     override fun ruleVerdict(argumentsJson: String) = RuleVerdict.HIGH_RISK
 
     override suspend fun execute(argumentsJson: String): String {

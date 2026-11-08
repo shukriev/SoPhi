@@ -582,7 +582,7 @@ class RuntimeBuilder {
 
         val effectiveConfig = agentConfig.copy(
             systemPrompt = listOfNotNull(
-                basePrompt, agentConfig.systemPrompt, learningSection, memorySection
+                basePrompt, agentConfig.systemPrompt, learningSection, memorySection, dev.sophi.core.tools.DATA_FENCE_NOTE
             ).joinToString("\n\n")
         )
 

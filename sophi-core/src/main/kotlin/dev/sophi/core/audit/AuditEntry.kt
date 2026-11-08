@@ -1,5 +1,6 @@
 package dev.sophi.core.audit
 
+import dev.sophi.core.tools.EffectKind
 import dev.sophi.core.tools.RiskLevel
 import kotlinx.serialization.Serializable
 import kotlin.coroutines.AbstractCoroutineContextElement
@@ -35,6 +36,8 @@ data class AuditEntry(
     val readCheckMs: Long? = null,
     /** The id result_read pages this call's whole result by (`r7`); null = the model saw all of it. */
     val resultId: String? = null,
+    /** What the call does (`writes`, `process`, `network`); empty = reads local state only. */
+    val effects: List<String> = emptyList(),
 )
 
 /** Where audit entries go. sophi-enterprise implements this for retention and export. Must not throw for ordinary failures. */
@@ -61,7 +64,7 @@ private const val REDACT_WINDOW = 20_000
 fun auditEntry(
     actor: String, tenant: String?, session: String, tool: String, risk: RiskLevel, argumentsJson: String,
     rule: String, outcome: String, result: String, start: Long, plan: String? = null, guardian: String? = null,
-    readCheck: String? = null, readCheckMs: Long? = null, resultId: String? = null,
+    readCheck: String? = null, readCheckMs: Long? = null, resultId: String? = null, effects: Set<EffectKind> = emptySet(),
 ) = AuditEntry(
     ts = start,
     actor = actor,
@@ -80,6 +83,7 @@ fun auditEntry(
     readCheck = readCheck?.let { runCatching { redactWindowed(it, REDACT_WINDOW).take(300) }.getOrDefault(UNREDACTABLE) },
     readCheckMs = readCheckMs,
     resultId = resultId,
+    effects = effects.sorted().map { it.name.lowercase() },
 )
 
 /** Builds and records an entry; anything thrown on the way, Errors included (a regex overflow), drops only this entry. */

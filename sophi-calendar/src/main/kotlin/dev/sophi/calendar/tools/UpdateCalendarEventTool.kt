@@ -47,6 +47,7 @@ class UpdateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override val name = "update_calendar_event"
     override val description = "Update fields on an existing calendar event; omitted fields are left unchanged"
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(dev.sophi.core.tools.EffectKind.WRITES)
     override val parametersJson = """
         {"type":"object","properties":{
           "event_id":{"type":"string"},

@@ -101,6 +101,11 @@ class WriteSkillToolTest : FunSpec({
         tool.riskLevel("{}") shouldBe RiskLevel.DESTRUCTIVE
     }
 
+    test("write_skill only writes; install_skill also fetches") {
+        tool.effects("{}") shouldBe setOf(dev.sophi.core.tools.EffectKind.WRITES)
+        InstallSkillTool().effects("{}") shouldBe setOf(dev.sophi.core.tools.EffectKind.WRITES, dev.sophi.core.tools.EffectKind.NETWORK)
+    }
+
     test("execute() records a version on a successful write") {
         runBlocking { tool.execute(VALID_ARGS) }
 

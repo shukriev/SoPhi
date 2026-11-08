@@ -190,6 +190,7 @@ class BashKillTool(private val jobs: BashJobs) : Tool {
         {"type":"object","properties":{"id":{"type":"string","description":"Job id from bash(background=true), e.g. j1"}},"required":["id"]}
     """.trimIndent()
     override val deferred = true
+    override fun effects(argumentsJson: String) = setOf(EffectKind.PROCESS)
     override suspend fun execute(argumentsJson: String): String =
         jobs.kill(sessionOf(), jobJson.decodeFromString<JobArgs>(argumentsJson).id)
 }

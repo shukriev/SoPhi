@@ -77,6 +77,12 @@ class BashTool(
         val staysInside = bashReachesOutside(command, root) == null
         return if (looksReadOnly && staysInside) RiskLevel.CAUTION else RiskLevel.DESTRUCTIVE
     }
+    /** Always a process; writes unless [riskLevel] found it read-only and inside; network unless a sandbox turns it off. */
+    override fun effects(argumentsJson: String): Set<EffectKind> = buildSet {
+        add(EffectKind.PROCESS)
+        if (riskLevel(argumentsJson) != RiskLevel.CAUTION) add(EffectKind.WRITES)
+        if (sandbox == null || sandbox.mode == SandboxMode.OFF || sandbox.network) add(EffectKind.NETWORK)
+    }
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
         // Unparseable: execute() decodes the same type and throws before doing anything, so don't prompt —
         // let it fail with the parse error the model can act on. (riskLevel still fails closed; ADR-027.)

@@ -194,7 +194,7 @@ class BuildCliRuntimeTest : FunSpec({
     // With no --system passed, the prompt is exactly the SDK default (RuntimeBuilder always
     // includes DefaultPrompt.BASE now) — pinning this so the migration cannot quietly change it.
     test("with no --system and an empty learning home the system prompt is exactly the default") {
-        build().runtime.config.systemPrompt shouldBe DefaultPrompt.BASE
+        build().runtime.config.systemPrompt shouldBe "${DefaultPrompt.BASE}\n\n${dev.sophi.core.tools.DATA_FENCE_NOTE}"
     }
 
     test("a new session is created with an id but is not persisted until a turn saves it") {

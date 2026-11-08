@@ -82,6 +82,12 @@ class ToolRegistry {
      * SubagentTool/DecomposeGoalTool to report their own risk level from a caller's self-declared
      * expected tools.
      */
+    /** Every kind the named tools may have, probed with "{}" like [worstRiskAmong]; none named or one unknown = all kinds. */
+    fun effectsAmong(expectedTools: List<String>?): Set<EffectKind> {
+        if (expectedTools.isNullOrEmpty()) return EffectKind.entries.toSet()
+        return expectedTools.flatMap { getOrNull(it)?.callEffects("{}") ?: EffectKind.entries }.toSet()
+    }
+
     fun worstRiskAmong(expectedTools: List<String>?): RiskLevel {
         val tiers = expectedTools.orEmpty().mapNotNull { getOrNull(it)?.riskLevel("{}") }
         return when {

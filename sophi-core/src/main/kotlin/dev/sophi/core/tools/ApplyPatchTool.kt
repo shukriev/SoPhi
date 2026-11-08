@@ -222,6 +222,7 @@ class ApplyPatchTool(
     private fun paths(op: FileOp) = listOfNotNull(op.path, (op as? FileOp.Update)?.moveTo)
 
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.DESTRUCTIVE
+    override fun effects(argumentsJson: String) = setOf(EffectKind.WRITES)
 
     override fun ruleVerdict(argumentsJson: String): RuleVerdict {
         // Unparseable: execute() fails before touching anything, so don't prompt (as edit_file).
