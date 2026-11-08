@@ -4,6 +4,7 @@ import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlConfiguration
 import kotlinx.serialization.Serializable
 import java.nio.file.Path
+import java.security.MessageDigest
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteExisting
@@ -21,6 +22,15 @@ data class InstallResult(
     val rejected: Map<String, List<String>> = emptyMap(),
     /** Scan findings per skill, whether the skill went in (confirmed) or was held back. */
     val findings: Map<String, List<ScanFinding>> = emptyMap()
+)
+
+/** What an install would bring in, read before anything is written. [digest] pins the exact files. */
+data class InstallPreview(
+    val ids: List<String>,
+    val notFound: List<String>,
+    val commit: String?,
+    val findings: Map<String, List<ScanFinding>>,
+    val digest: String
 )
 
 data class DiscoveredSkill(val id: String, val path: Path, val skillMdPath: Path)
@@ -45,20 +55,35 @@ private const val BUNDLE_MARKER = ".sophi-bundle"
  * ([scanSkill]); one with findings goes in only when `confirm` says yes.
  */
 class SkillInstaller {
+    /** Fetches and scans [source] without installing, so the user approves content, not just a source. */
+    fun preview(source: String, only: Set<String> = emptySet()): InstallPreview {
+        val (root, commit, cleanup) = resolveSource(source)
+        try {
+            val (selected, notFound) = select(root, only)
+            val findings = selected.associate { it.id to scanSkill(it.path) }.filterValues { it.isNotEmpty() }
+            return InstallPreview(selected.map { it.id }, notFound, commit, findings, sourceDigest(root, selected))
+        } finally {
+            cleanup()
+        }
+    }
+
+    /** [expectDigest], from [preview], refuses the install if the source changed since it was shown. */
     fun install(
         source: String,
         targetDir: Path,
         only: Set<String> = emptySet(),
         update: Boolean = false,
+        expectDigest: String? = null,
         confirm: (id: String, findings: List<ScanFinding>) -> Boolean = { _, _ -> false },
         validate: (id: String, content: String) -> List<String> = { _, _ -> emptyList() }
     ): InstallResult {
         targetDir.createDirectories()
         val (root, commit, cleanup) = resolveSource(source)
         try {
-            val discovered = root.walkSkillDirs().sortedBy { it.id }
-            val selected = if (only.isEmpty()) discovered else discovered.filter { it.id in only }
-            val notFound = (only - selected.map { it.id }.toSet()).sorted()
+            val (selected, notFound) = select(root, only)
+            check(expectDigest == null || sourceDigest(root, selected) == expectDigest) {
+                "$source changed since it was approved; nothing was installed"
+            }
             val installed = mutableListOf<String>()
             val skipped = mutableListOf<String>()
             val rejected = mutableMapOf<String, List<String>>()
@@ -98,6 +123,21 @@ class SkillInstaller {
         }
         SkillLock.read(targetDir).let { if (id in it) SkillLock.write(targetDir, it - id) }
         return true
+    }
+
+    private fun select(root: Path, only: Set<String>): Pair<List<DiscoveredSkill>, List<String>> {
+        val discovered = root.walkSkillDirs().sortedBy { it.id }
+        val selected = if (only.isEmpty()) discovered else discovered.filter { it.id in only }
+        return selected to (only - selected.map { it.id }.toSet()).sorted()
+    }
+
+    /** SHA-256 over the selected skills' files, keyed by path under [root] (a clone's temp name doesn't count). */
+    private fun sourceDigest(root: Path, skills: List<DiscoveredSkill>): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        skills.flatMap { s -> s.path.toFile().walkTopDown().onEnter { it.name != ".git" }.filter { it.isFile }.toList() }
+            .distinct().map { root.relativize(it.toPath()).toString() to it }.sortedBy { it.first }
+            .forEach { (rel, file) -> digest.update(rel.toByteArray()); digest.update(file.readBytes()) }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     /** The folder to install from, the commit it is at (null for a local path), and its cleanup. */
