@@ -62,9 +62,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
             "and inspect its run history (outcome + duration of each past run). " +
             "Recurring tasks fire on an interval with no stop condition (e.g. hourly monitoring). " +
             "Goal tasks repeat turns until an LLM-judged or shell-checked condition is met, up to max_iterations. " +
-            "at (trigger_type=once) is an ISO-8601 local date-time you must compute yourself — if the request uses " +
-            "a relative time (\"tomorrow\", \"in an hour\"), call get_current_datetime first; never guess it. " +
-            "cron_expression (trigger_type=cron) is standard 5-field Unix cron syntax resolved in the local timezone."
+            "For a relative time (\"tomorrow\", \"in an hour\"), call get_current_datetime before computing at; never guess it."
     override val parametersJson = """
         {"type":"object","properties":{
           "action":{"type":"string","enum":["create","list","update","pause","resume","remove","runs"]},

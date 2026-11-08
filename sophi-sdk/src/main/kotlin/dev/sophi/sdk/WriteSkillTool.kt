@@ -52,14 +52,11 @@ class WriteSkillTool(
     }
 ) : Tool {
     override val name = "write_skill"
-    override val description = "Create or update a site-specific skill (id must match " +
-        "site-<slug>, or site-<slug>/<member> for a domain member — e.g. site-github-com or " +
-        "site-maidplus-de/companies) documenting a website's workflows so Sophi can recall it " +
-        "on a future visit instead of re-exploring. Set domain=true to create/update the shared " +
-        "index for a group of related skills (id must have no '/' segment in that case). The body " +
-        "is built from '## Map' (what the site is), '## Procedures' (how to do one task you " +
-        "performed), '## Known unknowns' and '## Last updated'. mode=map (the default) cannot " +
-        "write Procedures. Never include credentials, tokens, or secrets in the body."
+    override val description = "Create or update a site-specific skill documenting a website's workflows so " +
+        "Sophi can recall it on a future visit instead of re-exploring. The body is built from '## Map' (what " +
+        "the site is), '## Procedures' (how to do one task you performed), '## Known unknowns' and " +
+        "'## Last updated'; mode=map (the default) cannot write Procedures. Never include credentials, tokens, " +
+        "or secrets in the body."
     override val parametersJson = """
         {"type":"object","properties":{
           "id":{"type":"string","description":"site-<slug> derived from the hostname, e.g. site-github-com, or site-<slug>/<member> for a domain member, e.g. site-maidplus-de/companies"},
@@ -68,7 +65,7 @@ class WriteSkillTool(
           "tags":{"type":"array","items":{"type":"string"}},
           "body":{"type":"string","description":"Markdown body: entry URL(s), workflow steps, selectors/anchors that worked, gotchas"},
           "project":{"type":"boolean","description":"Write into ./.sophi/skills instead of the global ~/.sophi/skills"},
-          "domain":{"type":"boolean","description":"True to create/update the shared index for a domain (id must have no '/' segment). False (default) for a standalone or member skill."},
+          "domain":{"type":"boolean","description":"True to create/update the shared index for a group of related skills (id must have no '/' segment). False (default) for a standalone or member skill."},
           "mode":{"type":"string","enum":["map","procedure"],"description":"map (default) records what the site IS — navigation, screens, entry URLs. procedure records how to DO one task you just performed: numbered steps, the selectors that worked, gotchas. Only use procedure after actually carrying the task out."}
         },"required":["id","title","description","body"]}
     """.trimIndent()

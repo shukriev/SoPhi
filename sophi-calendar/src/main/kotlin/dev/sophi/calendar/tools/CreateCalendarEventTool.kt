@@ -48,16 +48,14 @@ class CreateCalendarEventTool(private val provider: CalendarProvider) : Tool {
     override fun riskLevel(argumentsJson: String): RiskLevel = RiskLevel.CAUTION
     override fun effects(argumentsJson: String) = setOf(dev.sophi.core.tools.EffectKind.WRITES)
     override val description = "Create a calendar event (optionally recurring or all-day) on the native OS calendar. " +
-        "For a timed event, set 'start'/'end' to ISO-8601 local date-times (e.g. 2026-07-27T12:00:00) — never " +
-        "epoch milliseconds. For an all-day event, set \"all_day\": true and use 'start_date'/'end_date' " +
-        "(ISO YYYY-MM-DD, date only, no time-of-day). If the request uses a relative date or time " +
-        "(\"tomorrow\", \"next Monday\", \"in an hour\"), call get_current_datetime first to establish the " +
-        "current date and timezone; never guess it."
+        "start/end are ISO-8601 local date-times, never epoch milliseconds; an all-day event uses all_day=true " +
+        "with start_date/end_date. For a relative date or time (\"tomorrow\", \"next Monday\", \"in an hour\"), " +
+        "call get_current_datetime first; never guess it."
     override val parametersJson = """
         {"type":"object","properties":{
           "title":{"type":"string"},
           "calendar_id":{"type":"string","description":"Defaults to the OS default calendar"},
-          "start":{"type":"string","description":"ISO-8601 local date-time without a UTC offset (e.g. 2026-07-27T12:00:00) — interpreted in the OS's local timezone, matching get_current_datetime's zone; required unless all_day=true"},
+          "start":{"type":"string","description":"ISO-8601 local date-time, no UTC offset, e.g. 2026-07-27T12:00:00 (get_current_datetime's timezone); required unless all_day=true"},
           "end":{"type":"string","description":"ISO-8601 local date-time, same format as start; required unless all_day=true"},
           "all_day":{"type":"boolean","default":false},
           "start_date":{"type":"string","description":"ISO YYYY-MM-DD; required when all_day=true"},
