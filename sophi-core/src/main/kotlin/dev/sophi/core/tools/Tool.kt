@@ -10,6 +10,10 @@ enum class RuleVerdict { LOW_RISK, HIGH_RISK, UNKNOWN }
 /**
  * Where a call acts, for plan-first turns: on this machine, or in another system (an MCP server) as a lookup, a
  * lookup only the server vouches for, or a change. Only plan mode reads it; approval tiers stay [RiskLevel].
+ *
+ * MCP tools derive it from their [Tool.effects]. Built-ins stay [LOCAL] on purpose, even bash/fetch_url/web_search
+ * whose effects include NETWORK: plan mode treats programs started here as local, else plan-first 'outside' mode
+ * would plan every bash call. Reach stays a separate method because plan-mode test fakes and that rule depend on it.
  */
 enum class Reach { LOCAL, OUTSIDE_READ, OUTSIDE_HINTED_READ, OUTSIDE_CHANGE }
 

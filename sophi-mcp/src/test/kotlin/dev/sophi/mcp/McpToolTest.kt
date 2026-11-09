@@ -30,6 +30,24 @@ class McpToolTest : FunSpec({
         McpTool(session, "okta", RemoteToolInfo("deactivate_user", "", "{}"), emptySet()).effects("{}") shouldBe setOf(w, n)
     }
 
+    test("reach agrees with effects: outside iff NETWORK, a change iff WRITES and no hint") {
+        val session = mockk<McpSession>()
+        val n = dev.sophi.core.tools.EffectKind.NETWORK
+        val w = dev.sophi.core.tools.EffectKind.WRITES
+        listOf(
+            Triple(RemoteToolInfo("list_users", "", "{}"), setOf("list_users"), Reach.OUTSIDE_READ),
+            Triple(RemoteToolInfo("find_user", "", "{}", readOnlyHint = true), emptySet(), Reach.OUTSIDE_HINTED_READ),
+            Triple(RemoteToolInfo("deactivate_user", "", "{}"), emptySet(), Reach.OUTSIDE_CHANGE),
+        ).forEach { (info, safe, expected) ->
+            val tool = McpTool(session, "okta", info, safe)
+            val reach = tool.reach("{}")
+            val fx = tool.effects("{}")
+            reach shouldBe expected
+            (reach != Reach.LOCAL) shouldBe (n in fx)
+            (reach == Reach.OUTSIDE_CHANGE) shouldBe (w in fx && !info.readOnlyHint)
+        }
+    }
+
     test("name is namespaced with the server name") {
         val session = mockk<McpSession>()
         val tool = McpTool(session, "filesystem", RemoteToolInfo("read_file", "reads a file", "{}"), emptySet())

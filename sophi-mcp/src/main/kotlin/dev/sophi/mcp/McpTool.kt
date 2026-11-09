@@ -41,10 +41,15 @@ class McpTool(
     override fun effects(argumentsJson: String) =
         if (remoteName in safeTools) setOf(EffectKind.NETWORK) else setOf(EffectKind.WRITES, EffectKind.NETWORK)
 
-    override fun reach(argumentsJson: String): Reach = when {
-        remoteName in safeTools -> Reach.OUTSIDE_READ
-        readOnlyHint -> Reach.OUTSIDE_HINTED_READ
-        else -> Reach.OUTSIDE_CHANGE
+    /** Derived from [effects], so the two can't drift; the hint only marks a would-be change as a vouched-for read. */
+    override fun reach(argumentsJson: String): Reach {
+        val fx = effects(argumentsJson)
+        return when {
+            EffectKind.NETWORK !in fx -> Reach.LOCAL
+            EffectKind.WRITES !in fx -> Reach.OUTSIDE_READ
+            readOnlyHint -> Reach.OUTSIDE_HINTED_READ
+            else -> Reach.OUTSIDE_CHANGE
+        }
     }
 
     override suspend fun execute(argumentsJson: String): String = mask(
