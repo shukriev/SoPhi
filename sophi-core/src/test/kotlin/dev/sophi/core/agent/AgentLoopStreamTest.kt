@@ -272,7 +272,7 @@ class AgentLoopStreamTest : FunSpec({
 
         session.branch().last().content shouldContain "Stopped early"
         session.branch().last().content shouldContain "3 consecutive"
-        coVerify(exactly = 3) { provider.stream(any()) }
+        coVerify(exactly = 4) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     test("streamTurn() stops early when searches keep broadening beyond an earlier scoped path") {
@@ -298,7 +298,7 @@ class AgentLoopStreamTest : FunSpec({
 
         session.branch().last().content shouldContain "Stopped early"
         session.branch().last().content shouldContain "broadened"
-        coVerify(exactly = 3) { provider.stream(any()) }
+        coVerify(exactly = 4) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     test("streamTurn() stops early when approaching the tool-round budget under the default guard") {
@@ -317,7 +317,7 @@ class AgentLoopStreamTest : FunSpec({
 
         session.branch().last().content shouldContain "Stopped early"
         session.branch().last().content shouldContain "round"
-        coVerify(exactly = 1) { provider.stream(any()) }
+        coVerify(exactly = 2) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     test("streamTurn() stops early and says so when reasoning burns the whole output budget") {
