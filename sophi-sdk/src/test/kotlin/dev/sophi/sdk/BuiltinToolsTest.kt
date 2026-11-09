@@ -32,6 +32,12 @@ class BuiltinToolsTest : FunSpec({
         buildBuiltinTools(tempdir().toPath(), braveApiKey = null).single { it.name == "sqlite_show" }.deferred shouldBe true
     }
 
+    test("buildBuiltinTools registers archive_list and archive_extract") {
+        val names = buildBuiltinTools(tempdir().toPath(), braveApiKey = null).map { it.name }
+        names shouldContain "archive_list"
+        names shouldContain "archive_extract"
+    }
+
     test("decompose_goal is a session-bound tool, so it is absent from the static builtin set") {
         val names = buildBuiltinTools(tempdir().toPath(), braveApiKey = null).map { it.name }
         names.contains("decompose_goal") shouldBe false
