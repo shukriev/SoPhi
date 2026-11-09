@@ -65,18 +65,23 @@ suspend fun checkMcpServers(
  * The connect `sophi` itself makes (Keychain secrets, stored sign-ins), for [checkMcpServers]: connects, counts
  * the tools, disconnects. Never opens a browser.
  */
-fun mcpToolCounter(): suspend (McpServerConfig) -> Int {
-    val mask = SecretMask()
-    val store = KeychainCredentialStore(mask = mask)
-    val oauth = McpOAuth(store, mask, OAuthFlow(openBrowser = { error("doctor never signs in") }))
-    val manager = McpClientManager(httpConnector = StreamableHttpMcpConnector(auth = oauth), credentials = store, mask = mask)
-    return { config ->
+fun mcpToolCounter(manager: McpClientManager = doctorMcpManager()): suspend (McpServerConfig) -> Int = { config ->
+    // Disconnect in finally: connectOne keeps the session even when listTools then fails.
+    try {
         var failure: Throwable? = null
         val tools = manager.connectOne(config, onFailure = { failure = it })
         failure?.let { throw it }
-        manager.disconnect(config.name)
         tools.size
+    } finally {
+        manager.disconnect(config.name)
     }
+}
+
+private fun doctorMcpManager(): McpClientManager {
+    val mask = SecretMask()
+    val store = KeychainCredentialStore(mask = mask)
+    val oauth = McpOAuth(store, mask, OAuthFlow(openBrowser = { error("doctor never signs in") }))
+    return McpClientManager(httpConnector = StreamableHttpMcpConnector(auth = oauth), credentials = store, mask = mask)
 }
 
 /**

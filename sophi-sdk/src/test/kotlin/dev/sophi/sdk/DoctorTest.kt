@@ -5,6 +5,10 @@ import dev.sophi.mcp.config.McpTransport
 import dev.sophi.skills.SkillLock
 import dev.sophi.skills.SkillPin
 import dev.sophi.skills.skillContentHash
+import dev.sophi.mcp.McpClientManager
+import dev.sophi.mcp.McpConnector
+import dev.sophi.mcp.McpSession
+import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -76,5 +80,19 @@ class DoctorTest : FunSpec({
 
     test("checkCommand: a command that exits 0 is ok") {
         checkCommand("true", listOf("true"), 2.seconds, required = true, hint = "x").ok shouldBe true
+    }
+
+    test("mcpToolCounter closes the session even when listing tools fails after the connect") {
+        var closed = false
+        val session = object : McpSession {
+            override suspend fun listTools() = error("list failed")
+            override suspend fun callTool(name: String, argumentsJson: String) = ""
+            override suspend fun close() { closed = true }
+        }
+        val counter = mcpToolCounter(McpClientManager(stdioConnector = object : McpConnector {
+            override suspend fun connect(config: McpServerConfig) = session
+        }))
+        shouldThrowAny { counter(server("broken")) }
+        closed shouldBe true
     }
 })
