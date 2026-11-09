@@ -16,6 +16,7 @@ import java.util.zip.ZipException
 import java.util.zip.ZipFile
 import kotlin.io.path.createDirectories
 import kotlin.io.path.exists
+import kotlin.io.path.isDirectory
 
 // ponytail: zip/jar only (java.util.zip); tar/tar.gz needs a reader of its own and comes when asked, bash `tar` covers it until then.
 
@@ -152,7 +153,14 @@ class ArchiveExtractTool(
             require(unsafe.isEmpty()) { "Refusing to extract ${a.path}: unsafe entry names ${names(unsafe)}" }
             val files = entries.filterNot { it.isDirectory }
             val duplicates = files.groupBy { to.resolve(it.name).normalize() }.filterValues { it.size > 1 }.values.map { it.first().name }
-            val conflicts = files.map { it.name }.filter { to.resolve(it).normalize().exists(LinkOption.NOFOLLOW_LINKS) } + duplicates
+            // A folder an entry needs (its parents, or a directory entry itself) must not be an existing file or another entry's file.
+            val fileTargets = files.map { to.resolve(it.name).normalize() }.toSet()
+            val blocked = entries.filter { e ->
+                val t = to.resolve(e.name).normalize()
+                generateSequence(if (e.isDirectory) t else t.parent) { it.parent }.takeWhile { it != to && it.startsWith(to) }
+                    .any { it in fileTargets || (it.exists(LinkOption.NOFOLLOW_LINKS) && !it.isDirectory()) }
+            }.map { it.name }
+            val conflicts = files.map { it.name }.filter { to.resolve(it).normalize().exists(LinkOption.NOFOLLOW_LINKS) } + duplicates + blocked
             require(conflicts.isEmpty()) { "Refusing to overwrite existing files: ${names(conflicts)}" }
             var total = 0L
             files.forEach { e ->

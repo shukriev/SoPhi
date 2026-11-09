@@ -34,7 +34,7 @@ import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 /** Writes a zip at [file]: a name ending in `/` is a directory, a ByteArray is written STORED, a String DEFLATED. */
-fun zip(file: Path, vararg entries: Pair<String, Any?>): Path {
+private fun zip(file: Path, vararg entries: Pair<String, Any?>): Path {
     ZipOutputStream(file.outputStream()).use { out ->
         entries.forEach { (name, content) ->
             val e = ZipEntry(name)
@@ -140,6 +140,22 @@ class ArchiveToolsTest : FunSpec({
         refused { ArchiveExtractTool(root).execute("""{"path":"a.zip","to":"out"}""") } shouldContain "b.txt"
         root.resolve("out/b.txt").readText() shouldBe "original"
         tree(root) shouldBe before
+    }
+
+    test("a file in the way of an entry's folder refuses everything, nothing written") {
+        // (a) a file entry `a` plus `a/b`; (b) an existing file out/x under an entry x/y.txt
+        listOf(
+            arrayOf("first.txt" to "1", "a" to "file", "a/b" to "under") to null,
+            arrayOf("first.txt" to "1", "x/y.txt" to "under") to "x",
+        ).forEach { (entries, existing) ->
+            val r = createTempDirectory("sophi-archive").toRealPath()
+            r.resolve("out").createDirectories()
+            existing?.let { r.resolve("out/$it").writeText("mine") }
+            zip(r.resolve("a.zip"), *entries)
+            val before = tree(r)
+            refused { ArchiveExtractTool(r).execute("""{"path":"a.zip","to":"out"}""") } shouldContain "Refusing to overwrite"
+            tree(r) shouldBe before
+        }
     }
 
     test("an entry over the default 10 MB per-file cap is refused by its real bytes, nothing written") {
