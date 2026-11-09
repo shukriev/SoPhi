@@ -309,16 +309,49 @@ class AgentLoop(
         turn: TurnProgress,
         reason: String,
         stopReason: TurnStopReason,
-        onEvent: suspend (TurnEvent) -> Unit
+        onEvent: suspend (TurnEvent) -> Unit,
+        handoff: CompletionRequest? = null,
     ): AgentSession {
-        val stopMessage = "[Stopped early: $reason]"
+        val note = handoff?.let { handoffNote(it) }
+        val stopMessage = if (note == null) "[Stopped early: $reason]" else "[Paused: $reason]\n\n$note"
         onEvent(TurnEvent.Token(stopMessage))
         turn.persisted = true
         session.append(EntryRole.USER, userInput, dev.sophi.core.session.imagesMetadata(turn.images))
         turn.pendingRounds.forEach { session.append(it.role, it.content, it.metadata) }
-        session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to stopReason.name))
+        val metadata = mapOf("stopReason" to stopReason.name)
+        session.append(EntryRole.ASSISTANT, stopMessage, if (note == null) metadata else metadata + ("paused" to "true"))
         sessionManager.save(session)
         return session
+    }
+
+    /** The paused turn's messages again, tools refused, asking for a handoff note. */
+    private fun handoffRequest(messages: List<Message>, config: AgentConfig) = CompletionRequest(
+        messages = dev.sophi.ai.api.prepareForModel(messages + Message(MessageRole.USER, HANDOFF_PROMPT), canSee = supportsImages()),
+        model = config.model,
+        maxTokens = config.maxTokens,
+        temperature = config.temperature,
+        systemPrompt = config.systemPrompt,
+        tools = emptyList(),
+    )
+
+    /**
+     * Null when the note call fails, goes over budget or says nothing: the turn then stops as before.
+     * ponytail: buffered, not streamed live, so a failed call never shows half a note; stream it if the wait shows.
+     */
+    private suspend fun handoffNote(request: CompletionRequest): String? = try {
+        val text = StringBuilder()
+        provider.stream(request).collect { e ->
+            when (e) {
+                is StreamEvent.Content -> text.append(e.text)
+                is StreamEvent.Usage -> runCatching { onUsage(e.usage, "turn") }
+                else -> {}
+            }
+        }
+        text.toString().trim().ifBlank { null }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     /** A round's `moves`, and its (and its subagents') allowed bash commands that reach outside the workspace (`outsideCommands`). */
@@ -920,7 +953,7 @@ class AgentLoop(
                 return finishEarly(
                     session, userInput, turn,
                     "reached the tool-round sanity ceiling (${config.maxToolRounds})",
-                    TurnStopReason.ToolRoundCeiling, onEvent
+                    TurnStopReason.ToolRoundCeiling, onEvent, handoffRequest(messages, config)
                 )
             }
             // Hooks act before any check, so a rewritten call is classified, ruled on, planned and confirmed as rewritten.
@@ -969,7 +1002,7 @@ class AgentLoop(
 
             val guardReason = loopGuardState.afterRound(toolOutcomes, toolRound)
             if (guardReason != null && !loopGuard.askToContinue(guardReason)) {
-                return finishEarly(session, userInput, turn, guardReason, TurnStopReason.LoopGuard, onEvent)
+                return finishEarly(session, userInput, turn, guardReason, TurnStopReason.LoopGuard, onEvent, handoffRequest(messages, config))
             }
 
             // roundUsage reflects the request that *asked for* these tool calls — sent before any
@@ -1031,3 +1064,8 @@ internal fun announcesWithoutActing(reply: String): Boolean {
     val last = text.split(Regex("(?<=[.!])\\s+")).last()
     return ANNOUNCEMENT.containsMatchIn(last)
 }
+
+/** Asked, with tools refused, when a turn pauses on its round ceiling or the loop guard. */
+internal const val HANDOFF_PROMPT = "You are out of steps for this turn, so tools are off. Write a short handoff note " +
+    "for whoever continues: ## Done (what is finished, with file paths), ## Next (the next concrete steps), " +
+    "## Traps (what failed or misled you). No more than 15 lines."

@@ -123,6 +123,34 @@ class TurnControllerTest : FunSpec({
         )
     }
 
+    test("a paused turn ends with the keep-going hint, even with the usage line off") {
+        val broken = ToolRegistry().register(object : Tool {
+            override val name = "broken"
+            override val description = "Always fails"
+            override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String): String = throw RuntimeException("nope")
+        })
+        every { provider.stream(any()) } answers {
+            if (firstArg<CompletionRequest>().tools.isEmpty()) flowOf(StreamEvent.Content("## Done\nnothing"))
+            else flowOf(StreamEvent.ToolCallsReady(listOf(ToolCall("c1", "broken", "{}"))))
+        }
+        val rendered = mutableListOf<String>()
+        val controller = TurnController(runtimeFor(registry = broken), ScriptedInputSource(emptyList()), LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+
+        val settled = controller.runTurn(AgentSession(id = "s1"), "go")
+
+        settled.branch().last().metadata["paused"] shouldBe "true"
+        rendered.last() shouldBe com.github.ajalt.mordant.rendering.TextColors.gray(PAUSED_HINT)
+    }
+
+    test("a normal turn prints no keep-going hint") {
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+        val rendered = mutableListOf<String>()
+        TurnController(runtimeFor(), ScriptedInputSource(emptyList()), LiveRegion(StringBuilder()) { 80 }) { rendered.add(it) }
+            .runTurn(AgentSession(id = "s1"), "hi")
+        rendered.none { PAUSED_HINT in it }.shouldBeTrue()
+    }
+
     test("a turn that changed the todo list prints it under the reply") {
         val toolRegistry = ToolRegistry().register(dev.sophi.core.tools.TodoTool())
         var round = 0
