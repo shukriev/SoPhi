@@ -102,6 +102,16 @@ internal fun catalogProviderFor(type: String, baseUrl: String?): String? = when 
 fun ProviderOptions.resolve(
     catalog: ModelCatalog = ModelCatalog.bundled(),
     discover: () -> LocalServer? = { discoverLocalServer() },
+): ResolvedProvider = resolveProvider(type, baseUrl, model, contextWindowTokens, catalog, discover)
+
+/** What `sophi` starts with for these provider settings: probes a local server and fills in model and window. */
+fun resolveProvider(
+    type: String,
+    baseUrl: String?,
+    model: String?,
+    contextWindowTokens: Int?,
+    catalog: ModelCatalog = ModelCatalog.bundled(),
+    discover: () -> LocalServer? = { discoverLocalServer() },
 ): ResolvedProvider =
     when (val t = type.lowercase()) {
         "local" -> {
