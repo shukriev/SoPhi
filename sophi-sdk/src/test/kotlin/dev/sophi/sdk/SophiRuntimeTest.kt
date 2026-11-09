@@ -770,6 +770,17 @@ class SophiRuntimeTest : FunSpec({
         rt.skills() shouldBe emptyList()
     }
 
+    test("removeSkill on an auto-learned skill goes through AutoSkillStore and leaves a fingerprint") {
+        val skillsDir = createTempDirectory("sophi-sdk-skills-test")
+        AutoSkillStore(skillsDir).write(SkillDraft("auto-x", "X", "d", emptyList(), "1. a\n2. Verify: b", false))
+        val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)
+
+        rt.removeSkill("auto-x") shouldBe true
+
+        AutoSkillStore(skillsDir).removed().single().id shouldBe "auto-x"
+        rt.skills() shouldBe emptyList()
+    }
+
     test("removeSkill returns false for an id that doesn't exist") {
         val skillsDir = createTempDirectory("sophi-sdk-skills-test")
         val rt = SophiRuntime(agentLoop, sessionManager, PluginRegistry(), config, skillsDir = skillsDir)

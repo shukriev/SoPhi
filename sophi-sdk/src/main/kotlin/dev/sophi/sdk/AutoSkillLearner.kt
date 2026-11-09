@@ -46,7 +46,7 @@ class AutoSkillLearner(
 
     private suspend fun run(turn: FinishedTurn, fromWeb: Boolean, canSave: () -> Boolean): LearnResult {
         val existing = store.list().map { (id, s) -> id to "${s.metadata.title}: ${s.metadata.description}" }
-        val r = reflector.reflect(turn, existing) ?: return LearnResult.Dropped("reflect", listOf("no usable reflection"))
+        val r = reflector.reflect(turn, existing, store.removed().map { it.title }) ?: return LearnResult.Dropped("reflect", listOf("no usable reflection"))
         if (!r.reusable) return LearnResult.NotReusable
         val id = r.update?.takeIf { u -> existing.any { it.first == u } }
             ?: autoSkillId(r.id.ifBlank { r.title })

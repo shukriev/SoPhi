@@ -155,7 +155,8 @@ class SophiRuntime internal constructor(
      */
     fun installSkill(source: String, update: Boolean = false, confirm: Boolean = false): InstallResult =
         skillInstaller.install(source, skillsDir, update = update, confirm = { _, _ -> confirm })
-    fun removeSkill(id: String): Boolean = skillInstaller.remove(skillsDir, id)
+    fun removeSkill(id: String): Boolean =
+        (isAutoSkillId(id) && AutoSkillStore(skillsDir).remove(id)) || skillInstaller.remove(skillsDir, id)
 
     fun proposals(status: String? = null): List<Proposal> = proposalStore.list(status)
     fun acceptProposal(id: String): Boolean = proposalStore.accept(id)
