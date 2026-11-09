@@ -7,10 +7,13 @@ import dev.sophi.skills.SkillMetadata
 import dev.sophi.skills.SkillRegistry
 import dev.sophi.skills.SkillVersion
 import dev.sophi.skills.SkillVersionStore
+import dev.sophi.learning.JsonlLog
 import dev.sophi.versioning.VersionStore
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.nio.file.Path
 import kotlin.io.path.createDirectories
+import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -22,6 +25,8 @@ private val AUTO_ID = Regex("^auto-[a-z0-9-]{1,60}$")
 private val PARAM_NAME = Regex("^[a-z0-9_]{1,40}$")
 private const val MAX_TITLE = 80
 private const val MAX_DESCRIPTION = 200
+private val NUMBERED_STEP = Regex("""^\s*\d+\.\s+\S""", RegexOption.MULTILINE)
+private val VERIFY_STEP = Regex("""^\s*\d+\.\s+(\*\*)?verify\b""", setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE))
 
 /**
  * ArcadeDB refuses a second open of the same database in one JVM, and every skill-version write
@@ -51,6 +56,13 @@ data class SkillDraft(
     val body: String,
     val fromWeb: Boolean,
 )
+
+/** A learned skill the user removed: the learner never proposes it again. */
+@Serializable
+data class RemovedSkill(val id: String, val title: String, val ts: Long)
+
+/** "Archive E-mails!" → "archive e mails". */
+private fun normalizeTitle(title: String) = title.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
 
 sealed class AutoSkillWrite {
     data class Written(val id: String, val updated: Boolean) : AutoSkillWrite()
@@ -82,6 +94,12 @@ class AutoSkillStore(private val dir: Path = Path.of(System.getProperty("user.ho
         if (draft.title.length > MAX_TITLE) add("title is longer than $MAX_TITLE characters")
         if (draft.description.length > MAX_DESCRIPTION) add("description is longer than $MAX_DESCRIPTION characters")
         draft.params.filterNot { PARAM_NAME.matches(it.name) }.forEach { add("parameter name '${it.name}' must match ${PARAM_NAME.pattern}") }
+        // Checked in code, not by the reviewer model, so no reply can argue past it.
+        if (NUMBERED_STEP.findAll(draft.body).count() < 2) add("body needs at least two numbered steps")
+        if (!VERIFY_STEP.containsMatchIn(draft.body)) add("body needs a numbered step starting \"Verify:\" that says how to tell it worked")
+        // ponytail: exact id/title match; fuzzy (embedding) match if near-duplicate re-proposals show up
+        val title = normalizeTitle(draft.title)
+        if (removed().any { it.id == draft.id || it.title == title }) add("the user removed '${draft.title}' before; not learning it again")
         addAll(checkInstalledSkillContent(render(draft)))
     }
 
@@ -114,6 +132,23 @@ class AutoSkillStore(private val dir: Path = Path.of(System.getProperty("user.ho
 
     private fun isLearned(path: Path): Boolean =
         runCatching { AUTO_LEARNED_TAG in SkillLoader().loadFile(path).metadata.tags }.getOrDefault(false)
+
+    private fun removedLog() = JsonlLog(dir.resolve(".auto-skills-removed.jsonl"))
+
+    fun removed(): List<RemovedSkill> = removedLog().readAll().mapNotNull {
+        runCatching { Json.decodeFromString(RemovedSkill.serializer(), it) }.getOrNull()
+    }
+
+    /** Deletes a learned skill and remembers it so it isn't learned again. Its versions are kept.
+     *  False for anything this feature didn't write. */
+    fun remove(id: String): Boolean = synchronized(SkillVersionsLock) {
+        if (!isAutoSkillId(id)) return false
+        val path = dir.resolve("$id.md")
+        if (!path.exists() || !isLearned(path)) return false
+        val title = SkillLoader().loadFile(path).metadata.title
+        removedLog().append(Json.encodeToString(RemovedSkill.serializer(), RemovedSkill(id, normalizeTitle(title), System.currentTimeMillis())))
+        path.deleteIfExists()
+    }
 
     /** Restores the newest earlier version that differs from the file. Rolling back twice
      *  toggles between the last two versions. False when there's nothing to go back to. */

@@ -37,11 +37,11 @@ class WorkflowReflector(
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Null on an error, a timeout or a reply that isn't the JSON object. */
-    suspend fun reflect(turn: FinishedTurn, existing: List<Pair<String, String>>): Reflection? {
+    suspend fun reflect(turn: FinishedTurn, existing: List<Pair<String, String>>, removed: List<String> = emptyList()): Reflection? {
         val reply = try {
             withTimeout(timeoutMs) {
                 provider.complete(CompletionRequest(
-                    messages = listOf(Message(MessageRole.USER, prompt(turn, existing))),
+                    messages = listOf(Message(MessageRole.USER, prompt(turn, existing, removed))),
                     model = model, maxTokens = maxTokens, temperature = 0.0,
                     judgment = Judgments.WORKFLOW_REFLECTOR,
                 ))
@@ -53,7 +53,7 @@ class WorkflowReflector(
         return runCatching { json.decodeFromString(Reflection.serializer(), text.substring(start, end + 1)) }.getOrNull()
     }
 
-    internal fun prompt(turn: FinishedTurn, existing: List<Pair<String, String>>): String = buildString {
+    internal fun prompt(turn: FinishedTurn, existing: List<Pair<String, String>>, removed: List<String> = emptyList()): String = buildString {
         appendLine("You just finished a task for the user. Decide whether what you did is a reusable workflow worth")
         appendLine("saving as a skill for next time.")
         appendLine("- Save only workflows likely to recur and worth more than a one-line answer. Skip one-offs,")
@@ -61,7 +61,8 @@ class WorkflowReflector(
         appendLine("- Generalise: replace concrete values (names, senders, search terms, dates, projects, ids) with")
         appendLine("  named parameters written {like_this}.")
         appendLine("- Write the body as numbered markdown steps in terms of the tools used, by name, including any")
-        appendLine("  site_action calls the turn made.")
+        appendLine("  site_action calls the turn made. At least two steps; the last starts with \"Verify:\" and says")
+        appendLine("  what to look at and what it should show, e.g. \"3. Verify: the label shows in Gmail's sidebar\".")
         appendLine("- If an existing auto-skill below covers the same workflow, update it: set \"update\" to its id")
         appendLine("  and write the full improved skill.")
         appendLine("- Never include passwords, tokens, keys, one-time codes, or personal data that isn't a parameter.")
@@ -75,6 +76,11 @@ class WorkflowReflector(
         appendLine()
         appendLine("## Existing auto-skills")
         appendLine(existing.joinToString("\n") { (id, about) -> "- $id: $about" }.ifEmpty { "(none)" })
+        if (removed.isNotEmpty()) {
+            appendLine()
+            appendLine("## Removed by the user (never propose these again)")
+            removed.forEach { appendLine("- $it") }
+        }
         appendLine()
         appendLine("## The turn")
         appendLine("<<<$fence")
