@@ -7,6 +7,8 @@ import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.core.dryrun.replayReport
 import kotlin.coroutines.EmptyCoroutineContext
 import dev.sophi.core.tools.DenialLimit
+import dev.sophi.core.tools.callEffects
+import dev.sophi.core.permissions.Effect
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
@@ -171,6 +173,7 @@ class ScheduleEngine(
         } else try {
             withTimeout(taskTimeoutMs) {
                 task.changePlanId?.let { return@withTimeout replayChangePlan(task, it, startedAtMs) }
+                (task.mode as? TaskMode.Watch)?.let { return@withTimeout checkPage(task, it.url, startedAtMs) }
                 val session = sessionManager.create(title = "schedule:${task.name}")
                 val recorder = if (planFirst != PlanFirst.OFF && savePendingPlan != null) PlanRecorder(planFirst, trustReadOnlyHints) else null
                 sessionId = session.id
@@ -245,6 +248,7 @@ class ScheduleEngine(
                         (if (result.finalStatus == PlanFinalStatus.Met) RunOutcome.GoalMet else RunOutcome.GoalExhausted) to
                             result.finalOutput
                     }
+                    is TaskMode.Watch -> error("watch runs return before a session is created")
                 } } }
                 } catch (e: CancellationException) {
                     if (limit?.tripped != true) throw e
@@ -283,7 +287,8 @@ class ScheduleEngine(
         runLog.append(logged)
         taskStore.recordRun(task.id, logged.finishedAtMs)
         if (pauseFor != null) taskStore.update(task.id) { it.copy(enabled = false, pausedReason = pauseFor) }
-        if (!logged.summary.trim().equals("NO_RESCUE_NEEDED", ignoreCase = true)) notifier.notify(task, logged)
+        if (!logged.summary.trim().equals("NO_RESCUE_NEEDED", ignoreCase = true) &&
+            !(task.mode is TaskMode.Watch && logged.summary.startsWith(WATCH_UNCHANGED))) notifier.notify(task, logged)
         return logged
     }
 
@@ -292,6 +297,41 @@ class ScheduleEngine(
         val previous = runLog.forTask(taskId).filter { it.outcome !is RunOutcome.Skipped }.takeLast(FAILURE_STREAK - 1)
         return previous.size == FAILURE_STREAK - 1 &&
             previous.all { (it.outcome as? RunOutcome.Failed)?.error?.let(::causeKey) == causeKey(error) }
+    }
+
+    /**
+     * A watch run: fetch_url under the same rule, grant and nobody-to-ask decision as an unattended model call, then a
+     * plain text compare with the snapshot under the run log's `watch/` dir. No model sees the page.
+     */
+    private suspend fun checkPage(task: ScheduledTask, url: String, startedAtMs: Long): RunRecord {
+        fun record(outcome: RunOutcome, summary: String = "") = RunRecord(task.id, startedAtMs, System.currentTimeMillis(), outcome, summary)
+        val fetch = fullRegistry.getOrNull("fetch_url") ?: return record(RunOutcome.Failed("fetch_url is not available to the scheduler"))
+        val args = kotlinx.serialization.json.buildJsonObject { put("url", kotlinx.serialization.json.JsonPrimitive(url)) }.toString()
+        val rules = taskRules(task, permissions)
+        val kinds = fetch.callEffects(args)
+        val subjects = runCatching { fetch.permissionSubjects(args) }.getOrNull()
+        // As AgentLoop.executeCalls decides: deny > ask > allow, else a grant; an ask can't be answered unattended.
+        val blocked = when (val effect = rules?.decide(fetch.name, subjects, kinds, unattended = true)) {
+            Effect.ALLOW -> null
+            Effect.DENY, Effect.ASK -> rules!!.why(effect, fetch.name, kinds, true)?.let { "blocked by rule: $it" }
+                ?: "blocked by ${effect.name.lowercase()} rule${if (effect == Effect.ASK) "; this run is unattended and nobody is here to approve it" else ""}"
+            null -> if (fetch.riskLevel(args) == dev.sophi.core.tools.RiskLevel.SAFE || fetch.name in task.toolGrants) null
+                else "not granted to this task; this run is unattended and nobody is here to approve it"
+        }
+        if (blocked != null) return record(RunOutcome.Skipped("fetch_url $url $blocked"))
+
+        val result = fetch.execute(args)
+        if (result.startsWith("Error: ")) return record(RunOutcome.Failed(result.removePrefix("Error: ")))
+        val status = result.lineSequence().first()
+        if (status.split(" ").getOrNull(1)?.toIntOrNull()?.let { it in 200..299 } != true) return record(RunOutcome.Failed(status))
+        val page = normalisePage(result.substringAfter("\n"))
+        val snapshot = runLog.path.resolveSibling("watch").resolve("${task.id}.txt")
+        val old = if (java.nio.file.Files.exists(snapshot)) java.nio.file.Files.readString(snapshot) else null
+        if (old == page) return record(RunOutcome.Succeeded, "$WATCH_UNCHANGED: $url")
+        java.nio.file.Files.createDirectories(snapshot.parent)
+        java.nio.file.Files.writeString(snapshot, page)
+        return if (old == null) record(RunOutcome.Succeeded, "$WATCH_UNCHANGED: $url (first check, snapshot saved)")
+            else record(RunOutcome.Succeeded, pageChange(url, old, page))
     }
 
     private suspend fun replayChangePlan(task: ScheduledTask, planId: String, startedAtMs: Long): RunRecord {

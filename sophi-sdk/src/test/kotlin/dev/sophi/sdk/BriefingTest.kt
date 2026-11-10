@@ -128,4 +128,18 @@ class BriefingTest : FunSpec({
         val text = runBlocking { briefing(dir, now - 24 * h, now, down, "local-model", zone = ZoneOffset.UTC) }
         text shouldBe "Since Mon 13 Nov 22:13 (24h)\n\nDone (1)\n  - Inbox triage: 21:13. Archived 3."
     }
+
+    test("a watch's unchanged checks are left out; its changes show like any done run") {
+        val w = task("w1", "Keyboard price")
+        val changed = "${dev.sophi.schedule.engine.PAGE_CHANGED}: https://shop.example/kb (1 added, 1 removed)"
+        val watchRuns = listOf(
+            run("w1", now - 9 * h, RunOutcome.Succeeded, "${dev.sophi.schedule.engine.WATCH_UNCHANGED}: https://shop.example/kb"),
+            run("w1", now - 6 * h, RunOutcome.Succeeded, "$changed\n+ Keyboard 79 EUR"),
+            run("w1", now - 3 * h, RunOutcome.Succeeded, "${dev.sophi.schedule.engine.WATCH_UNCHANGED}: https://shop.example/kb"),
+        )
+        val out = outcomes(watchRuns, listOf(w), emptyList(), now - 24 * h, now)
+        out.map { it.atMs } shouldBe listOf(now - 6 * h)
+        renderBriefing(out, listOf(w), now - 24 * h, now, ZoneOffset.UTC) shouldContain "Keyboard price: 16:13. $changed"
+        outcomes(watchRuns.take(1), listOf(w), emptyList(), now - 24 * h, now) shouldBe emptyList()
+    }
 })

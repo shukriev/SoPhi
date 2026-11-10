@@ -8,6 +8,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.core.agent.BackgroundSubagents
 import dev.sophi.core.dryrun.ChangePlanStore
 import dev.sophi.core.dryrun.PlanStatus
+import dev.sophi.schedule.engine.WATCH_UNCHANGED
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
@@ -44,7 +45,8 @@ fun outcomes(
     sinceMs: Long, untilMs: Long, plans: ChangePlanStore? = null,
 ): List<Outcome> {
     val names = tasks.associate { it.id to it.name }
-    val scheduled = runs.filter { it.finishedAtMs in sinceMs..untilMs }.map { r ->
+    // A watch's quiet checks (no change, first look) aren't news; its changes are.
+    val scheduled = runs.filter { it.finishedAtMs in sinceMs..untilMs && !(it.outcome == RunOutcome.Succeeded && it.summary.startsWith(WATCH_UNCHANGED)) }.map { r ->
         val waiting = r.pendingPlanId?.takeIf { plans?.get(it)?.status == PlanStatus.PENDING }
         val (status, detail) = when (val o = r.outcome) {
             RunOutcome.Succeeded, RunOutcome.GoalMet -> (if (waiting != null) OutcomeStatus.WAITING else OutcomeStatus.DONE) to r.summary
