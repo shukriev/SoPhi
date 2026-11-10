@@ -42,6 +42,15 @@ class BuiltinToolsTest : FunSpec({
         val names = buildBuiltinTools(tempdir().toPath(), braveApiKey = null).map { it.name }
         names.contains("decompose_goal") shouldBe false
     }
+    test("every builtin tool reports LOCAL reach, even bash/fetch_url/web_search whose effects include NETWORK") {
+        // Deliberate (see Reach KDoc): plan-first 'outside' mode would otherwise plan every bash call.
+        dev.sophi.core.tools.BashJobs(tempdir().toPath()).use { jobs ->
+            val tools = buildBuiltinTools(tempdir().toPath(), braveApiKey = "test-key", jobs = jobs)
+            tools.map { it.name } shouldContain "web_search"
+            tools.filter { it.reach("{}") != dev.sophi.core.tools.Reach.LOCAL }.map { it.name } shouldBe emptyList()
+        }
+    }
+
     test("every builtin tool with required arguments reports a call without them as failed") {
         // The loop only knows a call failed if the tool throws or returns an "Error: " result;
         // a tool that words its error any other way is logged as a success.
