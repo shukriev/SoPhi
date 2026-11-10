@@ -31,13 +31,18 @@ fun normalisePage(text: String): String = text.lines()
  * The run summary for a change from [old] to [new] (both normalised): a first line naming [url] and the counts, then
  * up to [SHOWN_LINES] added and removed lines, fenced as outside data: every reader (notifier, companion, briefing,
  * the runs listing a model reads) gets them fenced, and the first line stays plain for a notification.
- * ponytail: a set difference, not an LCS diff; a line that only moved or repeats doesn't count.
+ * ponytail: a multiset difference, not an LCS diff; a line that only moved doesn't count, an extra copy does.
  */
 fun pageChange(url: String, old: String, new: String): String {
     val before = old.lines().filter { it.isNotEmpty() }
     val after = new.lines().filter { it.isNotEmpty() }
-    val added = after - before.toSet()
-    val removed = before - after.toSet()
+    // Each line of [b] cancels one copy in [a].
+    fun minus(a: List<String>, b: List<String>): List<String> {
+        val left = b.groupingBy { it }.eachCount().toMutableMap()
+        return a.filter { line -> (left[line] ?: 0).let { n -> if (n > 0) left[line] = n - 1; n == 0 } }
+    }
+    val added = minus(after, before)
+    val removed = minus(before, after)
     fun show(sign: String, lines: List<String>) = lines.take(SHOWN_LINES).map { "$sign ${it.take(160)}" } +
         listOfNotNull(if (lines.size > SHOWN_LINES) "$sign ${lines.size - SHOWN_LINES} more" else null)
     val counts = if (added.isEmpty() && removed.isEmpty()) "lines moved" else "${added.size} added, ${removed.size} removed"
