@@ -214,7 +214,7 @@ internal suspend fun buildCliRuntime(
         // mcpConfig throws on a missing file; sophi-web guards identically today.
         // ${secret:name} in mcp.json from the Keychain; remote servers sign in with `sophi mcp login` or /mcp login.
         credentials()
-        onMcpSignInNeeded { server -> onWarning("$server needs you to sign in again — run `sophi mcp login $server`") }
+        onMcpSignInNeeded { server -> onWarning(dev.sophi.mcp.auth.signInNotice(server)) }
         if (mcpConfigPath.exists()) mcpConfig(mcpConfigPath)
         planFirst(opts.planFirst, opts.trustReadOnlyHints)
         if (opts.guardian) guardian(opts.guardianModel, opts.llmTimeoutSeconds.seconds)

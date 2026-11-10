@@ -39,8 +39,10 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.ConcurrentHashMap
 
 /** A remote MCP server that wants a sign-in Sophi doesn't have (never had one, or it was revoked). */
-class SignInRequiredException(val server: String) :
-    Exception("$server needs you to sign in again — run `sophi mcp login $server`")
+class SignInRequiredException(val server: String) : Exception(signInNotice(server))
+
+/** The one line every host shows for a server that needs sign-in. */
+fun signInNotice(server: String) = "$server needs sign-in: run `sophi mcp login $server`"
 
 /** The [SignInRequiredException] somewhere in this throwable's cause chain, if any (transports wrap what they throw). */
 fun Throwable.signInRequired(): SignInRequiredException? =
@@ -79,7 +81,7 @@ class McpOAuth(
     private val access = ConcurrentHashMap<String, Tokens>()
     /** Whether each server has a stored sign-in, so requests and UI redraws don't each start a Keychain lookup. */
     private val signedIn = ConcurrentHashMap<String, Boolean>()
-    /** Servers whose last refresh failed: [onSignInNeeded] fires once per failure streak. */
+    /** Servers refused (no sign-in, or refresh failed): [onSignInNeeded] fires once per failure streak. */
     private val failing = ConcurrentHashMap.newKeySet<String>()
 
     /** Signs in through the browser (via [flow]'s openBrowser) and stores the result. [config] must be resolved. */
@@ -129,7 +131,7 @@ class McpOAuth(
 
     /** Adds the bearer token to every request; a 401 refreshes once and retries, then fails with [SignInRequiredException]. */
     fun install(client: KtorClient, server: String) {
-        fun refuse(): Nothing = throw SignInRequiredException(server)
+        fun refuse(): Nothing { signInNeeded(server); throw SignInRequiredException(server) }
         client.plugin(HttpSend).intercept { request ->
             // Only a server this process holds a token for sends one up front; the rest find out from a 401.
             if (access.containsKey(server)) request.headers[HttpHeaders.Authorization] = "Bearer ${accessToken(server) ?: refuse()}"

@@ -246,8 +246,8 @@ class McpOAuthTest : FunSpec({
             runBlocking { rig.oauth.login(srv.config) }.getOrThrow()
             val tool = rig.connect(srv.config).single()
             srv.expireAccess(); srv.revokeRefresh()
-            runBlocking { tool.execute("{}") } shouldStartWith "Error: sentry needs you to sign in again"
-            runBlocking { tool.execute("{}") } shouldStartWith "Error: sentry needs you to sign in again"
+            runBlocking { tool.execute("{}") } shouldStartWith "Error: sentry needs sign-in: run `sophi mcp login sentry`"
+            runBlocking { tool.execute("{}") } shouldContain "tell the user"
             rig.signInNeeded shouldBe listOf("sentry")
             rig.browser.opened shouldBe 1
         }
@@ -259,6 +259,8 @@ class McpOAuthTest : FunSpec({
             val failures = mutableListOf<Throwable>()
             rig.connect(srv.config, failures) shouldBe emptyList()
             failures.single().shouldBeInstanceOf<SignInRequiredException>().server shouldBe "sentry"
+            rig.connect(srv.config) shouldBe emptyList()
+            rig.signInNeeded shouldBe listOf("sentry")
             rig.browser.opened shouldBe 0
         }
     }

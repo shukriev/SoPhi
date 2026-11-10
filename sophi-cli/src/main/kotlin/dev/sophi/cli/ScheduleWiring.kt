@@ -58,7 +58,7 @@ internal fun buildScheduleEngine(
         plugin(dev.sophi.schedule.tools.ProposalPlugin(proposalStore))
         if (mcpConfigPath != null && mcpConfigPath.toFile().exists()) {
             credentials()
-            onMcpSignInNeeded { server -> onWarning("$server needs you to sign in again — run `sophi mcp login $server`") }
+            onMcpSignInNeeded { server -> onWarning(dev.sophi.mcp.auth.signInNotice(server)) }
             mcpConfig(mcpConfigPath)
         }
         if (planFirst != dev.sophi.core.dryrun.PlanFirst.OFF) planFirst(planFirst, trustReadOnlyHints)
