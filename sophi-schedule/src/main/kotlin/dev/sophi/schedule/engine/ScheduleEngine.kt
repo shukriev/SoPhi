@@ -81,6 +81,9 @@ internal fun planSearchTemperatures(env: (String) -> String? = System::getenv): 
  */
 private val PLAN_CRITIC_TIMEOUT = 300.seconds
 
+/** How a run's summary starts when it left a change plan waiting for the user (the morning briefing reads it). */
+const val PLAN_WAITING = "Plan waiting for your approval"
+
 /** This many runs in a row failing with the same [causeKey] pause the task until the user resumes it. */
 internal const val FAILURE_STREAK = 3
 
@@ -254,7 +257,7 @@ class ScheduleEngine(
                 val pending = recorder?.takeIf { it.steps.isNotEmpty() }?.toPlan(task.prompt, session.id)
                     ?.also { savePendingPlan?.invoke(it) }
                 val summary = pending?.let {
-                    "Plan waiting for your approval: ${it.steps.size} change${if (it.steps.size == 1) "" else "s"} — sophi plans show ${it.id}"
+                    "$PLAN_WAITING: ${it.steps.size} change${if (it.steps.size == 1) "" else "s"} — sophi plans show ${it.id}"
                 } ?: ranSummary
                 runCatching {
                     pluginRegistry?.dispatch(
