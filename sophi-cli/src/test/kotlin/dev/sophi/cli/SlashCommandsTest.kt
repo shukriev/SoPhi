@@ -373,4 +373,13 @@ class SlashCommandsTest : FunSpec({
         handler.handle("/bogus", session)
         output.single() shouldContain "/goal"
     }
+
+    test("/export writes the current session as HTML") {
+        val mgr = dev.sophi.core.session.FileSessionManager(tempdir().toPath())
+        val session = AgentSession(id = "s1").also { it.append(EntryRole.USER, "hello export"); mgr.save(it) }
+        val out = tempdir().toPath().resolve("s.html")
+        SlashHandler(mgr, null, config) { output.add(it) }.handle("/export $out", session)
+        output.single() shouldContain "Wrote $out"
+        java.nio.file.Files.readString(out) shouldContain "hello export"
+    }
 })

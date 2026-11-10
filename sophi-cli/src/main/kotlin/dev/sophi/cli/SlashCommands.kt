@@ -144,6 +144,14 @@ class SlashHandler(
                 }
                 session
             }
+            "export" -> {
+                // Turns are saved by the runtime, so the file on disk is the current session.
+                val words = arg?.split(" ")?.filter { it.isNotBlank() }.orEmpty()
+                val out = words.firstOrNull { it != "--force" }?.let { Path.of(it) }
+                output(runCatching { "Wrote ${dev.sophi.sdk.exportSessionHtml(sessionManager, session.id, out, "--force" in words)}" }
+                    .getOrElse { "Export failed: ${it.message}" })
+                session
+            }
             "branch" -> {
                 val entries = runtime?.branch(session) ?: session.branch()
                 if (entries.isEmpty()) output("(empty)")
@@ -250,7 +258,7 @@ class SlashHandler(
             }
             else -> {
                 output(
-                    "Unknown command: /$cmd  Available: /list /search /branch /checkout /undo /revert /compact /good /bad " +
+                    "Unknown command: /$cmd  Available: /list /search /export /branch /checkout /undo /revert /compact /good /bad " +
                         "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents /mcp /plans /release"
                 )
                 session

@@ -98,4 +98,20 @@ class ExportCommandTest : FunSpec({
         }
         Files.exists(outDir.resolve("manifest.json")) shouldBe true
     }
+
+    test("export --html writes one redacted HTML file and refuses to overwrite") {
+        val sessionsDir = tempdir().toPath()
+        val s = AgentSession(id = "s1").apply { append(EntryRole.USER, "token ghp_${"a".repeat(36)} <script>") }
+        FileSessionManager(sessionsDir).save(s)
+        val out = tempdir().toPath().resolve("page.html")
+        val args = "--html s1 --out $out --sessions-dir $sessionsDir"
+        ExportCommand().test(args).statusCode shouldBe 0
+        val html = Files.readString(out)
+        html shouldContain "&lt;script&gt;"
+        html shouldContain "[REDACTED:github_token]"
+        val again = ExportCommand().test(args)
+        again.statusCode shouldBe 1
+        again.stderr shouldContain "--force"
+        ExportCommand().test("$args --force").statusCode shouldBe 0
+    }
 })

@@ -372,7 +372,7 @@ class SophiCli(
 
         mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
         mordantTerminal.println(
-            "Type 'exit' or 'quit' to end. Commands: /list /search /branch /checkout /undo /revert /compact /good /bad " +
+            "Type 'exit' or 'quit' to end. Commands: /list /search /export /branch /checkout /undo /revert /compact /good /bad " +
                 "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents /release\n"
         )
         // A background subagent can end at any time relative to the prompt line: printAbove, as for warnings.
