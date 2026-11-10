@@ -33,8 +33,8 @@ sealed class RpcEvent {
     @Serializable @SerialName("turn_started") data class TurnStarted(val input: String) : RpcEvent()
     @Serializable @SerialName("token") data class Token(val text: String) : RpcEvent()
     @Serializable @SerialName("reasoning_token") data class ReasoningToken(val text: String) : RpcEvent()
-    @Serializable @SerialName("tool_call_started") data class ToolCallStarted(val name: String, val argsJson: String) : RpcEvent()
-    @Serializable @SerialName("tool_call_finished") data class ToolCallFinished(val name: String, val result: String, val isError: Boolean) : RpcEvent()
+    @Serializable @SerialName("tool_call_started") data class ToolCallStarted(val name: String, val argsJson: String, val callId: String = "") : RpcEvent()
+    @Serializable @SerialName("tool_call_finished") data class ToolCallFinished(val name: String, val result: String, val isError: Boolean, val callId: String = "") : RpcEvent()
     @Serializable @SerialName("confirmation_requested") data class ConfirmationRequested(val requests: List<ConfirmationRequest>) : RpcEvent()
     @Serializable @SerialName("confirmation_resolved") data class ConfirmationResolved(val callId: String, val approved: Boolean) : RpcEvent()
     @Serializable @SerialName("steer_applied") data class SteerApplied(val texts: List<String>) : RpcEvent()
@@ -58,6 +58,8 @@ private val rpcJson = Json {
 fun decodeRpcCommand(line: String): Result<RpcCommand> =
     runCatching { rpcJson.decodeFromString(RpcCommand.serializer(), line) }
 
+fun decodeRpcEvent(line: String): RpcEvent = rpcJson.decodeFromString(RpcEvent.serializer(), line)
+
 /** Compact JSON never contains a raw newline (kotlinx escapes control characters), so this is one line. */
 fun encodeRpcEvent(e: RpcEvent): String = rpcJson.encodeToString(RpcEvent.serializer(), e)
 
@@ -68,8 +70,8 @@ fun encodeRpcEvent(e: RpcEvent): String = rpcJson.encodeToString(RpcEvent.serial
 fun TurnEvent.toRpcEvent(mask: (String) -> String): RpcEvent? = when (this) {
     is TurnEvent.Token -> RpcEvent.Token(text)
     is TurnEvent.ReasoningToken -> RpcEvent.ReasoningToken(text)
-    is TurnEvent.ToolCallStarted -> RpcEvent.ToolCallStarted(name, mask(argsJson))
-    is TurnEvent.ToolCallFinished -> RpcEvent.ToolCallFinished(name, mask(result), isError)
+    is TurnEvent.ToolCallStarted -> RpcEvent.ToolCallStarted(name, mask(argsJson), callId)
+    is TurnEvent.ToolCallFinished -> RpcEvent.ToolCallFinished(name, mask(result), isError, callId)
     is TurnEvent.SteerApplied -> RpcEvent.SteerApplied(texts)
     is TurnEvent.FollowUpStarted -> RpcEvent.FollowUpStarted(text)
     is TurnEvent.PlanReady -> RpcEvent.PlanReady(plan.id, plan.steps.size)

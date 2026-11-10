@@ -3,13 +3,15 @@ package dev.sophi.core.agent
 sealed class TurnEvent {
     data class Token(val text: String) : TurnEvent()
     data class ReasoningToken(val text: String) : TurnEvent()
-    data class ToolCallStarted(val name: String, val argsJson: String) : TurnEvent()
+    /** [callId] is the model's id for the call, the one a confirmation request carries; empty when unknown. */
+    data class ToolCallStarted(val name: String, val argsJson: String, val callId: String = "") : TurnEvent()
     data class ToolCallFinished(
         val name: String,
         val result: String,
         val isError: Boolean = false,
         val durationMillis: Long = 0,
-        val argsJson: String = ""
+        val argsJson: String = "",
+        val callId: String = "",
     ) : TurnEvent()
     /**
      * Fired around a confirmationPolicy.confirm() call that's actually needed (at least one

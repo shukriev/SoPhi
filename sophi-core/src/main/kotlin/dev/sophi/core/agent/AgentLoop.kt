@@ -745,7 +745,7 @@ class AgentLoop(
         return try { withContext(changes) {
             allowedCalls.zip(classified) { (call, allowed), (_, req) ->
                 async {
-                    onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson))
+                    onEvent(TurnEvent.ToolCallStarted(call.name, call.argumentsJson, call.id))
                     val start = System.currentTimeMillis()
                     val step = held[call.id]
                     var readCheck: String? = null
@@ -833,7 +833,7 @@ class AgentLoop(
                     }
                     val took = System.currentTimeMillis() - start
                     hooks?.afterTool(session.id, call.name, call.argumentsJson, result, failed, took)
-                    onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, took, call.argumentsJson))
+                    onEvent(TurnEvent.ToolCallFinished(call.name, result, failed, took, call.argumentsJson, call.id))
                     ToolCallOutcome(
                         call,
                         Message(
