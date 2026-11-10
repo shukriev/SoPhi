@@ -223,9 +223,9 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
         return if (store.remove(id)) "Removed $id" else "Error: no task found with id $id"
     }
 
-    /** A watch's changed lines are the page's own text: the model reads them fenced, as data. */
+    /** A watch's changed lines are the page's own text: the model reads them fenced, as data (runs logged before pageChange fenced them). */
     private fun pageFenced(summary: String): String =
-        if (!summary.startsWith(PAGE_CHANGED) || '\n' !in summary) summary
+        if (!summary.startsWith(PAGE_CHANGED) || '\n' !in summary || summary.substringAfter('\n').startsWith("<tool_data")) summary
         else summary.substringBefore('\n') + "\n" + fenceAsData("fetch_url", summary.substringAfter('\n'))
 
     private fun runs(args: ManageTaskArgs): String {

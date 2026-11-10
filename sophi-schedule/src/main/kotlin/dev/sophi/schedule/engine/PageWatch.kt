@@ -1,5 +1,7 @@
 package dev.sophi.schedule.engine
 
+import dev.sophi.core.tools.fenceAsData
+
 /** How a watch run's summary starts when the page had no change (or this was its first look): never notified, left out of the briefing. */
 const val WATCH_UNCHANGED = "Page unchanged"
 
@@ -23,7 +25,8 @@ fun normalisePage(text: String): String = text.lines()
 
 /**
  * The run summary for a change from [old] to [new] (both normalised): a first line naming [url] and the counts, then
- * up to [SHOWN_LINES] added and removed lines.
+ * up to [SHOWN_LINES] added and removed lines, fenced as outside data: every reader (notifier, companion, briefing,
+ * the runs listing a model reads) gets them fenced, and the first line stays plain for a notification.
  * ponytail: a set difference, not an LCS diff; a line that only moved or repeats doesn't count.
  */
 fun pageChange(url: String, old: String, new: String): String {
@@ -34,5 +37,6 @@ fun pageChange(url: String, old: String, new: String): String {
     fun show(sign: String, lines: List<String>) = lines.take(SHOWN_LINES).map { "$sign ${it.take(160)}" } +
         listOfNotNull(if (lines.size > SHOWN_LINES) "$sign ${lines.size - SHOWN_LINES} more" else null)
     val counts = if (added.isEmpty() && removed.isEmpty()) "lines moved" else "${added.size} added, ${removed.size} removed"
-    return (listOf("$PAGE_CHANGED: $url ($counts)") + show("+", added) + show("-", removed)).joinToString("\n")
+    val lines = (show("+", added) + show("-", removed)).joinToString("\n")
+    return "$PAGE_CHANGED: $url ($counts)" + if (lines.isEmpty()) "" else "\n" + fenceAsData("fetch_url", lines)
 }
