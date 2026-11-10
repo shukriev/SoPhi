@@ -31,3 +31,5 @@ fun turnUsageLine(
 }
 
 const val BUDGET_HINT = "Raise the budget with /settings max-cost-usd <usd>, or 0 for none."
+
+const val PAUSED_HINT = "Paused. Say \"keep going\" to continue from the note above."

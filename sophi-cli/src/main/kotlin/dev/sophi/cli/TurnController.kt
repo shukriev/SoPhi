@@ -170,6 +170,7 @@ class TurnController(
             // Only now, with the key reader joined: it hands the terminal back as it stops.
             recorded?.let { planFirst?.review(it, settled) }
             if (hinted.isNotEmpty()) output(TextColors.gray(hintedReadsLine(hinted)))
+            if (settled.branch().lastOrNull()?.metadata?.get("paused") == "true") output(TextColors.gray(PAUSED_HINT))
         }
     }
 }

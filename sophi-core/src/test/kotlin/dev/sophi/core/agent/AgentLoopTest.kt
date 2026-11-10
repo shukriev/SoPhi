@@ -477,7 +477,7 @@ class AgentLoopTest : FunSpec({
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "3 consecutive"
         result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
-        coVerify(exactly = 3) { provider.stream(any()) }
+        coVerify(exactly = 4) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     test("turn() stops early after 3 consecutive rounds where the tool returns an 'Error: ' string instead of throwing") {
@@ -501,7 +501,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "3 consecutive"
-        coVerify(exactly = 3) { provider.stream(any()) }
+        coVerify(exactly = 4) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     test("turn() keeps going past 3 consecutive failures when the loop guard says yes") {
@@ -578,7 +578,7 @@ class AgentLoopTest : FunSpec({
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "same call"
         result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
-        coVerify(exactly = 6) { provider.stream(any()) }
+        coVerify(exactly = 7) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     test("turn() stops early when searches keep broadening beyond an earlier scoped path") {
@@ -608,7 +608,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "broadened"
-        coVerify(exactly = 3) { provider.stream(any()) }
+        coVerify(exactly = 4) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     // Seen live (playbook coding-3, bonsai-27b): glob {"path":"ledger/**/*.py"} failed to parse, the
@@ -691,7 +691,7 @@ class AgentLoopTest : FunSpec({
 
         result.branch().last().content shouldContain "Stopped early"
         result.branch().last().content shouldContain "round"
-        coVerify(exactly = 1) { provider.stream(any()) }
+        coVerify(exactly = 2) { provider.stream(any()) }  // +1: the handoff note request
     }
 
     // ── Turn events ──────────────────────────────────────────────────────────
@@ -1025,7 +1025,7 @@ class AgentLoopTest : FunSpec({
         val result = newLoop(ToolRegistry().register(loopingTool()), compaction = CompactionMode.STRUCTURED)
             .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 20))
         result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
-        captured.size shouldBe 9  // c1..c9: the 6th post-stub call is c9, then the guard stops the turn
+        captured.size shouldBe 10  // c1..c9: the 6th post-stub call is c9, then the guard stops the turn; +1 handoff note request
         val note = "you have now made this exact call"
         val post = captured.last().messages.filter { it.role == dev.sophi.ai.api.MessageRole.TOOL && it.toolCallId in setOf("c4", "c5", "c6", "c7", "c8") }
         post.map { it.content.contains(note) } shouldBe listOf(false, false, true, true, true)
@@ -1038,7 +1038,7 @@ class AgentLoopTest : FunSpec({
         val result = newLoop(ToolRegistry().register(loopingTool()), compaction = CompactionMode.STRUCTURED)
             .turn(AgentSession(id = "s1"), "go", config.copy(maxToolRounds = 30))
         result.tip?.metadata?.get("stopReason") shouldBe TurnStopReason.LoopGuard.name
-        captured.size shouldBe 12
+        captured.size shouldBe 13  // +1: the handoff note request
     }
 
     test("structured mode summarises in the same compaction when elision does not bring relief") {

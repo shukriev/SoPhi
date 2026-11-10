@@ -102,6 +102,16 @@ class PromptBuilderTest : FunSpec({
         msgs[3].content shouldBe "Done — archived 12 emails."
     }
 
+    test("a paused turn replays its handoff note, without the marker") {
+        val msgs = PromptBuilder.build(listOf(
+            entry(EntryRole.ASSISTANT, "[Paused: reached the tool-round sanity ceiling (2)]\n\n## Done\nread a.kt",
+                mapOf("stopReason" to "ToolRoundCeiling", "paused" to "true")),
+        ))
+        msgs.single().content.contains("[Paused") shouldBe false
+        msgs.single().content.contains("tool-round sanity ceiling (2)") shouldBe true
+        msgs.single().content.endsWith("## Done\nread a.kt") shouldBe true
+    }
+
     // A steer applied after a tool round is saved after that round, whose entries are replay=false.
     // Replayed later it would follow the turn's input directly, and strict chat templates
     // (Gemma/Mistral) reject two USER messages in a row.

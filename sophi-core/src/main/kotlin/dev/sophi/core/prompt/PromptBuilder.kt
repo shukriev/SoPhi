@@ -8,13 +8,16 @@ import dev.sophi.core.session.images
 
 object PromptBuilder {
     private val STOP_MARKER = Regex("""^\s*\[Stopped (?:early: (.*)|by the user)]\s*$""", RegexOption.DOT_MATCHES_ALL)
+    private val PAUSE_MARKER = Regex("""^\[Paused: (.*?)]\n\n""")
 
     /**
      * A past turn that ended on a stop marker ("[Stopped early: …]", "[Stopped by the user]") is
      * replayed as a note instead. Verbatim, a small model learns the marker as an answer and writes
      * it itself. Also catches markers a model already wrote that way, which carry no stopReason.
+     * A paused turn keeps its handoff note; only the bracketed marker is reworded.
      */
     private fun stopNote(content: String): String? {
+        PAUSE_MARKER.find(content)?.let { return "(Paused: ${it.groupValues[1]}.)\n\n" + content.substring(it.range.last + 1) }
         val m = STOP_MARKER.matchEntire(content) ?: return null
         val reason = m.groupValues[1]
         return if (reason.isEmpty()) "(No answer: the user stopped it.)" else "(No answer: this turn was cut off — $reason.)"
