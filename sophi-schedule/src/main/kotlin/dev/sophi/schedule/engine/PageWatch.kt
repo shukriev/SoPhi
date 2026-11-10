@@ -8,6 +8,10 @@ const val WATCH_UNCHANGED = "Page unchanged"
 /** How a watch run's summary starts when the page changed; the page's own lines follow on later lines. */
 const val PAGE_CHANGED = "Page changed"
 
+/** Where watch [taskId]'s last page text is kept, beside [runLog]. */
+fun watchSnapshot(runLog: dev.sophi.schedule.store.RunLog, taskId: String): java.nio.file.Path =
+    runLog.path.resolveSibling("watch").resolve("$taskId.txt")
+
 private const val SHOWN_LINES = 3
 private val ISO_DATE_TIME = Regex("""\b\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?""")
 private val CLOCK_TIME = Regex("""\b([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?\b""")

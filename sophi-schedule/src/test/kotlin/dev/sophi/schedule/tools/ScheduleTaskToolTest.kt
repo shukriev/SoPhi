@@ -326,6 +326,33 @@ class ScheduleTaskToolTest : FunSpec({
         task.prompt shouldContain "https://shop.example/kb"
     }
 
+    test("update changes a watch's url with the same approval as creating one, and resets its snapshot") {
+        val s = store()
+        val log = runLog()
+        val tool = ScheduleTaskTool(s, log)
+        val t = s.add(ScheduledTask(name = "w", trigger = Trigger.Manual, mode = TaskMode.Watch("https://a.example"),
+            prompt = "Watch https://a.example for changes", toolGrants = setOf("fetch_url")))
+        val snapshot = dev.sophi.schedule.engine.watchSnapshot(log, t.id)
+        java.nio.file.Files.createDirectories(snapshot.parent)
+        java.nio.file.Files.writeString(snapshot, "old page")
+
+        // tool_grants without fetch_url must not leave the watch unable to fetch
+        val args = """{"action":"update","task_id":"${t.id}","url":"https://b.example","tool_grants":["web_search"]}"""
+        tool.riskLevel(args) shouldBe dev.sophi.core.tools.RiskLevel.DESTRUCTIVE
+        tool.ruleVerdict(args) shouldBe dev.sophi.core.tools.RuleVerdict.HIGH_RISK
+        tool.riskLevel("""{"action":"update","task_id":"${t.id}","name":"x"}""") shouldBe dev.sophi.core.tools.RiskLevel.SAFE
+        runBlocking { tool.execute(args) } shouldContain "Updated"
+        val task = s.get(t.id)!!
+        task.mode shouldBe TaskMode.Watch("https://b.example")
+        task.toolGrants shouldBe setOf("web_search", "fetch_url")
+        java.nio.file.Files.exists(snapshot) shouldBe false
+
+        runBlocking { tool.execute("""{"action":"update","task_id":"${t.id}","url":"ftp://c.example"}""") } shouldContain "http(s)"
+        val r = s.add(ScheduledTask(name = "r", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+        runBlocking { tool.execute("""{"action":"update","task_id":"${r.id}","url":"https://b.example"}""") } shouldContain "only a watch"
+        s.get(r.id)!!.mode shouldBe TaskMode.Recurring
+    }
+
     test("mode=watch needs an http(s) url") {
         val tool = ScheduleTaskTool(store(), runLog())
         runBlocking { tool.execute("""{"action":"create","name":"w","trigger_type":"manual","mode":"watch"}""") } shouldContain "'url' is required"

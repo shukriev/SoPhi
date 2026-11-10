@@ -348,7 +348,7 @@ class ScheduleEngine(
         val status = result.lineSequence().first()
         if (status.split(" ").getOrNull(1)?.toIntOrNull()?.let { it in 200..299 } != true) return record(RunOutcome.Failed(status))
         val page = normalisePage(result.substringAfter("\n"))
-        val snapshot = runLog.path.resolveSibling("watch").resolve("${task.id}.txt")
+        val snapshot = watchSnapshot(runLog, task.id)
         val old = if (java.nio.file.Files.exists(snapshot)) java.nio.file.Files.readString(snapshot) else null
         if (old == page) return record(RunOutcome.Succeeded, "$WATCH_UNCHANGED: $url")
         java.nio.file.Files.createDirectories(snapshot.parent)

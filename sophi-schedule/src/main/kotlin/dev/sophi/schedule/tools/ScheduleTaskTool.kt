@@ -6,6 +6,7 @@ import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
 import dev.sophi.core.tools.fenceAsData
 import dev.sophi.schedule.engine.PAGE_CHANGED
+import dev.sophi.schedule.engine.watchSnapshot
 import dev.sophi.schedule.model.CronSchedules
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.ScheduledTask
@@ -40,7 +41,8 @@ private data class ManageTaskArgs(
     val url: String? = null
 ) {
     /** Tool grants and a watch's unattended fetches both hand the task power the user should approve. */
-    val grantingPower get() = action in setOf("create", "update") && toolGrants?.isNotEmpty() == true || action == "create" && mode == "watch"
+    val grantingPower get() = action in setOf("create", "update") && toolGrants?.isNotEmpty() == true || action == "create" && mode == "watch" ||
+        action == "update" && url != null
 }
 
 class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog) : Tool {
@@ -79,7 +81,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
           "at":{"type":"string","description":"ISO-8601 local date-time, e.g. 2026-07-27T12:00:00; required when trigger_type=once"},
           "cron_expression":{"type":"string","description":"Required when trigger_type=cron. Standard 5-field Unix cron syntax (minute hour day-of-month month day-of-week), e.g. \"0 9 * * *\" for 9am daily. Resolved in the local system timezone."},
           "mode":{"type":"string","enum":["recurring","goal","watch"]},
-          "url":{"type":"string","description":"Required when mode=watch"},
+          "url":{"type":"string","description":"Required when mode=watch; on update, the watch's new page"},
           "stop_condition_type":{"type":"string","enum":["llm_judged","shell_check"],"description":"Required when mode=goal"},
           "shell_command":{"type":"string","description":"Required when stop_condition_type=shell_check"},
           "max_iterations":{"type":"integer","description":"Required when mode=goal"},
@@ -161,7 +163,11 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
 
     private fun update(args: ManageTaskArgs): String {
         val id = args.taskId ?: return "Error: 'task_id' is required for action=update"
-        if (store.get(id) == null) return "Error: no task found with id $id"
+        val current = store.get(id) ?: return "Error: no task found with id $id"
+        val newUrl = args.url?.also { url ->
+            if (current.mode !is TaskMode.Watch) return "Error: 'url' can change only a watch task"
+            if (!url.startsWith("http://") && !url.startsWith("https://")) return "Error: 'url' must be an http(s) URL"
+        }
 
         val newTrigger: Trigger? = when (args.triggerType) {
             null -> null
@@ -186,8 +192,13 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 name = args.name ?: task.name,
                 prompt = args.prompt ?: task.prompt,
                 trigger = newTrigger ?: task.trigger,
-                toolGrants = args.toolGrants?.toSet() ?: task.toolGrants
+                toolGrants = (args.toolGrants?.toSet() ?: task.toolGrants) + listOfNotNull("fetch_url".takeIf { newUrl != null }),
+                mode = newUrl?.let { TaskMode.Watch(it) } ?: task.mode,
             )
+        }
+        // The new page compared with the old one's snapshot would report a bogus change: its first check starts fresh.
+        if (updated && newUrl != null && newUrl != (current.mode as TaskMode.Watch).url) {
+            java.nio.file.Files.deleteIfExists(watchSnapshot(runLog, id))
         }
         return if (updated) "Updated $id" else "Error: no task found with id $id"
     }
