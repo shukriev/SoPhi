@@ -48,7 +48,10 @@ class ScheduleEngineWatchTest : FunSpec({
     data class Rig(val engine: ScheduleEngine, val store: TaskStore, val runLog: RunLog, val fetch: FakeFetch,
                    val notified: MutableList<RunRecord>, val provider: LLMProvider, val home: java.nio.file.Path)
 
+    val audited = mutableListOf<dev.sophi.core.audit.AuditEntry>()
+
     fun rig(rules: PermissionRules? = null): Rig {
+        audited.clear()
         val home = tempdir().toPath()
         val store = TaskStore(home.resolve("tasks.json"))
         val runLog = RunLog(home.resolve("runs.jsonl"))
@@ -57,7 +60,7 @@ class ScheduleEngineWatchTest : FunSpec({
         val provider = mockk<LLMProvider>()
         val engine = ScheduleEngine(store, runLog, provider, ToolRegistry().register(fetch),
             FileSessionManager(createTempDirectory("watch-test")), Notifier { _, r -> notified += r },
-            model = "m", contextWindowTokens = 100_000, permissions = rules)
+            model = "m", contextWindowTokens = 100_000, permissions = rules, audit = { audited += it })
         return Rig(engine, store, runLog, fetch, notified, provider, home)
     }
 
@@ -102,6 +105,39 @@ class ScheduleEngineWatchTest : FunSpec({
 
         record.outcome shouldBe RunOutcome.Skipped("fetch_url $URL blocked by rule: network deny (unattended)")
         r.fetch.fetched.size shouldBe 0
+    }
+
+    test("every fetch is audited like a tool call, a blocked one too, with the rule that decided") {
+        val r = rig()
+        runBlocking { r.engine.runNow(watch(r).id) }
+        audited.single().let {
+            it.tool shouldBe "fetch_url"
+            it.risk shouldBe RiskLevel.DESTRUCTIVE
+            it.args shouldContain URL
+            it.rule shouldBe "grant"
+            it.decision shouldBe "allowed"
+            it.outcome shouldBe "ok"
+            it.effects shouldBe listOf("network")
+        }
+
+        val denied = rig(PermissionRules(listOf(PermissionRule(effect = Effect.DENY, kind = EffectKind.NETWORK, unattended = true)),
+            emptyList(), null, null, emptySet()))
+        runBlocking { denied.engine.runNow(watch(denied).id) }
+        audited.single().let {
+            it.rule shouldBe "rule:deny"
+            it.decision shouldBe "denied"
+            it.outcome shouldBe "denied"
+        }
+    }
+
+    test("a watch blocked run after run notifies once, on the first skip in a row; every skip is still logged") {
+        val r = rig(PermissionRules(listOf(PermissionRule(effect = Effect.DENY, kind = EffectKind.NETWORK, unattended = true)),
+            emptyList(), null, null, emptySet()))
+        val id = watch(r).id
+        repeat(3) { runBlocking { r.engine.runNow(id) } }
+
+        r.notified.size shouldBe 1
+        r.runLog.forTask(id).map { it.outcome::class } shouldBe List(3) { RunOutcome.Skipped::class }
     }
 
     test("without a fetch_url grant or allow rule, nobody is here to approve the fetch") {
