@@ -304,6 +304,12 @@
                     <!-- on the command line: the JDK caches java.io.tmpdir before surefire sets its properties -->
                     <argLine>-Djava.io.tmpdir=${test.tmpdir}</argLine>
                     <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR></environmentVariables>
+                    <!-- kotest 5.x ClassGraph scans (@AutoScan, AbstractProjectConfig); nothing here uses
+                         either, and on a loaded machine the scan stalled a test JVM for 40+ minutes -->
+                    <systemPropertyVariables>
+                        <kotest.framework.classpath.scanning.autoscan.disable>true</kotest.framework.classpath.scanning.autoscan.disable>
+                        <kotest.framework.classpath.scanning.config.disable>true</kotest.framework.classpath.scanning.config.disable>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
             <plugin>
@@ -314,6 +320,8 @@
                     <includes><include>**/*IT</include></includes>
                     <systemPropertyVariables>
                         <spring.profiles.active>it</spring.profiles.active>
+                        <kotest.framework.classpath.scanning.autoscan.disable>true</kotest.framework.classpath.scanning.autoscan.disable>
+                        <kotest.framework.classpath.scanning.config.disable>true</kotest.framework.classpath.scanning.config.disable>
                     </systemPropertyVariables>
                     <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR></environmentVariables>
                     <argLine>-Djava.io.tmpdir=${test.tmpdir}</argLine>
