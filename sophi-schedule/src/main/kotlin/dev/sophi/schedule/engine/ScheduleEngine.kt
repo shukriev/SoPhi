@@ -7,11 +7,6 @@ import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.core.dryrun.replayReport
 import kotlin.coroutines.EmptyCoroutineContext
 import dev.sophi.core.tools.DenialLimit
-import dev.sophi.core.tools.callEffects
-import dev.sophi.core.permissions.Effect
-import dev.sophi.core.audit.LOCAL_ACTOR
-import dev.sophi.core.audit.auditEntry
-import dev.sophi.core.audit.recordQuietly
 
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.core.agent.AgentConfig
@@ -190,13 +185,7 @@ class ScheduleEngine(
                         fullRegistry.subset(def.allowedTools)
                     }
                 }
-                val loop = AgentLoop(
-                    provider, scopedRegistry, sessionManager,
-                    confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
-                    grants = task.toolGrants,
-                    contextWindowTokens = contextWindowTokens,
-                    audit = audit, permissions = taskRules(task, permissions), hooks = pluginRegistry
-                )
+                val loop = loopFor(task, scopedRegistry)
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)
                 // Same collectContext path every interactive entry point already uses (SophiRuntime.
                 // streamTurn, AgentController.configWithContext) — without this, scheduled tasks
@@ -305,45 +294,29 @@ class ScheduleEngine(
             previous.all { (it.outcome as? RunOutcome.Failed)?.error?.let(::causeKey) == causeKey(error) }
     }
 
+    /** The loop a task's calls run through: nobody to ask, the task's grants and rules, the host's audit and hooks. */
+    private fun loopFor(task: ScheduledTask, registry: ToolRegistry) = AgentLoop(
+        provider, registry, sessionManager,
+        confirmationPolicy = dev.sophi.core.tools.ConfirmationPolicy.DENY_ALL,
+        grants = task.toolGrants,
+        contextWindowTokens = contextWindowTokens,
+        audit = audit, permissions = taskRules(task, permissions), hooks = pluginRegistry
+    )
+
     /**
-     * A watch run: fetch_url under the same rule, grant and nobody-to-ask decision as an unattended model call, then a
-     * plain text compare with the snapshot under the run log's `watch/` dir. No model sees the page.
+     * A watch run: fetch_url through the same pipeline as an unattended model call (hooks, rules, grants, guardian,
+     * audit; AgentLoop.callTool), then a plain text compare with the snapshot under the run log's `watch/` dir.
+     * No model sees the page.
      */
     private suspend fun checkPage(task: ScheduledTask, url: String, startedAtMs: Long): RunRecord {
         fun record(outcome: RunOutcome, summary: String = "") = RunRecord(task.id, startedAtMs, System.currentTimeMillis(), outcome, summary)
-        val fetch = fullRegistry.getOrNull("fetch_url") ?: return record(RunOutcome.Failed("fetch_url is not available to the scheduler"))
+        if (fullRegistry.getOrNull("fetch_url") == null) return record(RunOutcome.Failed("fetch_url is not available to the scheduler"))
         val args = kotlinx.serialization.json.buildJsonObject { put("url", kotlinx.serialization.json.JsonPrimitive(url)) }.toString()
-        val rules = taskRules(task, permissions)
-        val kinds = fetch.callEffects(args)
-        val subjects = runCatching { fetch.permissionSubjects(args) }.getOrNull()
-        val risk = fetch.riskLevel(args)
-        // As AgentLoop.executeCalls decides: deny > ask > allow, else a grant; an ask can't be answered unattended.
-        val effect = rules?.decide(fetch.name, subjects, kinds, unattended = true)
-        val rule = when (effect) {
-            Effect.DENY -> "rule:deny"; Effect.ASK -> "rule:ask"; Effect.ALLOW -> "rule:allow"
-            null -> if (risk == dev.sophi.core.tools.RiskLevel.SAFE) "safe" else if (fetch.name in task.toolGrants) "grant" else "policy"
+        // Not saved anywhere: it only names the call in the audit log and to hooks.
+        val (result, denied) = withContext(dev.sophi.core.tools.Unattended) {
+            loopFor(task, fullRegistry).callTool(dev.sophi.core.session.AgentSession("schedule:${task.id}"), "fetch_url", args)
         }
-        val blocked = when (effect) {
-            Effect.ALLOW -> null
-            Effect.DENY, Effect.ASK -> rules!!.why(effect, fetch.name, kinds, true)?.let { "blocked by rule: $it" }
-                ?: "blocked by ${effect.name.lowercase()} rule${if (effect == Effect.ASK) "; this run is unattended and nobody is here to approve it" else ""}"
-            null -> if (rule != "policy") null else "not granted to this task; this run is unattended and nobody is here to approve it"
-        }
-        val start = System.currentTimeMillis()
-        fun audit(outcome: String, result: String) = audit?.recordQuietly {
-            auditEntry(LOCAL_ACTOR, null, "schedule:${task.id}", fetch.name, risk, args, rule, outcome, result, start, effects = kinds)
-        }
-        if (blocked != null) {
-            val reason = "fetch_url $url $blocked"
-            audit("denied", reason)
-            return record(RunOutcome.Skipped(reason))
-        }
-        // ponytail: no guardian review or before-tool hooks here; they guard what a model reads or is steered by, and no
-        // model sees this page. Route through AgentLoop if a watch ever feeds one.
-        val result = try { fetch.execute(args) } catch (e: CancellationException) { audit("cancelled", ""); throw e } catch (e: Exception) {
-            audit("error", "Error: ${e.message}"); throw e
-        }
-        audit(if (dev.sophi.core.tools.isToolError(result)) "error" else "ok", result)
+        if (denied) return record(RunOutcome.Skipped("fetch_url $url: ${result.removePrefix("Error: ")}"))
         if (result.startsWith("Error: ")) return record(RunOutcome.Failed(result.removePrefix("Error: ")))
         val status = result.lineSequence().first()
         if (status.split(" ").getOrNull(1)?.toIntOrNull()?.let { it in 200..299 } != true) return record(RunOutcome.Failed(status))
