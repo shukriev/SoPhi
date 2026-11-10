@@ -145,4 +145,27 @@ class TextToolCallScannerTest : FunSpec({
             streamEvents(server).filterIsInstance<StreamEvent.ToolCallsReady>().single().calls.single().name shouldBe "x"
         } finally { server.stop(0) }
     }
+
+    test("a call followed by trailing text is an unrun call") {
+        val trailing = "<tool_call>{\"name\":\"read_file\",\"arguments\":{\"path\":\"a\"}}</tool_call>\n### Summary: done"
+        hasUnrunTextToolCall(trailing) shouldBe true
+        hasUnrunTextToolCall("Let me look. $hermes\nIt says hello.") shouldBe true
+        hasUnrunTextToolCall("[TOOL_CALLS][{\"name\":\"glob\",\"arguments\":{}}] Done, now I'll summarise.") shouldBe true
+    }
+
+    test("a call alone, plain text, broken JSON or a blank name is not an unrun call") {
+        hasUnrunTextToolCall("  $hermes\n ") shouldBe false
+        hasUnrunTextToolCall(" [TOOL_CALLS][{\"name\":\"glob\",\"arguments\":{}}]\n") shouldBe false
+        hasUnrunTextToolCall("Archived 12 emails.") shouldBe false
+        hasUnrunTextToolCall("<tool_call>{\"name\":\"x\",</tool_call>\n### Summary: done") shouldBe false
+        hasUnrunTextToolCall("[TOOL_CALLS][{\"name\":\"x\", oops] Done") shouldBe false
+        hasUnrunTextToolCall("<tool_call>{\"name\":\" \"}</tool_call> after") shouldBe false
+    }
+
+    test("the stream still shows a call with trailing text as plain text") {
+        val text = "<tool_call>{\"name\":\"read_file\",\"arguments\":{\"path\":\"a\"}}</tool_call>\n### Summary: done"
+        val sc = TextToolCallScanner()
+        sc.feed(text) shouldBe ""
+        sc.finish() shouldBe Result(emptyList(), text)
+    }
 })

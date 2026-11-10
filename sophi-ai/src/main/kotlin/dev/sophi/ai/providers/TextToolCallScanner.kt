@@ -11,8 +11,10 @@ private const val HERMES_OPEN = "<tool_call>"
 private const val HERMES_CLOSE = "</tool_call>"
 private const val MISTRAL = "[TOOL_CALLS]"
 private val markers = listOf(HERMES_OPEN, MISTRAL)
+private val hermesBlocks = Regex("$HERMES_OPEN(.*?)$HERMES_CLOSE", RegexOption.DOT_MATCHES_ALL)
+private val mapper = ObjectMapper()
 // Trailing tokens must fail the parse, or text after the JSON would be silently dropped.
-private val reader = ObjectMapper().readerFor(JsonNode::class.java).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+private val reader = mapper.readerFor(JsonNode::class.java).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
 
 /**
  * Some local models write tool calls into the text instead of using the API field: Hermes style
@@ -49,25 +51,56 @@ internal class TextToolCallScanner {
 
     private fun parseHermes(text: String): List<ToolCall> {
         if (!text.startsWith(HERMES_OPEN)) return emptyList()
-        val blocks = Regex("$HERMES_OPEN(.*?)$HERMES_CLOSE", RegexOption.DOT_MATCHES_ALL)
-        if (blocks.replace(text, "").isNotBlank()) return emptyList()
-        return toCalls(blocks.findAll(text).map { runCatching { reader.readTree(it.groupValues[1]) }.getOrNull() }.toList())
+        if (hermesBlocks.replace(text, "").isNotBlank()) return emptyList()
+        return toCalls(hermesBlocks.findAll(text).map { runCatching { reader.readTree(it.groupValues[1]) }.getOrNull() }.toList())
     }
 
     private fun parseMistral(text: String): List<ToolCall> {
         val array = runCatching { reader.readTree(text.removePrefix(MISTRAL)) }.getOrNull()
         return if (array != null && array.isArray) toCalls(array.toList()) else emptyList()
     }
+}
 
-    /** All-or-nothing: one bad entry means the whole block is treated as plain text. */
-    private fun toCalls(nodes: List<JsonNode?>): List<ToolCall> {
-        val calls = nodes.mapNotNull { node ->
-            val name = node?.get("name")?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val args = node.get("arguments")
-            ToolCall(newCallId(), name, if (args == null || args.isNull) "{}" else if (args.isTextual) args.asText() else args.toString())
-        }
-        return if (calls.size == nodes.size) calls else emptyList()
+/**
+ * True when, from the first marker on, the text starts with valid call blocks in a format the scanner
+ * knows and non-blank text follows them. The stream shows such a reply as plain text and runs nothing,
+ * so the caller can tell the model its call was not run. A marker with JSON that doesn't parse is not a call.
+ */
+fun hasUnrunTextToolCall(text: String): Boolean {
+    val at = markers.map { text.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: return false
+    val rest = text.substring(at)
+    val after = if (rest.startsWith(MISTRAL)) afterMistralCalls(rest.removePrefix(MISTRAL)) else afterHermesCalls(rest)
+    return !after.isNullOrBlank()
+}
+
+/** The text after the leading run of Hermes blocks, or null if they aren't all valid calls. */
+private fun afterHermesCalls(text: String): String? {
+    var end = 0
+    val nodes = mutableListOf<JsonNode?>()
+    for (m in hermesBlocks.findAll(text)) {
+        if (text.substring(end, m.range.first).isNotBlank()) break
+        nodes += runCatching { reader.readTree(m.groupValues[1]) }.getOrNull()
+        end = m.range.last + 1
     }
+    return if (toCalls(nodes).isEmpty()) null else text.substring(end)
+}
+
+/** The text after the first JSON value, or null if that value isn't an array of valid calls. */
+private fun afterMistralCalls(body: String): String? = runCatching {
+    mapper.createParser(body).use { p ->
+        val array = mapper.readTree<JsonNode>(p)
+        if (array != null && array.isArray && toCalls(array.toList()).isNotEmpty()) body.substring(p.currentLocation().charOffset.toInt()) else null
+    }
+}.getOrNull()
+
+/** All-or-nothing: one bad entry means the whole block is treated as plain text. */
+private fun toCalls(nodes: List<JsonNode?>): List<ToolCall> {
+    val calls = nodes.mapNotNull { node ->
+        val name = node?.get("name")?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        val args = node.get("arguments")
+        ToolCall(newCallId(), name, if (args == null || args.isNull) "{}" else if (args.isTextual) args.asText() else args.toString())
+    }
+    return if (calls.size == nodes.size) calls else emptyList()
 }
 
 private val idChars = ('a'..'z') + ('A'..'Z') + ('0'..'9')

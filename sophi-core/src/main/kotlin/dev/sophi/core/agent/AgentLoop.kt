@@ -9,6 +9,7 @@ import dev.sophi.ai.api.MessageRole
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
+import dev.sophi.ai.providers.hasUnrunTextToolCall
 import dev.sophi.core.agent.plan.DecomposeGoalTool
 import dev.sophi.core.audit.ActorContext
 import dev.sophi.core.audit.AuditScope
@@ -824,6 +825,7 @@ class AgentLoop(
         val pendingRounds = turn.pendingRounds
         val loopGuardState = LoopGuardState(config.maxToolRounds)
         var nudged = false
+        var callNudged = false
         val hooks = currentCoroutineContext()[HookScope]?.hooks
 
         while (true) {
@@ -889,6 +891,14 @@ class AgentLoop(
                     messages.add(Message(MessageRole.ASSISTANT, reply))
                     pendingRounds.add(PendingEntry(EntryRole.ASSISTANT, reply, emptyMap()))
                     applySteers(inbox, messages, pendingRounds, onEvent)
+                    continue
+                }
+                // A text tool call with text after it (often a made-up "### Summary") was shown, not run.
+                // One nudge per turn; a second one is taken as the answer.
+                if (!callNudged && request.tools.isNotEmpty() && hasUnrunTextToolCall(contentBuf.toString())) {
+                    callNudged = true
+                    messages.add(Message(MessageRole.ASSISTANT, contentBuf.toString()))
+                    messages.add(Message(MessageRole.USER, UNRUN_CALL_NUDGE))
                     continue
                 }
                 // "I'll open Gmail now." with no tool call ends the turn having done nothing. One
@@ -1017,6 +1027,9 @@ const val STOPPED_BY_USER = "[Stopped by the user]"
 
 internal const val ACT_NUDGE = "You said what you'd do next but didn't call a tool. If you meant to act, " +
     "call the tool now. If you're done or need something from me, say so."
+
+internal const val UNRUN_CALL_NUDGE = "Your tool call was not run: text came after it. To call a tool, send only " +
+    "the call, with nothing after it. Don't write results or a summary before the tool has run."
 
 private val ANNOUNCEMENT = Regex("""\b(I'll|I will|I'm going to|I am going to|Let me(?! know)|Now I'll)\b""", RegexOption.IGNORE_CASE)
 

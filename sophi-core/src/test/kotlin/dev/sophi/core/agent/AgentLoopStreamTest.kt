@@ -416,4 +416,34 @@ class AgentLoopStreamTest : FunSpec({
         newLoop(ToolRegistry().apply { register(tool) }).streamTurn(AgentSession(id = "once"), "go", config) {}
         requests shouldHaveSize 2
     }
+
+    test("a text tool call with text after it is not run: one nudge per turn, the unrun text is not kept") {
+        val tool = object : Tool {
+            override val name = "read_file"; override val description = "d"; override val parametersJson = "{}"
+            override suspend fun execute(argumentsJson: String) = "ok"
+        }
+        val unrun = "<tool_call>{\"name\":\"read_file\",\"arguments\":{\"path\":\"a\"}}</tool_call>\n### Summary: it says hi"
+        val requests = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(capture(requests)) } returnsMany listOf(
+            flowOf(StreamEvent.Content(unrun)),
+            flowOf(StreamEvent.Content("The file says hello.")),
+        )
+        val session = AgentSession(id = "u1")
+        newLoop(ToolRegistry().apply { register(tool) }).streamTurn(session, "read a", config) {}
+        requests shouldHaveSize 2
+        requests[1].messages.last().content shouldBe UNRUN_CALL_NUDGE
+        session.branch().map { it.content } shouldBe listOf("read a", "The file says hello.")
+
+        val again = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(capture(again)) } returns flowOf(StreamEvent.Content(unrun))
+        val twice = AgentSession(id = "u2")
+        newLoop(ToolRegistry().apply { register(tool) }).streamTurn(twice, "read a", config) {}
+        again shouldHaveSize 2
+        twice.branch().last().content shouldBe unrun
+
+        val noTools = mutableListOf<dev.sophi.ai.api.CompletionRequest>()
+        every { provider.stream(capture(noTools)) } returns flowOf(StreamEvent.Content(unrun))
+        newLoop().streamTurn(AgentSession(id = "u3"), "read a", config) {}
+        noTools shouldHaveSize 1
+    }
 })
