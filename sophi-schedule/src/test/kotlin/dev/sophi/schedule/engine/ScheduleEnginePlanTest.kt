@@ -112,5 +112,6 @@ class ScheduleEnginePlanTest : FunSpec({
         saved.single().steps.single().tool shouldBe "okta__deactivate_user"
         saved.single().task shouldBe "offboard today's leavers"
         record.summary shouldBe "Plan waiting for your approval: 1 change — sophi plans show ${saved.single().id}"
+        record.pendingPlanId shouldBe saved.single().id
     }
 })

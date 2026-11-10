@@ -17,6 +17,14 @@ class RunLogTest : FunSpec({
         l.readAll() shouldBe listOf(record("t1", 1L), record("t1", 2L))
     }
 
+    test("a record written before pendingPlanId existed still loads, with it null") {
+        val file = tempdir().toPath().resolve("runs.jsonl")
+        java.nio.file.Files.writeString(file, """{"taskId":"t1","startedAtMs":1,"finishedAtMs":2,""" +
+            """"outcome":{"type":"dev.sophi.schedule.model.RunOutcome.Succeeded"},"summary":"ok","replans":null,""" +
+            """"decompositions":null,"sessionId":"s1","planId":null}""" + "\n")
+        RunLog(file).readAll().single().pendingPlanId shouldBe null
+    }
+
     test("readAll on a missing file returns empty") {
         log().readAll() shouldBe emptyList()
     }
