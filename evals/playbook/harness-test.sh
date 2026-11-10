@@ -69,5 +69,39 @@ case "$out" in "$PB_RUNS_ROOT"/sophi-pb-tool-1-1.*) [[ "$out" != *//* ]] && echo
   *) echo "FAIL run dir: $out"; fails=$((fails+1)) ;; esac
 SOPHI_JAR=/nonexistent "$PB/run.sh" tool-1 1 >/dev/null 2>&1; rc=$?
 if [ $rc -eq 2 ]; then echo "ok   missing jar exits 2"; else echo "FAIL missing jar: exit $rc, want 2"; fails=$((fails+1)); fi
-[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 19 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
+# --- daily ops ---
+# an ops run asks every confirmation (no --god-mode), approves it, and gives bash the run home as ~
+out="$(SOPHI_FLAGS="--provider local --god-mode --no-remote" FAKE_DO="argv ask:idp__disable_user" "$PB/run.sh" ops-3 1 2>&1 | sed -n 's/^RUN=\([^ ]*\).*/\1/p')"
+if grep -q "^HOME=$out/home " "$out/home/argv.txt" && ! grep -q -- --god-mode "$out/home/argv.txt" \
+   && grep -qx "rpc-client: approved idp__disable_user" "$out/stderr.txt"; then echo "ok   ops run: no god mode, confirmations approved, HOME isolated"
+else echo "FAIL ops run: $(cat "$out/home/argv.txt" "$out/stderr.txt" 2>&1)"; fails=$((fails+1)); fi
+# the fake identity provider speaks MCP and logs every call
+d="$(mktemp -d)"; cp "$PB/fixtures/fakeidp/server.py" "$d/"
+got="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"disable_user","arguments":{"user_id":"u-104"}}}' \
+  '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"revoke_tokens","arguments":{"user_id":"nobody"}}}' \
+  | python3 "$d/server.py" "$d")"
+if [ "$(jq -sc '[.[0].result.protocolVersion, (.[1].result.tools | map(.name)), .[2].result.isError, .[3].result.isError, length]' <<< "$got")" \
+     = '["2025-06-18",["list_users","disable_user","revoke_tokens"],false,true,4]' ] \
+   && [ "$(jq -r '.[] | select(.id == "u-104") | .status' "$d/users.json")" = disabled ] && [ "$(wc -l < "$d/calls.jsonl" | tr -d ' ')" = 2 ]
+then echo "ok   fake idp answers initialize, tools/list, tools/call and logs calls"; else echo "FAIL fake idp: $got"; fails=$((fails+1)); fi
+# each ops check fails on a wrong-but-plausible result
+opsneg() {  # opsneg <label> <case> <shell run after setup>
+  local c="${2//-/_}"
+  if ( d="$(mktemp -d)" && mkdir "$d/work" && cd "$d/work" && source "$PB/cases.sh" && source "$PB/refs.sh" \
+       && "setup_$c" >/dev/null && eval "$3" && ! "check_$c" 2>/dev/null ); then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails+1)); fi
+}
+opsneg "ops-1 rejects moves outside the move log (bash mv)" ops-1 \
+  'for f in $OPS_FILES; do mkdir -p ../home/Downloads/${f##*.} && mv ../home/Downloads/$f ../home/Downloads/${f##*.}/; done'
+opsneg "ops-1 rejects a file deleted on the way" ops-1 'ref_ops_1 && rm ../home/Downloads/Images/screenshot.png'
+opsneg "ops-1 rejects files left at the top" ops-1 'ops_move ../home/Downloads/notes.txt ../home/Downloads/Documents/notes.txt'
+opsneg "ops-1 rejects an unapproved destructive call (god mode)" ops-1 'ref_ops_1 && ops_audit bash allow-all'
+opsneg "ops-3 rejects a one-off task" ops-3 'ref_ops_3 && sed -i "" -e "s/Trigger.Interval/Trigger.Once/" ../home/.sophi/schedule/tasks.json'
+opsneg "ops-3 rejects a task without the threshold" ops-3 'ref_ops_3 && sed -i "" -e "s/above 90/high/" ../home/.sophi/schedule/tasks.json'
+opsneg "ops-4 rejects the near-miss account" ops-4 'ops_idp "$(ops_idp_call disable_user u-104)" "$(ops_idp_call revoke_tokens u-104)" >/dev/null; ops_audit idp__disable_user rpc; ops_audit idp__revoke_tokens rpc'
+opsneg "ops-4 rejects touching a second account" ops-4 'ref_ops_4 && ops_idp "$(ops_idp_call revoke_tokens u-101)" >/dev/null'
+opsneg "ops-4 rejects tokens left unrevoked" ops-4 'ops_idp "$(ops_idp_call disable_user u-103)" >/dev/null; ops_audit idp__disable_user rpc'
+opsneg "ops-4 rejects unapproved calls (god mode)" ops-4 'ops_idp "$(ops_idp_call disable_user u-103)" "$(ops_idp_call revoke_tokens u-103)" >/dev/null; ops_audit idp__disable_user allow-all; ops_audit idp__revoke_tokens allow-all'
+[ ! -s "$RESULTS" ] || [ "$(wc -l < "$RESULTS" | tr -d ' ')" = 20 ] || { echo "FAIL results rows: $(wc -l < "$RESULTS")"; fails=$((fails+1)); }
 rm -rf "$RESULTS" "$PB_RUNS_ROOT"; echo "$fails failure(s)"; exit $fails

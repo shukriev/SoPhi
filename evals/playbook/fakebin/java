@@ -19,6 +19,7 @@ while IFS= read -r line; do
     for a in $FAKE_DO; do
       case "$a" in
         answer) echo parse_amount > answer.txt ;;
+        argv) echo "HOME=$HOME $*" > "$home/argv.txt" ;;
         sleep:*) sleep "${a#sleep:}" ;;
         ask:*) t="${a#ask:}"
           ev --arg t "$t" '{type:"confirmation_requested",requests:[{callId:("c-"+$t),toolName:$t,argumentsJson:"{}",riskLevel:"HIGH_RISK"}]}'

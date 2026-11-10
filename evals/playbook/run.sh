@@ -28,12 +28,15 @@ cd "$RUN/work" || exit 1
 # Only the calendar case may reach Calendar.app; every other run gets the osascript guard.
 case " ${CALENDAR_CASES[*]} " in *" $id "*) SPATH="$PATH" ;; *) SPATH="$PB/guardbin:$PATH" ;; esac
 is_delegate=no; case " ${DELEGATE_CASES[*]} " in *" $id "*) is_delegate=yes ;; esac
+# Daily-ops cases: every confirmation is asked (no --god-mode) and approved, and bash's ~ is the run home.
+is_ops=no; SHOME="$HOME"; case " ${OPS_CASES[*]} " in *" $id "*)
+  is_ops=yes; SHOME="$RUN/home"; f=(); for a in "${FLAGS[@]}"; do [ "$a" = --god-mode ] || f+=("$a"); done; FLAGS=("${f[@]}") ;; esac
 trap '' PIPE  # a killed Sophi must not kill this script on the next write
 # Sends one command, then reads events (into events.jsonl) until the turn ends or the command is refused
 # with an `error` (logged; no turn_ended follows). Returns 1 if Sophi is gone.
-# Confirmations: only invoke_claude_code in a delegate case is approved; anything else is denied.
+# Confirmations: an ops case approves all; else only invoke_claude_code in a delegate case is approved, anything else denied.
 await_turn() {
-  local ev ty c t ok
+  local ev ty c t ok msg
   while IFS= read -r ev <&4; do
     printf '%s\n' "$ev" >> "$RUN/events.jsonl"
     ty="$(jq -r '.type' <<< "$ev")"
@@ -42,8 +45,8 @@ await_turn() {
       exited) return 1 ;;
       confirmation_requested)
         while IFS=$'\t' read -r c t; do
-          ok=false; [ "$t" = invoke_claude_code ] && [ $is_delegate = yes ] && ok=true
-          [ $ok = true ] || echo "rpc-client: denied $t" >> "$RUN/stderr.txt"
+          ok=false; [ $is_ops = yes ] && ok=true; [ "$t" = invoke_claude_code ] && [ $is_delegate = yes ] && ok=true
+          [ $ok = true ] && msg=approved || msg=denied; echo "rpc-client: $msg $t" >> "$RUN/stderr.txt"
           jq -nc --arg c "$c" --argjson ok $ok '{type:"confirm",callId:$c,approved:$ok}' >&3
         done < <(jq -r '.requests[] | "\(.callId)\t\(.toolName)"' <<< "$ev") ;;
     esac
@@ -63,7 +66,7 @@ turn_cmd() {
 session() {
   local io pid line
   io="$(mktemp -d)"; mkfifo "$io/in" "$io/out"
-  PATH="$SPATH" java -Duser.home="$RUN/home" -jar "$JAR" --mode rpc "${FLAGS[@]}" < "$io/in" > "$io/out" 2>> "$RUN/stderr.txt" & pid=$!
+  HOME="$SHOME" PATH="$SPATH" java -Duser.home="$RUN/home" -jar "$JAR" --mode rpc "${FLAGS[@]}" < "$io/in" > "$io/out" 2>> "$RUN/stderr.txt" & pid=$!
   exec 3> "$io/in" 4< "$io/out"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -81,6 +84,11 @@ killtree() { local c; for c in $(pgrep -P "$1"); do killtree "$c"; done; kill "$
 ( sleep "$CAP"; touch "$RUN/.timed-out"; for p in $(pgrep -f -- "-Duser.home=$RUN/home"); do killtree "$p"; done ) & WATCHDOG=$!
 session "turns_$fn"
 declare -F "turns_${fn}_2" >/dev/null && [ ! -e "$RUN/.timed-out" ] && session "turns_${fn}_2"
+# Plan-first holds an MCP change in a plan until someone approves it after the turn; in an ops case the client
+# approves each plan, which replays its steps exactly (audited with rule `plan`). Output in plans.txt.
+[ $is_ops = yes ] && [ ! -e "$RUN/.timed-out" ] && for p in $(jq -r 'select(.type == "plan_ready") | .planId' "$RUN/events.jsonl" 2>/dev/null); do
+  HOME="$SHOME" PATH="$SPATH" java -Duser.home="$RUN/home" -jar "$JAR" plans approve "$p" >> "$RUN/plans.txt" 2>&1 < /dev/null
+done
 pkill -P $WATCHDOG 2>/dev/null; kill $WATCHDOG 2>/dev/null
 
 if "check_$fn" >/dev/null 2>&1; then result=pass; else result=fail; fi
