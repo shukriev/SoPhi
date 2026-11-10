@@ -1,6 +1,5 @@
 package dev.sophi.core.tools
 
-import dev.sophi.core.audit.redactTokens
 import dev.sophi.core.permissions.PermissionSubject
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -13,24 +12,13 @@ private const val MAX_ITEMS = 100
 /** Names whose values are never shown: headers, meta tags, query parameters. */
 private val SECRET_NAME = Regex("(?i)token|auth|session|secret|passw|csrf|xsrf|cookie|api.?key|^key$|^sid$|^sig$|signature|^code$")
 
-private val TOKEN_RUN = Regex("[A-Za-z0-9_+/=-]{24,}")
-
-/**
- * A value that looks like a secret whatever it is named: a known token shape (the shared SECRET_PATTERNS), or a 24+ char
- * run mixing upper case, lower case and digits. ponytail: a heuristic, so an odd asset hash may be withheld too.
- */
-private fun secretLike(value: String) = redactTokens(value) != value ||
-    TOKEN_RUN.findAll(value).any { m -> m.value.any(Char::isUpperCase) && m.value.any(Char::isLowerCase) && m.value.any(Char::isDigit) }
-
-private fun unlessSecret(value: String) = if (secretLike(value)) "[redacted]" else value
-
 @Serializable
 private data class WebInspectArgs(val url: String)
 
 /**
  * A page's structure, observed only: one GET (the same fetch, redirect and private-address handling as `fetch_url`), parsed
- * as static HTML. Never clicks, types or runs script. Cookies, auth headers, form values, inline script, secret-named
- * meta and query values, and any header, meta or query value shaped like a secret are never shown.
+ * as static HTML. Never clicks, types or runs script. Cookies, auth headers, form values, inline script and secret-named
+ * meta and query values are never shown.
  */
 class WebInspectTool(httpClient: HttpClient? = null) : Tool {
     private val fetcher = httpClient?.let { FetchUrlTool(it) } ?: FetchUrlTool()
@@ -58,7 +46,7 @@ class WebInspectTool(httpClient: HttpClient? = null) : Tool {
         val headers = response.headers().map()
         val (withheld, shown) = headers.keys.partition { SECRET_NAME.containsMatchIn(it) }
         appendLine("Headers${if (withheld.isNotEmpty()) " (${withheld.size} headers withheld)" else ""}:")
-        shown.sortedBy { it.lowercase() }.forEach { appendLine("${it.lowercase()}: ${unlessSecret(headers.getValue(it).joinToString(", "))}") }
+        shown.sortedBy { it.lowercase() }.forEach { appendLine("${it.lowercase()}: ${headers.getValue(it).joinToString(", ")}") }
 
         val type = response.headers().firstValue("Content-Type").orElse("")
         if (type.isNotEmpty() && "html" !in type.lowercase()) { append("Not an HTML page ($type)."); return@buildString }
@@ -71,7 +59,7 @@ class WebInspectTool(httpClient: HttpClient? = null) : Tool {
         appendLine("Meta:")
         doc.select("meta[content]").take(MAX_ITEMS).forEach { m ->
             val key = listOf("name", "property", "http-equiv").map { m.attr(it) }.firstOrNull { it.isNotEmpty() } ?: return@forEach
-            appendLine("$key: ${if (SECRET_NAME.containsMatchIn(key)) "[redacted]" else unlessSecret(m.attr("content")).take(200)}")
+            appendLine("$key: ${if (SECRET_NAME.containsMatchIn(key)) "[redacted]" else m.attr("content").take(200)}")
         }
 
         appendLine("Headings:")
@@ -108,10 +96,10 @@ class WebInspectTool(httpClient: HttpClient? = null) : Tool {
         }
     }
 
-    /** Drops userinfo and the values of secret-named or secret-shaped query parameters. */
+    /** Drops userinfo and the values of secret-named query parameters. */
     private fun clean(url: String): String =
         url.replace(Regex("^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/?#@]*@"), "$1")
             .replace(Regex("([?&])([^=&#]+)=([^&#]*)")) { m ->
-                if (SECRET_NAME.containsMatchIn(m.groupValues[2]) || secretLike(m.groupValues[3])) "${m.groupValues[1]}${m.groupValues[2]}=[redacted]" else m.value
+                if (SECRET_NAME.containsMatchIn(m.groupValues[2])) "${m.groupValues[1]}${m.groupValues[2]}=[redacted]" else m.value
             }
 }

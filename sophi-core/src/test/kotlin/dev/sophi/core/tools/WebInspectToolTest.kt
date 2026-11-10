@@ -92,30 +92,6 @@ class WebInspectToolTest : FunSpec({
         out shouldContain "(3 headers withheld)"
     }
 
-    test("withholds secret-shaped values whatever their name: meta, header and query values") {
-        val jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
-        val html = """
-            <html><head><title>T</title>
-            <meta name="x9" content="$jwt">
-            <meta name="site-verification" content="Qk9xR3pLmN8vT2wYh6Jd5sFa1Ue7">
-            <meta name="og:image" content="https://cdn.example/img/hero-banner-large.png">
-            <meta name="build" content="550e8400-e29b-41d4-a716-446655440000">
-            </head><body data-k="ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">
-            <a href="/p?x9=AIzaSyA1234567890abcdefghijklmnopqrstuv&page=2&q=shoes">P</a>
-            <form><input type="hidden" name="x9" value="$jwt"></form>
-            </body></html>
-        """.trimIndent()
-        val out = inspect(page(html, mapOf("X-Debug" to listOf("sk-proj1234567890abcdefghijXYZ"))))
-        listOf("eyJhbGciOi", "Qk9xR3pLmN8vT2wYh6Jd5sFa1Ue7", "ghp_", "AIzaSy", "sk-proj").forEach { out shouldNotContain it }
-        out shouldContain "x9: [redacted]"
-        out shouldContain "site-verification: [redacted]"
-        out shouldContain "x-debug: [redacted]"
-        out shouldContain "x9=[redacted]&page=2&q=shoes"
-        out shouldContain "og:image: https://cdn.example/img/hero-banner-large.png"
-        out shouldContain "build: 550e8400-e29b-41d4-a716-446655440000"
-        out shouldContain "hidden x9"
-    }
-
     test("shares fetch_url's redirect handling and private-address refusal") {
         val client = mockk<HttpClient>()
         every { client.send(any<HttpRequest>(), any<HttpResponse.BodyHandler<String>>()) } returns
