@@ -48,5 +48,6 @@ class ConsolidationHistoryStoreTest : FunSpec({
         records shouldHaveSize 1
         records.single().id.isNotBlank() shouldBe true
         records.single().ts shouldBe 100L
+        records.single().capped shouldBe false
     }
 })

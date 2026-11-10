@@ -39,6 +39,9 @@ class ConsolidatorTest : FunSpec({
             store.putEmbedding(id, "fake", v)
             return m
         }
+        /** No embedding, so merge never pairs it: an orphan for prune tests. */
+        fun plain(id: String, salience: Double, at: Long = 0L) = store.upsertMemory(Memory(id, id, Room.EPISODES, salience,
+            SalienceSignals(0.0, 0.0, 0.0, 0.0, 1.0), Sensitivity.PERSONAL, Provenance.USER_DIRECT, at, at, "s"))
     }
 
     test("merge: near-duplicates within a room collapse, salience strengthened, clock reset") {
@@ -265,6 +268,8 @@ class ConsolidatorTest : FunSpec({
         val report = r.consolidator.run(nowMs = now)
         report.pruned shouldBe 1
         report.purged shouldBe 1
+        report.capped shouldBe false
+        r.historyStore.all().single().capped shouldBe false
         (r.store.memories().getValue("mem_dead").softDeletedAt != null) shouldBe true
         r.store.memories().containsKey("mem_old_soft") shouldBe false
         r.store.memories().getValue("mem_live").active shouldBe true
@@ -295,6 +300,88 @@ class ConsolidatorTest : FunSpec({
         val report = r.consolidator.run(nowMs = now)
         report.pruned shouldBe 1
         r.store.memories().getValue("mem_marginal").active shouldBe false
+    }
+
+    test("cap: more prune candidates than maxDemotionsPerPass prunes exactly the cap, lowest priority first") {
+        val r = Rig(config = JanesPalaceConfig(sessionModel = "test-model", maxDemotionsPerPass = 2))
+        listOf(0.4, 0.1, 0.3, 0.2).forEachIndexed { i, s -> r.plain("mem_$i", s) }
+        val report = r.consolidator.run(nowMs = 400 * DAY)
+        report.pruned shouldBe 2
+        report.capped shouldBe true
+        r.historyStore.all().single().capped shouldBe true
+        r.store.memories().values.filter { !it.active }.map { it.id }.toSet() shouldBe setOf("mem_1", "mem_3")
+    }
+
+    test("cap: merge absorptions use the same budget, prune gets only what is left") {
+        val r = Rig(config = JanesPalaceConfig(sessionModel = "test-model", maxDemotionsPerPass = 2))
+        r.add("mem_a", "dentist appointment thursday fourteen", at = 400 * DAY, salience = 0.6)
+        r.add("mem_b", "dentist appointment thursday fourteen", at = 400 * DAY + 1, salience = 0.5)
+        r.plain("mem_x", 0.1); r.plain("mem_y", 0.2); r.plain("mem_z", 0.3)
+        val report = r.consolidator.run(nowMs = 400 * DAY + 2)
+        report.merged shouldBe 1
+        report.pruned shouldBe 1
+        report.capped shouldBe true
+        r.store.memories().getValue("mem_x").active shouldBe false
+        r.store.memories().getValue("mem_y").active shouldBe true
+    }
+
+    test("cap: a compress thread whose interior doesn't fit the remaining budget is skipped whole") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+        val r = Rig(provider, JanesPalaceConfig(sessionModel = "test-model", maxDemotionsPerPass = 1))
+        listOf("big1", "big2", "big3", "big4", "small1", "small2", "small3").forEachIndexed { i, id ->
+            r.add("mem_$id", "$id unique words $id", at = i.toLong(), salience = 0.05)
+        }
+        listOf("big1" to "big2", "big2" to "big3", "big3" to "big4").forEach { (a, b) -> r.store.upsertEdge(CausalEdge("mem_$a", "mem_$b", "big")) }
+        listOf("small1" to "small2", "small2" to "small3").forEach { (a, b) -> r.store.upsertEdge(CausalEdge("mem_$a", "mem_$b", "small")) }
+        val report = r.consolidator.run(nowMs = 200 * DAY)
+        report.compressed shouldBe 1
+        report.capped shouldBe true
+        r.store.memories().getValue("mem_big2").active shouldBe true
+        r.store.memories().getValue("mem_big3").active shouldBe true
+        r.store.memories().getValue("mem_small2").active shouldBe false
+    }
+
+    test("recall protection: a recently recalled low-priority memory is not pruned; an old recall doesn't protect") {
+        val now = 400 * DAY
+        val recent = Rig()
+        recent.plain("mem_dead", 0.5)
+        recent.store.logRecall(RecallRecord(now - 5 * DAY, "mem_dead", "s"))
+        recent.consolidator.run(nowMs = now).pruned shouldBe 0
+        recent.store.memories().getValue("mem_dead").active shouldBe true
+
+        val old = Rig()
+        old.plain("mem_dead", 0.5)
+        old.store.logRecall(RecallRecord(now - 40 * DAY, "mem_dead", "s"))
+        old.consolidator.run(nowMs = now).pruned shouldBe 1
+    }
+
+    test("recall protection: compress skips a thread with a recently recalled interior member") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("summary", TokenUsage(1, 1))
+        val r = Rig(provider)
+        val now = 200 * DAY
+        r.add("mem_1", "user changed jobs", at = 0L, salience = 0.05)
+        r.add("mem_2", "family moved to plovdiv", at = 1 * DAY, salience = 0.05)
+        r.add("mem_3", "emma enrolled in new school", at = 2 * DAY, salience = 0.05)
+        r.store.upsertEdge(CausalEdge("mem_1", "mem_2", "relocation"))
+        r.store.upsertEdge(CausalEdge("mem_2", "mem_3", "relocation"))
+        r.store.logRecall(RecallRecord(now - 3 * DAY, "mem_2", "s"))
+        r.consolidator.run(nowMs = now).compressed shouldBe 0
+        r.store.memories().getValue("mem_2").active shouldBe true
+    }
+
+    test("classifyPatterns ignores ids the model invents: only known candidates are tagged") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("""["mem_ghost", "mem_repeated"]""", TokenUsage(1, 1))
+        val r = Rig(provider)
+        r.store.upsertMemory(Memory(
+            "mem_repeated", "always forgets passport before flights", Room.EPISODES, 0.6,
+            SalienceSignals(rep = 0.9, emph = 0.0, nov = 0.0, aff = 0.0, rec = 1.0),
+            Sensitivity.PERSONAL, Provenance.USER_DIRECT, 0L, 0L, "s"))
+        r.consolidator.run(nowMs = 1_000L).classified shouldBe 1
+        r.store.memories().containsKey("mem_ghost") shouldBe false
+        r.store.memories().getValue("mem_repeated").actionablePattern shouldBe true
     }
 
     test("isDue respects the 24h marker") {

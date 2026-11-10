@@ -63,6 +63,13 @@ data class JanesPalaceConfig(
     val compressAgeMs: Long = 90 * DAY,
     val compressPriorityCeiling: Double = 0.1,
     val pruneFloor: Double = 0.02,
+    /** One consolidation pass soft-deletes at most this many memories: merge absorptions, compress
+     *  interiors and prunes share the budget, in run order. Purge doesn't count (it only finishes
+     *  earlier soft-deletes). Bounds how much one bad pass can take away. */
+    val maxDemotionsPerPass: Int = 25,
+    /** A memory recalled within this window is never pruned, and a thread with such an interior
+     *  member is not compressed. */
+    val recallProtectMs: Long = 30 * DAY,
     // Outcome-driven worth (see MemoryWorth.kt): below worthMinEvidence total hits, a memory's
     // hitsPositive/hitsNegative ratio is withheld from judgment regardless of how lopsided it
     // looks -- too little evidence to trust. Boost/suppress multipliers are deliberately

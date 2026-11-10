@@ -13,7 +13,9 @@ data class TurnObservation(
 data class MemoryBlock(val rendered: String, val memoryIds: List<String>)
 data class ConsolidationReport(
     val merged: Int, val strengthened: Int, val compressed: Int, val pruned: Int, val purged: Int,
-    val classified: Int = 0, val classifiedHabits: Int = 0
+    val classified: Int = 0, val classifiedHabits: Int = 0,
+    /** True when the pass skipped a demotion because [dev.sophi.memory.jane.JanesPalaceConfig.maxDemotionsPerPass] ran out. */
+    val capped: Boolean = false
 ) { val total: Int get() = merged + strengthened + compressed + pruned + purged + classified + classifiedHabits }
 
 sealed interface ForgetRequest {
