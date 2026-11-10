@@ -90,7 +90,10 @@ private class TurnProgress(val images: List<dev.sophi.ai.api.ImageRef> = emptyLi
     var persisted = false
 }
 
-private data class ToolCallOutcome(val call: ToolCall, val message: Message, val failed: Boolean)
+private data class ToolCallOutcome(val call: ToolCall, val message: Message, val failed: Boolean, val denied: Boolean = false)
+
+/** [AgentLoop.callTool]'s answer: the tool's own result text, or the pipeline's error when [denied] (a rule, hook or policy). */
+data class DirectCallResult(val result: String, val denied: Boolean)
 
 private val entryJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
@@ -492,20 +495,7 @@ class AgentLoop(
     ): AgentSession {
         val turn = TurnProgress(images)
         return try {
-            // Fresh per turn (and per nested AgentLoop): tool_search activations die with the turn.
-            // A nested loop built without a sink audits to the outer loop's, and obeys its rules.
-            val sink = audit ?: currentCoroutineContext()[AuditScope]?.sink
-            // A loop built with its own rules inside another loop's turn only adds their deny and ask: it can't loosen the outer ones.
-            val outer = currentCoroutineContext()[PermissionScope]?.rules
-            val rules = if (permissions == null || outer == null || outer === permissions) permissions ?: outer else outer.tightened(permissions.active)
-            val turnHooks = hooks ?: currentCoroutineContext()[HookScope]?.hooks
-            val turnGuardian = guardian ?: currentCoroutineContext()[GuardianScope]?.guardian
-            var scope: CoroutineContext = ActivatedTools()
-            if (sink != null) scope += AuditScope(sink)
-            if (rules != null) scope += PermissionScope(rules)
-            if (turnHooks != null) scope += HookScope(turnHooks)
-            if (turnGuardian != null) scope += GuardianScope(turnGuardian)
-            withContext(scope) { runTurn(session, userInput, config, onEvent, turn, turnPreamble, inbox) }
+            withContext(turnScope()) { runTurn(session, userInput, config, onEvent, turn, turnPreamble, inbox) }
         } catch (e: CancellationException) {
             val limit = currentCoroutineContext()[DenialLimit]?.takeIf { it.tripped }
             if (!turn.persisted) withContext(NonCancellable) {
@@ -552,6 +542,39 @@ class AgentLoop(
         }
         session.append(EntryRole.ASSISTANT, stopMessage, mapOf("stopReason" to reason.name))
         sessionManager.save(session)
+    }
+
+    /** The audit sink, rules, hooks and guardian a turn's tool calls answer to; fresh tool_search activations. */
+    private suspend fun turnScope(): CoroutineContext {
+        // Fresh per turn (and per nested AgentLoop): tool_search activations die with the turn.
+        // A nested loop built without a sink audits to the outer loop's, and obeys its rules.
+        val sink = audit ?: currentCoroutineContext()[AuditScope]?.sink
+        // A loop built with its own rules inside another loop's turn only adds their deny and ask: it can't loosen the outer ones.
+        val outer = currentCoroutineContext()[PermissionScope]?.rules
+        val rules = if (permissions == null || outer == null || outer === permissions) permissions ?: outer else outer.tightened(permissions.active)
+        val turnHooks = hooks ?: currentCoroutineContext()[HookScope]?.hooks
+        val turnGuardian = guardian ?: currentCoroutineContext()[GuardianScope]?.guardian
+        var scope: CoroutineContext = ActivatedTools()
+        if (sink != null) scope += AuditScope(sink)
+        if (rules != null) scope += PermissionScope(rules)
+        if (turnHooks != null) scope += HookScope(turnHooks)
+        if (turnGuardian != null) scope += GuardianScope(turnGuardian)
+        return scope
+    }
+
+    /**
+     * One tool call with no model turn around it (a scheduled page watch's fetch), through the same pipeline as a
+     * model's call: before-tool hooks, rules, grants, confirmation, guardian, audit, after-tool hooks. Returns the
+     * tool's raw result (not cut or fenced: the caller reads it, not a model) or the pipeline's error when denied.
+     * [session] only names the call in audit and hooks; nothing is saved to it.
+     */
+    suspend fun callTool(session: AgentSession, name: String, argumentsJson: String): DirectCallResult = withContext(turnScope()) {
+        val call = ToolCall("call-" + java.util.UUID.randomUUID().toString().take(8), name, argumentsJson)
+        val (one, veto) = applyBeforeToolHooks(currentCoroutineContext()[HookScope]?.hooks, session.id, listOf(call))
+        var raw = ""
+        val outcome = executeCalls(session, "", one, veto, { if (it is TurnEvent.ToolCallFinished) raw = it.result },
+            contextWindowTokens, takeCheckpoint = false) {}.single()
+        DirectCallResult(raw, outcome.denied)
     }
 
     /** Before-tool hooks, ahead of every check: a rewritten call is classified, ruled on, planned and confirmed as rewritten. */
@@ -744,9 +767,9 @@ class AgentLoop(
                         "Error: Tool '${call.name}' vetoed by a hook: ${vetoes[call.id]}"
                     } else if (!allowed) {
                         failed = true
-                        currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson,
-                            effects[call.id]?.let { rules?.why(it, call.name, kindsOf[call.id].orEmpty(), unattended) })
-                        if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule"
+                        val why = effects[call.id]?.let { rules?.why(it, call.name, kindsOf[call.id].orEmpty(), unattended) }
+                        currentCoroutineContext()[DenialLimit]?.denied(call.name, call.argumentsJson, why)
+                        if (effects[call.id] == Effect.DENY) "Error: Tool '${call.name}' denied by a permission rule${why?.let { " ($it)" }.orEmpty()}"
                         else if (verdicts[call.id]?.effect == Effect.DENY) "Error: Tool '${call.name}' denied by the guardian: ${verdicts.getValue(call.id).reason}"
                         else hookDenials[call.id]?.let { "Error: Tool '${call.name}' denied by a hook: $it" }
                             ?: if (currentCoroutineContext()[Unattended.Key] != null) "Error: Tool '${call.name}' execution denied by " +
@@ -819,7 +842,8 @@ class AgentLoop(
                             toolCallId = call.id,
                             toolName = call.name
                         ),
-                        failed
+                        failed,
+                        denied = outcome == "denied",
                     )
                 }
             }.awaitAll()

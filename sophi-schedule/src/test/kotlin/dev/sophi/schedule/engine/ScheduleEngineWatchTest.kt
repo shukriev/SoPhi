@@ -50,7 +50,7 @@ class ScheduleEngineWatchTest : FunSpec({
 
     val audited = mutableListOf<dev.sophi.core.audit.AuditEntry>()
 
-    fun rig(rules: PermissionRules? = null): Rig {
+    fun rig(rules: PermissionRules? = null, beforeTool: ((dev.sophi.extensions.HookContext) -> dev.sophi.core.agent.HookResult)? = null): Rig {
         audited.clear()
         val home = tempdir().toPath()
         val store = TaskStore(home.resolve("tasks.json"))
@@ -60,7 +60,16 @@ class ScheduleEngineWatchTest : FunSpec({
         val provider = mockk<LLMProvider>()
         val engine = ScheduleEngine(store, runLog, provider, ToolRegistry().register(fetch),
             FileSessionManager(createTempDirectory("watch-test")), Notifier { _, r -> notified += r },
-            model = "m", contextWindowTokens = 100_000, permissions = rules, audit = { audited += it })
+            model = "m", contextWindowTokens = 100_000, permissions = rules, audit = { audited += it },
+            pluginRegistry = beforeTool?.let { decide ->
+                dev.sophi.extensions.PluginRegistry().register(object : dev.sophi.extensions.SophiPlugin {
+                    override val name = "p"
+                    override fun hooks() = listOf(object : dev.sophi.extensions.AgentHook {
+                        override val point = dev.sophi.extensions.HookPoint.BEFORE_TOOL
+                        override suspend fun decide(context: dev.sophi.extensions.HookContext) = decide(context)
+                    })
+                })
+            })
         return Rig(engine, store, runLog, fetch, notified, provider, home)
     }
 
@@ -103,7 +112,7 @@ class ScheduleEngineWatchTest : FunSpec({
         val r = rig(rules)
         val record = runBlocking { r.engine.runNow(watch(r).id) }!!
 
-        record.outcome shouldBe RunOutcome.Skipped("fetch_url $URL blocked by rule: network deny (unattended)")
+        record.outcome shouldBe RunOutcome.Skipped("fetch_url $URL: Tool 'fetch_url' denied by a permission rule (network deny (unattended))")
         r.fetch.fetched.size shouldBe 0
     }
 
@@ -147,6 +156,18 @@ class ScheduleEngineWatchTest : FunSpec({
 
         (record.outcome as RunOutcome.Skipped).reason shouldContain "nobody is here to approve"
         r.fetch.fetched.size shouldBe 0
+    }
+
+    test("the fetch goes through the before-tool hooks: a veto skips it, a rewrite is what gets fetched") {
+        val vetoed = rig(beforeTool = { dev.sophi.core.agent.HookResult.Veto("no fetching on weekends") })
+        val record = runBlocking { vetoed.engine.runNow(watch(vetoed).id) }!!
+        (record.outcome as RunOutcome.Skipped).reason shouldContain "no fetching on weekends"
+        vetoed.fetch.fetched.size shouldBe 0
+        audited.single().outcome shouldBe "denied"
+
+        val rewritten = rig(beforeTool = { dev.sophi.core.agent.HookResult.Rewrite("""{"url":"https://mirror.example/kb"}""") })
+        runBlocking { rewritten.engine.runNow(watch(rewritten).id) }
+        rewritten.fetch.fetched.single() shouldBe """{"url":"https://mirror.example/kb"}"""
     }
 
     test("an error page or a fetch error fails the check and keeps the snapshot") {
