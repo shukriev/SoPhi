@@ -5,7 +5,9 @@ import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.core.agent.BackgroundSubagents
-import dev.sophi.schedule.engine.PLAN_WAITING
+import dev.sophi.core.dryrun.ChangePlan
+import dev.sophi.core.dryrun.ChangePlanStore
+import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
@@ -29,7 +31,13 @@ class BriefingTest : FunSpec({
     val now = 1_700_000_000_000L
     fun task(id: String, name: String, paused: String? = null) =
         ScheduledTask(id = id, name = name, trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p", enabled = paused == null, pausedReason = paused)
-    fun run(taskId: String, at: Long, outcome: RunOutcome, summary: String = "") = RunRecord(taskId, at - 1000, at, outcome, summary)
+    fun run(taskId: String, at: Long, outcome: RunOutcome, summary: String = "", plan: String? = null) =
+        RunRecord(taskId, at - 1000, at, outcome, summary, pendingPlanId = plan)
+    val waiting = "Plan waiting for your approval: 2 changes — sophi plans show plan_42"
+    fun plans(vararg status: Pair<String, PlanStatus>) = ChangePlanStore(createTempDirectory("plans")).apply {
+        status.forEach { (id, s) -> save(ChangePlan(id, 0, "t", "s", reads = emptyList(), steps = emptyList(), status = s)) }
+    }
+    val pending = plans("plan_42" to PlanStatus.PENDING)
 
     val tasks = listOf(task("t1", "Inbox triage"), task("t2", "Nightly backup", paused = "timed out after #s"), task("t3", "Clean downloads"))
     val runs = listOf(
@@ -37,18 +45,18 @@ class BriefingTest : FunSpec({
         run("t1", now - 10 * h, RunOutcome.Succeeded, "Archived 4 newsletters."),
         run("t1", now - 2 * h, RunOutcome.Succeeded, "Archived 12 newsletters, flagged 2 from Ana.\nmore"),
         run("t2", now - 5 * h, RunOutcome.Failed("timed out after 300s"), "Paused: 3 runs in a row failed the same way."),
-        run("t3", now - 4 * h, RunOutcome.Succeeded, "$PLAN_WAITING: 2 changes — sophi plans show plan_42"),
+        run("t3", now - 4 * h, RunOutcome.Succeeded, waiting, plan = "plan_42"),
         run("gone", now - 3 * h, RunOutcome.Skipped("wall-clock budget exceeded")),
     )
 
     test("outcomes come from the run log in the window, named from the task store, plus finished subagents") {
         val sub = BackgroundSubagents.Info("b1", "s", "researcher", "auth", "sub1", now - h, BackgroundSubagents.Status.DONE, "Auth uses JWT.")
         val running = sub.copy(id = "b2", status = BackgroundSubagents.Status.RUNNING, text = null)
-        val out = outcomes(runs, tasks, listOf(sub, running), sinceMs = now - 24 * h, untilMs = now)
+        val out = outcomes(runs, tasks, listOf(sub, running), sinceMs = now - 24 * h, untilMs = now, plans = pending)
         out.map { Triple(it.name, it.status, it.detail.lineSequence().first()) } shouldBe listOf(
             Triple("Inbox triage", OutcomeStatus.DONE, "Archived 4 newsletters."),
             Triple("Nightly backup", OutcomeStatus.FAILED, "timed out after 300s"),
-            Triple("Clean downloads", OutcomeStatus.WAITING, "$PLAN_WAITING: 2 changes — sophi plans show plan_42"),
+            Triple("Clean downloads", OutcomeStatus.WAITING, waiting),
             Triple("gone", OutcomeStatus.SKIPPED, "wall-clock budget exceeded"),
             Triple("Inbox triage", OutcomeStatus.DONE, "Archived 12 newsletters, flagged 2 from Ana."),
             Triple("researcher", OutcomeStatus.DONE, "Auth uses JWT."),
@@ -57,7 +65,7 @@ class BriefingTest : FunSpec({
     }
 
     test("the template groups a task's runs and lists what needs the user") {
-        val text = renderBriefing(outcomes(runs, tasks, emptyList(), now - 24 * h, now), tasks, now - 24 * h, now, ZoneOffset.UTC)
+        val text = renderBriefing(outcomes(runs, tasks, emptyList(), now - 24 * h, now, pending), tasks, now - 24 * h, now, ZoneOffset.UTC)
         text shouldContain "Done (1)"
         text shouldContain "Inbox triage: 2 runs, last 20:13. Archived 12 newsletters, flagged 2 from Ana."
         text shouldContain "Failed or paused (2)"
@@ -67,6 +75,14 @@ class BriefingTest : FunSpec({
         text shouldContain "Nightly backup is paused (timed out after #s). Fix the cause, then: sophi schedule resume t2"
         text shouldContain "Clean downloads left a plan for your approval: sophi plans show plan_42"
         text shouldNotContain "too old"
+    }
+
+    test("a plan approved or cancelled since, or gone, no longer needs the user: the run counts as done") {
+        for (store in listOf(plans("plan_42" to PlanStatus.DONE), plans("plan_42" to PlanStatus.CANCELLED), plans(), null)) {
+            val out = outcomes(listOf(run("t3", now - h, RunOutcome.Succeeded, waiting, plan = "plan_42")), tasks, emptyList(), now - 24 * h, now, store)
+            out.single().status shouldBe OutcomeStatus.DONE
+            renderBriefing(out, emptyList(), now - 24 * h, now, ZoneOffset.UTC) shouldNotContain "Needs you"
+        }
     }
 
     test("nothing ran: one line") {

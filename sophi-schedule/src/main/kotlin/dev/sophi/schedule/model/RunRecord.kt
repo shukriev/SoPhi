@@ -34,5 +34,7 @@ data class RunRecord(
      * all (Recurring mode, or a Goal run that died before a plan was ever generated). Needed to
      * look the run's plan history back up via PlanLog.
      */
-    val planId: String? = null
+    val planId: String? = null,
+    /** The change plan this run left waiting for the user's approval (plan-first), or null when it left none. */
+    val pendingPlanId: String? = null,
 )

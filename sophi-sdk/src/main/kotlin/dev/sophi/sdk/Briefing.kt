@@ -6,7 +6,8 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.Message
 import dev.sophi.ai.api.MessageRole
 import dev.sophi.core.agent.BackgroundSubagents
-import dev.sophi.schedule.engine.PLAN_WAITING
+import dev.sophi.core.dryrun.ChangePlanStore
+import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.RunRecord
 import dev.sophi.schedule.model.ScheduledTask
@@ -27,28 +28,31 @@ enum class OutcomeStatus { DONE, WAITING, FAILED, SKIPPED }
 /**
  * One thing a schedule or background subagent did: what the morning briefing (and the companion dashboard) list.
  * Derived from the run log and live subagents, never stored. [source] is `schedule` or `subagent`; [id] the task id
- * or `b1`; [detail] the summary, error or skip reason.
+ * or `b1`; [detail] the summary, error or skip reason; [planId] the plan a WAITING run left for approval.
  */
 data class Outcome(
     val source: String, val id: String, val name: String, val atMs: Long,
-    val status: OutcomeStatus, val detail: String, val sessionId: String?,
+    val status: OutcomeStatus, val detail: String, val sessionId: String?, val planId: String? = null,
 )
 
-/** The runs that finished in [sinceMs]..[untilMs] and the subagents started in it that have ended, oldest first. */
+/**
+ * The runs that finished in [sinceMs]..[untilMs] and the subagents started in it that have ended, oldest first.
+ * A run is WAITING only while the plan it left is still pending in [plans]; approved, cancelled or gone, it's DONE.
+ */
 fun outcomes(
     runs: List<RunRecord>, tasks: List<ScheduledTask>, subagents: List<BackgroundSubagents.Info>,
-    sinceMs: Long, untilMs: Long,
+    sinceMs: Long, untilMs: Long, plans: ChangePlanStore? = null,
 ): List<Outcome> {
     val names = tasks.associate { it.id to it.name }
     val scheduled = runs.filter { it.finishedAtMs in sinceMs..untilMs }.map { r ->
+        val waiting = r.pendingPlanId?.takeIf { plans?.get(it)?.status == PlanStatus.PENDING }
         val (status, detail) = when (val o = r.outcome) {
-            RunOutcome.Succeeded, RunOutcome.GoalMet ->
-                (if (r.summary.startsWith(PLAN_WAITING)) OutcomeStatus.WAITING else OutcomeStatus.DONE) to r.summary
+            RunOutcome.Succeeded, RunOutcome.GoalMet -> (if (waiting != null) OutcomeStatus.WAITING else OutcomeStatus.DONE) to r.summary
             RunOutcome.GoalExhausted -> OutcomeStatus.FAILED to "goal not met. ${r.summary}".trim()
             is RunOutcome.Failed -> OutcomeStatus.FAILED to o.error
             is RunOutcome.Skipped -> OutcomeStatus.SKIPPED to o.reason
         }
-        Outcome("schedule", r.taskId, names[r.taskId] ?: r.taskId, r.finishedAtMs, status, detail, r.sessionId)
+        Outcome("schedule", r.taskId, names[r.taskId] ?: r.taskId, r.finishedAtMs, status, detail, r.sessionId, waiting)
     }
     val background = subagents.filter { it.startedAtMs in sinceMs..untilMs }.mapNotNull { s ->
         val status = when (s.status) {
@@ -87,8 +91,7 @@ fun renderBriefing(
     val needs = tasks.filter { it.pausedReason != null }.map {
         "  - ${it.name} is paused (${it.pausedReason}). Fix the cause, then: sophi schedule resume ${it.id}"
     } + outcomes.filter { it.status == OutcomeStatus.WAITING }.map {
-        val plan = Regex("sophi plans show (\\S+)").find(it.detail)?.groupValues?.get(1)
-        "  - ${it.name} left a plan for your approval: " + (plan?.let { id -> "sophi plans show $id" } ?: "sophi plans")
+        "  - ${it.name} left a plan for your approval: sophi plans show ${it.planId}"
     }
 
     val hours = (untilMs - sinceMs) / 3_600_000
@@ -136,13 +139,15 @@ fun markBriefed(scheduleDir: Path, nowMs: Long) {
 /**
  * The morning briefing for [scheduleDir]'s run log and tasks (plus [subagents], from a live runtime) in
  * [sinceMs]..[nowMs]: a lede from [model] when anything happened and the call works, then the template.
+ * [plans] is the change-plan store `sophi plans` reads, to tell which plans still wait for the user.
  */
 suspend fun briefing(
     scheduleDir: Path, sinceMs: Long, nowMs: Long, provider: LLMProvider? = null, model: String? = null,
     subagents: List<BackgroundSubagents.Info> = emptyList(), zone: ZoneId = ZoneId.systemDefault(),
+    plans: ChangePlanStore = ChangePlanStore(),
 ): String {
     val tasks = TaskStore(scheduleDir.resolve("tasks.json")).list()
-    val outcomes = outcomes(RunLog(scheduleDir.resolve("runs.jsonl")).readAll(), tasks, subagents, sinceMs, nowMs)
+    val outcomes = outcomes(RunLog(scheduleDir.resolve("runs.jsonl")).readAll(), tasks, subagents, sinceMs, nowMs, plans)
     val template = renderBriefing(outcomes, tasks, sinceMs, nowMs, zone)
     return if (outcomes.isEmpty() && tasks.none { it.pausedReason != null }) template else withLede(template, provider, model)
 }
