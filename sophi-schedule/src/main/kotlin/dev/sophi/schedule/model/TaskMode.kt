@@ -10,4 +10,8 @@ sealed class TaskMode {
 
     @Serializable
     data class Goal(val stopCondition: StopCondition, val maxIterations: Int) : TaskMode()
+
+    /** Fetch [url] each run and speak up only when its text changed; no model call. */
+    @Serializable
+    data class Watch(val url: String) : TaskMode()
 }

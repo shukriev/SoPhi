@@ -4,6 +4,8 @@ import dev.sophi.core.agent.plan.StopCondition
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.RuleVerdict
 import dev.sophi.core.tools.Tool
+import dev.sophi.core.tools.fenceAsData
+import dev.sophi.schedule.engine.PAGE_CHANGED
 import dev.sophi.schedule.model.CronSchedules
 import dev.sophi.schedule.model.RunOutcome
 import dev.sophi.schedule.model.ScheduledTask
@@ -34,16 +36,19 @@ private data class ManageTaskArgs(
     @SerialName("shell_command") val shellCommand: String? = null,
     @SerialName("max_iterations") val maxIterations: Int? = null,
     @SerialName("tool_grants") val toolGrants: List<String>? = null,
-    @SerialName("task_id") val taskId: String? = null
-)
+    @SerialName("task_id") val taskId: String? = null,
+    val url: String? = null
+) {
+    /** Tool grants and a watch's unattended fetches both hand the task power the user should approve. */
+    val grantingPower get() = action in setOf("create", "update") && toolGrants?.isNotEmpty() == true || action == "create" && mode == "watch"
+}
 
 class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog) : Tool {
     override val name = TOOL_NAME
     override fun riskLevel(argumentsJson: String): RiskLevel {
         val args = runCatching { json.decodeFromString(ManageTaskArgs.serializer(), argumentsJson) }.getOrNull()
             ?: return RiskLevel.DESTRUCTIVE
-        val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
-        return if (grantingPower) RiskLevel.DESTRUCTIVE else RiskLevel.SAFE
+        return if (args.grantingPower) RiskLevel.DESTRUCTIVE else RiskLevel.SAFE
     }
     /** Listing tasks or runs only reads; anything else (or unparseable) changes the schedule. The task's own calls are checked when it runs. */
     override fun effects(argumentsJson: String): Set<dev.sophi.core.tools.EffectKind> {
@@ -55,14 +60,14 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
         // let it fail with the parse error the model can act on. (riskLevel still fails closed; ADR-027.)
         val args = runCatching { json.decodeFromString(ManageTaskArgs.serializer(), argumentsJson) }.getOrNull()
             ?: return RuleVerdict.LOW_RISK
-        val grantingPower = args.action in setOf("create", "update") && args.toolGrants?.isNotEmpty() == true
-        return if (grantingPower) RuleVerdict.HIGH_RISK else RuleVerdict.LOW_RISK
+        return if (args.grantingPower) RuleVerdict.HIGH_RISK else RuleVerdict.LOW_RISK
     }
     override val description =
         "Create, list, update, pause, resume, or remove a scheduled or goal-based background task, " +
             "and inspect its run history (outcome + duration of each past run). " +
             "Recurring tasks fire on an interval with no stop condition (e.g. hourly monitoring). " +
             "Goal tasks repeat turns until an LLM-judged or shell-checked condition is met, up to max_iterations. " +
+            "Watch tasks fetch url each run and notify only when its text changed. " +
             "For a relative time (\"tomorrow\", \"in an hour\"), call get_current_datetime before computing at; never guess it."
     override val parametersJson = """
         {"type":"object","properties":{
@@ -73,7 +78,8 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
           "every_seconds":{"type":"integer","description":"Required when trigger_type=interval"},
           "at":{"type":"string","description":"ISO-8601 local date-time, e.g. 2026-07-27T12:00:00; required when trigger_type=once"},
           "cron_expression":{"type":"string","description":"Required when trigger_type=cron. Standard 5-field Unix cron syntax (minute hour day-of-month month day-of-week), e.g. \"0 9 * * *\" for 9am daily. Resolved in the local system timezone."},
-          "mode":{"type":"string","enum":["recurring","goal"]},
+          "mode":{"type":"string","enum":["recurring","goal","watch"]},
+          "url":{"type":"string","description":"Required when mode=watch"},
           "stop_condition_type":{"type":"string","enum":["llm_judged","shell_check"],"description":"Required when mode=goal"},
           "shell_command":{"type":"string","description":"Required when stop_condition_type=shell_check"},
           "max_iterations":{"type":"integer","description":"Required when mode=goal"},
@@ -103,7 +109,8 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
 
     private fun create(args: ManageTaskArgs): String {
         val name = args.name ?: return "Error: 'name' is required for action=create"
-        val prompt = args.prompt ?: return "Error: 'prompt' is required for action=create"
+        val prompt = args.prompt ?: (if (args.mode == "watch") "Watch ${args.url} for changes" else null)
+            ?: return "Error: 'prompt' is required for action=create"
         val trigger = when (args.triggerType) {
             "interval" -> args.everySeconds?.let { Trigger.Interval(it) }
                 ?: return "Error: 'every_seconds' is required for trigger_type=interval"
@@ -133,7 +140,12 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 }
                 TaskMode.Goal(stopCondition, maxIterations)
             }
-            else -> return "Error: 'mode' must be recurring or goal"
+            "watch" -> {
+                val url = args.url ?: return "Error: 'url' is required for mode=watch"
+                if (!url.startsWith("http://") && !url.startsWith("https://")) return "Error: 'url' must be an http(s) URL"
+                TaskMode.Watch(url)
+            }
+            else -> return "Error: 'mode' must be recurring, goal or watch"
         }
         val task = store.add(
             ScheduledTask(
@@ -141,7 +153,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 trigger = trigger,
                 mode = mode,
                 prompt = prompt,
-                toolGrants = args.toolGrants?.toSet() ?: emptySet()
+                toolGrants = args.toolGrants.orEmpty().toSet() + listOfNotNull("fetch_url".takeIf { mode is TaskMode.Watch })
             )
         )
         return "Created task ${task.id} (${task.name})"
@@ -211,6 +223,11 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
         return if (store.remove(id)) "Removed $id" else "Error: no task found with id $id"
     }
 
+    /** A watch's changed lines are the page's own text: the model reads them fenced, as data. */
+    private fun pageFenced(summary: String): String =
+        if (!summary.startsWith(PAGE_CHANGED) || '\n' !in summary) summary
+        else summary.substringBefore('\n') + "\n" + fenceAsData("fetch_url", summary.substringAfter('\n'))
+
     private fun runs(args: ManageTaskArgs): String {
         val records = (args.taskId?.let { runLog.forTask(it) } ?: runLog.readAll()).takeLast(20)
         if (records.isEmpty()) return "No run history."
@@ -218,7 +235,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
             val durationSec = (r.finishedAtMs - r.startedAtMs) / 1000.0
             val why = when (val o = r.outcome) { is RunOutcome.Failed -> ": ${o.error}"; is RunOutcome.Skipped -> ": ${o.reason}"; else -> "" }
             "${r.taskId}  ${r.outcome::class.simpleName}$why  " +
-                String.format(Locale.ROOT, "%.1fs", durationSec) + "  ${r.summary}"
+                String.format(Locale.ROOT, "%.1fs", durationSec) + "  ${pageFenced(r.summary)}"
         }
     }
 }

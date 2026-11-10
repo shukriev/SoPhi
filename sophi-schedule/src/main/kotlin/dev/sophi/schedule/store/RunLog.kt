@@ -9,7 +9,7 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption.APPEND
 import java.nio.file.StandardOpenOption.CREATE
 
-class RunLog(private val path: Path) {
+class RunLog(val path: Path) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Synchronized
