@@ -25,6 +25,7 @@ import dev.sophi.core.tools.BashSandbox
 import dev.sophi.core.tools.SandboxMode
 import dev.sophi.core.tools.SqliteShowTool
 import dev.sophi.core.tools.Tool
+import dev.sophi.core.tools.WebInspectTool
 import dev.sophi.core.tools.WebSearchTool
 import dev.sophi.core.permissions.PermissionRules
 import dev.sophi.mcp.server.buildMcpServer
@@ -48,7 +49,7 @@ fun buildBuiltinTools(root: Path = Path.of("").toAbsolutePath(), braveApiKey: St
         FileReadTool(root), FileWriteTool(root), GrepTool(root), GlobTool(root), EditTool(root), ApplyPatchTool(root),
         BashTool(root, sandbox, jobs),
         MoveFileTool(root), DeleteFileTool(root), SqliteShowTool(root), ArchiveListTool(root), ArchiveExtractTool(root),
-        FetchUrlTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool(), TodoTool()
+        FetchUrlTool(), WebInspectTool(), GetCurrentDateTimeTool(), RunClaudeCodeTool(), TodoTool()
     )
     if (jobs != null) tools += listOf(BashOutputTool(jobs), BashKillTool(jobs))
     val key = braveApiKey ?: System.getenv("BRAVE_SEARCH_API_KEY")

@@ -42,7 +42,10 @@ class FetchUrlTool(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? =
+    override fun permissionSubjects(argumentsJson: String): List<PermissionSubject>? = urlSubjects(argumentsJson)
+
+    /** The `url` argument as a permission subject; shared with `web_inspect`. */
+    internal fun urlSubjects(argumentsJson: String): List<PermissionSubject>? =
         runCatching { json.decodeFromString<FetchUrlArgs>(argumentsJson) }.getOrNull()
             ?.let { urlSubject(it.url) }?.let { listOf(PermissionSubject(it)) }
 
@@ -56,12 +59,25 @@ class FetchUrlTool(
         return "$scheme://$host${port?.let { ":$it" } ?: ""}${uri.rawPath.orEmpty()}${uri.rawQuery?.let { "?$it" } ?: ""}"
     }
 
-    override suspend fun execute(argumentsJson: String): String = withContext(Dispatchers.IO) {
+    override suspend fun execute(argumentsJson: String): String {
         val args = json.decodeFromString<FetchUrlArgs>(argumentsJson)
-        val start = URI.create(args.url)
+        return fetch(args.url) { response, uri, from ->
+            val contentType = response.headers().firstValue("Content-Type").orElse("")
+            val body = if (!args.raw && isHtml(contentType, response.body())) htmlToText(response.body(), uri.toString())
+                       else response.body()
+            "HTTP ${response.statusCode()} $uri$from\n\n${capped(body)}"
+        }
+    }
+
+    /**
+     * GETs [url], following redirects with the private-address check on every hop, and hands the final response, its URI
+     * and a " (redirected from ...)" note (or "") to [render]. Errors come back as text. Shared with `web_inspect`.
+     */
+    internal suspend fun fetch(url: String, render: (HttpResponse<String>, URI, String) -> String): String = withContext(Dispatchers.IO) {
+        val start = URI.create(url)
 
         require(start.scheme == "http" || start.scheme == "https") {
-            "Only http/https URLs are allowed: ${args.url}"
+            "Only http/https URLs are allowed: $url"
         }
 
         // Cookies live for this one call only: enough for sites that bounce a fresh visitor through a
@@ -76,11 +92,7 @@ class FetchUrlTool(
             cookies.put(uri, response.headers().map())
             val location = response.headers().firstValue("Location").orElse(null)
             if (response.statusCode() !in REDIRECT_STATUSES || location == null) {
-                val from = if (uri != start) " (redirected from $start)" else ""
-                val contentType = response.headers().firstValue("Content-Type").orElse("")
-                val body = if (!args.raw && isHtml(contentType, response.body())) htmlToText(response.body(), uri.toString())
-                           else response.body()
-                return@withContext "HTTP ${response.statusCode()} $uri$from\n\n${capped(body)}"
+                return@withContext render(response, uri, if (uri != start) " (redirected from $start)" else "")
             }
             val next = uri.resolve(location)
             if (next.scheme != "http" && next.scheme != "https") {
@@ -133,6 +145,6 @@ class FetchUrlTool(
         return (if (title.isNotEmpty()) "Title: $title\n\n" else "") + text
     }
 
-    private fun capped(body: String): String =
+    internal fun capped(body: String): String =
         if (body.length > MAX_RESULT_CHARS) body.take(MAX_RESULT_CHARS) + "\n... response truncated" else body
 }
