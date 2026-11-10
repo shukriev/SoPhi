@@ -119,7 +119,7 @@ class RuntimeBuilder {
     private var mcpClientManager: McpClientManager? = null
     private var credentialStore: dev.sophi.core.credentials.CredentialStore? = null
     private val secretMask = dev.sophi.core.credentials.SecretMask()
-    private var onMcpSignInNeeded: (String) -> Unit = {}
+    private var onMcpSignInNeeded: (String) -> Unit = { System.err.println(dev.sophi.mcp.auth.signInNotice(it)) }
     private var mcpWiring: Triple<dev.sophi.mcp.McpConnector, dev.sophi.mcp.McpConnector, dev.sophi.mcp.auth.McpOAuth?>? = null
     private var providedRegistry: ToolRegistry? = null
     private var loopGuardPolicy: LoopGuardPolicy = LoopGuardPolicy.NEVER_CONTINUE
@@ -192,7 +192,7 @@ class RuntimeBuilder {
         credentialStore = store ?: dev.sophi.core.credentials.KeychainCredentialStore(mask = secretMask)
     }
 
-    /** Told when a signed-in MCP server's sign-in stops working (refresh refused), once per failure. */
+    /** Told when an MCP server needs sign-in (none stored, or refresh refused), at connect or mid-session; once per failure streak. Default: stderr. */
     fun onMcpSignInNeeded(callback: (server: String) -> Unit): RuntimeBuilder = apply { onMcpSignInNeeded = callback }
 
     /** Tests only: the connectors and sign-in the built manager uses. */

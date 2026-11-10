@@ -60,7 +60,7 @@ class McpTool(
         } catch (e: TimeoutCancellationException) {
             "Error: MCP tool '$remoteName' timed out after $timeout"
         } catch (e: Exception) {
-            "Error: ${(e.signInRequired() ?: e).message}"
+            e.signInRequired()?.let { "Error: ${it.message}. Retrying won't help: tell the user to sign in." } ?: "Error: ${e.message}"
         }
     )
 }

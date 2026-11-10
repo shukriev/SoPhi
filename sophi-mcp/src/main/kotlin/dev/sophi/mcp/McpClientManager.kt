@@ -64,8 +64,8 @@ class McpClientManager(
         } catch (e: Exception) {
             val signIn = e.signInRequired()
             val message = e.message?.let(mask::mask)
-            if (signIn != null) System.err.println("${config.name} needs sign-in — run `sophi mcp login ${config.name}`")
-            else System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: $message")
+            // A sign-in refusal was already told through McpOAuth's onSignInNeeded.
+            if (signIn == null) System.err.println("Warning: MCP server '${config.name}' failed to connect or list tools: $message")
             // A secret can't ride out in the exception: callers show its message, and its cause chain may hold the value.
             onFailure(signIn ?: if (e is MissingSecretException) e else Exception(message))
             emptyList()
