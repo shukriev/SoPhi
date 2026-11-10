@@ -41,7 +41,8 @@ fun main(args: Array<String>) {
             TournamentCommand().subcommands(TournamentRunCommand(), TournamentPromoteCommand(), TournamentStatusCommand()),
             ConfigCommand().subcommands(ConfigActivateCommand(), ConfigSeedCommand()),
             SetupCommand().subcommands(SetupLocalCommand()),
-            DoctorCommand()
+            DoctorCommand(),
+            BriefingCommand()
         )
         .main(args)
     exitProcess(0)
