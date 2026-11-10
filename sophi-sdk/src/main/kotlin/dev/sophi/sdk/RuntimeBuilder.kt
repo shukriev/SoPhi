@@ -104,6 +104,8 @@ class RuntimeBuilder {
     /** The most of one tool result the model sees at once; the rest is paged with `result_read`. A small window shrinks it to 20% of the window. */
     var resultPageChars: Int = dev.sophi.core.tools.DEFAULT_RESULT_PAGE_CHARS
     var skillsDir: Path = Path.of(System.getProperty("user.home"), ".sophi", "skills")
+    /** Plugins installed by `sophi install git:...`; each loads only while its jar matches its pin (see [InstalledPlugins]). */
+    var pluginsDir: Path = InstalledPlugins.DEFAULT_DIR
     var memoryHome: Path = JanesPalaceConfig.DEFAULT_HOME
     /** The shared server root memory lives on; null = shared only when [memoryHome] is the default (ADR-041 M6),
      *  embedded at any other home. Tests set both to temp directories. */
@@ -501,7 +503,7 @@ class RuntimeBuilder {
             val cfg = checkNotNull(builtinToolsConfig) { "checkpoints() needs builtinTools(root)" }
             CheckpointStore(cfg.root, home, onWarning = warn)
         }
-        val pluginRegistry = PluginRegistry().also { r -> plugins.forEach { r.register(it) } }
+        val pluginRegistry = PluginRegistry().also { r -> (plugins + InstalledPlugins.load(pluginsDir)).forEach { r.register(it) } }
         val reads = readCheckConfig?.first ?: if (guardianConfig != null) dev.sophi.core.tools.GateMode.SHADOW else dev.sophi.core.tools.GateMode.OFF
         // The start model's name: the metered provider sends it to the session's active model.
         val guardian = if (guardianConfig == null && reads == dev.sophi.core.tools.GateMode.OFF) null else dev.sophi.core.tools.LlmGuardian(

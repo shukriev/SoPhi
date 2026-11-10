@@ -26,12 +26,12 @@ object SkillLock {
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
     /** A missing or unreadable lock reads as empty, so a damaged file never hides skills. */
-    fun read(dir: Path): Map<String, SkillPin> = runCatching {
-        dir.resolve(FILE).takeIf { it.exists() }?.let { json.decodeFromString<Map<String, SkillPin>>(it.readText()) }
+    fun read(dir: Path, file: String = FILE): Map<String, SkillPin> = runCatching {
+        dir.resolve(file).takeIf { it.exists() }?.let { json.decodeFromString<Map<String, SkillPin>>(it.readText()) }
     }.getOrNull() ?: emptyMap()
 
-    fun write(dir: Path, pins: Map<String, SkillPin>) =
-        dir.resolve(FILE).writeText(json.encodeToString<Map<String, SkillPin>>(pins.toSortedMap()))
+    fun write(dir: Path, pins: Map<String, SkillPin>, file: String = FILE) =
+        dir.resolve(file).writeText(json.encodeToString<Map<String, SkillPin>>(pins.toSortedMap()))
 
     /** SoPhi's own writers call this after changing a skill, so a pinned skill they edit keeps loading. */
     fun repinIfPinned(dir: Path, id: String, by: String) {

@@ -140,8 +140,8 @@ class SkillInstaller {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** The folder to install from, the commit it is at (null for a local path), and its cleanup. */
-    private fun resolveSource(source: String): Triple<Path, String?, () -> Unit> {
+    /** The folder to install from, the commit it is at (null for a local path), and its cleanup. Plugin installs reuse it. */
+    fun resolveSource(source: String): Triple<Path, String?, () -> Unit> {
         if (source.startsWith("http://") || source.startsWith("https://") ||
             source.startsWith("git@") || source.startsWith("file://")
         ) {
