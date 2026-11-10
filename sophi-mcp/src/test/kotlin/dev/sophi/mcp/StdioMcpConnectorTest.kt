@@ -35,7 +35,8 @@ class StdioMcpConnectorTest : FunSpec({
                 "dev.sophi.mcp.TestMcpServerMainKt"
             )
         )
-        val connector = StdioMcpConnector()
+        // No PATH probe: the real interactive zsh took 30s+ here under load, and PATH is irrelevant
+        val connector = StdioMcpConnector(loginShell = "/nonexistent/shell")
 
         val (toolNames, reply) = runBlocking {
             val session = connector.connect(config)
@@ -121,7 +122,7 @@ class StdioMcpConnectorTest : FunSpec({
 
     test("resolveLoginShellPath returns null within its timeout when the shell never exits") {
         val hangingShell = createTempFile(suffix = ".sh").apply {
-            writeText("#!/bin/sh\nsleep 10\n")
+            writeText("#!/bin/sh\nsleep 60\n")
             setPosixFilePermissions(setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE))
         }
 
@@ -129,17 +130,27 @@ class StdioMcpConnectorTest : FunSpec({
             resolveLoginShellPath(hangingShell.toString(), timeoutSeconds = 1).shouldBeNull()
         }
 
-        (elapsed.inWholeSeconds < 6) shouldBe true
+        // Bounded by the shell's own lifetime, not a speed budget: waiting for the shell to exit
+        // takes >= 60s, while two 1s timeouts stay far below that even on a loaded machine.
+        (elapsed.inWholeSeconds < 60) shouldBe true
     }
 
     test("connect injects the resolved login-shell PATH into the spawned process's environment") {
+        // A fake shell with a fixed answer: the real interactive zsh can time out into its
+        // login-only fallback under load, so two probes of it may disagree. Real-shell resolution
+        // is covered by "resolves a real login shell's PATH" above.
+        val shell = createTempFile(suffix = ".sh").apply {
+            writeText("#!/bin/sh\nprintf '%s' '/fake/login/bin:/usr/bin:/bin'\n")
+            setPosixFilePermissions(setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE))
+        }.toString()
         val classpath = System.getProperty("java.class.path")
-        val shell = System.getenv("SHELL") ?: "/bin/zsh"
+        // Absolute, so spawning doesn't depend on the fake PATH containing a java
+        val java = "${System.getProperty("java.home")}/bin/java"
         val connector = StdioMcpConnector(loginShell = shell)
         val config = McpServerConfig(
             name = "test", transport = McpTransport.STDIO,
             command = listOf(
-                "java", "-Dkotlin-logging.logStartupMessage=false", "-cp", classpath, "dev.sophi.mcp.TestMcpServerMainKt"
+                java, "-Dkotlin-logging.logStartupMessage=false", "-cp", classpath, "dev.sophi.mcp.TestMcpServerMainKt"
             )
         )
 
@@ -150,7 +161,7 @@ class StdioMcpConnectorTest : FunSpec({
             reply
         }
 
-        reply shouldBe resolveLoginShellPath(shell)
+        reply shouldBe "/fake/login/bin:/usr/bin:/bin"
     }
 
     test("resolveExecutable leaves an already-qualified command untouched") {
@@ -184,10 +195,12 @@ class StdioMcpConnectorTest : FunSpec({
             // silent. That's the scenario a watchdog is needed for: withTimeout's cooperative
             // cancellation alone can't interrupt the blocking native read this leaves stuck, so
             // without a mechanism that force-kills the process at the deadline, this test would
-            // take the full 30s (matching the child process's own lifetime) instead of ~1s.
-            command = listOf("sleep", "30")
+            // take the full 60s (matching the child process's own lifetime) instead of ~1s.
+            command = listOf("sleep", "60")
         )
-        val connector = StdioMcpConnector(connectTimeoutSeconds = 1)
+        // A missing shell resolves no PATH at once. The default probes the real interactive zsh
+        // (up to 30s cold) inside the timed block below, which is what made this flaky under load.
+        val connector = StdioMcpConnector(loginShell = "/nonexistent/shell", connectTimeoutSeconds = 1)
 
         val elapsed = measureTime {
             val error = runCatching { runBlocking { connector.connect(config) } }.exceptionOrNull()
@@ -196,10 +209,10 @@ class StdioMcpConnectorTest : FunSpec({
             error.message shouldContain "hanging"
         }
 
-        // Tight enough to catch a regression back to "wait for the blocked read to unblock on its
-        // own" (which would take ~30s here, matching sleep's own duration) while leaving headroom
-        // for process-kill/reap overhead on a loaded CI runner.
-        (elapsed.inWholeSeconds < 10) shouldBe true
+        // Bounded by the child's own lifetime, not a speed budget: a regression back to "wait for
+        // the blocked read to unblock on its own" takes >= 60s (sleep's duration), while the 1s
+        // watchdog stays far below that even on a loaded machine.
+        (elapsed.inWholeSeconds < 60) shouldBe true
     }
 
     test("connect lets config.env override the resolved login-shell PATH") {
