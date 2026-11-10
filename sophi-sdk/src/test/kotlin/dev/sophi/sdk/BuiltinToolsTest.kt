@@ -28,6 +28,10 @@ class BuiltinToolsTest : FunSpec({
         names shouldContain "invoke_claude_code"
     }
 
+    test("buildBuiltinTools registers web_inspect, deferred until tool_search loads it") {
+        buildBuiltinTools(tempdir().toPath(), braveApiKey = null).single { it.name == "web_inspect" }.deferred shouldBe true
+    }
+
     test("buildBuiltinTools registers sqlite_show, deferred until tool_search loads it") {
         buildBuiltinTools(tempdir().toPath(), braveApiKey = null).single { it.name == "sqlite_show" }.deferred shouldBe true
     }
