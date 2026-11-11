@@ -270,6 +270,51 @@ class PlanRunnerTest : FunSpec({
         outcome.planVersionCount shouldBe 2
     }
 
+    // Playbook plan-1, live: three steps all Done, but the judge was shown only step 3's "appended to
+    // CHANGELOG.md", so it could not confirm settings.ini and said NO — replanned until Exhausted.
+    test("the goal judge sees every step's result, so a goal met across several steps is not replanned") {
+        val outputs = mapOf("READ_DOC" to "retry limit is 7", "CREATE_INI" to "wrote settings.ini", "APPEND_LOG" to "appended to CHANGELOG.md")
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } answers {
+            val input = firstArg<CompletionRequest>().messages.last().content
+            flowOf(StreamEvent.Content(outputs.entries.last { it.key in input }.value))
+        }
+        // A judge that says YES exactly when the evidence it is shown covers the whole goal.
+        coEvery { provider.complete(any()) } answers {
+            val prompt = firstArg<CompletionRequest>().messages.single().content
+            LLMResponse.Text(if (outputs.values.all { it in prompt }) "YES" else "NO", TokenUsage(1, 1))
+        }
+        val planner = mockk<Planner>()
+        coEvery { planner.plan(any(), any()) } returns Plan(
+            id = "plan_1", goalPrompt = "goal",
+            steps = listOf(
+                PlanStep(id = "s1", instruction = "READ_DOC"),
+                PlanStep(id = "s2", instruction = "CREATE_INI", dependsOn = listOf("s1")),
+                PlanStep(id = "s3", instruction = "APPEND_LOG", dependsOn = listOf("s2"))
+            )
+        )
+
+        val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
+
+        outcome.finalStatus shouldBe PlanFinalStatus.Met
+        outcome.replans shouldHaveSize 0
+        outcome.finalOutput shouldBe "appended to CHANGELOG.md"
+    }
+
+    test("a judge verdict after a think block or in bold still reads as YES") {
+        for (reply in listOf("<think>the file has 7, so yes</think>\n\nYES", "the file has 7.</think>\nYES", "**YES**")) {
+            val provider = mockk<LLMProvider>()
+            every { provider.stream(any()) } returns flowOf(StreamEvent.Content("done"))
+            coEvery { provider.complete(any()) } returns LLMResponse.Text(reply, TokenUsage(1, 1))
+            val planner = mockk<Planner>()
+            coEvery { planner.plan(any(), any()) } returns singleStepPlan()
+
+            val outcome = runBlocking { runner(provider, planner).run("parent", "goal", StopCondition.LlmJudged) }
+
+            outcome.finalStatus shouldBe PlanFinalStatus.Met
+        }
+    }
+
     test("a low-confidence step escalates once to a stronger model") {
         val provider = mockk<LLMProvider>()
         val capturedModels = mutableListOf<String>()
