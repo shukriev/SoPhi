@@ -23,7 +23,10 @@ class ArcadeLogConfigTest : FunSpec({
 
     test("opening a store points ArcadeDB at Sophi's log config: home-dir log file, quiet console") {
         withProperty(null) {
-            EmbeddedArcadeStore.open(createTempDirectory("arcade-log-test")).close()
+            // production config logs under %h: if this is the JVM's first ArcadeDB use, keep it off the real home
+            val home = System.getProperty("user.home")
+            System.setProperty("user.home", createTempDirectory("arcade-log-home").toString())
+            try { EmbeddedArcadeStore.open(createTempDirectory("arcade-log-test")).close() } finally { System.setProperty("user.home", home) }
 
             val file = System.getProperty(LOG_CONFIG_PROPERTY)
             file shouldNotBe null
