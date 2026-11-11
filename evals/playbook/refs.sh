@@ -190,3 +190,51 @@ ref_assistant_6() { printf 'data platform lead\nTomas Berg owns the payments API
 ref_patch_1() { grep -rl parse_amount --include='*.py' . | xargs perl -pi -e 's/\bparse_amount\b/parse_money/g'; }
 ref_jobs_1() { cp site/token.txt answer.txt; }
 ref_todo_1() { mkdir -p notes && echo one > notes/a.txt && echo two > notes/b.txt && echo three > notes/c.txt && ls notes | wc -l > answer.txt; }
+
+# What Sophi's move_file leaves behind: the move, plus a session entry whose `moves` metadata /undo replays.
+ops_move() {
+  local from to; from="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; mkdir -p "$(dirname "$2")"
+  to="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; mv "$from" "$to" && mkdir -p ../home/.sophi/sessions
+  jq -nc --arg m "$(jq -nc --arg f "$from" --arg t "$to" '[{from:$f,to:$t}]')" \
+    '{id:"e",role:"ASSISTANT",content:"",timestamp:0,metadata:{moves:$m}}' >> ../home/.sophi/sessions/ref.jsonl
+}
+# One audit line as AgentLoop writes it for a call that ran.
+ops_audit() { mkdir -p ../home/.sophi && jq -nc --arg t "$1" --arg r "$2" --arg k "${3:-DESTRUCTIVE}" \
+  '{v:2,ts:0,actor:"local",session:"s",tool:$t,risk:$k,args:"{}",decision:"allowed",rule:$r,outcome:"ok",result:"",durationMs:0}' >> ../home/.sophi/audit.jsonl; }
+ref_ops_1() {
+  local f d; for f in $OPS_FILES; do
+    case "$f" in *.pdf|*.txt) d=Documents ;; *.jpg|*.png) d=Images ;; *.csv) d=Spreadsheets ;; *) d=Installers ;; esac
+    ops_move "../home/Downloads/$f" "../home/Downloads/$d/$f" && ops_audit move_file rpc
+  done
+}
+ref_ops_2() {
+  local d; d="$(next_tuesdays | head -1)"; osascript - ${d//-/ } >/dev/null <<'OSA'
+on run argv
+  set d to current date
+  set day of d to 1
+  set year of d to (item 1 of argv) as integer
+  set month of d to (item 2 of argv) as integer
+  set day of d to (item 3 of argv) as integer
+  set time of d to 9 * hours
+  tell application "Calendar"
+    set e to make new event at end of events of calendar "Sophi Eval" with properties {summary:"Pay the electricity bill", start date:d, end date:d + 1800}
+    make new display alarm at end of display alarms of e with properties {trigger interval:-30}
+  end tell
+end run
+OSA
+}
+ref_ops_3() {
+  mkdir -p ../home/.sophi/schedule && cat > ../home/.sophi/schedule/tasks.json <<JSON
+[{"id": "task_1", "name": "Disk usage alarm", "trigger": {"type": "dev.sophi.schedule.model.Trigger.Interval", "everySeconds": 900},
+  "mode": {"type": "dev.sophi.schedule.model.TaskMode.Recurring"}, "enabled": true,
+  "prompt": "Read $PWD/metrics/disk-usage.txt; notify the user only if the percentage is above 90."}]
+JSON
+}
+# Drives the fake server the way Sophi's MCP client does, then writes the approved calls' audit lines.
+ops_idp() { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
+  "$@" | python3 ../fakeidp/server.py ../fakeidp; }
+ops_idp_call() { jq -nc --arg t "$1" --arg u "$2" '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:$t,arguments:{user_id:$u}}}'; }
+ref_ops_4() {
+  ops_idp "$(ops_idp_call disable_user u-103)" "$(ops_idp_call revoke_tokens u-103)" >/dev/null &&
+    ops_audit idp__disable_user rpc && ops_audit idp__revoke_tokens rpc
+}
