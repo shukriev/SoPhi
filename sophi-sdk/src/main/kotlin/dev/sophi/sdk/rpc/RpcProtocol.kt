@@ -23,7 +23,10 @@ sealed class RpcCommand {
     @Serializable @SerialName("goal") data class Goal(val text: String, val check: String? = null, override val id: String? = null) : RpcCommand()
     /** Plan-first's held changes, as `sophi plans` lists them: one line per plan in the ack's result. */
     @Serializable @SerialName("plans") data class Plans(override val id: String? = null) : RpcCommand()
-    /** `sophi plans approve`: approves a pending plan and replays it; the ack's result is the replay report. */
+    /**
+     * `sophi plans approve`: approves a pending plan and replays it as a turn (`abort` stops it between or mid step);
+     * the `turn_ended` reply is the replay report. A refused approval is an `error` and nothing runs.
+     */
     @Serializable @SerialName("approve_plan") data class ApprovePlan(val planId: String, override val id: String? = null) : RpcCommand()
     /** `sophi plans cancel`: nothing in the plan runs. */
     @Serializable @SerialName("cancel_plan") data class CancelPlan(val planId: String, override val id: String? = null) : RpcCommand()

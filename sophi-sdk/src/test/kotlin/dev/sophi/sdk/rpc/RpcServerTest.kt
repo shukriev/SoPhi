@@ -122,19 +122,81 @@ class RpcServerTest : FunSpec({
         r.input.close(); job.join()
     }
 
-    test("approve_plan approves, replays the steps and acks the replay report") {
+    test("approve_plan approves and replays the steps as a turn whose reply is the replay report") {
         val okta = Outside()
         val (r, job, id) = planned(okta)
         r.send("""{"type":"approve_plan","planId":"$id","id":"7"}""")
-        r.awaitType("ack")
-        field(r.last("ack"), "id") shouldBe "7"
-        field(r.last("ack"), "command") shouldBe "approve_plan"
-        field(r.last("ack"), "result") shouldBe "Plan $id: 1 ok"
+        r.awaitType("turn_ended", 2)
+        field(r.last("turn_started"), "input") shouldBe "approve_plan $id"
+        field(r.last("turn_ended"), "reply") shouldBe "Plan $id: 1 ok"
+        field(r.last("turn_ended"), "stopReason") shouldBe "Completed"
         okta.calls.size shouldBe 1
         r.runtime.plan(id)!!.status shouldBe PlanStatus.DONE
         r.input.close(); job.join()
         // The outcome note lands on the live session, so the next turn sees it.
         r.runtime.sessionManager.load(r.server.sessionId).entries.last().metadata["plan"] shouldBe id
+    }
+
+    test("abort during a plan replay stops it; the steps not run are recorded, other commands get a turn is running") {
+        val started = CompletableDeferred<Unit>()
+        val ran: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val slow = object : Tool {
+            override val name = "okta__deactivate_user"
+            override val description = "deactivates a user"
+            override val parametersJson = """{"type":"object","properties":{}}"""
+            override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+            override fun reach(argumentsJson: String) = Reach.OUTSIDE_CHANGE
+            override suspend fun execute(argumentsJson: String): String { ran += argumentsJson; started.complete(Unit); awaitCancellation() }
+        }
+        fun deactivate(id: String, user: String) =
+            LLMResponse.ToolUse(listOf(ToolCall(id, slow.name, """{"user":"$user"}""")), TokenUsage(1, 0)).toStreamFlow()
+        val r = Rig(streaming(deactivate("c1", "jane"), deactivate("c2", "joe"), text("I plan two.")), tempdir().toPath(), slow)
+        val job = launch { r.server.run(r.input) }
+        r.send("""{"type":"prompt","text":"offboard two"}""")
+        r.awaitType("turn_ended")
+        val id = r.runtime.plans().single().id
+        r.runtime.plan(id)!!.steps.size shouldBe 2
+        r.send("""{"type":"approve_plan","planId":"$id","id":"7"}""")
+        started.await()
+        r.send("""{"type":"plans","id":"p"}""")
+        r.awaitType("error")
+        r.last("error") shouldContain "a turn is running"
+        r.send("""{"type":"abort","id":"a"}""")
+        r.awaitType("turn_ended", 2)
+        r.last("turn_ended") shouldContain "\"stopReason\":\"UserStopped\""
+        field(r.last("turn_ended"), "reply") shouldBe "Plan $id: 1 stopped mid-call (it may have run) · 2 not run"
+        r.types().count { it == "error" } shouldBe 1 // the abort found the replay running
+        val plan = r.runtime.plan(id)!!
+        plan.status shouldBe PlanStatus.CANCELLED
+        plan.results.map { it.outcome } shouldBe listOf("cancelled", "not-run")
+        ran.size shouldBe 1
+        r.input.close(); job.join()
+    }
+
+    // Another writer holds the output, so announcing the replay suspends; the abort, read in the same pass, lands there.
+    test("abort before the replay starts cancels the plan instead of leaving it approved") {
+        val okta = Outside()
+        val (r, job, id) = planned(okta)
+        val held = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val r2 = RpcServer(r.runtime, r.session, r.confirmations, MemoryStatus(false), { null }, out = { line: String ->
+            if ("hold" in line) { held.countDown(); release.await() }
+            r.lines.add(line)
+        })
+        r.input.close(); job.join()
+        val input = Channel<String>(Channel.UNLIMITED)
+        val run = launch { r2.run(input) }
+        r.awaitType("ready", 2)
+        val holder = launch(Dispatchers.IO) { r2.emit(RpcEvent.Error("hold")) }
+        held.await()
+        input.send("""{"type":"approve_plan","planId":"$id"}""")
+        input.send("""{"type":"abort"}""")
+        delay(200)
+        release.countDown()
+        holder.join(); input.close(); withTimeout(10_000) { run.join() }
+        r.last("turn_ended") shouldContain "\"stopReason\":\"UserStopped\""
+        r.runtime.plan(id)!!.status shouldBe PlanStatus.CANCELLED
+        okta.calls shouldBe emptyList()
     }
 
     test("approve_plan on a plan that isn't pending, or doesn't exist, is an error and runs nothing") {
