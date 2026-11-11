@@ -5,9 +5,11 @@ import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import dev.sophi.core.session.FileSessionManager
 import dev.sophi.learning.export.ExportInputs
 import dev.sophi.learning.export.ExportOptions
 import dev.sophi.learning.export.Exporter
+import dev.sophi.sdk.exportSessionHtml
 import java.nio.file.Path
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -27,8 +29,11 @@ class ExportRunner(
     }
 }
 
-class ExportCommand : CliktCommand(name = "export", help = "Export sessions as fine-tuning datasets") {
-    private val out by option("--out").default("./sophi-export-${LocalDate.now()}")
+class ExportCommand : CliktCommand(name = "export",
+    help = "Export sessions as fine-tuning datasets, or one session as a shareable HTML page (--html <session-id>)") {
+    private val html by option("--html", help = "Session id: write it as one self-contained, secret-redacted HTML file " +
+        "(--out file, default ./sophi-session-<id>.html)")
+    private val outOpt by option("--out")
     private val scope by option("--scope")
     private val since by option("--since", help = "ISO date, e.g. 2026-01-01")
     private val minJudgment by option("--min-judgment").default("success")
@@ -42,6 +47,15 @@ class ExportCommand : CliktCommand(name = "export", help = "Export sessions as f
         .default("${System.getProperty("user.home")}/.sophi/sessions")
 
     override fun run() {
+        html?.let { id ->
+            val path = try {
+                exportSessionHtml(FileSessionManager(Path.of(sessionsDirStr)), id, outOpt?.let { Path.of(it) }, force)
+            } catch (e: IllegalStateException) { throw UsageError(e.message ?: "export failed")
+            } catch (e: IllegalArgumentException) { throw UsageError(e.message ?: "export failed") } // unknown session id
+            echo("wrote $path")
+            return
+        }
+        val out = outOpt ?: "./sophi-export-${LocalDate.now()}"
         // UsageError, not echo-and-return: a script running `sophi export && train` must stop here.
         if (minJudgment !in setOf("success", "partial"))
             throw UsageError("--min-judgment must be success|partial (got '$minJudgment')")
