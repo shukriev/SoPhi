@@ -153,7 +153,12 @@ class PlanRunner(
 
             if (plan.steps.any { it.status != StepStatus.Done }) continue
 
-            if (checkStopCondition(stopCondition, goalPrompt, lastOutput)) {
+            // Every step's result, not just the last: a final "append to CHANGELOG" step says nothing
+            // about the earlier steps, and a judge shown only that could never confirm the whole goal.
+            val evidence = plan.steps.mapNotNull { step ->
+                stepOutputs[step.id]?.let { "Step ${step.id} (${step.instruction}):\n$it" }
+            }.joinToString("\n\n")
+            if (checkStopCondition(stopCondition, goalPrompt, evidence)) {
                 return finish(PlanFinalStatus.Met, lastOutput, plan, replans, decompositions, depth)
             }
             if (replans.size >= config.maxReplans || !budget.hasRoom()) {
@@ -348,17 +353,17 @@ class PlanRunner(
         }
     }
 
-    private suspend fun checkStopCondition(stopCondition: StopCondition, goalPrompt: String, lastOutput: String): Boolean =
+    private suspend fun checkStopCondition(stopCondition: StopCondition, goalPrompt: String, evidence: String): Boolean =
         when (stopCondition) {
-            is StopCondition.LlmJudged -> judge(goalPrompt, lastOutput)
+            is StopCondition.LlmJudged -> judge(goalPrompt, evidence)
             is StopCondition.ShellCheck -> {
                 val exit = shellRunner(stopCondition.command)
                 if (stopCondition.expectExitZero) exit == 0 else exit != 0
             }
         }
 
-    private suspend fun judge(goal: String, output: String): Boolean {
-        val prompt = "Goal: $goal\n\nLatest agent output:\n$output\n\n" +
+    private suspend fun judge(goal: String, stepResults: String): Boolean {
+        val prompt = "Goal: $goal\n\nResults of the plan steps, in order:\n$stepResults\n\n" +
             "Has the goal been fully achieved? Answer with exactly one word: YES or NO."
         val response = provider.complete(
             CompletionRequest(
@@ -370,7 +375,10 @@ class PlanRunner(
                 judgment = Judgments.GOAL_JUDGE
             )
         )
-        return (response as? LLMResponse.Text)?.content?.trim()?.uppercase()?.startsWith("YES") ?: false
+        // Local models may put their reasoning inline (`<think>…</think>`, or only the closing tag when the
+        // template opened it) or bold the verdict; the answer is what follows the reasoning.
+        val verdict = (response as? LLMResponse.Text)?.content?.substringAfterLast("</think>") ?: return false
+        return verdict.trim().trimStart('*', '`', '"', '\'').uppercase().startsWith("YES")
     }
 }
 
