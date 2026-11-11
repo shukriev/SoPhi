@@ -829,6 +829,20 @@ session directly as a `TOOL_RESULT` entry — the same shape the tool call itsel
 produce — letting a user force a specific skill into context without waiting on the LLM
 to decide.
 
+### Plugins from git
+
+`sophi install git:<url>[#ref] [--update]` (`InstalledPlugins`, sophi-sdk) installs a `SophiPlugin` jar.
+The format is deliberately narrow: the repo commits a prebuilt `plugin.jar` at its root that lists its
+classes in `META-INF/services/dev.sophi.extensions.SophiPlugin`. SoPhi never builds a repo or runs
+anything from it during install; a repo with only sources is refused. The fetch reuses
+`SkillInstaller.resolveSource`, and the pin reuses `SkillLock`/`SkillPin` with its own file,
+`~/.sophi/plugins/plugins.lock.json` (url, exact commit, jar SHA-256). Before anything is written the
+user sees the repo, the resolved commit, the jar hash and the declared classes, plus a plain warning that
+a plugin is trusted code, and must answer yes. An installed name is refused unless `--update` asks to
+re-resolve it, so a moved ref never changes what runs on its own. At startup `RuntimeBuilder` loads
+`~/.sophi/plugins/<name>/plugin.jar` through one `URLClassLoader` and `ServiceLoader`, skipping (with a
+warning) any jar with no pin or a hash that no longer matches. `sophi plugins list|remove <name>`.
+
 ---
 
 ## Architecture Decision Records

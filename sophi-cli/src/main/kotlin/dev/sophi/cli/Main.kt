@@ -36,6 +36,8 @@ fun main(args: Array<String>) {
             ),
             GoalCommand().subcommands(GoalRunCommand()),
             SkillCommand().subcommands(SkillInstallCommand(), SkillReviewCommand(), SkillVerifyCommand()),
+            PluginInstallCommand(),
+            PluginsCommand().subcommands(PluginsListCommand(), PluginsRemoveCommand()),
             VersionsCommand().subcommands(VersionsListCommand(), VersionsShowCommand(), VersionsRevertCommand()),
             EvalsCommand().subcommands(EvalsRunCommand()),
             TournamentCommand().subcommands(TournamentRunCommand(), TournamentPromoteCommand(), TournamentStatusCommand()),
