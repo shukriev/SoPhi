@@ -8,7 +8,7 @@ import dev.sophi.ai.api.CompletionRequest
 import dev.sophi.ai.api.LLMProvider
 import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
-import dev.sophi.core.dryrun.ChangePlan
+import dev.sophi.core.dryrun.listLine
 import dev.sophi.core.dryrun.replayReport
 import dev.sophi.sdk.Sophi
 import dev.sophi.sdk.SophiRuntime
@@ -16,22 +16,13 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlin.io.path.exists
 
 private const val PLANS_USAGE = "Usage: plans [list] | plans show|approve|run|cancel <id>"
-private val LISTED_AT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
 
 /** No one presses ESC outside the REPL: a replay runs to its end. */
 internal object NoEscInput : InputSource by NoOpInputSource {
     override suspend fun awaitEsc() = awaitCancellation()
-}
-
-private fun ChangePlan.listLine(): String {
-    val n = steps.size - dropped.size
-    return "$id  ${status.name.lowercase()}  ${LISTED_AT.format(Instant.ofEpochMilli(createdAtMs))}  $n change${if (n == 1) "" else "s"}  ${task.take(60)}"
 }
 
 /** `list` (default), `show`, `approve` (approve and run a pending plan), `run` (an approved one), `cancel`. */

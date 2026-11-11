@@ -4,6 +4,8 @@ import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.TurnInbox
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.audit.noteDecision
+import dev.sophi.core.dryrun.listLine
+import dev.sophi.core.dryrun.replayReport
 import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.tools.ConfirmationPolicy
@@ -132,6 +134,20 @@ class RpcServer(
             is RpcCommand.SetModel -> sessionCommand(cmd.id, "set_model") {
                 switchModel(cmd.model)?.let { throw IllegalArgumentException(it) }
                 cmd.model
+            }
+            is RpcCommand.Plans -> sessionCommand(cmd.id, "plans") {
+                runtime.plans().joinToString("\n") { it.listLine() }.ifEmpty { "No plans." }
+            }
+            // ponytail: the replay holds the command loop (no abort mid-replay); run it as a turn if replays get long.
+            is RpcCommand.ApprovePlan -> sessionCommand(cmd.id, "approve_plan") {
+                val plan = runtime.plan(cmd.planId) ?: throw IllegalArgumentException("No plan ${cmd.planId}")
+                runtime.approvePlan(plan.id, plan.dropped)
+                // The live session gets the outcome note when the plan is its own, so a later save can't drop it.
+                runtime.maskSecrets(runtime.runPlan(plan.id, session.takeIf { it.id == plan.sessionId }).replayReport())
+            }
+            is RpcCommand.CancelPlan -> sessionCommand(cmd.id, "cancel_plan") {
+                runtime.cancelPlan(cmd.planId)
+                "Cancelled; nothing ran."
             }
         }
     }

@@ -9,7 +9,10 @@ import dev.sophi.core.session.AgentSession
 import dev.sophi.core.session.EntryRole
 import dev.sophi.core.credentials.SecretMask
 import dev.sophi.core.tools.ConfirmationRequest
+import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
+import dev.sophi.core.dryrun.PlanFirst
+import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.core.tools.Tool
 import dev.sophi.sdk.RuntimeBuilder
 import dev.sophi.sdk.SophiRuntime
@@ -63,7 +66,7 @@ private fun type(line: String) = Json.parseToJsonElement(line).jsonObject["type"
 
 class RpcServerTest : FunSpec({
     /** A server on [llm]; [lines] is everything it wrote, [input] its stdin. */
-    class Rig(llm: LLMProvider, dir: java.nio.file.Path) {
+    class Rig(llm: LLMProvider, dir: java.nio.file.Path, extra: Tool? = null) {
         val lines: MutableList<String> = Collections.synchronizedList(mutableListOf())
         lateinit var server: RpcServer
         val confirmations = RpcConfirmations { server.emit(it) }
@@ -71,6 +74,8 @@ class RpcServerTest : FunSpec({
             provider = llm; sessionsDir = dir; model = "m"; usageLogPath = null
             confirmationPolicy(confirmations)
             tool(risky)
+            extra?.let { tool(it) }
+            planFirst(PlanFirst.OUTSIDE, dir = dir.resolve("plans"))
         }.contextWindowTokens(100_000).build()
         val session: AgentSession = runtime.sessionManager.create()
         val input = Channel<String>(Channel.UNLIMITED)
@@ -83,6 +88,81 @@ class RpcServerTest : FunSpec({
     }
 
     fun rig(llm: LLMProvider) = Rig(llm, tempdir().toPath())
+
+    /** An outside change: plan-first records it instead of running it. */
+    class Outside : Tool {
+        val calls: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        override val name = "okta__deactivate_user"
+        override val description = "deactivates a user"
+        override val parametersJson = """{"type":"object","properties":{}}"""
+        override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+        override fun reach(argumentsJson: String) = Reach.OUTSIDE_CHANGE
+        override suspend fun execute(argumentsJson: String) = "deactivated".also { calls += argumentsJson }
+    }
+
+    /** A running server whose first turn left one pending plan; returns its rig, job and plan id. */
+    suspend fun kotlinx.coroutines.CoroutineScope.planned(okta: Outside): Triple<Rig, kotlinx.coroutines.Job, String> {
+        val r = Rig(streaming(call("c1", okta.name), text("I plan to deactivate Jane.")), tempdir().toPath(), okta)
+        val job = launch { r.server.run(r.input) }
+        r.send("""{"type":"prompt","text":"offboard jane"}""")
+        r.awaitType("turn_ended")
+        return Triple(r, job, r.runtime.plans().single().id)
+    }
+
+    fun field(line: String, key: String) = Json.parseToJsonElement(line).jsonObject[key]!!.jsonPrimitive.content
+
+    test("plans lists the pending plan; nothing ran") {
+        val okta = Outside()
+        val (r, job, id) = planned(okta)
+        r.send("""{"type":"plans","id":"1"}""")
+        r.awaitType("ack")
+        field(r.last("ack"), "command") shouldBe "plans"
+        field(r.last("ack"), "result") shouldContain "$id  pending"
+        okta.calls shouldBe emptyList()
+        r.input.close(); job.join()
+    }
+
+    test("approve_plan approves, replays the steps and acks the replay report") {
+        val okta = Outside()
+        val (r, job, id) = planned(okta)
+        r.send("""{"type":"approve_plan","planId":"$id","id":"7"}""")
+        r.awaitType("ack")
+        field(r.last("ack"), "id") shouldBe "7"
+        field(r.last("ack"), "command") shouldBe "approve_plan"
+        field(r.last("ack"), "result") shouldBe "Plan $id: 1 ok"
+        okta.calls.size shouldBe 1
+        r.runtime.plan(id)!!.status shouldBe PlanStatus.DONE
+        r.input.close(); job.join()
+        // The outcome note lands on the live session, so the next turn sees it.
+        r.runtime.sessionManager.load(r.server.sessionId).entries.last().metadata["plan"] shouldBe id
+    }
+
+    test("approve_plan on a plan that isn't pending, or doesn't exist, is an error and runs nothing") {
+        val okta = Outside()
+        val (r, job, id) = planned(okta)
+        r.runtime.cancelPlan(id)
+        r.send("""{"type":"approve_plan","planId":"$id","id":"a"}""")
+        r.send("""{"type":"approve_plan","planId":"nope","id":"b"}""")
+        r.awaitType("error", 2)
+        val errors = synchronized(r.lines) { r.lines.filter { type(it) == "error" } }
+        errors[0] shouldContain "Only a pending plan can be approved; $id is cancelled"
+        errors[1] shouldContain "No plan nope"
+        okta.calls shouldBe emptyList()
+        r.input.close(); job.join()
+    }
+
+    test("cancel_plan cancels a pending plan; it can't be approved after") {
+        val okta = Outside()
+        val (r, job, id) = planned(okta)
+        r.send("""{"type":"cancel_plan","planId":"$id"}""")
+        r.awaitType("ack")
+        field(r.last("ack"), "command") shouldBe "cancel_plan"
+        r.runtime.plan(id)!!.status shouldBe PlanStatus.CANCELLED
+        r.send("""{"type":"approve_plan","planId":"$id"}""")
+        r.awaitType("error")
+        okta.calls shouldBe emptyList()
+        r.input.close(); job.join()
+    }
 
     test("ready then a prompt yields tokens and turn_ended") {
         val r = rig(streaming(text("hello")))

@@ -4,6 +4,9 @@ import dev.sophi.core.audit.LOCAL_ACTOR
 import dev.sophi.core.tools.RiskLevel
 import kotlinx.serialization.Serializable
 import java.security.MessageDigest
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /** When a turn records changes instead of making them: never, changes in another system (MCP), or every change. */
 enum class PlanFirst { OFF, OUTSIDE, EVERY }
@@ -48,6 +51,14 @@ fun ChangePlan.approvedSteps(): List<PlanStep> = steps.filter { it.n !in dropped
 fun ChangePlan.stepsHash(): String = MessageDigest.getInstance("SHA-256")
     .digest(approvedSteps().joinToString("") { it.tool + "\u0000" + it.args + "\n" }.toByteArray())
     .joinToString("") { "%02x".format(it) }
+
+private val LISTED_AT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
+
+/** One plan in a listing: `<id>  <status>  <created>  <n> change(s)  <task>`. */
+fun ChangePlan.listLine(): String {
+    val n = steps.size - dropped.size
+    return "$id  ${status.name.lowercase()}  ${LISTED_AT.format(Instant.ofEpochMilli(createdAtMs))}  $n change${if (n == 1) "" else "s"}  ${task.take(60)}"
+}
 
 /** One line a person reads: `Plan <id>: 1 ok · 2 failed: <why> · 3 not run`. */
 fun ChangePlan.replayReport(): String = "Plan $id: " + results.joinToString(" · ") { it.label() }
