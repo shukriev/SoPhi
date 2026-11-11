@@ -4,6 +4,8 @@ import dev.sophi.core.agent.TurnEvent
 import dev.sophi.core.agent.TurnInbox
 import dev.sophi.core.agent.plan.PlanLog
 import dev.sophi.core.audit.noteDecision
+import dev.sophi.core.dryrun.ChangePlan
+import dev.sophi.core.dryrun.PlanStatus
 import dev.sophi.core.dryrun.listLine
 import dev.sophi.core.dryrun.replayReport
 import dev.sophi.core.session.AgentSession
@@ -138,12 +140,14 @@ class RpcServer(
             is RpcCommand.Plans -> sessionCommand(cmd.id, "plans") {
                 runtime.plans().joinToString("\n") { it.listLine() }.ifEmpty { "No plans." }
             }
-            // ponytail: the replay holds the command loop (no abort mid-replay); run it as a turn if replays get long.
-            is RpcCommand.ApprovePlan -> sessionCommand(cmd.id, "approve_plan") {
-                val plan = runtime.plan(cmd.planId) ?: throw IllegalArgumentException("No plan ${cmd.planId}")
-                runtime.approvePlan(plan.id, plan.dropped)
-                // The live session gets the outcome note when the plan is its own, so a later save can't drop it.
-                runtime.maskSecrets(runtime.runPlan(plan.id, session.takeIf { it.id == plan.sessionId }).replayReport())
+            // Approved here, then replayed as a turn, so `abort` stops it and other commands see a turn running.
+            is RpcCommand.ApprovePlan -> {
+                if (synchronized(lock) { turn != null }) return emit(RpcEvent.Error("a turn is running", cmd.id))
+                val plan = runCatching {
+                    val plan = runtime.plan(cmd.planId) ?: throw IllegalArgumentException("No plan ${cmd.planId}")
+                    runtime.approvePlan(plan.id, plan.dropped)
+                }.getOrElse { return emit(RpcEvent.Error(it.message ?: it.toString(), cmd.id)) }
+                startIfIdle { replay(plan.id, plan.sessionId) }
             }
             is RpcCommand.CancelPlan -> sessionCommand(cmd.id, "cancel_plan") {
                 runtime.cancelPlan(cmd.planId)
@@ -226,6 +230,25 @@ class RpcServer(
         r.changePlan?.let { emit(RpcEvent.PlanReady(it.id, it.steps.size)) }
         val stop = if (r.status == GoalStatus.Failed) "Error" else "Completed"
         RpcEvent.TurnEnded(r.reply.ifEmpty { r.error?.message.orEmpty() }, stop, r.status.name)
+    }
+
+    /** The replay report is the reply; on an abort it goes out as a token first, so the stopped turn's reply carries it. */
+    private suspend fun replay(planId: String, planSession: String) = try {
+        announced("approve_plan $planId", goal = false) { relay ->
+            val report = { p: ChangePlan -> runtime.maskSecrets(p.replayReport()) }
+            try {
+                // The live session gets the outcome note when the plan is its own, so a later save can't drop it.
+                val done = runtime.runPlan(planId, session.takeIf { it.id == planSession })
+                RpcEvent.TurnEnded(report(done), if (done.status == PlanStatus.FAILED) "Error" else "Completed")
+            } catch (e: CancellationException) {
+                withContext(NonCancellable) { runtime.plan(planId)?.let { relay(TurnEvent.Token(report(it))) } }
+                throw e
+            }
+        }
+    } catch (e: CancellationException) {
+        // Aborted before the replay started (e.g. while announcing it): nothing ran, so cancel rather than leave it approved.
+        if (runtime.plan(planId)?.status == PlanStatus.APPROVED) runtime.cancelPlan(planId)
+        throw e
     }
 
     /** Emits `turn_started`, runs [body], and turns a cancellation or failure into the matching `turn_ended`. */
