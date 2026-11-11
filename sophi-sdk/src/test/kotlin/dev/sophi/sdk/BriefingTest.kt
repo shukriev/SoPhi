@@ -142,4 +142,13 @@ class BriefingTest : FunSpec({
         renderBriefing(out, listOf(w), now - 24 * h, now, ZoneOffset.UTC) shouldContain "Keyboard price: 16:13. $changed"
         outcomes(watchRuns.take(1), listOf(w), emptyList(), now - 24 * h, now) shouldBe emptyList()
     }
+
+    test("a run that had nothing to report is left out of the briefing") {
+        val t = task("d1", "Disk alarm")
+        val runs = listOf(
+            run("d1", now - 9 * h, RunOutcome.Succeeded, dev.sophi.schedule.engine.NOTHING_TO_REPORT),
+            run("d1", now - 3 * h, RunOutcome.Succeeded, "Disk usage is 95%"),
+        )
+        outcomes(runs, listOf(t), emptyList(), now - 24 * h, now).map { it.atMs } shouldBe listOf(now - 3 * h)
+    }
 })

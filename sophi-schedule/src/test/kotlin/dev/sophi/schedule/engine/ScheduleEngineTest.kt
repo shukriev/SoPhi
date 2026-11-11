@@ -294,6 +294,34 @@ class ScheduleEngineTest : FunSpec({
         notified shouldBe emptyList()
     }
 
+    test("a quiet reply in a local model's shape (think block, bold, trailing period) is logged as a success, not notified") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("<think>disk-usage.txt says 42%, below 90.</think>\n\n **`$NOTHING_TO_REPORT`.** \n"))
+        val notified = mutableListOf<RunRecord>()
+        val (engine, taskStore, runLog) = engine(provider, notifier = Notifier { _, run -> notified.add(run) })
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Once(atMs = 0L), mode = TaskMode.Recurring, prompt = "tell me only when usage is above 90%"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        notified shouldBe emptyList()
+        val run = runLog.forTask(task.id).single()
+        run.outcome shouldBe RunOutcome.Succeeded
+        run.summary shouldBe NOTHING_TO_REPORT
+        run.isQuiet() shouldBe true
+    }
+
+    test("a recurring run's system prompt tells the model how to stay quiet") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(capture(requests)) } returns flowOf(StreamEvent.Content("Usage is 95%"))
+        val (engine, taskStore, _) = engine(provider)
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        requests.first().systemPrompt!! shouldContain "reply with exactly $NOTHING_TO_REPORT"
+    }
+
     test("notifier still fires for a Recurring task with real content") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Flight tomorrow — you usually forget your passport"))
@@ -557,7 +585,7 @@ class ScheduleEngineTest : FunSpec({
         )
         val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
         kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
-        capturedSystemPrompt shouldBe "be careful"
+        capturedSystemPrompt!! shouldContain "be careful"
     }
 
     test("one task timing out does not abort concurrently-running tasks in the same tick") {

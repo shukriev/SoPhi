@@ -92,6 +92,26 @@ internal const val FAILURE_STREAK = 3
 internal fun causeKey(error: String): String =
     error.lineSequence().first().lowercase().replace(Regex("[0-9a-f]*[0-9][0-9a-f]*"), "#").trim()
 
+/** What a model run replies when it has nothing to tell the owner; [QUIET_INSTRUCTION] tells it so. */
+const val NOTHING_TO_REPORT = "NOTHING_TO_REPORT"
+
+/** Appended to every Recurring run's system prompt: without it the model can't know how to stay quiet. */
+internal const val QUIET_INSTRUCTION = "This is a scheduled run: the owner is notified of your final reply. " +
+    "If there is nothing worth telling them (the condition they asked about is not met, nothing changed), " +
+    "reply with exactly $NOTHING_TO_REPORT and nothing else."
+
+/**
+ * True when [reply]'s answer is the quiet token, as local models actually write it: after a `<think>` block,
+ * in bold or backticks, with a trailing period. `NO_RESCUE_NEEDED` is the older name (ADR-033/035 task prompts).
+ */
+internal fun isQuietReply(reply: String): Boolean =
+    reply.substringAfterLast("</think>").trim().trim('*', '`', '"', '\'', '.', ' ').uppercase() in
+        setOf(NOTHING_TO_REPORT, "NO_RESCUE_NEEDED")
+
+/** A run with nothing to tell the owner (a model's [NOTHING_TO_REPORT], a watch's [WATCH_UNCHANGED]): logged, never notified or briefed. */
+fun RunRecord.isQuiet(): Boolean =
+    summary == NOTHING_TO_REPORT || (outcome == RunOutcome.Succeeded && summary.startsWith(WATCH_UNCHANGED))
+
 class ScheduleEngine(
     private val taskStore: TaskStore,
     private val runLog: RunLog,
@@ -207,8 +227,7 @@ class ScheduleEngine(
                     coroutineScope { withContext(DenialLimit(coroutineContext.job).also { limit = it }) { when (val mode = task.mode) {
                     is TaskMode.Recurring -> {
                         val extra = pluginContext.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
-                        val effectiveConfig = if (extra == null) config
-                            else config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra).joinToString("\n\n"))
+                        val effectiveConfig = config.copy(systemPrompt = listOfNotNull(config.systemPrompt, extra, QUIET_INSTRUCTION).joinToString("\n\n"))
                         val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended + (recorder ?: EmptyCoroutineContext)) {
                             loop.turn(session, task.prompt, effectiveConfig)
                         }
@@ -251,7 +270,7 @@ class ScheduleEngine(
                     ?.also { savePendingPlan?.invoke(it) }
                 val summary = pending?.let {
                     "Plan waiting for your approval: ${it.steps.size} change${if (it.steps.size == 1) "" else "s"} — sophi plans show ${it.id}"
-                } ?: ranSummary
+                } ?: ranSummary.takeUnless { outcome !is RunOutcome.Failed && isQuietReply(it) } ?: NOTHING_TO_REPORT
                 runCatching {
                     pluginRegistry?.dispatch(
                         HookPoint.AFTER_TURN,
@@ -282,8 +301,7 @@ class ScheduleEngine(
         runLog.append(logged)
         taskStore.recordRun(task.id, logged.finishedAtMs)
         if (pauseFor != null) taskStore.update(task.id) { it.copy(enabled = false, pausedReason = pauseFor) }
-        if (!repeatSkip && !logged.summary.trim().equals("NO_RESCUE_NEEDED", ignoreCase = true) &&
-            !(task.mode is TaskMode.Watch && logged.summary.startsWith(WATCH_UNCHANGED))) notifier.notify(task, logged)
+        if (!repeatSkip && !logged.isQuiet()) notifier.notify(task, logged)
         return logged
     }
 
