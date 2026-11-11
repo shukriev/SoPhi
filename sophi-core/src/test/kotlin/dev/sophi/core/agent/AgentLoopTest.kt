@@ -730,8 +730,8 @@ class AgentLoopTest : FunSpec({
         loopWithTool.turn(session, "What is 6 times 7?", config) { if (it !is TurnEvent.RoundUsage) events.add(it) }
 
         events shouldBe listOf(
-            TurnEvent.ToolCallStarted("calculator", "{}"),
-            TurnEvent.ToolCallFinished("calculator", "42", argsJson = "{}"),
+            TurnEvent.ToolCallStarted("calculator", "{}", "call-1"),
+            TurnEvent.ToolCallFinished("calculator", "42", argsJson = "{}", callId = "call-1"),
             TurnEvent.Token("The answer is 42")
         )
     }
@@ -761,8 +761,8 @@ class AgentLoopTest : FunSpec({
 
         // durationMillis is wall-clock (0 or 1 ms here), so it's zeroed before comparing — it made this test flaky.
         events.map { if (it is TurnEvent.ToolCallFinished) it.copy(durationMillis = 0) else it } shouldBe listOf(
-            TurnEvent.ToolCallStarted("broken", "{}"),
-            TurnEvent.ToolCallFinished("broken", "Error: disk full", isError = true, argsJson = "{}"),
+            TurnEvent.ToolCallStarted("broken", "{}", "c1"),
+            TurnEvent.ToolCallFinished("broken", "Error: disk full", isError = true, argsJson = "{}", callId = "c1"),
             TurnEvent.Token("recovered")
         )
     }

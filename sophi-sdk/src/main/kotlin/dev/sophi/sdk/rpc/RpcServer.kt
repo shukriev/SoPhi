@@ -90,6 +90,13 @@ class RpcServer(
         writes.withLock { out(encodeRpcEvent(masked)) }
     }
 
+    val sessionId: String get() = session.id
+
+    /** Swaps in a fresh session and returns its id; null while a turn runs. */
+    fun newSession(): String? = synchronized(lock) {
+        if (turn != null) null else runtime.sessionManager.create().also { session = it }.id
+    }
+
     /** Emits `ready`, serves [input] until it closes, lets the running turn and its follow-ups finish, emits `exited`. */
     suspend fun run(input: ReceiveChannel<String>) = coroutineScope {
         emit(RpcEvent.Ready(session.id, runtime.config.model, runtime.provider?.name ?: "", memory))

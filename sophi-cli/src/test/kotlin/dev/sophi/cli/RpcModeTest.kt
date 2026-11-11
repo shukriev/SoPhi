@@ -30,7 +30,7 @@ class RpcModeTest : FunSpec({
     suspend fun rpc(
         stdin: String, memory: Boolean = false, lateLine: String? = null,
         reply: () -> kotlinx.coroutines.flow.Flow<StreamEvent> = { flowOf(StreamEvent.Content("hello")) },
-        tools: List<Tool> = emptyList(),
+        tools: List<Tool> = emptyList(), acp: Boolean = false,
     ) = ByteArrayOutputStream().let { bytes ->
         val llm = mockk<LLMProvider>()
         every { llm.name } returns "fake"
@@ -54,6 +54,7 @@ class RpcModeTest : FunSpec({
             switchModel = { _, _ -> null },
             stdin = System.`in`,
             stdout = PrintStream(bytes, true),
+            acp = acp,
         ) } finally { System.setIn(realIn); late.join() }
         bytes.toString().lines().filter { it.isNotBlank() }.map { Json.parseToJsonElement(it).jsonObject }
     }
@@ -68,6 +69,17 @@ class RpcModeTest : FunSpec({
             it.first() shouldBe "ready"
             it.last() shouldBe "exited"
         }
+    }
+
+    test("acp mode speaks JSON-RPC: initialize, then session/new returns the CLI's session") {
+        val sent = listOf(
+            """{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":1}}""",
+            """{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":".","mcpServers":[]}}""",
+        ).joinToString("\n", postfix = "\n")
+        val lines = rpc(sent, acp = true)
+        lines.forEach { it["jsonrpc"]!!.jsonPrimitive.content shouldBe "2.0" }
+        lines.first()["result"]!!.jsonObject["protocolVersion"]!!.jsonPrimitive.content shouldBe "1"
+        lines[1]["result"]!!.jsonObject["sessionId"] shouldNotBe null
     }
 
     test("ready reports memory off with a reason") {

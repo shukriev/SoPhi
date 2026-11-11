@@ -271,6 +271,25 @@ with its embedded hub automatically — the companion's Sessions tab shows it li
 send it a message or answer its confirmation prompts from there. No companion running, or
 `--no-remote` passed: behaves exactly as before, no difference. See ADR-023.
 
+**In your editor (ACP):** `sophi --mode acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com)
+(protocol version 1) on stdin/stdout, so Zed and other ACP clients can drive Sophi. In Zed's `settings.json`:
+
+```json
+{
+  "agent_servers": {
+    "Sophi": {
+      "type": "custom",
+      "command": "sophi",
+      "args": ["--mode", "acp"]
+    }
+  }
+}
+```
+
+Sophi works in the directory Zed starts it in (the project root) and asks before risky tool calls through
+Zed's allow/reject prompt. Not supported yet: loading past sessions, images, MCP servers passed by the editor
+(use the project's `.sophi/mcp.json`), and the editor's own file and terminal access (Sophi uses its own tools).
+
 **Good for:** local dev-tool style usage, exploring the agent loop, quick
 one-off tasks — same category as a REPL.
 

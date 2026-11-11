@@ -242,8 +242,9 @@ class SophiCli(
 
     private val mode: String by option(
         "--mode",
-        help = "interactive (default) or rpc: JSON lines on stdin/stdout for programs (editors, scripts, the eval playbook); see docs"
-    ).choice("interactive", "rpc").default("interactive")
+        help = "interactive (default); rpc: JSON lines on stdin/stdout for programs (scripts, the eval playbook); " +
+            "acp: the Agent Client Protocol on stdin/stdout, for editors such as Zed; see docs"
+    ).choice("interactive", "rpc", "acp").default("interactive")
 
     private fun cliOptions(model: String, contextWindowTokens: Int, embedding: EmbeddingChoice, resolved: ResolvedProvider) =
         CliOptions(
@@ -283,10 +284,10 @@ class SophiCli(
 
     override fun run() = runBlocking {
         if (currentContext.invokedSubcommand != null) return@runBlocking
-        // In rpc mode stdout is the protocol, so everything that prints (here and in the runtime) goes to stderr.
+        // In rpc and acp mode stdout is the protocol, so everything that prints (here and in the runtime) goes to stderr.
         // UTF-8 whatever the locale: the protocol is JSON, and tokens are often not ASCII.
         val protocolOut = java.io.PrintStream(java.io.FileOutputStream(java.io.FileDescriptor.out), true, Charsets.UTF_8)
-        if (mode == "rpc") System.setOut(System.err)
+        if (mode != "interactive") System.setOut(System.err)
         val catalog = loadModelCatalog()
         // Off the critical path: this run uses what was loaded above; a fresh file applies from the next start.
         if (catalogRefresh) kotlin.concurrent.thread(isDaemon = true, name = "sophi-catalog-refresh") {
@@ -313,7 +314,7 @@ class SophiCli(
             )
         })
         val embedding = chooseEmbedding(memoryEnabled, embeddingModel, embeddingBaseUrl, embeddingDimensions, resolved)
-        if (mode == "rpc") return@runBlocking runRpc(
+        if (mode != "interactive") return@runBlocking runRpc(
             build = { manual, onWarning, input ->
                 exitOnBadPermissionRules { buildCliRuntime(
                     // No hub in rpc mode, as with --no-remote.
@@ -323,7 +324,7 @@ class SophiCli(
                 ) }
             },
             switchModel = { cli, id -> switchModelTo(resolved, catalog, cli, id) },
-            stdin = System.`in`, stdout = protocolOut,
+            stdin = System.`in`, stdout = protocolOut, acp = mode == "acp",
         )
         val mordantTerminal = Terminal()
         val sophiTerminal = SophiTerminal.create()
@@ -564,7 +565,8 @@ private suspend fun endSession(cli: CliRuntime, say: (String) -> Unit) {
 }
 
 /**
- * `--mode rpc`: [stdin] lines are commands, [stdout] gets only protocol lines. [build] makes the runtime
+ * `--mode rpc`, or `--mode acp` when [acp] (the same server behind the Agent Client Protocol): [stdin] lines are
+ * commands, [stdout] gets only protocol lines. [build] makes the runtime
  * around the RPC confirmations (its manual policy), reports setup warnings to its second argument and
  * gets an input source that never reads stdin (a read would swallow a client command; a tripped loop guard just stops the turn).
  */
@@ -573,6 +575,7 @@ internal suspend fun runRpc(
     switchModel: suspend (CliRuntime, String) -> String?,
     stdin: java.io.InputStream,
     stdout: java.io.PrintStream,
+    acp: Boolean = false,
 ) = coroutineScope {
     lateinit var server: dev.sophi.sdk.rpc.RpcServer
     val confirmations = dev.sophi.sdk.rpc.RpcConfirmations { server.emit(it) }
@@ -585,23 +588,27 @@ internal suspend fun runRpc(
         }, NoOpInputSource)
     } catch (e: Exception) {
         if (e is kotlinx.coroutines.CancellationException) throw e
-        stdout.println(dev.sophi.sdk.rpc.encodeRpcEvent(dev.sophi.sdk.rpc.RpcEvent.Error(e.message ?: "Sophi could not start; see stderr")))
+        // ACP has no line for this: stderr already says why.
+        if (!acp) stdout.println(dev.sophi.sdk.rpc.encodeRpcEvent(dev.sophi.sdk.rpc.RpcEvent.Error(e.message ?: "Sophi could not start; see stderr")))
         stdout.flush()
         throw e as? com.github.ajalt.clikt.core.ProgramResult ?: com.github.ajalt.clikt.core.ProgramResult(1)
     }
     val memoryOn = cli.runtime.memoryPlugin != null
+    val write: (String) -> Unit = { stdout.println(it); stdout.flush() }
+    lateinit var acpServer: dev.sophi.sdk.acp.AcpServer
     server = dev.sophi.sdk.rpc.RpcServer(
         cli.runtime, cli.session, confirmations,
         dev.sophi.sdk.rpc.MemoryStatus(memoryOn, memoryWarning.get().takeUnless { memoryOn }),
-        { switchModel(cli, it) }, { stdout.println(it); stdout.flush() }, cli.planLog,
+        { switchModel(cli, it) }, if (acp) { line -> acpServer.relay(line) } else write, cli.planLog,
     )
+    if (acp) acpServer = dev.sophi.sdk.acp.AcpServer(server, { System.err.println(it) }, write)
     val lines = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
     kotlin.concurrent.thread(isDaemon = true, name = "sophi-rpc-stdin") {
         stdin.bufferedReader().useLines { it.forEach(lines::trySend) }
         lines.close()
     }
     try {
-        server.run(lines)
+        if (acp) acpServer.run(lines) else server.run(lines)
     } finally {
         endSession(cli) { System.err.println(it) }
         cli.runtime.close()
