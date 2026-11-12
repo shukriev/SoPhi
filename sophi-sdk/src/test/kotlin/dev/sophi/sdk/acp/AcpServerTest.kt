@@ -5,6 +5,9 @@ import dev.sophi.ai.api.LLMResponse
 import dev.sophi.ai.api.StreamEvent
 import dev.sophi.ai.api.TokenUsage
 import dev.sophi.ai.api.ToolCall
+import dev.sophi.core.dryrun.PlanFirst
+import dev.sophi.core.dryrun.PlanStatus
+import dev.sophi.core.tools.Reach
 import dev.sophi.core.tools.RiskLevel
 import dev.sophi.core.tools.Tool
 import dev.sophi.sdk.RuntimeBuilder
@@ -53,12 +56,23 @@ private val risky = object : Tool {
     override suspend fun execute(argumentsJson: String) = "removed"
 }
 
+/** An outside change: plan-first holds it as a plan instead of running it. */
+private class Outside : Tool {
+    val calls: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    override val name = "okta__deactivate_user"
+    override val description = "deactivates a user"
+    override val parametersJson = """{"type":"object","properties":{}}"""
+    override fun riskLevel(argumentsJson: String) = RiskLevel.DESTRUCTIVE
+    override fun reach(argumentsJson: String) = Reach.OUTSIDE_CHANGE
+    override suspend fun execute(argumentsJson: String) = "deactivated".also { calls += argumentsJson }
+}
+
 private val JsonObject.update get() = this["params"]!!.jsonObject["update"]!!.jsonObject
 private fun JsonObject.str(key: String) = this[key]?.jsonPrimitive?.content
 
 class AcpServerTest : FunSpec({
     /** An ACP server on [llm]; [lines] is everything it wrote (parsed), [input] its stdin. */
-    class Rig(llm: LLMProvider, dir: java.nio.file.Path) {
+    class Rig(llm: LLMProvider, dir: java.nio.file.Path, extra: Tool? = null) {
         val lines: MutableList<JsonObject> = Collections.synchronizedList(mutableListOf())
         lateinit var rpc: RpcServer
         lateinit var acp: AcpServer
@@ -67,6 +81,8 @@ class AcpServerTest : FunSpec({
             provider = llm; sessionsDir = dir; model = "m"; usageLogPath = null
             confirmationPolicy(confirmations)
             tool(risky)
+            extra?.let { tool(it) }
+            planFirst(PlanFirst.OUTSIDE, dir = dir.resolve("plans"))
         }.contextWindowTokens(100_000).build()
         val input = Channel<String>(Channel.UNLIMITED)
         init {
@@ -81,6 +97,7 @@ class AcpServerTest : FunSpec({
         }
         suspend fun response(id: Int) = await { it["id"]?.jsonPrimitive?.content == "$id" && "method" !in it }
         suspend fun send(line: String) = input.send(line)
+        fun said() = updates().filter { it.str("sessionUpdate") == "agent_message_chunk" }.joinToString("") { it["content"]!!.jsonObject.str("text")!! }
         fun updates() = snapshot().filter { it.str("method") == "session/update" }.map { it.update }
 
         /** initialize + session/new; returns the session id. */
@@ -195,5 +212,75 @@ class AcpServerTest : FunSpec({
         r.response(3)["result"]!!.jsonObject.str("sessionId") shouldNotBe first
         r.input.close()
         job.join()
+    }
+
+    /** A prompt whose turn held one outside change as a plan; returns the rig, its job, the session and the plan ask. */
+    suspend fun kotlinx.coroutines.CoroutineScope.held(okta: Outside): Triple<Rig, kotlinx.coroutines.Job, JsonObject> {
+        val r = Rig(streaming(call("c1", okta.name), text("I plan to deactivate Jane.")), tempdir().toPath(), okta)
+        val job = launch { r.acp.run(r.input) }
+        r.prompt(2, r.open(), "offboard jane")
+        val ask = r.await { it.str("method") == "session/request_permission" }
+        return Triple(r, job, ask)
+    }
+
+    test("a turn that held changes as a plan asks to apply them, and the prompt waits for the answer") {
+        val okta = Outside()
+        val (r, job, ask) = held(okta)
+        val call = ask["params"]!!.jsonObject["toolCall"]!!.jsonObject
+        call.str("title") shouldBe "Apply 1 held change"
+        call["content"].toString() shouldContain okta.name
+        r.updates().any { it.str("toolCallId") == call.str("toolCallId") && it.str("sessionUpdate") == "tool_call" } shouldBe true
+        r.snapshot().none { it["id"]?.jsonPrimitive?.content == "2" && "method" !in it } shouldBe true
+        okta.calls shouldBe emptyList()
+        r.input.close()
+        job.join()
+    }
+
+    test("allowing a held plan replays it and answers the prompt with the replay report") {
+        val okta = Outside()
+        val (r, job, ask) = held(okta)
+        r.send("""{"jsonrpc":"2.0","id":${ask["id"]},"result":{"outcome":{"outcome":"selected","optionId":"allow"}}}""")
+        r.response(2)["result"]!!.jsonObject.str("stopReason") shouldBe "end_turn"
+        okta.calls.size shouldBe 1
+        r.said() shouldContain "1 ok"
+        r.runtime.plans().single().status shouldBe PlanStatus.DONE
+        r.input.close()
+        job.join()
+    }
+
+    test("rejecting a held plan discards it; nothing runs") {
+        val okta = Outside()
+        val (r, job, ask) = held(okta)
+        r.send("""{"jsonrpc":"2.0","id":${ask["id"]},"result":{"outcome":{"outcome":"selected","optionId":"reject"}}}""")
+        r.response(2)["result"]!!.jsonObject.str("stopReason") shouldBe "end_turn"
+        r.said() shouldContain "Held changes discarded; nothing ran."
+        r.input.close()
+        job.join()
+        okta.calls shouldBe emptyList()
+        r.runtime.plans().single().status shouldBe PlanStatus.CANCELLED
+    }
+
+    test("session/cancel while the plan ask is pending discards the plan and answers cancelled") {
+        val okta = Outside()
+        val (r, job, _) = held(okta)
+        r.send("""{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"${r.rpc.sessionId}"}}""")
+        r.response(2)["result"]!!.jsonObject.str("stopReason") shouldBe "cancelled"
+        r.said() shouldContain "Held changes discarded; nothing ran."
+        r.input.close()
+        job.join()
+        okta.calls shouldBe emptyList()
+        r.runtime.plans().single().status shouldBe PlanStatus.CANCELLED
+    }
+
+    test("an early stop says why before the prompt is answered") {
+        val started = CompletableDeferred<Unit>()
+        val r = rig(streaming(flow { started.complete(Unit); awaitCancellation() }))
+        val job = launch { r.acp.run(r.input) }
+        r.prompt(2, r.open(), "go")
+        started.await() // the prompt is registered; stand in for the turn ending early
+        r.acp.relay("""{"type":"turn_ended","reply":"","stopReason":"LoopGuard"}""")
+        r.response(2)["result"]!!.jsonObject.str("stopReason") shouldBe "end_turn"
+        r.said() shouldBe "Stopped: the same tool calls kept failing."
+        job.cancel()
     }
 })
