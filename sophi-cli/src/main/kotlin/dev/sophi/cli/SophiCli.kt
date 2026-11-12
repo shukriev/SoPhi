@@ -542,11 +542,11 @@ private suspend fun switchModelTo(resolved: ResolvedProvider, catalog: dev.sophi
 }
 
 /** The end of every session: record its outcome, tell the hub, consolidate and close memory, close the runtime's resources. */
-private suspend fun endSession(cli: CliRuntime, say: (String) -> Unit) {
+private suspend fun endSession(cli: CliRuntime, current: String = cli.session.id, say: (String) -> Unit) {
     val session = cli.session
     // Goes through SophiRuntime.recordSessionEnd, not learningPlugin directly, so memory's
     // outcome-driven forgetting gets the same signal without this host wiring it itself.
-    runCatching { cli.runtime.recordSessionEnd(session.id) }
+    runCatching { cli.runtime.recordSessionEnd(current) }
     runCatching {
         cli.hubClient?.publish(HubEvent.SessionClosed(session.id)) // no-op if never connected
         cli.hubClient?.close()
@@ -610,7 +610,8 @@ internal suspend fun runRpc(
     try {
         if (acp) acpServer.run(lines) else server.run(lines)
     } finally {
-        endSession(cli) { System.err.println(it) }
+        // The server's current session: an earlier one (ACP session/new) was ended when it was replaced.
+        endSession(cli, server.sessionId) { System.err.println(it) }
         cli.runtime.close()
     }
 }
