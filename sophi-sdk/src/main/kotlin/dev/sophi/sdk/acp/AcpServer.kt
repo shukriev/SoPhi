@@ -241,14 +241,13 @@ private fun chunk(kind: String, s: String) = buildJsonObject { put("sessionUpdat
 
 /** Why Sophi stopped early, in plain words, so the editor shows it; null for a normal end, a cancel or an error. */
 private fun whyStopped(rpc: String) = when (rpc) {
-    "Completed", "UserStopped", "Error" -> null
+    "Completed", "UserStopped", "Error", "BudgetExceeded" -> null // the loop already streams its own budget line
     "ToolRoundCeiling" -> "Stopped: the turn used all the tool rounds it is allowed."
     "LoopGuard" -> "Stopped: the same tool calls kept failing."
     "ContextExhausted" -> "Stopped: the conversation no longer fits the model's context window."
     "CompactionThrashing" -> "Stopped: compacting the conversation kept failing to free enough room."
     "EmptyResponse" -> "Stopped: the model returned an empty reply."
     "OutputTruncated" -> "Stopped: the reply hit the model's output token limit."
-    "BudgetExceeded" -> "Stopped: this session's cost budget is spent."
     "DeniedUnattended" -> "Stopped: too many actions were denied with nobody there to approve them."
     else -> "Stopped: $rpc."
 }
