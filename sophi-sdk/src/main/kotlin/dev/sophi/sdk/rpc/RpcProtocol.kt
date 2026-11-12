@@ -50,7 +50,8 @@ sealed class RpcEvent {
     @Serializable @SerialName("follow_up_started") data class FollowUpStarted(val text: String) : RpcEvent()
     @Serializable @SerialName("model_fallback") data class ModelFallback(val from: String, val to: String, val reason: String) : RpcEvent()
     @Serializable @SerialName("usage") data class Usage(val inputTokens: Int, val outputTokens: Int, val generationMillis: Long) : RpcEvent()
-    @Serializable @SerialName("plan_ready") data class PlanReady(val planId: String, val steps: Int) : RpcEvent()
+    /** [changes] is one line per held change (`<n>. <tool> <args>`), for a host that shows the plan before approving it. */
+    @Serializable @SerialName("plan_ready") data class PlanReady(val planId: String, val steps: Int, val changes: List<String> = emptyList()) : RpcEvent()
     /** [stopReason] is `Completed` or a TurnStopReason name; [goalStatus] is set for goal runs only. */
     @Serializable @SerialName("turn_ended") data class TurnEnded(val reply: String, val stopReason: String, val goalStatus: String? = null) : RpcEvent()
     @Serializable @SerialName("ack") data class Ack(val id: String?, val command: String, val result: String? = null) : RpcEvent()
@@ -83,7 +84,7 @@ fun TurnEvent.toRpcEvent(mask: (String) -> String): RpcEvent? = when (this) {
     is TurnEvent.ToolCallFinished -> RpcEvent.ToolCallFinished(name, mask(result), isError, callId)
     is TurnEvent.SteerApplied -> RpcEvent.SteerApplied(texts)
     is TurnEvent.FollowUpStarted -> RpcEvent.FollowUpStarted(text)
-    is TurnEvent.PlanReady -> RpcEvent.PlanReady(plan.id, plan.steps.size)
+    is TurnEvent.PlanReady -> RpcEvent.PlanReady(plan.id, plan.steps.size, plan.steps.map { "${it.n}. ${it.tool} ${mask(it.args)}" })
     is TurnEvent.RoundUsage -> RpcEvent.Usage(usage.inputTokens, usage.outputTokens, generationMillis)
     is TurnEvent.ModelFallback -> RpcEvent.ModelFallback(from, to, reason)
     is TurnEvent.ConfirmationStarted, TurnEvent.ConfirmationFinished, is TurnEvent.HintedReads -> null
