@@ -23,6 +23,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -96,20 +97,34 @@ class RpcServer(
 
     val sessionId: String get() = session.id
 
-    /** Swaps in a fresh session and returns its id; null while a turn runs. */
+    /** Ids of replaced sessions whose end work [run] still owes; it finishes them before `exited`. */
+    private val ended = Channel<String>(Channel.UNLIMITED)
+
+    /**
+     * Swaps in a fresh session and returns its id; null while a turn runs. The replaced session, if it has any
+     * entries, gets [SophiRuntime.recordSessionEnd] in the background (callers hold their own locks, and the end
+     * work may ask the model); the session current at exit is the host's to end, as for any other session.
+     */
     fun newSession(): String? = synchronized(lock) {
-        if (turn != null) null else runtime.sessionManager.create().also { session = it }.id
+        if (turn != null) return null
+        val old = session
+        session = runtime.sessionManager.create()
+        if (old.entries.isNotEmpty()) ended.trySend(old.id)
+        session.id
     }
 
     /** Emits `ready`, serves [input] until it closes, lets the running turn and its follow-ups finish, emits `exited`. */
     suspend fun run(input: ReceiveChannel<String>) = coroutineScope {
         emit(RpcEvent.Ready(session.id, runtime.config.model, runtime.provider?.name ?: "", memory))
+        val ending = launch { for (id in ended) runtime.recordSessionEnd(id) }
         for (line in input) {
             if (line.isBlank()) continue
             decodeRpcCommand(line).fold({ handle(it) }, { emit(RpcEvent.Error("bad command: ${it.message}")) })
         }
         confirmations.closeInput()
         synchronized(lock) { turn }?.join()
+        ended.close()
+        ending.join()
         emit(RpcEvent.Exited)
     }
 

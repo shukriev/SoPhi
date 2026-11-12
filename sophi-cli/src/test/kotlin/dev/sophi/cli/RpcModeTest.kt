@@ -30,12 +30,11 @@ class RpcModeTest : FunSpec({
     suspend fun rpc(
         stdin: String, memory: Boolean = false, lateLine: String? = null,
         reply: () -> kotlinx.coroutines.flow.Flow<StreamEvent> = { flowOf(StreamEvent.Content("hello")) },
-        tools: List<Tool> = emptyList(), acp: Boolean = false,
+        tools: List<Tool> = emptyList(), acp: Boolean = false, dir: java.nio.file.Path = tempdir().toPath(), resume: String? = null,
     ) = ByteArrayOutputStream().let { bytes ->
         val llm = mockk<LLMProvider>()
         every { llm.name } returns "fake"
         every { llm.stream(any()) } answers { reply() }
-        val dir = tempdir().toPath()
         // The real System.in, as in production: a read from it anywhere but the rpc reader would eat a command.
         val realIn = System.`in`
         val pipe = java.io.PipedOutputStream()
@@ -45,7 +44,7 @@ class RpcModeTest : FunSpec({
         val late = kotlin.concurrent.thread { Thread.sleep(1500); lateLine?.let { pipe.write(it.toByteArray()) }; pipe.close() }
         try { runRpc(
             build = { manual, onWarning, input ->
-                val opts = optionsFor(dir).let {
+                val opts = optionsFor(dir).copy(sessionIdToResume = resume).let {
                     if (memory) it.copy(memoryEnabled = true, embeddingModel = "e", embeddingBaseUrl = "http://127.0.0.1:9/v1") else it
                 }
                 buildCliRuntime(opts, llm, Terminal(), input, onWarning, manualConfirmation = manual)
@@ -80,6 +79,27 @@ class RpcModeTest : FunSpec({
         lines.forEach { it["jsonrpc"]!!.jsonPrimitive.content shouldBe "2.0" }
         lines.first()["result"]!!.jsonObject["protocolVersion"]!!.jsonPrimitive.content shouldBe "1"
         lines[1]["result"]!!.jsonObject["sessionId"] shouldNotBe null
+    }
+
+    test("acp: a later session/new ends the earlier session once; exit ends only the current one") {
+        val dir = tempdir().toPath()
+        // A resumed conversation, so the first ACP session already has entries.
+        val sm = dev.sophi.core.session.FileSessionManager(dir.resolve("sessions"))
+        val first = sm.create().also { it.append(dev.sophi.core.session.EntryRole.USER, "hello"); sm.save(it) }.id
+        val sent = listOf(
+            """{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":1}}""",
+            """{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":".","mcpServers":[]}}""",
+            """{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":".","mcpServers":[]}}""",
+        ).joinToString("\n", postfix = "\n")
+        val lines = rpc(sent, acp = true, dir = dir, resume = first)
+        lines[1]["result"]!!.jsonObject["sessionId"]!!.jsonPrimitive.content shouldBe first
+        val second = lines[2]["result"]!!.jsonObject["sessionId"]!!.jsonPrimitive.content
+        // Ending a session writes its final (non-"open") learning outcome: one per ended session.
+        val finals = java.nio.file.Files.readAllLines(dir.resolve("learning/session-outcomes.jsonl"))
+            .map { Json.parseToJsonElement(it).jsonObject }
+            .filter { it["outcome"]!!.jsonPrimitive.content != "open" }
+            .map { it["sessionId"]!!.jsonPrimitive.content }
+        finals.sorted() shouldBe listOf(first, second).sorted()
     }
 
     test("ready reports memory off with a reason") {

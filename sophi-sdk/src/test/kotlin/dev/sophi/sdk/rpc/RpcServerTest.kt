@@ -22,6 +22,7 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.collections.shouldNotContain
@@ -66,7 +67,7 @@ private fun type(line: String) = Json.parseToJsonElement(line).jsonObject["type"
 
 class RpcServerTest : FunSpec({
     /** A server on [llm]; [lines] is everything it wrote, [input] its stdin. */
-    class Rig(llm: LLMProvider, dir: java.nio.file.Path, extra: Tool? = null) {
+    class Rig(llm: LLMProvider, dir: java.nio.file.Path, extra: Tool? = null, plugin: dev.sophi.extensions.SophiPlugin? = null) {
         val lines: MutableList<String> = Collections.synchronizedList(mutableListOf())
         lateinit var server: RpcServer
         val confirmations = RpcConfirmations { server.emit(it) }
@@ -75,6 +76,7 @@ class RpcServerTest : FunSpec({
             confirmationPolicy(confirmations)
             tool(risky)
             extra?.let { tool(it) }
+            plugin?.let { plugin(it) }
             planFirst(PlanFirst.OUTSIDE, dir = dir.resolve("plans"))
         }.contextWindowTokens(100_000).build()
         val session: AgentSession = runtime.sessionManager.create()
@@ -507,5 +509,26 @@ class RpcServerTest : FunSpec({
         job.join()
         r.last("ack") shouldContain "\"id\":\"m1\""
         r.last("error") shouldContain "unknown model bad"
+    }
+
+    test("newSession ends the session it replaces once, in the background, before exited; an empty one gets nothing") {
+        val ended: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val spy = object : dev.sophi.extensions.SophiPlugin {
+            override val name = "spy"
+            override fun hooks() = listOf(object : dev.sophi.extensions.AgentHook {
+                override val point = dev.sophi.extensions.HookPoint.ON_SESSION_END
+                override suspend fun invoke(context: dev.sophi.extensions.HookContext) { ended += context.sessionId }
+            })
+        }
+        val r = Rig(streaming(text("hi")), tempdir().toPath(), plugin = spy)
+        val job = launch { r.server.run(r.input) }
+        r.send("""{"type":"prompt","text":"hello"}""")
+        r.awaitType("turn_ended")
+        val first = r.server.sessionId
+        val second = r.server.newSession()!!
+        r.server.newSession() shouldNotBe second // the empty second is replaced without any end work
+        r.input.close(); job.join()
+        ended shouldBe listOf(first) // the current (third) session is the host's to end at exit
+        r.types().last() shouldBe "exited"
     }
 })
