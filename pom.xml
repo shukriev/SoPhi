@@ -34,6 +34,9 @@
 
     <properties>
         <test.tmpdir>${java.io.tmpdir}/sophi-tests${maven.multiModuleProjectDirectory}/${project.artifactId}</test.tmpdir>
+        <!-- Through the environment, so JVMs a test spawns (two-process tests) use it too, not ~/.sophi/log -->
+        <test.logconfig>${project.build.directory}/test-arcadedb-log.properties</test.logconfig>
+        <test.jdkopts>-Djava.util.logging.config.file=${test.logconfig}</test.jdkopts>
         <kotlin.version>2.4.0</kotlin.version>
         <spring-boot.version>4.0.5</spring-boot.version>
         <spring-ai.version>2.0.0-RC1</spring-ai.version>
@@ -289,6 +292,12 @@
                             <target>
                                 <delete dir="${test.tmpdir}" quiet="true"/>
                                 <mkdir dir="${test.tmpdir}"/>
+                                <!-- ArcadeDB logging for tests: production's config logs to ~/.sophi/log -->
+                                <echo file="${test.logconfig}">handlers = java.util.logging.ConsoleHandler, java.util.logging.FileHandler
+java.util.logging.ConsoleHandler.level = WARNING
+java.util.logging.FileHandler.pattern = ${project.build.directory}/arcadedb-test.log
+java.util.logging.FileHandler.formatter = com.arcadedb.log.LogFormatter
+</echo>
                             </target>
                         </configuration>
                     </execution>
@@ -303,7 +312,7 @@
                     <excludes><exclude>**/*IT</exclude></excludes>
                     <!-- on the command line: the JDK caches java.io.tmpdir before surefire sets its properties -->
                     <argLine>-Djava.io.tmpdir=${test.tmpdir}</argLine>
-                    <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR></environmentVariables>
+                    <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR><JDK_JAVA_OPTIONS>${test.jdkopts}</JDK_JAVA_OPTIONS></environmentVariables>
                     <!-- kotest 5.x ClassGraph scans (@AutoScan, AbstractProjectConfig); nothing here uses
                          either, and on a loaded machine the scan stalled a test JVM for 40+ minutes -->
                     <systemPropertyVariables>
@@ -323,7 +332,7 @@
                         <kotest.framework.classpath.scanning.autoscan.disable>true</kotest.framework.classpath.scanning.autoscan.disable>
                         <kotest.framework.classpath.scanning.config.disable>true</kotest.framework.classpath.scanning.config.disable>
                     </systemPropertyVariables>
-                    <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR></environmentVariables>
+                    <environmentVariables><TMPDIR>${test.tmpdir}</TMPDIR><JDK_JAVA_OPTIONS>${test.jdkopts}</JDK_JAVA_OPTIONS></environmentVariables>
                     <argLine>-Djava.io.tmpdir=${test.tmpdir}</argLine>
                     <skipITs>${skipITs}</skipITs>
                 </configuration>
