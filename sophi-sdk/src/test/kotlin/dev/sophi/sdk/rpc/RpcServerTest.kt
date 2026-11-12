@@ -513,12 +513,18 @@ class RpcServerTest : FunSpec({
 
     test("newSession ends the session it replaces once, in the background, before exited; an empty one gets nothing") {
         val ended: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val log: MutableList<String> = Collections.synchronizedList(mutableListOf())
         val spy = object : dev.sophi.extensions.SophiPlugin {
             override val name = "spy"
-            override fun hooks() = listOf(object : dev.sophi.extensions.AgentHook {
-                override val point = dev.sophi.extensions.HookPoint.ON_SESSION_END
-                override suspend fun invoke(context: dev.sophi.extensions.HookContext) { ended += context.sessionId }
-            })
+            override fun hooks() = listOf(dev.sophi.extensions.HookPoint.ON_SESSION_START, dev.sophi.extensions.HookPoint.ON_SESSION_END).map { p ->
+                object : dev.sophi.extensions.AgentHook {
+                    override val point = p
+                    override suspend fun invoke(context: dev.sophi.extensions.HookContext) {
+                        log += "$p ${context.sessionId}"
+                        if (p == dev.sophi.extensions.HookPoint.ON_SESSION_END) ended += context.sessionId
+                    }
+                }
+            }
         }
         val r = Rig(streaming(text("hi")), tempdir().toPath(), plugin = spy)
         val job = launch { r.server.run(r.input) }
@@ -526,9 +532,13 @@ class RpcServerTest : FunSpec({
         r.awaitType("turn_ended")
         val first = r.server.sessionId
         val second = r.server.newSession()!!
-        r.server.newSession() shouldNotBe second // the empty second is replaced without any end work
+        val third = r.server.newSession()!!
+        third shouldNotBe second // the empty second is replaced without any end work
         r.input.close(); job.join()
         ended shouldBe listOf(first) // the current (third) session is the host's to end at exit
+        // Each new session gets SophiRuntime.newSession's start work, once, after the old one's end.
+        log shouldBe listOf("ON_SESSION_END $first", "ON_SESSION_START $second", "ON_SESSION_START $third")
+        r.runtime.sessionManager.load(second).id shouldBe second // saved, so it can be resumed
         r.types().last() shouldBe "exited"
     }
 })

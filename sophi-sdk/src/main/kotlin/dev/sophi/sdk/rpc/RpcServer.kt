@@ -97,34 +97,37 @@ class RpcServer(
 
     val sessionId: String get() = session.id
 
-    /** Ids of replaced sessions whose end work [run] still owes; it finishes them before `exited`. */
-    private val ended = Channel<String>(Channel.UNLIMITED)
+    /** Session end and start work [run] still owes, in order; it finishes all of it before `exited`. */
+    private val lifecycle = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
     /**
-     * Swaps in a fresh session and returns its id; null while a turn runs. The replaced session, if it has any
-     * entries, gets [SophiRuntime.recordSessionEnd] in the background (callers hold their own locks, and the end
-     * work may ask the model); the session current at exit is the host's to end, as for any other session.
+     * Swaps in a fresh session, made as [SophiRuntime.newSession] makes one, and returns its id; null while a
+     * turn runs. The hooks run in the background, in order (callers hold their own locks, and the end work may
+     * ask the model): [SophiRuntime.recordSessionEnd] for the replaced session if it has any entries, then
+     * [SophiRuntime.sessionStarted] for the new one. The session current at exit is the host's to end.
      */
     fun newSession(): String? = synchronized(lock) {
         if (turn != null) return null
         val old = session
-        session = runtime.sessionManager.create()
-        if (old.entries.isNotEmpty()) ended.trySend(old.id)
-        session.id
+        session = runtime.createSession()
+        val id = session.id
+        if (old.entries.isNotEmpty()) lifecycle.trySend { runtime.recordSessionEnd(old.id) }
+        lifecycle.trySend { runtime.sessionStarted(id) }
+        id
     }
 
     /** Emits `ready`, serves [input] until it closes, lets the running turn and its follow-ups finish, emits `exited`. */
     suspend fun run(input: ReceiveChannel<String>) = coroutineScope {
         emit(RpcEvent.Ready(session.id, runtime.config.model, runtime.provider?.name ?: "", memory))
-        val ending = launch { for (id in ended) runtime.recordSessionEnd(id) }
+        val hooks = launch { for (work in lifecycle) work() }
         for (line in input) {
             if (line.isBlank()) continue
             decodeRpcCommand(line).fold({ handle(it) }, { emit(RpcEvent.Error("bad command: ${it.message}")) })
         }
         confirmations.closeInput()
         synchronized(lock) { turn }?.join()
-        ended.close()
-        ending.join()
+        lifecycle.close()
+        hooks.join()
         emit(RpcEvent.Exited)
     }
 

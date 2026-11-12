@@ -162,11 +162,13 @@ class SophiRuntime internal constructor(
     fun acceptProposal(id: String): Boolean = proposalStore.accept(id)
     fun rejectProposal(id: String, reason: String): Boolean = proposalStore.reject(id, reason)
 
-    suspend fun newSession(title: String? = null): String =
-        sessionManager.create(title).also { sessionManager.save(it) }.id.also { id ->
+    suspend fun newSession(title: String? = null): String = createSession(title).id.also { sessionStarted(it) }
+
+    /** [newSession] without the [sessionStarted] hook, for a caller that cannot suspend; it fires that itself. */
+    internal fun createSession(title: String? = null): AgentSession =
+        sessionManager.create(title).also { sessionManager.save(it) }.also {
             // Snapshotting is best-effort learning metadata; never let it break session creation.
-            runCatching { sessionManager.saveConfigSnapshot(id, config.model, config.systemPrompt) }
-            sessionStarted(id)
+            runCatching { sessionManager.saveConfigSnapshot(it.id, config.model, config.systemPrompt) }
         }
 
     /** Summarises the older part of [session] with the current model, saves it, and returns the compacted session. */
