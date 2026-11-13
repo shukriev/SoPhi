@@ -40,6 +40,21 @@ class ScheduleTaskToolTest : FunSpec({
         val task = s.list().single()
         task.name shouldContain "monitor"
         (task.trigger is Trigger.Interval) shouldBe true
+        task.mcpServers shouldBe null
+    }
+
+    test("create and update store the MCP servers (accounts) the task's runs may use") {
+        val s = store()
+        val tool = ScheduleTaskTool(s, runLog())
+        runBlocking {
+            tool.execute("""{"action":"create","name":"issues","prompt":"summarise new issues","trigger_type":"manual","mode":"recurring","mcp_servers":["github-work"]}""")
+        }
+        val task = s.list().single()
+        task.mcpServers shouldBe setOf("github-work")
+        runBlocking { tool.execute("""{"action":"update","task_id":"${task.id}","mcp_servers":["github-personal"]}""") }
+        s.get(task.id)!!.mcpServers shouldBe setOf("github-personal")
+        runBlocking { tool.execute("""{"action":"update","task_id":"${task.id}","name":"renamed"}""") }
+        s.get(task.id)!!.mcpServers shouldBe setOf("github-personal")
     }
 
     test("create with trigger_type=once persists a Trigger.Once with the parsed epoch") {

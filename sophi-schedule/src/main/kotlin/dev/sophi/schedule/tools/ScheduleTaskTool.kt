@@ -38,7 +38,8 @@ private data class ManageTaskArgs(
     @SerialName("max_iterations") val maxIterations: Int? = null,
     @SerialName("tool_grants") val toolGrants: List<String>? = null,
     @SerialName("task_id") val taskId: String? = null,
-    val url: String? = null
+    val url: String? = null,
+    @SerialName("mcp_servers") val mcpServers: List<String>? = null
 ) {
     /** Tool grants and a watch's unattended fetches both hand the task power the user should approve. */
     val grantingPower get() = action in setOf("create", "update") && toolGrants?.isNotEmpty() == true || action == "create" && mode == "watch" ||
@@ -86,6 +87,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
           "shell_command":{"type":"string","description":"Required when stop_condition_type=shell_check"},
           "max_iterations":{"type":"integer","description":"Required when mode=goal"},
           "tool_grants":{"type":"array","items":{"type":"string"},"description":"Tool names this task may call unattended without confirmation, e.g. fetch_url"},
+          "mcp_servers":{"type":"array","items":{"type":"string"},"description":"MCP servers (accounts) its runs may use, e.g. github-work; if two fit, ask the user now. Omit for all"},
           "task_id":{"type":"string","description":"Required for update, pause, resume, remove; optional filter for runs"}
         },"required":["action"]}
     """.trimIndent()
@@ -155,7 +157,8 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 trigger = trigger,
                 mode = mode,
                 prompt = prompt,
-                toolGrants = args.toolGrants.orEmpty().toSet() + listOfNotNull("fetch_url".takeIf { mode is TaskMode.Watch })
+                toolGrants = args.toolGrants.orEmpty().toSet() + listOfNotNull("fetch_url".takeIf { mode is TaskMode.Watch }),
+                mcpServers = args.mcpServers?.toSet()
             )
         )
         return "Created task ${task.id} (${task.name})"
@@ -194,6 +197,7 @@ class ScheduleTaskTool(private val store: TaskStore, private val runLog: RunLog)
                 trigger = newTrigger ?: task.trigger,
                 toolGrants = (args.toolGrants?.toSet() ?: task.toolGrants) + listOfNotNull("fetch_url".takeIf { newUrl != null }),
                 mode = newUrl?.let { TaskMode.Watch(it) } ?: task.mode,
+                mcpServers = args.mcpServers?.toSet() ?: task.mcpServers,
             )
         }
         // The new page compared with the old one's snapshot would report a bogus change: its first check starts fresh.
