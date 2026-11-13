@@ -1,6 +1,7 @@
 package dev.sophi.schedule.engine
 
 import dev.sophi.core.dryrun.ChangePlan
+import dev.sophi.core.dryrun.PLAN_TOOL_SERVER_SEPARATOR
 import dev.sophi.core.dryrun.PlanFirst
 import dev.sophi.core.dryrun.PlanRecorder
 import dev.sophi.core.dryrun.PlanStatus
@@ -192,6 +193,10 @@ class ScheduleEngine(
             withTimeout(taskTimeoutMs) {
                 task.changePlanId?.let { return@withTimeout replayChangePlan(task, it, startedAtMs) }
                 (task.mode as? TaskMode.Watch)?.let { return@withTimeout checkPage(task, it.url, startedAtMs) }
+                task.mcpServers?.firstOrNull { s -> fullRegistry.names().none { it.startsWith(s + PLAN_TOOL_SERVER_SEPARATOR) } }?.let {
+                    // ponytail: "no tools from it" = gone; a connected server that lists zero tools reads the same.
+                    error("MCP server '$it' chosen for this task is not connected (removed from mcp.json, or signed out)")
+                }
                 val session = sessionManager.create(title = "schedule:${task.name}")
                 val recorder = if (planFirst != PlanFirst.OFF && savePendingPlan != null) PlanRecorder(planFirst, trustReadOnlyHints) else null
                 sessionId = session.id
@@ -204,6 +209,9 @@ class ScheduleEngine(
                             )
                         fullRegistry.subset(def.allowedTools)
                     }
+                }.let { r ->
+                    val servers = task.mcpServers ?: return@let r
+                    r.subset(r.names().filter { n -> PLAN_TOOL_SERVER_SEPARATOR !in n || servers.any { n.startsWith(it + PLAN_TOOL_SERVER_SEPARATOR) } })
                 }
                 val loop = loopFor(task, scopedRegistry)
                 val config = AgentConfig(model = model, maxTokens = maxTokens, systemPrompt = systemPrompt)

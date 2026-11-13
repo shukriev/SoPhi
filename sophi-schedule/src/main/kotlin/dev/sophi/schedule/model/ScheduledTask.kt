@@ -15,6 +15,11 @@ data class ScheduledTask(
     val rules: List<dev.sophi.core.permissions.PermissionRule> = emptyList(),
     val subagentType: String? = null,
     /**
+     * The MCP servers (mcp.json names, so the accounts: `github-work` vs `github-personal`) chosen when the task was
+     * made. A run sees only these servers' tools and fails, naming the server, if one is gone. Null = every server.
+     */
+    val mcpServers: Set<String>? = null,
+    /**
      * Opt-in cumulative wall-clock cap: if the sum of this task's own run durations within the
      * trailing [wallClockWindowMs] already meets or exceeds this, the next run is skipped
      * (recorded as RunOutcome.Skipped) before any session is created or provider called. Null
