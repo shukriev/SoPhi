@@ -283,4 +283,33 @@ class AcpServerTest : FunSpec({
         r.said() shouldBe "Stopped: the same tool calls kept failing."
         job.cancel()
     }
+
+    test("a turn that stops early still asks about the plan it held, as the REPL does") {
+        val okta = Outside()
+        val r = Rig(streaming(call("c1", okta.name), text("")), tempdir().toPath(), okta)
+        val job = launch { r.acp.run(r.input) }
+        r.prompt(2, r.open(), "offboard jane")
+        val ask = r.await { it.str("method") == "session/request_permission" }
+        r.said() shouldContain "Stopped:"
+        r.send("""{"jsonrpc":"2.0","id":${ask["id"]},"result":{"outcome":{"outcome":"selected","optionId":"reject"}}}""")
+        r.response(2)["result"]!!.jsonObject.str("stopReason") shouldBe "end_turn"
+        r.input.close()
+        job.join()
+        r.runtime.plans().single().status shouldBe PlanStatus.CANCELLED
+    }
+
+    test("a plan held by a turn the user stopped is discarded, and the prompt answers cancelled") {
+        val started = CompletableDeferred<Unit>()
+        val r = rig(streaming(flow { started.complete(Unit); awaitCancellation() }))
+        val job = launch { r.acp.run(r.input) }
+        r.prompt(2, r.open(), "go")
+        // Stand in for a turn that held a plan and then ended without completing (cancel_plan goes the reject path's way).
+        started.await()
+        r.acp.relay("""{"type":"plan_ready","planId":"p1","steps":1}""")
+        r.acp.relay("""{"type":"turn_ended","reply":"","stopReason":"UserStopped"}""")
+        r.response(2)["result"]!!.jsonObject.str("stopReason") shouldBe "cancelled"
+        r.said() shouldContain "Held changes discarded; nothing ran."
+        r.snapshot().none { it.str("method") == "session/request_permission" } shouldBe true
+        job.cancel()
+    }
 })

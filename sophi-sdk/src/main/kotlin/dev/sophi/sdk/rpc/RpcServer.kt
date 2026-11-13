@@ -100,19 +100,26 @@ class RpcServer(
     /** Session end and start work [run] still owes, in order; it finishes all of it before `exited`. */
     private val lifecycle = Channel<suspend () -> Unit>(Channel.UNLIMITED)
 
+    /** Done once the current session's start work (and the end work queued before it) has run; turns wait for it. */
+    @Volatile private var started: Job = Job().apply { complete() }
+
     /**
      * Swaps in a fresh session, made as [SophiRuntime.newSession] makes one, and returns its id; null while a
      * turn runs. The hooks run in the background, in order (callers hold their own locks, and the end work may
      * ask the model): [SophiRuntime.recordSessionEnd] for the replaced session if it has any entries, then
-     * [SophiRuntime.sessionStarted] for the new one. The session current at exit is the host's to end.
+     * [SophiRuntime.sessionStarted] for the new one, which the session's first turn waits for.
+     * The session current at exit is the host's to end.
      */
     fun newSession(): String? = synchronized(lock) {
         if (turn != null) return null
         val old = session
         session = runtime.createSession()
         val id = session.id
+        val done = Job()
         if (old.entries.isNotEmpty()) lifecycle.trySend { runtime.recordSessionEnd(old.id) }
-        lifecycle.trySend { runtime.sessionStarted(id) }
+        // ponytail: after run() has returned the channel is closed and this work is dropped; no turn can wait on it then.
+        lifecycle.trySend { try { runtime.sessionStarted(id) } finally { done.complete() } }
+        started = done
         id
     }
 
@@ -276,6 +283,7 @@ class RpcServer(
         val partial = StringBuilder()
         return try {
             emit(RpcEvent.TurnStarted(input)) // inside the try: a cancelled job still ends the turn it announced
+            started.join() // a fresh session's start hook first; abort still cancels the wait
             body(relay(partial))
         } catch (e: CancellationException) {
             val ended = RpcEvent.TurnEnded(partial.toString(), "UserStopped", GoalStatus.Interrupted.name.takeIf { goal })
