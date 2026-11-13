@@ -322,6 +322,72 @@ class ScheduleEngineTest : FunSpec({
         requests.first().systemPrompt!! shouldContain "reply with exactly $NOTHING_TO_REPORT"
     }
 
+    test("a reply whose first line is the quiet token is quiet; the rest is kept in the record, not notified") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("<think>x</think>\n**$NOTHING_TO_REPORT**\n\nAll 3 feeds checked, no changes."))
+        val notified = mutableListOf<RunRecord>()
+        val (engine, taskStore, runLog) = engine(provider, notifier = Notifier { _, run -> notified.add(run) })
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        notified shouldBe emptyList()
+        val run = runLog.forTask(task.id).single()
+        run.summary shouldBe "$NOTHING_TO_REPORT\n\nAll 3 feeds checked, no changes."
+        run.isQuiet() shouldBe true
+    }
+
+    test("the quiet token in the middle of real content does not make a run quiet") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Feed B has a new post.\n$NOTHING_TO_REPORT for feeds A and C."))
+        val notified = mutableListOf<RunRecord>()
+        val (engine, taskStore, _) = engine(provider, notifier = Notifier { _, run -> notified.add(run) })
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual, mode = TaskMode.Recurring, prompt = "p"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        notified shouldHaveSize 1
+        notified.single().isQuiet() shouldBe false
+    }
+
+    test("a goal-mode run's planner is told how to stay quiet, and a met goal whose last step has nothing to report is not notified") {
+        val provider = mockk<LLMProvider>()
+        val requests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content("$NOTHING_TO_REPORT."))
+        coEvery { provider.complete(capture(requests)) } returnsMany listOf(
+            LLMResponse.Text("""{"steps":[{"id":"s1","instruction":"check the feeds; if nothing is new reply $NOTHING_TO_REPORT"}]}""", TokenUsage(1, 1)),
+            LLMResponse.Text("1.0", TokenUsage(1, 1)),
+            LLMResponse.Text("YES", TokenUsage(1, 1))
+        )
+        val notified = mutableListOf<RunRecord>()
+        val (engine, taskStore, runLog) = engine(provider, notifier = Notifier { _, run -> notified.add(run) })
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual,
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "tell me about new feed posts"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        requests.first().messages.joinToString { it.content } shouldContain "replies with exactly $NOTHING_TO_REPORT"
+        notified shouldBe emptyList()
+        val run = runLog.forTask(task.id).single()
+        run.outcome shouldBe RunOutcome.GoalMet
+        run.summary shouldBe NOTHING_TO_REPORT
+    }
+
+    test("an exhausted goal is notified even if its last step said nothing to report") {
+        val provider = mockk<LLMProvider>()
+        every { provider.stream(any()) } returns flowOf(StreamEvent.Content(NOTHING_TO_REPORT))
+        // Same shape as the temperature-ladder test below: "0.9" passes the critic, never the judge.
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("0.9", TokenUsage(1, 1))
+        val notified = mutableListOf<RunRecord>()
+        val (engine, taskStore, _) = engine(provider, notifier = Notifier { _, run -> notified.add(run) })
+        val task = taskStore.add(ScheduledTask(name = "t", trigger = Trigger.Manual,
+            mode = TaskMode.Goal(StopCondition.LlmJudged, maxIterations = 3), prompt = "p"))
+
+        kotlinx.coroutines.runBlocking { engine.runNow(task.id) }
+
+        notified.single().outcome shouldBe RunOutcome.GoalExhausted
+    }
+
     test("notifier still fires for a Recurring task with real content") {
         val provider = mockk<LLMProvider>()
         every { provider.stream(any()) } returns flowOf(StreamEvent.Content("Flight tomorrow — you usually forget your passport"))

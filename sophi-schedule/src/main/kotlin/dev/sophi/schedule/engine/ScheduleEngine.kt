@@ -101,17 +101,30 @@ internal const val QUIET_INSTRUCTION = "This is a scheduled run: the owner is no
     "If there is nothing worth telling them (the condition they asked about is not met, nothing changed), " +
     "reply with exactly $NOTHING_TO_REPORT and nothing else."
 
-/**
- * True when [reply]'s answer is the quiet token, as local models actually write it: after a `<think>` block,
- * in bold or backticks, with a trailing period. `NO_RESCUE_NEEDED` is the older name (ADR-033/035 task prompts).
- */
-internal fun isQuietReply(reply: String): Boolean =
-    reply.substringAfterLast("</think>").trim().trim('*', '`', '"', '\'', '.', ' ').uppercase() in
-        setOf(NOTHING_TO_REPORT, "NO_RESCUE_NEEDED")
+/** A goal run's final reply is its last step's: the planner has to write that step so it can stay quiet. */
+internal const val GOAL_QUIET_CONTEXT = "This is a scheduled run: the owner is notified of the last step's reply. " +
+    "Write the last step so that, if there is nothing worth telling them (the condition they asked about is not met, " +
+    "nothing changed), it replies with exactly $NOTHING_TO_REPORT and nothing else."
 
-/** A run with nothing to tell the owner (a model's [NOTHING_TO_REPORT], a watch's [WATCH_UNCHANGED]): logged, never notified or briefed. */
+/**
+ * The run summary for [reply] when its first line is the quiet token, as local models actually write it (after a
+ * `<think>` block, in bold or backticks, with a trailing period): [NOTHING_TO_REPORT], then any further lines kept
+ * for the record. Null when the reply has something to say. `NO_RESCUE_NEEDED` is the older name (ADR-033/035).
+ */
+internal fun quietSummary(reply: String): String? {
+    val answer = reply.substringAfterLast("</think>").trim()
+    val first = answer.lineSequence().first().trim('*', '`', '"', '\'', '.', ' ').uppercase()
+    if (first !in setOf(NOTHING_TO_REPORT, "NO_RESCUE_NEEDED")) return null
+    return listOf(NOTHING_TO_REPORT, answer.substringAfter('\n', "").trim()).filter { it.isNotEmpty() }.joinToString("\n\n")
+}
+
+/**
+ * A run with nothing to tell the owner (a model's [NOTHING_TO_REPORT], a watch's [WATCH_UNCHANGED]): logged, never
+ * notified or briefed. Only a finished run can be quiet: an exhausted goal never verified its answer.
+ */
 fun RunRecord.isQuiet(): Boolean =
-    summary == NOTHING_TO_REPORT || (outcome == RunOutcome.Succeeded && summary.startsWith(WATCH_UNCHANGED))
+    (outcome == RunOutcome.Succeeded || outcome == RunOutcome.GoalMet) && summary.lineSequence().first() == NOTHING_TO_REPORT ||
+        (outcome == RunOutcome.Succeeded && summary.startsWith(WATCH_UNCHANGED))
 
 class ScheduleEngine(
     private val taskStore: TaskStore,
@@ -259,7 +272,7 @@ class ScheduleEngine(
                         )
                         val runner = PlanRunner(loop, sessionManager, provider, planner, critic, runnerConfig, planLog = planLog)
                         val result = withContext(SessionIdContext(session.id) + dev.sophi.core.tools.Unattended + (recorder ?: EmptyCoroutineContext)) {
-                            runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext)
+                            runner.run(session.id, task.prompt, mode.stopCondition, context = pluginContext + GOAL_QUIET_CONTEXT)
                         }
                         replans = result.replans.size
                         decompositions = result.decompositions.size
@@ -278,7 +291,7 @@ class ScheduleEngine(
                     ?.also { savePendingPlan?.invoke(it) }
                 val summary = pending?.let {
                     "Plan waiting for your approval: ${it.steps.size} change${if (it.steps.size == 1) "" else "s"} — sophi plans show ${it.id}"
-                } ?: ranSummary.takeUnless { outcome !is RunOutcome.Failed && isQuietReply(it) } ?: NOTHING_TO_REPORT
+                } ?: ranSummary.takeIf { outcome is RunOutcome.Failed } ?: quietSummary(ranSummary) ?: ranSummary
                 runCatching {
                     pluginRegistry?.dispatch(
                         HookPoint.AFTER_TURN,
