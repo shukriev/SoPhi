@@ -541,4 +541,32 @@ class RpcServerTest : FunSpec({
         r.runtime.sessionManager.load(second).id shouldBe second // saved, so it can be resumed
         r.types().last() shouldBe "exited"
     }
+
+    test("a new session's first prompt waits for its start hook, and commands are still read meanwhile") {
+        val gate = CompletableDeferred<Unit>()
+        val log: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val slow = object : dev.sophi.extensions.SophiPlugin {
+            override val name = "slow"
+            override fun hooks() = listOf(object : dev.sophi.extensions.AgentHook {
+                override val point = dev.sophi.extensions.HookPoint.ON_SESSION_START
+                override suspend fun invoke(context: dev.sophi.extensions.HookContext) { gate.await(); log += "start" }
+            })
+        }
+        val llm = mockk<LLMProvider>().also {
+            every { it.name } returns "fake"
+            every { it.stream(any()) } answers { log += "turn"; text("hi") }
+        }
+        val r = Rig(llm, tempdir().toPath(), plugin = slow)
+        val job = launch { r.server.run(r.input) }
+        r.server.newSession()!!
+        r.send("""{"type":"prompt","text":"hello"}""")
+        r.send("""{"type":"plans","id":"p"}""")
+        r.awaitType("error") // the reader is not blocked: it answers while the prompt waits
+        r.last("error") shouldContain "a turn is running"
+        log shouldBe emptyList()
+        gate.complete(Unit)
+        r.awaitType("turn_ended")
+        log shouldBe listOf("start", "turn")
+        r.input.close(); job.join()
+    }
 })

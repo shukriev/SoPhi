@@ -123,9 +123,13 @@ class AcpServer(private val rpc: RpcServer, private val log: (String) -> Unit = 
             synchronized(lock) { replaying = true }
             return command(buildJsonObject { put("type", "approve_plan"); put("planId", planId); put("id", APPROVE_ID) })
         }
+        discard(planId)
+        respond(synchronized(lock) { prompt.also { prompt = null } }, buildJsonObject { put("stopReason", if (cancelled) "cancelled" else "end_turn") })
+    }
+
+    private fun discard(planId: String) {
         command(buildJsonObject { put("type", "cancel_plan"); put("planId", planId) })
         update(chunk("agent_message_chunk", "Held changes discarded; nothing ran."))
-        respond(synchronized(lock) { prompt.also { prompt = null } }, buildJsonObject { put("stopReason", if (cancelled) "cancelled" else "end_turn") })
     }
 
     /** Sends a session/request_permission about [toolCall] with Allow and Reject options; [remember] files its request id. */
@@ -170,16 +174,20 @@ class AcpServer(private val rpc: RpcServer, private val log: (String) -> Unit = 
             is RpcEvent.TurnEnded -> {
                 var plan: RpcEvent.PlanReady? = null
                 var replayed = false
+                // Like the REPL, a plan from a turn that stopped early is still asked about; one from a turn the user
+                // stopped or that failed is discarded, since nothing the user saw approved it.
+                val ask = e.stopReason != "UserStopped" && e.stopReason != "Error"
                 val id = synchronized(lock) {
-                    plan = held.takeIf { e.stopReason == "Completed" }
+                    plan = held
                     replayed = replaying
                     held = null; replaying = false; shown.clear()
-                    prompt.also { if (plan == null) prompt = null }
+                    prompt.also { if (plan == null || !ask) prompt = null }
                 } ?: return
+                if (!ask) plan?.let { discard(it.planId) }
                 if (e.stopReason == "Error") return fail(id, -32603, e.reply)
                 if (replayed && e.stopReason == "Completed") update(chunk("agent_message_chunk", e.reply)) // the replay report
                 whyStopped(e.stopReason)?.let { update(chunk("agent_message_chunk", it)) }
-                plan?.let { return askPlan(it) }
+                if (ask) plan?.let { return askPlan(it) }
                 respond(id, buildJsonObject { put("stopReason", stopReason(e.stopReason)) })
             }
             is RpcEvent.Error -> if (e.id == APPROVE_ID) {
