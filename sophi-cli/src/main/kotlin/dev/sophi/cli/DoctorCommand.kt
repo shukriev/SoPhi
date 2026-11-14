@@ -62,7 +62,7 @@ class Doctor(
     }
 }
 
-class DoctorCommand : CliktCommand(name = "doctor", help = "Check that Sophi can start: model server, settings, MCP servers, skills") {
+class DoctorCommand : CliktCommand(name = "doctor", help = "Check that SoPhi can start: model server, settings, MCP servers, skills") {
     override fun run() {
         val home = Path.of(System.getProperty("user.home"))
         val code = Doctor(

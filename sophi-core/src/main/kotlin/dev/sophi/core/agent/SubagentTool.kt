@@ -70,6 +70,12 @@ class SubagentTool(
 
     private val bg = background.takeIf { depth == 0 }
 
+    /** This tool over [registry] instead: a narrowed registry ([ToolRegistry.subset]) must narrow its subagents too. */
+    internal fun over(registry: ToolRegistry) = SubagentTool(
+        definitions, provider, registry, sessionManager, parentConfig, contextWindowTokens, depth, maxDelegationDepth,
+        confirmationPolicy, currentWindow, worktrees, background, backgroundPolicy,
+    )
+
     /** Nobody can answer an ask rule or a guardian ASK behind the conversation: those are denied whatever [backgroundPolicy] says. */
     private val unattendedPolicy = ConfirmationPolicy { requests ->
         val (asks, rest) = requests.partition { it.askRule }

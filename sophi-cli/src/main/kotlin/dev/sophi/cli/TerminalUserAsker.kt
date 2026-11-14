@@ -22,7 +22,7 @@ class TerminalUserAsker(private val terminal: Terminal, private val input: Input
         else withTimeoutOrNull(timeoutMs) { oneAtATime.withLock { prompt(question) } } ?: Answer.TimedOut
 
     private suspend fun prompt(q: UserQuestion): Answer {
-        terminal.println(TextColors.cyan("Sophi asks: ${q.text}"))
+        terminal.println(TextColors.cyan("SoPhi asks: ${q.text}"))
         q.choices.forEachIndexed { i, c -> terminal.println("  ${i + 1}. ${c.label}${c.description?.let { " — $it" } ?: ""}") }
         repeat(2) { attempt ->
             val hint = when {

@@ -17,9 +17,9 @@ class TerminalConfirmationPolicy(
         val single = requests.size == 1
         if (single) {
             val r = requests.single()
-            terminal.println(TextColors.yellow("Sophi wants to run '${r.toolName}' (${r.riskLevel}): ${r.preview ?: r.argumentsJson}"))
+            terminal.println(TextColors.yellow("SoPhi wants to run '${r.toolName}' (${r.riskLevel}): ${r.preview ?: r.argumentsJson}"))
         } else {
-            terminal.println(TextColors.yellow("Sophi wants to run ${requests.size} actions this round:"))
+            terminal.println(TextColors.yellow("SoPhi wants to run ${requests.size} actions this round:"))
             requests.forEach { r ->
                 terminal.println(TextColors.yellow("  - ${r.toolName} (${r.riskLevel}): ${r.preview ?: r.argumentsJson}"))
             }

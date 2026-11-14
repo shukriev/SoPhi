@@ -55,7 +55,7 @@ class ModelsCommand(private val catalog: () -> ModelCatalog = { loadModelCatalog
             return
         }
         if (!ModelCatalog.refreshIfStale(DEFAULT_MODELS_CACHE, maxAge = Duration.ZERO)) {
-            echo("Couldn't download ${ModelCatalog.SOURCE_URL}; keeping the catalog Sophi has.", err = true)
+            echo("Couldn't download ${ModelCatalog.SOURCE_URL}; keeping the catalog SoPhi has.", err = true)
             return
         }
         echo("Wrote ${loadModelCatalog().size()} models to $DEFAULT_MODELS_CACHE")

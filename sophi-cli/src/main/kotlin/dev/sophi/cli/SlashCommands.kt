@@ -117,7 +117,7 @@ class SlashHandler(
     private fun handleRelease(arg: String?) {
         val rt = runtime ?: return output("The read check isn't available.")
         if (!arg.isNullOrEmpty()) {
-            return output(if (rt.releaseRead(arg)) "Released $arg: it goes to Sophi with your next message."
+            return output(if (rt.releaseRead(arg)) "Released $arg: it goes to SoPhi with your next message."
                 else "No held read $arg (unknown, or already released).")
         }
         val held = rt.heldReads()

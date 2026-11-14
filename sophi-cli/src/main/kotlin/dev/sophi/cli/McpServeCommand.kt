@@ -14,7 +14,7 @@ import kotlinx.io.buffered
 
 class McpServeCommand : CliktCommand(
     name = "mcp-serve",
-    help = "Expose an allowlist of Sophi's tools as an MCP server over stdio"
+    help = "Expose an allowlist of SoPhi's tools as an MCP server over stdio"
 ) {
     private val exposeTools: List<String> by option(
         "--expose-tools",

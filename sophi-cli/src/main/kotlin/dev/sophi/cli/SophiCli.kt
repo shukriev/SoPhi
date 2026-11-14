@@ -68,7 +68,7 @@ internal fun chooseEmbedding(
 
 class SophiCli(
     private val settingsFile: Path = DEFAULT_SETTINGS_FILE
-) : CliktCommand(name = "sophi", help = "Sophi — Kotlin agent harness", invokeWithoutSubcommand = true) {
+) : CliktCommand(name = "sophi", help = "SoPhi — your AI agent, on your machine", invokeWithoutSubcommand = true) {
     private val settings = CliSettingsStore(settingsFile) { System.err.println(TextColors.yellow(it)) }
     init { readSettingsFrom(settings) }
 
@@ -295,7 +295,7 @@ class SophiCli(
         }
         val resolved = providerOptions.resolveAndWarn(catalog)
         if (resolved.info?.tools == false) System.err.println(
-            "${resolved.model}: the model catalog says it has no tool calling, so Sophi's tools may not work with it"
+            "${resolved.model}: the model catalog says it has no tool calling, so SoPhi's tools may not work with it"
         )
         val model = resolved.model
         val contextWindowTokens = resolved.contextWindowTokens
@@ -371,7 +371,7 @@ class SophiCli(
             }
         }
 
-        mordantTerminal.println(TextColors.cyan("Sophi — session ${session.id}"))
+        mordantTerminal.println(TextColors.cyan("SoPhi — session ${session.id}"))
         mordantTerminal.println(
             "Type 'exit' or 'quit' to end. Commands: /list /search /export /branch /checkout /undo /revert /compact /good /bad " +
                 "/schedule /calendar /feedback /lessons /memory /skill /plan /goal /auto /permissions /settings /model /jobs /subagents /release\n"
@@ -589,7 +589,7 @@ internal suspend fun runRpc(
     } catch (e: Exception) {
         if (e is kotlinx.coroutines.CancellationException) throw e
         // ACP has no line for this: stderr already says why.
-        if (!acp) stdout.println(dev.sophi.sdk.rpc.encodeRpcEvent(dev.sophi.sdk.rpc.RpcEvent.Error(e.message ?: "Sophi could not start; see stderr")))
+        if (!acp) stdout.println(dev.sophi.sdk.rpc.encodeRpcEvent(dev.sophi.sdk.rpc.RpcEvent.Error(e.message ?: "SoPhi could not start; see stderr")))
         stdout.flush()
         throw e as? com.github.ajalt.clikt.core.ProgramResult ?: com.github.ajalt.clikt.core.ProgramResult(1)
     }

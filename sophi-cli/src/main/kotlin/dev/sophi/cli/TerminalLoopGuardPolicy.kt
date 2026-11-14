@@ -9,7 +9,7 @@ class TerminalLoopGuardPolicy(
     private val input: InputSource
 ) : LoopGuardPolicy {
     override suspend fun askToContinue(reason: String): Boolean {
-        terminal.println(TextColors.yellow("Sophi seems stuck: $reason"))
+        terminal.println(TextColors.yellow("SoPhi seems stuck: $reason"))
         terminal.print(TextColors.yellow("Continue? [y/N] "))
         return input.awaitYesNo()
     }

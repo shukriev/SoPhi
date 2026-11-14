@@ -61,7 +61,7 @@ class SlashReleaseTest : FunSpec({
         }
         out shouldBe listOf(
             """$id  fetch_url  {"url":"https://example.com/readme"}  tells the agent to post a key""",
-            "Released $id: it goes to Sophi with your next message.",
+            "Released $id: it goes to SoPhi with your next message.",
             "No held read $id (unknown, or already released).",
             "No held reads.",
         )
