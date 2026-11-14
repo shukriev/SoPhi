@@ -1,632 +1,270 @@
 <div align="center">
 
-<h1>
-  <img src="doc/images/logo.png" width="40" valign="middle" alt="SoPhi logo"/>
-  SoPhi
-</h1>
+<img src="doc/images/logo.png" width="96" alt="SoPhi logo, a purple octopus"/>
 
-### The Kotlin-native agent harness for the JVM
+# SoPhi
 
-**Bring your own LLM. Ship an agent in three lines, not three weeks.**
+### Your AI agent, on your machine.
+
+It plans before it changes things, asks before anything risky, and can undo what it did.
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![Spring AI](https://img.shields.io/badge/Spring%20AI-2.0-6DB33F)](https://spring.io/projects/spring-ai)
+[![JVM](https://img.shields.io/badge/JVM-21+-ED8B00?logo=openjdk&logoColor=white)](https://adoptium.net)
+[![Local first](https://img.shields.io/badge/models-local%20first-2ea043)](#-for-developers)
+[![License](https://img.shields.io/badge/license-Apache%202.0-1f6feb)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-client%20%2B%20server-555)](docs/extending.md)
+[![ACP](https://img.shields.io/badge/ACP-Zed%20and%20editors-555)](docs/editors-and-rpc.md)
 
-[Architecture deep-dive →](doc/Architecture.md)
+<img src="doc/images/demo-plan-first.svg" width="760" alt="A SoPhi session: asked to offboard a user, it looks the user up, moves their folder (undoable), and holds three account changes in three systems as one plan until they are approved"/>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shukriev/SoPhi/main/scripts/get-sophi.sh | sh
+```
+
+Works with **Ollama · LM Studio · llama.cpp · any OpenAI-compatible server**, or Claude with your own key.
+SoPhi never picks a cloud model for you.
 
 </div>
 
 ---
 
-SoPhi is a set of small, composable Maven modules built around one
-battle-tested core: an agent loop with tool calling, branchable session
-persistence, and automatic context compaction. Wrap it in a **terminal
-app**, a **REST/SSE server**, or **embed it directly** in your own JVM
-app — same core, three ways to run it.
+## Who is this for?
 
-## 🧩 Modules
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### [🛠 Developers →](#-for-developers)
+Run it in your terminal or your editor, drive it over JSON from any language, or embed it in your JVM app.
+
+</td>
+<td width="33%" valign="top">
+
+### [🧭 Product owners →](#-for-product-owners)
+What it does for people today (errands, schedules, watching pages, a morning briefing) and how it stays safe.
+
+</td>
+<td width="33%" valign="top">
+
+### [🏢 Enterprises →](#-for-enterprises)
+Your hardware, your models. Permission rules, sandbox, audit log, secrets in the keychain, pinned plugins.
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🛠 For developers
+
+<details open>
+<summary><b>One agent, five ways to run it</b></summary>
+<br>
+
+| Where | How | Guide |
+|---|---|---|
+| 💻 Terminal | `sophi` — chat, `/goal`, `/plan`, `/undo`, `/settings` | [docs/cli.md](docs/cli.md) |
+| ✏️ Your editor (Zed, any ACP client) | `sophi --mode acp` | [docs/editors-and-rpc.md](docs/editors-and-rpc.md) |
+| 🔁 Any language, over JSON lines | `sophi --mode rpc` | [docs/editors-and-rpc.md](docs/editors-and-rpc.md#over-json-lines-rpc) |
+| 🧩 Inside your JVM app | `sophi-sdk` | [docs/sdk.md](docs/sdk.md) |
+| 🌐 Over HTTP | `sophi-web` — REST + SSE | [docs/http.md](docs/http.md) |
+
+All five share the same agent loop, tools, sessions and safety checks, so moving between them doesn't change behaviour.
+
+</details>
+
+<details>
+<summary><b>Embed it in three lines</b></summary>
+<br>
+
+```kotlin
+val runtime = Sophi.runtime {
+    provider = buildOpenAiCompatProvider(baseUrl = "http://localhost:11434/v1", apiKey = null, model = "qwen3:8b")
+}
+val sessionId = runtime.newSession(title = "release-check")
+println(runtime.turn(sessionId, "What changed since the last tag?"))
+```
+
+Add your own tools, grants, plugins, plan-first, undo and an audit log from the same builder. See [docs/sdk.md](docs/sdk.md).
+
+</details>
+
+<details>
+<summary><b>Extend it: MCP servers, skills, plugins, hooks</b></summary>
+<br>
+
+- **MCP servers** in `.sophi/mcp.json`: any MCP server's tools, with OAuth sign-in (`sophi mcp login <server>`) and keys from the keychain (`${secret:name}`). Large servers load their tools on demand.
+- **SoPhi as an MCP server:** `sophi mcp-serve`.
+- **Skills:** Markdown files with a short header; installs are pinned and scanned (`sophi skill install`).
+- **Plugins from git:** `sophi install git:<url>[#ref]`, pinned to a commit and the jar's SHA-256, shown before you confirm.
+- **Hooks:** before/after each turn and tool call; a hook can veto or rewrite a tool call.
+
+More in [docs/extending.md](docs/extending.md).
+
+</details>
+
+<details>
+<summary><b>How it fits together</b></summary>
+<br>
+
+```mermaid
+flowchart TB
+    T[Terminal] --> C
+    E[Editor via ACP] --> C
+    R[RPC] --> C
+    A[Your JVM app] --> C
+    H[HTTP] --> C
+    C["Agent core: loop · plan-first · undo · permission rules · audit · memory · learning"]
+    C --> M[Local or cloud model]
+    C --> X[MCP servers]
+    C --> B[Built-in tools]
+    C --> S[Schedules]
+```
+
+More in [doc/Architecture.md](doc/Architecture.md).
+
+</details>
+
+<details>
+<summary><b>All 19 modules</b></summary>
+<br>
 
 | Module | What it gives you |
 |--------|--------------------|
-| ⚡ `sophi-ai` | Provider abstraction (`LLMProvider`) + Spring AI-backed `ClaudeProvider` / `OpenAICompatProvider` |
-| 🧠 `sophi-core` | The agent loop, session tree (JSONL, branch/checkout), tool dispatch, context compaction, explicit multi-step planning (`PlanRunner`) |
-| 📚 `sophi-skills` | Load capability packages from Markdown files with YAML frontmatter |
-| 🔌 `sophi-extensions` | `SophiPlugin` / `AgentHook` — lifecycle hooks (`BEFORE_TURN`, `AFTER_TOOL`, `ON_ERROR`, ...) |
-| 🎓 `sophi-learning` | Self-learning: tool reliability stats, session-end lesson distillation, user feedback, fine-tuning dataset export |
-| 🗄️ `sophi-store` | Embedded ArcadeDB (document+graph+vector) behind a generic `ArcadeStore` layer — the storage backend under memory and versioning |
-| 🕰️ `sophi-versioning` | Generic `Version`/`VersionStore` history + revert for skills, lessons, configs, and agent definitions, plus a config tournament mechanism (`sophi versions`, `sophi tournament`) |
-| 🏛️ `sophi-memory` | Long-term memory (Jane's Theory): a memory-palace store behind a technique-agnostic `MemoryTechnique` SPI |
-| 🔗 `sophi-mcp` | MCP client + server — call external MCP tool servers from the agent, or expose SoPhi over MCP (`sophi mcp-serve`) |
-| 📡 `sophi-hub` | Local WebSocket hub (`HubServer`/`HubClient`) — lets `sophi-companion` monitor and remote-control running `sophi-cli` sessions |
-| 🚪 `sophi-gateway` | Message contract between chat services and a SoPhi host (`GatewayHost`) |
-| 💬 `sophi-gateway-discord` | Discord bot gateway: one paired user, text, voice messages, photos, permission buttons |
-| 💻 `sophi-cli` | `sophi` terminal app — interactive TUI with slash commands |
-| 🌐 `sophi-web` | Spring Boot REST + SSE server exposing sessions and turns over HTTP |
-| 🛠️ `sophi-sdk` | `Sophi.runtime { }` DSL for embedding the agent in another JVM app |
-| 🖥️ `sophi-companion` | *(moved)* OS tray / menu-bar desktop app — now a commercial, direct-sale product built on `sophi-sdk`/`sophi-hub`. Last open-source snapshot: tag [`companion-last-oss`](../../tree/companion-last-oss/sophi-companion). |
-| 🏗️ `sophi-infra` | Ready-made plugins: `MetricsPlugin` |
+| ⚡ `sophi-ai` | Model providers: local servers, any OpenAI-compatible API, Claude; model catalog and cost |
+| 🧠 `sophi-core` | The agent loop, session tree, tools, compaction, plan-first, undo, permission rules, audit |
+| 📚 `sophi-skills` | Skills from Markdown files with YAML frontmatter |
+| 🔌 `sophi-extensions` | Plugins and lifecycle hooks |
+| 🎓 `sophi-learning` | Tool reliability, lessons from past sessions, feedback, fine-tuning dataset export |
+| 🗄️ `sophi-store` | Embedded ArcadeDB (document + graph + vector), the storage under memory and versioning |
+| 🕰️ `sophi-versioning` | Version history and revert for skills, lessons, configs and agent definitions |
+| 🏛️ `sophi-memory` | Long-term memory (Jane's Theory) |
+| 🔎 `sophi-context` | Indexes your projects for `search_context` (`sophi context add <folder>`) |
+| 🔗 `sophi-mcp` | MCP client and server |
+| 📡 `sophi-hub` | Local WebSocket hub so a desktop app can watch and steer CLI sessions |
+| ⏰ `sophi-schedule` | Recurring, goal and page-watch tasks, the scheduler, the briefing |
+| 📅 `sophi-calendar` | Calendar tools (macOS) |
+| 🚪 `sophi-gateway` | Message contract between chat services and a SoPhi host |
+| 💬 `sophi-gateway-discord` | Discord bot: text, voice messages, photos, approval buttons |
+| 💻 `sophi-cli` | The `sophi` command |
+| 🌐 `sophi-web` | REST + SSE server |
+| 🛠️ `sophi-sdk` | `Sophi.runtime { }` for embedding, plus the ACP and RPC servers |
+| 🏗️ `sophi-infra` | Ready-made plugins (`MetricsPlugin`) |
 
-They all sit on the same core, so switching between them later is a
-one-line change, not a rewrite.
+</details>
 
-## 📦 Install
+<details>
+<summary><b>Install options and building from source</b></summary>
+<br>
 
-**Installers (no Java needed).** Download from the newest `cli-v*`
-[release](../../releases): `sophi-macos-arm64.pkg` (Apple Silicon), `sophi-macos-x64.pkg`
-(Intel) or `sophi-windows-x64.msi`, open it, then run `sophi` in a new terminal. Until code signing is set up,
-they are unsigned: on macOS approve the package once under System Settings → Privacy & Security;
-on Windows choose "More info → Run anyway". To uninstall on macOS, delete `/Applications/sophi.app`
-and `/usr/local/bin/sophi`; on Windows use Apps & features.
+Installers (no Java needed), the one-liner for Windows, pinning a version, and `mvn -q -DskipTests package`:
+see [docs/install.md](docs/install.md). Then run `sophi doctor` to check the model server, settings, MCP
+servers and skills, with one fix line per problem.
 
-**One-liner (needs Java 21+).** No checkout required.
-
-```bash
-# macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/shukriev/SoPhi/main/scripts/get-sophi.sh | sh
-```
-
-```powershell
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/shukriev/SoPhi/main/scripts/get-sophi.ps1 | iex
-```
-
-Re-run to upgrade; set `SOPHI_VERSION=cli-v<x.y.z>` to pin a release. Maintainers publish
-a release by pushing a `cli-v*` tag (`.github/workflows/cli-release.yml`).
-
-## 🚀 Build
-
-
-```bash
-mvn -q -DskipTests package
-```
-
-SoPhi runs on a local model by default: start Ollama, LM Studio or llama.cpp and it finds
-the server itself. Claude is opt-in (`--provider claude --model <name>` with
-`ANTHROPIC_API_KEY` set); SoPhi never picks a cloud model for you.
+</details>
 
 ---
 
-## 💻 Use case 1: Interactive terminal agent (`sophi-cli`)
+## 🧭 For product owners
 
-Run a chat session in your terminal, backed by a local model, with persistent
-sessions you can branch and resume.
+<details open>
+<summary><b>What people use it for</b></summary>
+<br>
 
-Quick start: start Ollama or LM Studio (with a model loaded), then run `sophi`.
-
-```bash
-OLLAMA_CONTEXT_LENGTH=16384 ollama serve & ollama pull qwen3:8b   # or load a model in LM Studio
-mvn -pl sophi-cli -am package
-java -jar sophi-cli/target/sophi-cli-1.0.0-SNAPSHOT.jar
-```
-
-SoPhi probes llama.cpp (:8080), LM Studio (:1234) and Ollama (:11434), uses a model the
-server has in memory (else the first one it lists), and reads the context window the
-server loaded it with. Ollama's own default window is 4096 tokens, smaller than SoPhi's
-tool definitions alone, hence `OLLAMA_CONTEXT_LENGTH` above.
-
-To use Claude instead:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-sophi --provider claude --model <claude-model-id>
-```
-
-Options:
-
-```bash
-sophi --session <id>          # resume an existing session
-sophi --model <name>          # model (local: defaults to a model the server has loaded; required otherwise)
-sophi --sessions-dir <path>   # where session JSONL files live (default: ~/.sophi/sessions)
-sophi --agents-dir <path>     # directory of subagent definitions (default: ~/.sophi/agents)
-sophi --system "<prompt>"     # system prompt for every turn
-sophi --provider <name>       # 'local' (default: finds llama.cpp, LM Studio or Ollama), 'openai-compat', or 'claude'
-sophi --base-url <url>        # local: skip discovery and use this server; required for openai-compat
-sophi --context-window-tokens <n>  # override the window (local: read from the server; openai-compat 8192; claude 200000)
-sophi --api-key <key>         # optional; falls back to SOPHI_API_KEY (keeps it out of `ps`), then ANTHROPIC_API_KEY for claude
-sophi --memory                # enable long-term memory (see "Cross-cutting: memory")
-sophi --embedding-model <m>   # embedding model for --memory (local: a loaded nomic-embed model is used if present)
-sophi --embedding-base-url <url>   # embeddings endpoint (defaults to --base-url)
-sophi --embedding-dimensions <n>   # vector size (768 nomic-embed-text, 1536 OpenAI; default 1536)
-sophi --hub-port <port>       # port a running companion's hub listens on (default: 8765)
-sophi --no-remote             # don't register with a running companion's hub for this session
-```
-
-Other servers and models:
-
-```bash
-# A specific model on the local server SoPhi finds
-sophi --model qwen2.5:7b
-
-# Any other OpenAI-compatible server, e.g. vLLM
-sophi --provider openai-compat --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-7B-Instruct
-```
-
-In-session slash commands:
-
-```
-/list       list saved sessions
-/branch     print the active branch (entry ids + roles)
-/checkout <entry-id> [--files]   jump to a different point in the session tree; --files also restores the files
-/undo       restore the files the last tool round changed (asks first)
-/revert <entry-id>   restore the files changed from that entry on
-/compact    summarize older turns to shrink context
-/good       rate the last reply as good (feeds the learning system)
-/bad [reason]   rate the last reply as bad, optionally saying why
-/schedule [list|log|pause <id>|resume <id>|remove <id>]   manage scheduled/goal tasks
-/goal [--check "<command>"] <task>   explicit multi-step planning, with a preview before running
-/plan <goal>   break a goal into steps and run them one by one
-/calendar [list [days]|get <id>|create <description>|delete <id>|calendars]   manage calendar events (macOS)
-/skill [list|<id>]   list installed skills, or load one into the session
-/auto       toggle auto mode: low-risk tool calls run without asking (not under --god-mode)
-/permissions [trust]   list permission rules; trust activates the project's allow rules
-/settings [key [value]] open the settings menu, or show or set one setting
-/model [id]              show the model and its window, or switch to another one
-/jobs [kill <id>]        list background bash jobs, or stop one
-/search <words>          find past sessions that mention every word (the model has the same search as `session_search`)
-/feedback [list|delete <id>]   inspect and manage explicit feedback records
-/lessons [list|archive <id>|forget <id>]   inspect and manage learned lessons
-/memory [list|show <id>|threads|profile|why]   browse Jane's Theory memory (needs --memory)
-exit / quit  end the session
-```
-
-**Audit log.** The CLI appends every tool call, approved or denied, to `~/.sophi/audit.jsonl`, one JSON line each: `ts`, `actor`, `tenant`, `session`, `tool`, `risk`, `args`, `decision`, `rule` (what decided: `user`, `grant`, `policy`...), `outcome` (`ok`, `error`, `denied` or `cancelled`), `result` and `durationMs`. Secrets in args and results are redacted. Scheduled tasks are audited too, and so are calls from external MCP clients to `sophi mcp-serve` (actor `mcp:<client name>`, or `mcp-client` when it gives none; `rule` `safe` or `deny-all`). In the SDK, `RuntimeBuilder.auditLog()` turns it on, or `audit(sink)` takes your own `AuditSink`.
-
-Known limits of the audit log:
-
-- Redaction is pattern-based and best effort.
-- `args` and `result` keep a bounded sample (4,000 and 500 chars) and redaction work per entry is capped. Past the cap, the rest of each object or array, keys and values alike, is replaced by one `"…": "[…]"` (or `"[…]"`) marker.
-- Arguments that aren't JSON get the weaker text redaction, so numeric secrets and secrets under unfamiliar key names can survive.
-- A string value that starts with `{` or `[` (after whitespace, a BOM or a code fence) is redacted as JSON, up to 3 levels deep; if it doesn't parse (a cut JSON document) it is logged as `[unredactable]`. Other strings, such as code containing `{"a": 1}`, keep text redaction. A whole argument that isn't JSON but contains `{"` or `["`, such as a raw `curl -d '{...}'`, is logged as `[unredactable]`.
-- A numeric secret under an ordinary key name (e.g. `{"pin":123456}`) is logged as-is; numbers over 64 digits show as `[…]`.
-- Keys that redact to the same text (two GitHub tokens used as keys, say) are numbered `#2`, `#3`, so no value is lost.
-- A value that can't be redacted safely is logged as `[unredactable]`.
-- Secrets in shapes the patterns don't know (custom formats, encoded or split values) can still appear.
-- Calls made through sophi-web are not audited yet.
-- A call cancelled before it starts (e.g. during confirmation) has no entry.
-
-**Guardian (opt-in).** With `guardian` on in `/settings` (or `--guardian` for one run), a destructive call about to run without your approval (an allow rule, a grant, auto mode or `--god-mode` let it through) is first shown to the model, which answers allow, ask or deny. Ask sends it to you as an ask rule would; deny refuses it and tells Sophi why. If the review fails or times out, you are asked. It never allows anything a rule or you refused, and never reviews a call you just approved. It uses the session's model unless `guardian-model` names another. Each verdict is in that call's audit entry as `guardian` (`deny: <reason>`, redacted). In the SDK, `RuntimeBuilder.guardian(model)`. Not yet applied to `sophi schedule` runs or `/plan`.
-
-**Permission rules.** `~/.sophi/permissions.json` (global) and `.sophi/permissions.json` (project) hold a JSON list of `{"tool", "pattern", "effect"}`, where `effect` is `allow`, `ask` or `deny`. `tool` and `pattern` are globs: `*` matches anything, including `/`, and `\*` is a literal star. A rule without `pattern` covers every call of that tool.
-
-```json
-[
-  {"tool": "bash", "pattern": "rm *", "effect": "deny"},
-  {"tool": "bash", "pattern": "git status", "effect": "allow"},
-  {"tool": "write_file", "pattern": "secrets/*", "effect": "deny"},
-  {"tool": "read_file", "pattern": "/Users/you/.ssh/*", "effect": "deny"}
-]
-```
-
-The order is deny, then ask, then allow, then the usual risk tiers and confirmation. A deny rule also blocks under `--god-mode` and in `mcp-serve`; an ask rule always sends the call to a person, also in auto mode and under `--god-mode`. What a pattern is matched against:
-
-- `bash`: each part of the command, after splitting on `&&`, `||`, `;`, `|`, newlines, `$( )`, backticks and subshells. A call is allowed only if every part is.
-- `read_file`, `write_file`, `edit_file`, `apply_patch`, `grep`, `glob`, `move_file`, `delete_file`: the path, relative to the project root when inside it (`./.env` and `src/../.env` both give `.env`), otherwise the absolute path.
-- `fetch_url`: the URL.
-- Other tools have no subject, so only a rule without `pattern` applies.
-
-A project file can come from a cloned repo, so its `allow` rules do nothing until you trust them: `/permissions` lists them, `/permissions trust` activates the current ones (kept in `~/.sophi/permissions-trust.json`). Project `deny` and `ask` rules always apply. When a prompt can offer it, answering `a` (always) appends a project `allow` rule for exactly that command or path to `.sophi/permissions.json`, shows it first, and trusts it. A command with `*` in it is written escaped, so it only matches itself. A malformed rules file stops startup with an error naming the file, because ignoring it would drop deny rules silently.
-
-In the SDK, `RuntimeBuilder.permissionRules(projectRoot)` loads the same files, or `permissions(rules)` takes a `PermissionRules` you built.
-
-Known limits of permission rules:
-
-- Bash matching is textual. A command that can't be split (a heredoc, an unterminated quote), or whose command word is quoted, escaped or a variable (`\rm`, `"rm"`, `r''m`, `$RM`, `{rm,x}`), is treated as unknown: denied when any `bash` deny rule exists. Wrappers and paths are not seen through: `/bin/rm`, `command rm`, `env rm`, `exec rm`, `sudo`, `xargs`, `bash -c` and `eval` must be named in the patterns.
-- A bash part with an output redirect, or with a `NAME=value` prefix (`LD_PRELOAD=x git status`), is never allowed by a rule; it goes to the normal confirmation. Deny rules still see the command after the prefix. Redirects to `/dev/null` and `>&N` don't count, so they don't block an allow rule.
-- `~` is not expanded in rule patterns; write absolute paths.
-- Path subjects resolve symlinks and the on-disk case, so a path is matched as its real path. Patterns for paths outside the project must use the real path: on macOS `/private/etc/*`, not `/etc/*` (same for `/tmp` and `/var`). A symlink to a missing file can't be checked, so it fails closed.
-- URL subjects are normalized (scheme and host lowercase, no userinfo or default port). Only the requested URL is checked, not its redirects.
-- In `mcp-serve` an ask rule refuses the call, since nobody is there to answer.
-- A scheduled daemon takes its project rules from the directory it was started in.
-- sophi-web doesn't apply rules yet.
-- Rules are not a sandbox: the real containment is a sandboxed backend.
-
-**Sessions.** Each session is a JSONL file under `~/.sophi/sessions` that only grows: a save appends the entries that are new or changed, so saving a long session costs the same as a short one. A crash mid-write loses at most the last, partial line. The checked-out entry is saved too, so `--session <id>` resumes where `/checkout` left you, not at the last entry.
-
-**Settings.** `/settings` opens a menu of every `sophi` start flag: ↑↓ moves, Enter flips an on/off setting, steps through a choice or edits a value in place, `d` resets one to its default, Esc closes. Each change is saved to `~/.sophi/settings.json` and used as that flag's default from then on; a flag you type still wins for that run (every on/off flag has a `--no-…` opposite for that), and each row says whether its value came from a flag, the file or the default. The sandbox, network, Docker image, auto mode, model and cost budget change the running session at once; the rest are marked "(next start)". API keys, `--session` and `--god-mode` are never saved, and a value in the file that doesn't fit is skipped with a warning rather than stopping `sophi`. Without a terminal, `/settings` lists them, and `/settings <key> <value>` sets one.
-
-**Models and cost.** Each reply ends with a gray line showing the prompt size and the tokens the turn wrote. On a cloud provider it adds what the turn and the session cost: `claude-x · 12.3k in · 820 out · $0.0412 this turn · $0.31 session`. On a local model it shows the speed instead (`· 38 tok/s`). Prices, context windows and capabilities come from a [models.dev](https://models.dev) catalog. A snapshot ships with Sophi, and `sophi` refreshes it in the background at most once a day into `~/.sophi/models.json`; `--no-catalog-refresh` keeps it offline. Entries in `~/.sophi/models.local.json` (the same compact form) override it. A cloud model's window comes from the catalog unless you pass `--context-window-tokens`. A local model's window always comes from its server; the catalog gives only its base model's capabilities, and warns at start when that base model can't call tools. `sophi models <query>` looks a model up, and `sophi models --refresh` downloads the catalog now. `--max-cost-usd 5` (or the `max-cost-usd` setting) stops the session once its requests have cost $5, including `/goal`, `/plan`, subagents and compaction; the turn ends with what it did so far, and raising the budget lets the next turn run. The session total counts this run only. `/model <id>` switches the model from the next turn, within the same provider (a local server must list it), and the window follows the new model. In the SDK: `RuntimeBuilder.modelCatalog`, `priced`, `budget(maxUsd)`, then `SophiRuntime.costMeter` and `switchModel(model, window)`.
-
-**Sandbox.** `bash` runs unsandboxed by default. `--sandbox seatbelt` (or the `sandbox` setting) runs each command in macOS's sandbox: it can read anywhere but write only to the workspace, temp folders and tool caches. `--sandbox docker` runs commands in one container per session that shares only the workspace (mounted at the same path), with all capabilities dropped and CPU, memory and process limits; `--docker-image` picks the image (default `buildpack-deps:bookworm-scm`). `--no-network` blocks the network in either, name lookups included. Under seatbelt, commands can't reach Docker's socket either, since a container they started could see the whole disk. Switching to Docker starts the container straight away, so the first image pull happens then. A mode this machine can't run is refused with the reason. Path checks that flag commands reaching outside the workspace still apply in every mode. In the SDK, `SophiRuntime.bashSandbox.set(...)` switches it.
-
-**Questions.** When Sophi is blocked on a decision that's yours (a preference, a choice between approaches) it asks with `ask_user`: the question prints with numbered options; type a number or a reply and press Enter, or Esc to skip. Only in an interactive terminal; scheduled runs that ask time out after 4 minutes and carry on. In the SDK, `RuntimeBuilder.askUser(asker)`.
-
-**Desktop.** In an interactive terminal Sophi can `notify` you when something long finishes (a macOS notification, `notify-send` on Linux, otherwise a terminal bell), read and write the clipboard (`clipboard_read` asks first unless auto mode allows it), and `open` an http(s) URL or an existing file in its default app. `open` won't launch programs: it opens only documents and media (web pages, PDFs, text, office files, images, audio, video); folders, executables, scripts, shortcut files and installers are refused. In the SDK, `RuntimeBuilder.desktop(desktop)`; a host passes its own `Desktop` to route these elsewhere.
-
-**Todo list.** For a task with several steps the model keeps a checklist with the `todo` tool; the CLI prints it in gray under any turn that changed it. It is stored in the session and each turn shows the model its latest state, so it survives `/compact`, resume and `/checkout`. In the SDK, `currentTodos(session)` reads it.
-
-**Background jobs.** `bash` with `background: true` starts a long-running command (a dev server, a watcher, a long build) and returns at once with a job id; the model reads its new output with `bash_output` (which can wait up to 120 s for more) and stops it with `bash_kill`. At most 8 run at once. `/jobs` lists them and `/jobs kill <id>` stops one. Every job is killed when Sophi exits. Output goes to `~/.sophi/jobs/<pid>/`. Under the Docker sandbox, background jobs are refused for now. In the SDK, `SophiRuntime.jobs`; `RuntimeBuilder.jobsHome` moves the logs.
-
-**Undo.** Before each tool round that changes files, the CLI snapshots the workspace into a shadow git repo under `~/.sophi/checkpoints` (your own repo is untouched). `/undo` and `/revert` show what they would restore and ask first. `move_file` and `delete_file` are undoable too: deletes go to `~/.sophi/trash`. Bash commands that reach outside the workspace can't be undone and are listed as warnings. In the SDK, `RuntimeBuilder.checkpoints()` (needs `builtinTools`) turns snapshots on and `SophiRuntime.fileRestorer` does the restoring.
-
-The terminal redraws in place while a turn streams, instead of scrolling
-line by line:
-
-- **Live output** — streamed tokens and tool-call status update a single in-place region.
-- **ESC to interrupt** — cancel a turn mid-stream; the partial reply is kept, tagged `[interrupted]`, and the prompt returns immediately.
-- **Type while it works** — Enter sends a steer Sophi reads before its next step; Alt+Enter queues a follow-up for after it answers; ESC puts unsent text back at the prompt. Ctrl+T toggles the token view. A multi-line paste stays one message. Steering from the companion or the web comes later.
-- **Multi-line input** — end a line with `\` to continue on the next line, same convention as bash.
-- **Non-interactive fallback** — piped stdin or non-TTY output drops to plain line-mode automatically, so scripted usage still works.
-
-**Subagents:** `--agents-dir` points at a directory of Markdown files, each
-describing a subagent the CLI can delegate a task to mid-session:
-
-```markdown
----
-name: researcher
-description: "Looks things up without touching any files"
-allowedTools: [read_file, web_search]
----
-
-You are a research assistant. Investigate the task and report findings
-concisely. You cannot modify any files.
-```
-
-The frontmatter's `name` and `description` are what the main agent sees when
-choosing which subagent to delegate to; the Markdown body becomes that
-subagent's system prompt. Delegation nests up to 3 levels deep by default.
-
-**Remote monitoring:** if `sophi-companion` is running, every `sophi-cli` session registers
-with its embedded hub automatically — the companion's Sessions tab shows it live, and you can
-send it a message or answer its confirmation prompts from there. No companion running, or
-`--no-remote` passed: behaves exactly as before, no difference. See ADR-023.
-
-**In your editor (ACP):** `sophi --mode acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com)
-(protocol version 1) on stdin/stdout, so Zed and other ACP clients can drive Sophi. In Zed's `settings.json`:
-
-```json
-{
-  "agent_servers": {
-    "Sophi": {
-      "type": "custom",
-      "command": "sophi",
-      "args": ["--mode", "acp"]
-    }
-  }
-}
-```
-
-Sophi works in the directory Zed starts it in (the project root) and asks before risky tool calls through
-Zed's allow/reject prompt. Not supported yet: loading past sessions, images, MCP servers passed by the editor
-(use the project's `.sophi/mcp.json`), and the editor's own file and terminal access (Sophi uses its own tools).
-
-**Good for:** local dev-tool style usage, exploring the agent loop, quick
-one-off tasks — same category as a REPL.
-
----
-
-## 🌐 Use case 2: Agent-over-HTTP (`sophi-web`)
-
-Run SoPhi as a Spring Boot service so a frontend, another service, or a
-mobile app can talk to it over REST/SSE.
-
-```bash
-mvn -pl sophi-web -am spring-boot:run
-```
-
-Endpoints (`AgentController`, base path `/api`):
-
-```
-POST /api/sessions?title=...          create a session -> {id, entryCount, lastModified}
-GET  /api/sessions                    list sessions
-POST /api/sessions/{id}/turn          { "input": "..." } -> { sessionId, reply }
-GET  /api/sessions/{id}/stream?input=...   Server-Sent Events, one event per token
-POST /api/sessions/{id}/feedback      { "polarity": "positive|negative", "reason"?, "entryIndex"? } -> rate a reply
-```
-
-Example:
-
-```bash
-curl -X POST localhost:8080/api/sessions
-curl -X POST localhost:8080/api/sessions/<id>/turn \
-  -H 'Content-Type: application/json' -d '{"input": "hello"}'
-curl -N "localhost:8080/api/sessions/<id>/stream?input=hello"   # SSE stream
-```
-
-**Good for:** powering a chat UI, a Slack/Discord bot, or any client that
-needs the agent behind a network boundary rather than in-process.
-
----
-
-## 🛠️ Use case 3: Embedding SoPhi in your own JVM app (`sophi-sdk`)
-
-Use the `RuntimeBuilder` DSL to wire up a runtime with your own tools and
-plugins, no CLI or HTTP layer required.
-
-```kotlin
-import dev.sophi.sdk.Sophi
-import dev.sophi.ai.providers.ClaudeProvider
-import dev.sophi.infra.MetricsPlugin
-
-val runtime = Sophi.runtime {
-    provider = ClaudeProvider(chatModel)     // any LLMProvider
-    model = "claude-sonnet-4-5"
-    systemPrompt = "You are a build assistant."
-
-    tool(MyCustomTool())                     // implement dev.sophi.core.tools.Tool
-    grants(setOf("read_file"))               // tool names this runtime may use without confirmation
-    plugin(MetricsPlugin(meterRegistry))
-}
-
-val sessionId = runtime.newSession(title = "release-check")
-val reply = runtime.turn(sessionId, "What changed since the last tag?")
-```
-
-`provider` accepts any `LLMProvider` — for a local model instead of Claude, use
-`dev.sophi.ai.providers.buildOpenAiCompatProvider` (from `sophi-ai`):
-
-```kotlin
-import dev.sophi.ai.providers.buildOpenAiCompatProvider
-
-val runtime = Sophi.runtime {
-    provider = buildOpenAiCompatProvider(
-        baseUrl = "http://localhost:11434/v1", // Ollama; vLLM is typically :8000/v1
-        apiKey = null,                          // no-auth mode for local servers
-        model = "qwen2.5:7b"
-    )
-    systemPrompt = "You are a build assistant."
-}
-```
-
-A custom tool is just:
-
-```kotlin
-class MyCustomTool : dev.sophi.core.tools.Tool {
-    override val name = "my_tool"
-    override val description = "Does something useful"
-    override val parametersJson = """{"type":"object","properties":{}}"""
-    override suspend fun execute(argumentsJson: String): String = "result"
-}
-```
-
-**Good for:** bolting an agent onto an existing JVM app (CI tool, internal
-dashboard, batch job) without standing up a separate service.
-
----
-
-## 🖥️ Use case 4: Desktop tray companion (`sophi-companion`)
-
-`sophi-companion` — the OS tray / menu-bar desktop app embedding `sophi-sdk`
-in-process, with Chat, Sessions, MCP, Goals, and Settings tabs — is now a
-commercial, direct-sale product and no longer developed in this repo. It
-still shares `sophi-cli`'s full tool surface and talks to CLI sessions over
-the same open `sophi-hub` protocol described above; only the companion
-app's own source has moved.
-
-The last open-source snapshot is preserved at the
-[`companion-last-oss`](../../tree/companion-last-oss/sophi-companion) tag
-for anyone who wants to build or fork it as it stood before the move.
-
-**Good for:** keeping an agent one click away while you work — background goals,
-long-running sessions, and OS notifications, without a terminal or a browser tab.
-
----
-
-## 🧰 Cross-cutting: skills and plugins
-
-**Skills** (`sophi-skills`) are plain Markdown files with YAML frontmatter —
-drop them in a directory and load them with `SkillLoader().load(dir)`:
-
-```markdown
----
-title: "Deploy runbook"
-description: "How to deploy this service safely"
-tags: [ops, deploy]
----
-
-Steps to deploy...
-```
-
-**Plugins** (`sophi-extensions`) hook into the turn lifecycle
-(`BEFORE_TURN` / `AFTER_TURN` / `BEFORE_TOOL` / `AFTER_TOOL` / `ON_ERROR`).
-`sophi-infra` ships one ready to use:
-
-- `MetricsPlugin(meterRegistry)` — emits Micrometer counters for turns started/completed/errored
-
-A dollar budget for a session is `RuntimeBuilder.budget(maxUsd)`, not a plugin (see **Models and cost.**).
-
-Tool permissioning is no longer a plugin — `AgentLoop`'s `riskLevel`/`ConfirmationPolicy`/`grants` mechanism (ADR-016) is the one gate; see `RuntimeBuilder.grants(names)` below for the SDK-embedding equivalent of the old allowlist.
-
-Register plugins either manually (`RuntimeBuilder.plugin(...)` /
-`PluginRegistry.register(...)`) or via JVM `ServiceLoader` discovery
-(`PluginRegistry().discover()`).
-
-### Secrets and signing in to MCP servers
-
-Keys for MCP servers live in the macOS Keychain, not in `mcp.json`. Store one with `sophi secret set cloudflare` (a hidden prompt, or one line on stdin; `sophi secret list` and `sophi secret remove <name>` too), then reference it as `${secret:cloudflare}` in a stdio server's `env` or a remote server's new `headers`:
-
-```json
-{"servers":[
-  {"name":"cf","transport":"stdio","command":["npx","cf-mcp"],"env":{"CLOUDFLARE_API_TOKEN":"${secret:cloudflare}"}},
-  {"name":"internal","transport":"http","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer ${secret:internal}"}}
-]}
-```
-
-Remote servers that sign in with OAuth (Sentry, Linear, Notion, ...) need no key: `sophi mcp login sentry`, or `/mcp login sentry` in a session, opens the sign-in page; Sophi registers itself, stores the sign-in in the Keychain and renews it silently, also when the CLI and the companion share one sign-in. When a renewal is refused, the server's tools answer "needs you to sign in again" and nothing opens a browser on its own. A server without self-registration (GitHub) takes an `"oauth": {"clientId": "...", "clientSecret": "${secret:gh}", "scopes": ["repo"]}` block. `sophi mcp logout <server>` forgets it.
-
-Stored values never reach the model: they're masked as `[REDACTED:secret]` in every MCP result and error (values under 8 characters are stored but not masked). A missing `${secret:...}` fails only that server, naming the secret. SDK: `RuntimeBuilder.credentials()` (or `credentials(store)` for your own `CredentialStore`), `SophiRuntime.mcpLogin(config, openBrowser)` / `mcpLogout(name)`.
-
-### Plan first: approve changes before they happen
-
-When a task wants to change something in another system (an MCP tool that isn't read-only), Sophi doesn't do it and doesn't stop to ask either. It records the change and carries on: lookups still run, so the plan has real ids and names. At the end of the turn you see one plan:
-
-```
-offboard jane@acme.com: 3 changes in 3 systems
-Looked up (read-only, already ran):
-  okta find_user → 00u9f… (read-only per server)
-Changes waiting for you:
-  1 okta deactivate_user id=00u9f…
-  2 github remove_org_member org=acme user=jdoe (allowed by your rule)
-  3 slack deactivate_user user=U04…
-[a] approve all  [v] view arguments  [d 1,2] drop steps  [t 18:00] run at a time  [s] save for later  [n] cancel
-```
-
-Nothing changes before you approve, even calls a permission rule or grant would allow. Approving replays exactly those calls (same tools, same arguments) with no model involved, stopping at the first failure; each call is in the audit log with its plan and step. A plan with one change shows the usual allow prompt instead. `t` approves it now and runs it later from the scheduler; a recurring scheduled task that wants to change something leaves a pending plan and tells you instead.
-
-`sophi plans` lists plans; `sophi plans show|approve|run|cancel <id>` (or `/plans ...` in a session). Plans live in `~/.sophi/plans`. Settings (`/settings`): `plan-first` = `outside` (default) / `every` (local changes too) / `off`, and `trust-read-only-hints` (default on: a tool its MCP server marks read-only runs without asking in these turns; list lookups in `safeTools` to rely on your own word instead). Scheduled runs use the servers in `~/.sophi/mcp.json`. SDK: `RuntimeBuilder.planFirst(mode)`, `TurnEvent.PlanReady`, `SophiRuntime.approvePlan` / `runPlan` / `cancelPlan` / `schedulePlan` / `planFirstScope`.
-
-### Large MCP servers (deferred tools)
-
-An MCP server that lists more than 10 tools is loaded on demand: the model sees only their names and calls `tool_search` to load the ones it needs for the turn, so the schemas stay out of the prompt. Change the limit with `"deferToolsOver"` at the top of `.sophi/mcp.json` (SDK: `RuntimeBuilder.deferToolsOver(n)` when no mcp.json is loaded).
-
-### Browsing websites (browser-automation MCP + self-authored site skills)
-
-Sophi has no built-in browser — it connects to any browser-automation MCP server you
-configure in `.sophi/mcp.json`, the same way it connects to any other MCP server (see
-`docs/examples/mcp-browser-server.json` for the shape). Once configured:
-
-- Mark that server's **read-only** tools (navigate, screenshot, page snapshot / get
-  text, list tabs) as `safeTools` — everything else (click, type, select, submit)
-  stays `DESTRUCTIVE` and requires confirmation on every call, including in goal mode.
-- Install `docs/skills/browsing-sites.md` into `~/.sophi/skills/` once. It teaches
-  Sophi to recall a site it's seen before (via a skill it wrote itself last time,
-  through the `write_skill` tool) instead of re-exploring, and to record what it
-  learns after each visit.
-- Every `write_skill`/`install_skill` call is gated: static content checks (secret
-  scan, size cap, and for `install_skill`'s third-party content, a prompt-injection
-  scan) run before anything lands, and the confirmation prompt shows a real diff or
-  source summary instead of raw JSON. A new write lands as a `trial` version;
-  `sophi skill verify <id>|--all` runs it through the eval suite and reports a
-  human-confirmed promote/revert recommendation.
-- **Trust boundary:** marking `navigate`/`screenshot` as safe means Sophi can navigate
-  to any URL — including `file://` paths or internal-network addresses — without
-  confirmation, since `safeTools` matches by tool name only, not by argument. If that's
-  not an acceptable default for your environment, leave `navigate` out of `safeTools`.
-
----
-
-## 🎓 Cross-cutting: learning
-
-SoPhi observes its own sessions and gets better at your project over time.
-All three surfaces (CLI, web, SDK) wire this in automatically; everything
-lives in plain JSONL files under `~/.sophi/learning/`, and learning is
-strictly best-effort — it can never fail or slow down a turn.
-
-The loop, end to end:
-
-1. **Capture** — tool calls and session outcomes are recorded via lifecycle
-   hooks; tools with a bad recent track record earn a reliability warning in
-   the system prompt.
-2. **Distill** — one LLM self-evaluation at session end judges the outcome
-   (success / partial / failure) and distills deduplicated, reusable
-   *lessons* that are recalled into future sessions' system prompts.
-3. **Align** — rate replies with `/good` and `/bad [reason]` (or the web
-   feedback endpoint); the evaluator also detects implicit signals like
-   corrections, each backed by a verbatim quote. Preferences steer future
-   behavior through the same lesson pipeline.
-4. **Export** — `sophi export` turns the labeled history into fine-tuning
-   datasets: chat-format `sft.jsonl` from success-judged sessions, TRL
-   `dpo.jsonl` pairs from bad→good retries, plus a provenance
-   `manifest.json`. Redaction of secrets/PII is on by default; output is
-   deterministic and deduplicated.
-
-Everything the agent has learned is inspectable and revocable:
-
-```bash
-sophi lessons list [--all] [--scope <dir>]   # what it believes about this project
-sophi lessons archive <id>                   # retract a lesson (it may be learned again)
-sophi lessons forget <id>                    # retract it for good: it is never learned again
-sophi feedback list [--scope <dir>]          # your ratings + detected signals
-sophi feedback delete <id>                   # revoke feedback
-sophi export --out ./dataset   # build SFT/DPO training files
-```
-
-Training itself is out of scope by design — the datasets are the durable
-asset, and they work with TRL, axolotl, unsloth, or llama-factory as-is.
-
----
-
-## 🏛️ Cross-cutting: memory (Jane's Theory)
-
-Where learning remembers *how to behave*, memory remembers *your world*:
-who's in it, what happened, and how it connects — across sessions. It's
-organized as a memory palace: the leverage is at **encoding time**, not
-retrieval time. Opt-in and experimental:
-
-```bash
-# Local server with a nomic-embed model loaded: picked up automatically
-sophi --memory
-
-# Or name the embeddings model — any OpenAI-compatible embeddings endpoint works
-sophi --memory --embedding-model nomic-embed-text --embedding-dimensions 768
-```
-
-How it works, per turn:
-
-1. **Encode (async, after the turn)** — one cheap LLM verdict decides what
-   deserves remembering, how strongly (emotional weight is the largest
-   factor), in which of five rooms (entities, tasks, episodes, knowledge,
-   narrative), and connected to what causal story. Most turns store nothing.
-2. **Recall (before the turn, no LLM call)** — the query is embedded, routed
-   to the most relevant rooms, scored by semantic match × decayed importance
-   × your profile, then expanded along causal threads — the agent gets the
-   story, not just the fact. Stale or third-party memories are injected with
-   a `VERIFY` marker so the agent checks instead of asserting.
-3. **Forget (a feature, not a failure)** — each room has its own decay
-   half-life (episodes fade in days, life narratives last a year), and a
-   consolidation "sleep" cycle merges duplicates and prunes what faded.
-
-Sensitive topics (health, finances, relationships) are tier-guarded: never
-volunteered, only surfaced when you raise the topic, and every access is
-audited. Storage is an embedded ArcadeDB database (document+graph+vector)
-under `~/.sophi/memory/` (user-global — your life isn't per-project), and
-like learning it is strictly best-effort: memory can never fail or slow down
-a turn.
-
-Everything remembered is inspectable and truly deletable:
-
-```bash
-sophi memory list [--room tasks]    # browse what it remembers, by room
-sophi memory show <id>              # one memory in full
-sophi memory threads                # causal story lines
-sophi memory profile                # what it believes about you (confirm/correct/delete)
-sophi memory why                    # why did it bring that up?
-sophi memory forget <id>            # hard delete — shows impact first, provably gone
-sophi memory consolidate            # run the sleep cycle now
-sophi memory reset                  # wipe everything
-```
-
-"Provably gone" is literal: deletion is a compacting rewrite of every store
-file, the causal chain is re-linked around the gap, and the regression suite
-greps every file on disk to assert zero traces.
-
----
-
-## 🎯 Choosing a use case
-
-| You want to... | Reach for |
+| | |
 |---|---|
-| Poke at the agent yourself, or script one-off tasks | **`sophi-cli`** |
-| Let a frontend, bot, or service talk to the agent | **`sophi-web`** |
-| Add agent capability inside an existing JVM app | **`sophi-sdk`** |
-| Keep the agent in your menu bar, working in the background | **`sophi-companion`** *(commercial — see Use case 4)* |
+| 📅 **Daily errands** | Calendar, files, onboarding and offboarding people across the systems you connect |
+| ⏰ **Schedules** | "Every weekday at 9, check X." It stays quiet unless there's something to tell you. [More](docs/schedules.md) |
+| 👀 **Watch a page** | Tells you when a page's text changes, not when its clock does |
+| ☀️ **Morning briefing** | `sophi briefing`: what ran while you were away, and what's waiting for you |
+| 🎯 **Goals** | `/goal`: plans the steps, runs them, checks the result, replans if it's not done |
+| 🧠 **Remembers and learns** | Long-term memory of your world, and lessons from what worked and what you corrected. [More](docs/learning-and-memory.md) |
+| 📄 **Share a session** | `sophi export --html <id>`: one self-contained page, secrets removed |
 
-They all share the same `sophi-core` agent loop and session format, so
-switching between them later doesn't change how sessions or tools work —
-start small, grow into the rest.
+</details>
+
+<details open>
+<summary><b>Why it's safe to hand real work to</b></summary>
+<br>
+
+| | |
+|---|---|
+| ✋ **Plan first** | Changes to other systems are held as one plan until you approve it, then replayed exactly as shown |
+| 🙋 **Asks first** | Risky commands need your yes; your own rules decide what's always allowed or never |
+| ↩️ **Undo** | Files it changed, moved or deleted can be put back (`/undo`); a shell command reaching outside the project is flagged as not undoable |
+| 🌙 **Unattended means limited** | Scheduled runs can't do what you didn't grant, and can be kept to the accounts you picked |
+| 📜 **Audit log** | Every tool call: what, when, who decided, with secrets removed |
+
+</details>
+
+<details>
+<summary><b>Try these</b></summary>
+<br>
+
+```text
+Every morning at 8, tell me if any of tomorrow's meetings moved.
+Watch https://example.com/pricing and tell me when it changes.
+Move every PDF in ~/Downloads older than 30 days into ~/Archive/PDFs.
+Offboard jane@acme.com: suspend her accounts and archive her project folder.
+/goal get the build green and keep it under 10 minutes
+```
+
+</details>
+
+<details>
+<summary><b>Want it in your menu bar?</b></summary>
+<br>
+
+**SoPhi Companion** is a desktop app built on this SDK: chat, sessions, goals, approvals and the morning briefing,
+one click away. It's a separate commercial product; see [sophiloop.com](https://sophiloop.com). The last open-source
+snapshot is the [`companion-last-oss`](https://github.com/shukriev/SoPhi/tree/companion-last-oss/sophi-companion) tag.
+
+</details>
+
+---
+
+## 🏢 For enterprises
+
+| Concern | What SoPhi does |
+|---|---|
+| 🏠 **Data stays in** | Runs on your machines with local models; a cloud model is used only if you configure one |
+| 🔐 **Who may do what** | Allow / ask / deny rules per tool, command and path, global and per project; project rules from a cloned repo are inactive until trusted |
+| 📦 **Containment** | Commands can run in the macOS sandbox or a Docker container, with the network off |
+| 📜 **Evidence** | Append-only audit log of every tool call with secret redaction; plan replays are logged step by step |
+| 🔑 **Secrets** | OS keychain, referenced as `${secret:name}`; masked in MCP results the model sees; OAuth sign-in for MCP servers |
+| 🧾 **Supply chain** | Skills and plugins pinned to a commit (plugins also to a SHA-256) and shown before install |
+| 🧪 **Untrusted input** | Optional model checks: `read-check` reviews web and MCP results for injected instructions (record only, or hold them); `guardian` reviews destructive calls before they run |
+
+<details>
+<summary><b>Deploying it</b></summary>
+<br>
+
+- **As a service:** `sophi-web` (Spring Boot, REST + SSE). See [docs/http.md](docs/http.md).
+- **Unattended work:** the scheduler as a daemon, launchd or cron. See [docs/schedules.md](docs/schedules.md).
+- **Inside your own systems:** the SDK, or the RPC protocol from any language. See [docs/sdk.md](docs/sdk.md) and [docs/editors-and-rpc.md](docs/editors-and-rpc.md).
+- **Details and known limits** of rules, sandbox and audit log: [docs/cli.md](docs/cli.md).
+
+</details>
+
+<details>
+<summary><b>Need SSO, roles or support?</b></summary>
+<br>
+
+The core, SDK and web API are Apache 2.0 and stay that way. For support contracts or features your company
+needs (SSO, roles, tenants, audit retention), open a [discussion](https://github.com/shukriev/SoPhi/discussions)
+or write through [sophiloop.com](https://sophiloop.com).
+
+</details>
 
 ---
 
 ## 🤝 Contributing
 
-SoPhi is open to contributions from researchers, developers, and ecosystem builders. We welcome:
+Research, features, fixes and docs are all welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md),
+[GOVERNANCE.md](GOVERNANCE.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Before a PR: `mvn test` passes and
+`CHANGELOG.md` has an entry under `[Unreleased]`. Questions go to [issues](https://github.com/shukriev/SoPhi/issues)
+or [discussions](https://github.com/shukriev/SoPhi/discussions).
 
-- 🧪 **Research & experimentation** — new memory techniques, learning approaches, LLM providers
-- ✨ **Features & improvements** — new tools, plugins, and deployment modes
-- 🐛 **Bug fixes** — correctness issues, performance improvements
-- 📚 **Documentation** — guides, examples, architecture clarifications
+## 📄 License
 
-**To get started:**
-
-1. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for workflow and expectations
-2. Check [`GOVERNANCE.md`](GOVERNANCE.md) to understand decision-making and stability commitments
-3. Follow our [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — we're committed to a welcoming community
-
-**Quick checklist before you submit a PR:**
-
-- [ ] Tests pass (`mvn test`)
-- [ ] Changelog entry added to `CHANGELOG.md` under `[Unreleased]`
-- [ ] Clear commit messages (imperative mood, reference issues)
-- [ ] No debug logging or console noise
-
-**Questions?** Open an [issue](https://github.com/shukriev/SoPhi/issues) or [discussion](https://github.com/shukriev/SoPhi/discussions).
+[Apache 2.0](LICENSE).
