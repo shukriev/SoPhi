@@ -54,7 +54,13 @@ class ToolRegistry {
     fun subset(names: List<String>): ToolRegistry {
         val filtered = ToolRegistry()
         (names + RESULT_READ_NAME).forEach { name ->
-            tools[name]?.let { filtered.register(if (it is ToolSearchTool) ToolSearchTool(filtered) else it) }
+            tools[name]?.let {
+                filtered.register(when (it) {
+                    is ToolSearchTool -> ToolSearchTool(filtered)
+                    is dev.sophi.core.agent.SubagentTool -> it.over(filtered) // its subagents stay inside the subset
+                    else -> it
+                })
+            }
         }
         return filtered
     }

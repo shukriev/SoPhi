@@ -62,7 +62,7 @@ private object NoModel : LLMProvider {
     override fun stream(request: CompletionRequest): Flow<StreamEvent> = error("sophi plans doesn't call a model")
 }
 
-class PlansCommand : CliktCommand(name = "plans", help = "Changes Sophi recorded for your approval: list, show, approve, run, cancel") {
+class PlansCommand : CliktCommand(name = "plans", help = "Changes SoPhi recorded for your approval: list, show, approve, run, cancel") {
     private val action by argument(help = "list (default), show, approve, run or cancel").optional()
     private val id by argument(help = "The plan id").optional()
     private val mcpConfig by option("--mcp-config", help = "MCP servers to run plans with (default: .sophi/mcp.json here, else ~/.sophi/mcp.json)")

@@ -202,6 +202,26 @@ class SubagentToolTest : FunSpec({
         capturedRequests.first().tools.map { it.name } shouldBe listOf("read_file")
     }
 
+    test("a subagent started from a narrowed registry sees only that registry's tools, not the full one") {
+        val provider = mockk<LLMProvider>()
+        val capturedRequests = mutableListOf<CompletionRequest>()
+        every { provider.stream(any()) } answers {
+            capturedRequests.add(firstArg())
+            LLMResponse.Text("ok", TokenUsage(1, 1)).toStreamFlow()
+        }
+        val both = AgentDefinition(name = "both", description = "d", systemPrompt = "s", allowedTools = listOf("read_file", "write_file"))
+        val full = ToolRegistry().register(readTool).register(writeTool())
+        full.register(buildTool(listOf(both), provider, createTempDirectory("subagent-test"), fullRegistry = full))
+        // e.g. a scheduled run limited to some MCP servers: write_file is fenced out
+        val narrowed = full.subset(listOf("read_file", "delegate_to_subagent"))
+
+        runBlocking(SessionIdContext("parent-1")) {
+            narrowed.get("delegate_to_subagent").execute("""{"subagent_type":"both","prompt":"go"}""")
+        }
+
+        capturedRequests.first().tools.map { it.name } shouldBe listOf("read_file")
+    }
+
     test("execute() allows further delegation only when allowedTools includes the delegate tool itself") {
         val provider = mockk<LLMProvider>()
         val capturedRequests = mutableListOf<CompletionRequest>()

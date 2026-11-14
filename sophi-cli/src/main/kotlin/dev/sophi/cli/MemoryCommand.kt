@@ -26,7 +26,7 @@ import java.nio.file.Path
  * on the shared memory store (ADR-041 M6) — works while the companion or another CLI is running. Providers are wired only for the
  * subcommands that need them (search, consolidation compression).
  */
-class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control Sophi's long-term memory") {
+class MemoryCommand : CliktCommand(name = "memory", help = "Browse and control SoPhi's long-term memory") {
     init {
         subcommands(MemoryList(), MemoryShow(), MemoryThreads(), MemoryProfile(),
             MemoryForget(), MemoryWhy(), MemoryConsolidate(), MemoryConsolidations(), MemoryRestore(), MemoryReset())
@@ -236,10 +236,10 @@ class MemoryRestore : CliktCommand(name = "restore", help = "Undo a soft-delete 
     }
 }
 
-class MemoryReset : CliktCommand(name = "reset", help = "Wipe ALL memory — the shared memory every running Sophi app (CLI and companion) uses; irreversible") {
+class MemoryReset : CliktCommand(name = "reset", help = "Wipe ALL memory — the shared memory every running SoPhi app (CLI and companion) uses; irreversible") {
     private val yes: Boolean by option("--yes").flag()
     override fun run() = runBlocking {
-        echo("This wipes ${JanesPalaceConfig.DEFAULT_HOME} entirely — every memory, thread, and profile attribute — for every running Sophi app (CLI and companion), which share it.")
+        echo("This wipes ${JanesPalaceConfig.DEFAULT_HOME} entirely — every memory, thread, and profile attribute — for every running SoPhi app (CLI and companion), which share it.")
         if (!yes) {
             echo("Type RESET to confirm: ", trailingNewline = false)
             if (readLine()?.trim() != "RESET") return@runBlocking echo("Aborted.")

@@ -67,7 +67,7 @@ class ContextCommandTest : FunSpec({
     test("add says it is indexed while a session runs, not that it is indexing now") {
         val e = engine(); val out = mutableListOf<String>()
         ContextAdd(e, tempdir().toPath()) { out += it }.run()
-        out.single() shouldContain "indexed in the background while a Sophi session runs"
+        out.single() shouldContain "indexed in the background while a SoPhi session runs"
     }
 
     test("registerCwd re-requests a scan for a covered project that was never scanned") {

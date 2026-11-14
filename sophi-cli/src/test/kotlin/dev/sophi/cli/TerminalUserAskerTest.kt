@@ -26,7 +26,7 @@ class TerminalUserAskerTest : FunSpec({
     test("a number picks that option") {
         val (a, rec) = asker("2")
         runBlocking { a.ask(q(), null) } shouldBe Answer.Reply(CHOICES[1], null)
-        rec.output() shouldContain "Sophi asks:"
+        rec.output() shouldContain "SoPhi asks:"
         rec.output() shouldContain "1. Postgres — one server"
         rec.output() shouldContain "2. SQLite"
     }
@@ -50,7 +50,7 @@ class TerminalUserAskerTest : FunSpec({
     test("an unattended question (a background subagent) is never prompted") {
         val (a, rec) = asker("1")
         runBlocking { a.ask(q().copy(unattended = true, deadlineMs = 1), 60_000) } shouldBe Answer.TimedOut
-        rec.output() shouldNotContain "Sophi asks:"
+        rec.output() shouldNotContain "SoPhi asks:"
     }
 
     test("two questions in parallel are asked one after the other") {
@@ -58,8 +58,8 @@ class TerminalUserAskerTest : FunSpec({
         val answers = runBlocking { listOf(async { a.ask(q("First?"), null) }, async { a.ask(q("Second?"), null) }).awaitAll() }
         answers.toSet() shouldBe setOf(Answer.Reply(CHOICES[0], null), Answer.Reply(CHOICES[1], null))
         val out = rec.output()
-        val first = out.indexOf("Sophi asks:")
-        val second = out.indexOf("Sophi asks:", first + 1)
+        val first = out.indexOf("SoPhi asks:")
+        val second = out.indexOf("SoPhi asks:", first + 1)
         val promptAfterFirst = out.indexOf("Answer with a number", first)
         (promptAfterFirst in first until second) shouldBe true
     }
