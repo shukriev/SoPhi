@@ -26,4 +26,12 @@ class CalendarEventTest : FunSpec({
         val r = Recurrence(frequency = Frequency.WEEKLY, byWeekday = listOf(DayOfWeek.MONDAY, DayOfWeek.FRIDAY))
         r.byWeekday shouldBe listOf(DayOfWeek.MONDAY, DayOfWeek.FRIDAY)
     }
+
+    test("an old event JSON without attendees or url still decodes") {
+        val e = kotlinx.serialization.json.Json.decodeFromString(
+            CalendarEvent.serializer(), """{"title":"Old","start":1,"end":2}"""
+        )
+        e.attendees shouldBe emptyList()
+        e.url.shouldBeNull()
+    }
 })

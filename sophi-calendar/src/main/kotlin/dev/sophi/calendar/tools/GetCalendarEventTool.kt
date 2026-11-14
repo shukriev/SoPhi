@@ -30,6 +30,9 @@ class GetCalendarEventTool(private val provider: CalendarProvider) : Tool {
         val event = provider.get(eventId, args.calendarId) ?: return "Error: no event found with id $eventId"
         return "${event.id}  ${event.title}  ${event.start}-${event.end}" +
             (event.location?.let { "  location=$it" } ?: "") +
-            (event.notes?.let { "  notes=$it" } ?: "")
+            (event.notes?.let { "  notes=$it" } ?: "") +
+            // names only: attendee emails stay out of the model's prompt
+            (event.attendees.mapNotNull { it.name }.takeIf { it.isNotEmpty() }?.let { "  attendees=${it.joinToString(", ")}" } ?: "") +
+            (event.url?.let { "  url=$it" } ?: "")
     }
 }

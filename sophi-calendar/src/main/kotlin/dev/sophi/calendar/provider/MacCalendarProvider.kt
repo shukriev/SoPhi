@@ -1,5 +1,6 @@
 package dev.sophi.calendar.provider
 
+import dev.sophi.calendar.model.Attendee
 import dev.sophi.calendar.model.CalendarEvent
 import dev.sophi.calendar.model.CalendarEventPatch
 import dev.sophi.calendar.model.CalendarInfo
@@ -12,6 +13,8 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 private const val FIELD_SEP = "::SOPHI_FIELD::"
+private const val ATTENDEE_SEP = "<<SOPHI_ATTS>>"   // between attendees
+private const val ATTENDEE_FIELD_SEP = "<<SOPHI_ATT>>" // name / email within one attendee
 
 private val HANDLERS_PRELUDE = """
     on clean(t)
@@ -26,13 +29,28 @@ private val HANDLERS_PRELUDE = """
     end clean
 
     using terms from application "Calendar"
+        on formatAttendees(e)
+            set out to ""
+            try
+                repeat with a in attendees of e
+                    if out is not "" then set out to out & "$ATTENDEE_SEP"
+                    set out to out & my clean(display name of a) & "$ATTENDEE_FIELD_SEP" & my clean(email of a)
+                end repeat
+            end try
+            return out
+        end formatAttendees
+
         on formatEvent(e)
+            set u to ""
+            try
+                set u to my clean(url of e)
+            end try
             set sd to start date of e
             set ed to end date of e
             return (uid of e) & "$FIELD_SEP" & (summary of e as text) & "$FIELD_SEP" & ¬
                 (year of sd as text) & "$FIELD_SEP" & (month of sd as integer as text) & "$FIELD_SEP" & (day of sd as text) & "$FIELD_SEP" & (time of sd as text) & "$FIELD_SEP" & ¬
                 (year of ed as text) & "$FIELD_SEP" & (month of ed as integer as text) & "$FIELD_SEP" & (day of ed as text) & "$FIELD_SEP" & (time of ed as text) & "$FIELD_SEP" & ¬
-                (allday event of e as text) & "$FIELD_SEP" & my clean(location of e) & "$FIELD_SEP" & my clean(description of e)
+                (allday event of e as text) & "$FIELD_SEP" & my clean(location of e) & "$FIELD_SEP" & my clean(description of e) & "$FIELD_SEP" & my formatAttendees(e) & "$FIELD_SEP" & u
         end formatEvent
     end using terms from
 """.trimIndent()
@@ -198,7 +216,12 @@ class MacCalendarProvider(
             end = ymdSecToEpochMs(f[6].toInt(), f[7].toInt(), f[8].toInt(), f[9].toInt()),
             allDay = f[10] == "true",
             location = f[11].ifBlank { null },
-            notes = f[12].ifBlank { null }
+            notes = f[12].ifBlank { null },
+            attendees = f.getOrNull(13).orEmpty().split(ATTENDEE_SEP).filter { it.isNotBlank() }.map {
+                val (name, email) = (it.split(ATTENDEE_FIELD_SEP) + "").take(2)
+                Attendee(name.ifBlank { null }, email.ifBlank { null })
+            },
+            url = f.getOrNull(14)?.ifBlank { null }
         )
     }
 
