@@ -33,6 +33,14 @@ class GetCalendarEventToolTest : FunSpec({
         result.contains("ann@x.com") shouldBe false
     }
 
+    test("an attendee named by their email address leaks nothing") {
+        val line = listOf("A", "T", "2026", "8", "1", "0", "2026", "8", "1", "60", "false", "", "",
+            "ann@x.com<<SOPHI_ATT>>ann@x.com", "").joinToString("::SOPHI_FIELD::")
+        val provider = dev.sophi.calendar.provider.MacCalendarProvider(runScript = { line })
+        val result = runBlocking { GetCalendarEventTool(provider).execute("""{"event_id":"A","calendar_id":"Home"}""") }
+        result.contains("ann@x.com") shouldBe false
+    }
+
     test("get with an unknown event_id returns an Error string") {
         val result = runBlocking {
             GetCalendarEventTool(FakeCalendarProvider()).execute("""{"event_id":"missing"}""")

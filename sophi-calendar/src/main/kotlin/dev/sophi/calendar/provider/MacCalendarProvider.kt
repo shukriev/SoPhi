@@ -20,11 +20,14 @@ private val HANDLERS_PRELUDE = """
     on clean(t)
         if t is missing value then return ""
         set t to t as text
-        set {tid, my text item delimiters} to {my text item delimiters, return}
-        set parts to text items of t
-        set my text item delimiters to " "
-        set t to parts as text
-        set my text item delimiters to tid
+        set oldDelims to my text item delimiters
+        repeat with d in {return, linefeed, "$FIELD_SEP", "$ATTENDEE_SEP", "$ATTENDEE_FIELD_SEP"}
+            set my text item delimiters to (contents of d)
+            set parts to text items of t
+            set my text item delimiters to " "
+            set t to parts as text
+        end repeat
+        set my text item delimiters to oldDelims
         return t
     end clean
 
@@ -40,17 +43,21 @@ private val HANDLERS_PRELUDE = """
             return out
         end formatAttendees
 
-        on formatEvent(e)
+        on formatEvent(e, full)
             set u to ""
-            try
-                set u to my clean(url of e)
-            end try
+            set att to ""
+            if full then
+                try
+                    set u to my clean(url of e)
+                end try
+                set att to my formatAttendees(e)
+            end if
             set sd to start date of e
             set ed to end date of e
-            return (uid of e) & "$FIELD_SEP" & (summary of e as text) & "$FIELD_SEP" & ¬
+            return (uid of e) & "$FIELD_SEP" & my clean(summary of e) & "$FIELD_SEP" & ¬
                 (year of sd as text) & "$FIELD_SEP" & (month of sd as integer as text) & "$FIELD_SEP" & (day of sd as text) & "$FIELD_SEP" & (time of sd as text) & "$FIELD_SEP" & ¬
                 (year of ed as text) & "$FIELD_SEP" & (month of ed as integer as text) & "$FIELD_SEP" & (day of ed as text) & "$FIELD_SEP" & (time of ed as text) & "$FIELD_SEP" & ¬
-                (allday event of e as text) & "$FIELD_SEP" & my clean(location of e) & "$FIELD_SEP" & my clean(description of e) & "$FIELD_SEP" & my formatAttendees(e) & "$FIELD_SEP" & u
+                (allday event of e as text) & "$FIELD_SEP" & my clean(location of e) & "$FIELD_SEP" & my clean(description of e) & "$FIELD_SEP" & att & "$FIELD_SEP" & u
         end formatEvent
     end using terms from
 """.trimIndent()
@@ -172,7 +179,7 @@ class MacCalendarProvider(
                     on error
                         return "NOT_FOUND"
                     end try
-                    return my formatEvent(theEvent)
+                    return my formatEvent(theEvent, true)
                 end tell
             end tell
         """.trimIndent()
@@ -192,7 +199,7 @@ class MacCalendarProvider(
                     set matches to (every event whose start date < rangeEnd and end date > rangeStart)
                     set outputLines to {}
                     repeat with e in matches
-                        set end of outputLines to my formatEvent(e)
+                        set end of outputLines to my formatEvent(e, false)
                     end repeat
                     set {tid, my text item delimiters} to {my text item delimiters, linefeed}
                     set resultText to outputLines as text
@@ -203,7 +210,10 @@ class MacCalendarProvider(
         """.trimIndent()
         val output = runScript(script).trim()
         if (output.isEmpty()) return emptyList()
-        return output.lines().map { parseEventLine(it, calendarName) }
+        return output.lines().mapNotNull {
+            // a malformed line (e.g. hostile text in a field) skips that event, not the whole list
+            try { parseEventLine(it, calendarName) } catch (e: IndexOutOfBoundsException) { null } catch (e: NumberFormatException) { null }
+        }
     }
 
     private fun parseEventLine(line: String, calendarName: String): CalendarEvent {
@@ -219,7 +229,8 @@ class MacCalendarProvider(
             notes = f[12].ifBlank { null },
             attendees = f.getOrNull(13).orEmpty().split(ATTENDEE_SEP).filter { it.isNotBlank() }.map {
                 val (name, email) = (it.split(ATTENDEE_FIELD_SEP) + "").take(2)
-                Attendee(name.ifBlank { null }, email.ifBlank { null })
+                // Calendar.app falls back to the address as display name: never keep it as a name
+                Attendee(name.takeIf { '@' !in it }?.ifBlank { null }, email.ifBlank { null })
             },
             url = f.getOrNull(14)?.ifBlank { null }
         )
@@ -272,7 +283,7 @@ class MacCalendarProvider(
                     on error
                         return "NOT_FOUND"
                     end try$setters
-                    return my formatEvent(theEvent)
+                    return my formatEvent(theEvent, true)
                 end tell
             end tell
         """.trimIndent()

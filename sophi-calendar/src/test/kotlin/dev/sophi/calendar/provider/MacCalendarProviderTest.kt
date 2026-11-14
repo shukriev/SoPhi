@@ -138,6 +138,26 @@ class MacCalendarProviderTest : FunSpec({
         old.url shouldBe null
     }
 
+    test("an attendee whose display name is the email address gets no name") {
+        val base = listOf("A", "T", "2026", "8", "1", "0", "2026", "8", "1", "60", "false", "", "")
+        val line = (base + listOf("ann@x.com<<SOPHI_ATT>>ann@x.com", "")).joinToString(FIELD_SEP_FOR_TEST)
+        MacCalendarProvider(runScript = { line }).get("A", "Home")!!.attendees shouldBe listOf(Attendee(null, "ann@x.com"))
+    }
+
+    test("list skips a malformed line instead of failing") {
+        val good = listOf("ID1", "A", "2026", "8", "1", "0", "2026", "8", "1", "3600", "false", "", "").joinToString(FIELD_SEP_FOR_TEST)
+        val bad = "ID2${FIELD_SEP_FOR_TEST}broken"
+        MacCalendarProvider(runScript = { "$good\n$bad" }).list("Home", 0, 1).map { it.id } shouldBe listOf("ID1")
+    }
+
+    test("the AppleScript strips linefeeds and the separators from every field, and list skips attendees") {
+        var cap = ""
+        MacCalendarProvider(runScript = { cap = it; "" }).list("Home", 0, 1)
+        cap shouldContain "linefeed"
+        cap shouldContain "<<SOPHI_ATTS>>"
+        cap shouldContain "my formatEvent(e, false)"
+    }
+
     test("get returns null when Calendar.app reports NOT_FOUND") {
         val provider = MacCalendarProvider(runScript = { "NOT_FOUND" })
         provider.get("missing", "Home") shouldBe null
