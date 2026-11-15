@@ -1,5 +1,11 @@
 package dev.sophi.calendar.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class Attendee(val name: String? = null, val email: String? = null)
+
+@Serializable
 data class CalendarEvent(
     val id: String? = null,           // null on create; assigned by the backend
     val calendarId: String? = null,   // null = OS default calendar
@@ -12,7 +18,9 @@ data class CalendarEvent(
     val location: String? = null,
     val notes: String? = null,
     val reminderMinutesBefore: Int? = null,
-    val recurrence: Recurrence? = null
+    val recurrence: Recurrence? = null,
+    val attendees: List<Attendee> = emptyList(),
+    val url: String? = null
 )
 
 // Distinct from CalendarEvent: every field is optional so `update` can express

@@ -1,5 +1,6 @@
 package dev.sophi.calendar.provider
 
+import dev.sophi.calendar.model.Attendee
 import dev.sophi.calendar.model.CalendarInfo
 import dev.sophi.calendar.model.Frequency
 import dev.sophi.calendar.model.Recurrence
@@ -123,6 +124,38 @@ class MacCalendarProviderTest : FunSpec({
         event.location shouldBe "Room 1"
         event.notes shouldBe "Notes"
         event.calendarId shouldBe "Home"
+    }
+
+    test("get parses attendees and the event URL, and a short line still parses") {
+        val base = listOf("ABC", "Sync", "2026", "8", "1", "54000", "2026", "8", "1", "57600", "false", "", "")
+        val att = "Ann Lee<<SOPHI_ATT>>ann@x.com<<SOPHI_ATTS>>Bo<<SOPHI_ATT>>"
+        val line = (base + listOf(att, "https://meet.example/abc")).joinToString(FIELD_SEP_FOR_TEST)
+        val event = MacCalendarProvider(runScript = { line }).get("ABC", "Home")!!
+        event.attendees shouldBe listOf(Attendee("Ann Lee", "ann@x.com"), Attendee("Bo", null))
+        event.url shouldBe "https://meet.example/abc"
+        val old = MacCalendarProvider(runScript = { base.joinToString(FIELD_SEP_FOR_TEST) }).get("ABC", "Home")!!
+        old.attendees shouldBe emptyList()
+        old.url shouldBe null
+    }
+
+    test("an attendee whose display name is the email address gets no name") {
+        val base = listOf("A", "T", "2026", "8", "1", "0", "2026", "8", "1", "60", "false", "", "")
+        val line = (base + listOf("ann@x.com<<SOPHI_ATT>>ann@x.com", "")).joinToString(FIELD_SEP_FOR_TEST)
+        MacCalendarProvider(runScript = { line }).get("A", "Home")!!.attendees shouldBe listOf(Attendee(null, "ann@x.com"))
+    }
+
+    test("list skips a malformed line instead of failing") {
+        val good = listOf("ID1", "A", "2026", "8", "1", "0", "2026", "8", "1", "3600", "false", "", "").joinToString(FIELD_SEP_FOR_TEST)
+        val bad = "ID2${FIELD_SEP_FOR_TEST}broken"
+        MacCalendarProvider(runScript = { "$good\n$bad" }).list("Home", 0, 1).map { it.id } shouldBe listOf("ID1")
+    }
+
+    test("the AppleScript strips linefeeds and the separators from every field, and list skips attendees") {
+        var cap = ""
+        MacCalendarProvider(runScript = { cap = it; "" }).list("Home", 0, 1)
+        cap shouldContain "linefeed"
+        cap shouldContain "<<SOPHI_ATTS>>"
+        cap shouldContain "my formatEvent(e, false)"
     }
 
     test("get returns null when Calendar.app reports NOT_FOUND") {
