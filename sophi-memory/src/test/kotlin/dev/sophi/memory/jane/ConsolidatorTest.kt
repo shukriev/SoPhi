@@ -12,6 +12,7 @@ import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -135,8 +136,25 @@ class ConsolidatorTest : FunSpec({
         r.store.upsertEdge(CausalEdge("mem_1", "mem_2", "relocation"))
         r.store.upsertEdge(CausalEdge("mem_2", "mem_3", "relocation"))
         r.consolidator.run(nowMs = 200 * DAY)
-        r.store.memories().values.single { it.provenance == Provenance.SYSTEM_INFERRED && it.active }
-            .sourceSessionId shouldBe "ambient,s"
+        val summary = r.store.memories().values.single { it.provenance == Provenance.SYSTEM_INFERRED && it.active }
+        summary.sourceSessionId shouldBe "ambient,s"
+        summary.origin shouldBe null   // members heard in different ways
+        summary.confidence() shouldBe "low"   // part of it was overheard
+        summary.explain() shouldContain "summarized from older memories"
+    }
+
+    test("compress: a summary of memories all heard the same way keeps that origin") {
+        val provider = mockk<LLMProvider>()
+        coEvery { provider.complete(any()) } returns LLMResponse.Text("Moved to Plovdiv", TokenUsage(1, 1))
+        val r = Rig(provider)
+        listOf("mem_1" to "user changed jobs", "mem_2" to "family moved to plovdiv", "mem_3" to "emma enrolled in new school")
+            .forEachIndexed { i, (id, text) -> r.store.upsertMemory(r.add(id, text, at = i * DAY, salience = 0.05).copy(origin = Origin.MEETING)) }
+        r.store.upsertEdge(CausalEdge("mem_1", "mem_2", "relocation"))
+        r.store.upsertEdge(CausalEdge("mem_2", "mem_3", "relocation"))
+        r.consolidator.run(nowMs = 200 * DAY)
+        val summary = r.store.memories().values.single { it.provenance == Provenance.SYSTEM_INFERRED && it.active }
+        summary.origin shouldBe Origin.MEETING
+        summary.confidence() shouldBe "low"
     }
 
     test("compress keeps the thread when the summary comes back blank (thinking model cut off at length)") {

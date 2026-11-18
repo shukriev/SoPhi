@@ -146,6 +146,27 @@ class MemoryPluginTest : FunSpec({
         plugin.close()
     }
 
+    test("a newly stored sensitive memory is reported, so the host can offer Forget; a personal one is not") {
+        val llm = mockk<LLMProvider>()
+        val reply = { text: String, sensitivity: String -> LLMResponse.Text(
+            """{"memories":[{"text":"$text","room":"KNOWLEDGE","emph":0.8,"aff":0.9,
+               "sensitivity":"$sensitivity","provenance":"USER_DIRECT"}],"profile":[]}""", TokenUsage(1, 1)) }
+        coEvery { llm.complete(any()) } returns reply("The user has type 2 diabetes", "SENSITIVE")
+        val palace = JanesPalace(JanesPalaceConfig(home = tempdir().toPath(), sessionModel = "test-model"), llm, FakeEmbeddingProvider(), "fake")
+        val got = java.util.concurrent.CopyOnWriteArrayList<Pair<String, MemoryView>>()
+        val plugin = MemoryPlugin(palace, onSensitiveStored = { sid, m -> got += sid to m })
+        val hook = plugin.hooks().single { it.point == HookPoint.AFTER_TURN }
+        hook.invoke(HookContext("s1", userInput = "I have type 2 diabetes", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.map { it.first to it.second.text } shouldBe listOf("s1" to "The user has type 2 diabetes")
+
+        coEvery { llm.complete(any()) } returns reply("The user owns a red bicycle", "PERSONAL")
+        hook.invoke(HookContext("s1", userInput = "my bike is red", assistantReply = "ok"))
+        plugin.drainEncodes()
+        got.size shouldBe 1
+        plugin.close()
+    }
+
     test("a throwing household callback does not break the turn") {
         val llm = mockk<LLMProvider>()
         coEvery { llm.complete(any()) } returns LLMResponse.Text(

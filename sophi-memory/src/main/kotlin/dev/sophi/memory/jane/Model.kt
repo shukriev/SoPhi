@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 @Serializable enum class Room { ENTITIES, TASKS, EPISODES, KNOWLEDGE, NARRATIVE }
 @Serializable enum class Sensitivity { PUBLIC, PERSONAL, SENSITIVE, RESTRICTED }
 @Serializable enum class Provenance { USER_DIRECT, USER_ARTIFACT, THIRD_PARTY, SYSTEM_INFERRED }
+/** Where a memory was heard: a chat, ambient listening, a meeting, a commitment the user confirmed, a household share. */
+@Serializable enum class Origin { CHAT, AMBIENT, MEETING, CONFIRMED, SHARED }
 
 @Serializable
 data class SalienceSignals(
@@ -60,7 +62,10 @@ data class Memory(
     /** Looks like it belongs to the shared household; the host asks the user before sharing it. */
     val householdCandidate: Boolean = false,
     /** Names of the household members who shared this into the household memory, in order shared. */
-    val sharedBy: List<String> = emptyList()
+    val sharedBy: List<String> = emptyList(),
+    /** How it reached memory; null for memories written before it was recorded, and for summaries of mixed origin.
+     *  No copy of the user's words is kept: [sourceSessionId] points at the local transcript instead. */
+    val origin: Origin? = null
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null

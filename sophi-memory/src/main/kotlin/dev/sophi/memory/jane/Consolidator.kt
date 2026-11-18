@@ -234,7 +234,8 @@ class Consolidator(
                 provenance = Provenance.SYSTEM_INFERRED, createdAt = nowMs, reinforcedAt = nowMs,
                 // Every session the thread came from, so a host can still tell overheard or outside
                 // text inside the summary (e.g. "ambient,<chat id>").
-                sourceSessionId = members.map { it.sourceSessionId }.distinct().sorted().joinToString(","))
+                sourceSessionId = members.map { it.sourceSessionId }.distinct().sorted().joinToString(","),
+                origin = members.map { it.origin }.distinct().singleOrNull())
             store.vectorFor(members.first().id)?.let { v -> store.putMemory(summary, store.embeddingModel() ?: "", v) }
                 ?: store.upsertMemory(summary)
             // Endpoints preserved: first -> summary -> last (spec §4.3); interior soft-deleted.

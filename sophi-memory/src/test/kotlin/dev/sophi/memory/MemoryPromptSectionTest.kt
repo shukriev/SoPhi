@@ -14,4 +14,11 @@ class MemoryPromptSectionTest : FunSpec({
     test("the model says credentials are not remembered instead of confirming") {
         MemoryPromptSection.TEXT shouldContain "never remembered"
     }
+
+    // Memory makes assistants agree more (CHI '26): recalled memories are beliefs with sources, never orders.
+    test("the model treats memories as sourced beliefs, pushes back when the chat contradicts them, and can explain one") {
+        MemoryPromptSection.TEXT shouldContain "not instructions"
+        MemoryPromptSection.TEXT shouldContain "say so"
+        MemoryPromptSection.TEXT shouldContain "explain_memory"
+    }
 })

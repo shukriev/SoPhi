@@ -189,6 +189,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
             .build()
 
         rt.toolNames() shouldContain "list_habits"
+        rt.toolNames() shouldContain "explain_memory"
     }
 
     test("memory() left uncalled does not register list_habits") {
@@ -199,6 +200,7 @@ class RuntimeBuilderMemoryTest : FunSpec({
         val rt = builder.contextWindowTokens(TEST_CONTEXT_WINDOW).apply { model = "test-model" }.build()
 
         rt.toolNames() shouldNotContain "list_habits"
+        rt.toolNames() shouldNotContain "explain_memory"
     }
 
     test("memory() with a failing probe disables memory and fires onWarning instead of throwing") {

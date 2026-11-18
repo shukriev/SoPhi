@@ -188,6 +188,10 @@ class JanesPalace(
 
     override fun explainLastRecall(): String? = store.readLastRecall()
 
+    /** Where memory [id] came from, how sure SoPhi is and when it was saved; null for an unknown id, and for a
+     *  forgotten or replaced one, so a forgotten fact can't come back through its old id. */
+    fun explain(id: String): String? = store.memories()[id]?.takeIf { it.active }?.explain()
+
     override fun views(ids: List<String>): List<MemoryView> {
         val all = store.memories()
         val now = System.currentTimeMillis()
@@ -245,6 +249,8 @@ class JanesPalace(
             "source" to m.sourceSessionId,
             "state" to when { m.supersededBy != null -> "superseded"; m.softDeletedAt != null -> "soft-deleted"; else -> "active" }
         ) + (if (m.householdCandidate) mapOf("household" to "candidate") else emptyMap()) +
-            (if (m.sharedBy.isNotEmpty()) mapOf("sharedBy" to m.sharedBy.joinToString(", ")) else emptyMap())
+            (if (m.sharedBy.isNotEmpty()) mapOf("sharedBy" to m.sharedBy.joinToString(", ")) else emptyMap()) +
+            (m.origin?.let { mapOf("origin" to it.name.lowercase()) } ?: emptyMap()) +
+            mapOf("confidence" to m.confidence())
     )
 }

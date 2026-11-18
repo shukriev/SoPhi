@@ -95,7 +95,8 @@ class MemoryWriter(
             createdAt = nowMs,
             reinforcedAt = nowMs,
             sourceSessionId = sessionId,
-            isCommitment = true
+            isCommitment = true,
+            origin = Origin.CONFIRMED
         )
         store.putMemory(memory, embeddingModelName, vector)
         return memory
@@ -124,7 +125,7 @@ class MemoryWriter(
             id = "mem_" + UUID.randomUUID(), text = source.text, room = source.room,
             salience = source.salience, signals = source.signals, sensitivity = source.sensitivity,
             provenance = Provenance.USER_DIRECT, createdAt = nowMs, reinforcedAt = nowMs,
-            sourceSessionId = source.sourceSessionId, sharedBy = listOf(by)
+            sourceSessionId = source.sourceSessionId, sharedBy = listOf(by), origin = Origin.SHARED
         )
         store.putMemory(memory, embeddingModelName, vector)
         return memory
@@ -222,7 +223,8 @@ class MemoryWriter(
                 // Commitment tracking is chat-only in v1 (ADR-035): enforced here in code, not left
                 // to the prompt, since provenance can be THIRD_PARTY even outside an ambient turn.
                 isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting),
-                householdCandidate = vm.household && !turn.ambient && provenance == Provenance.USER_DIRECT && sensitivity <= Sensitivity.PERSONAL
+                householdCandidate = vm.household && !turn.ambient && provenance == Provenance.USER_DIRECT && sensitivity <= Sensitivity.PERSONAL,
+                origin = originOf(turn)
             )
             store.putMemory(memory, embeddingModelName, vector)
             stored += memory
