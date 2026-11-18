@@ -398,8 +398,10 @@ class RuntimeBuilder {
         onRecall: (sessionId: String, memories: List<dev.sophi.memory.MemoryView>) -> Unit = { _, _ -> },
         /** A new memory that looks like a household fact; see [MemoryPlugin]'s `onHouseholdCandidate`. */
         onHouseholdCandidate: (sessionId: String, memory: dev.sophi.memory.MemoryView) -> Unit = { _, _ -> },
+        /** A new SENSITIVE/RESTRICTED memory, so the host can offer to forget it; see [MemoryPlugin]'s `onSensitiveStored`. */
+        onSensitiveStored: (sessionId: String, memory: dev.sophi.memory.MemoryView) -> Unit = { _, _ -> },
     ): RuntimeBuilder = apply {
-        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider, onRecall, onHouseholdCandidate)
+        memoryConfig = MemoryConfig(embeddingModel, embeddingBaseUrl, embeddingApiKey, embeddingDimensions, onWarning, embeddingProvider, onRecall, onHouseholdCandidate, onSensitiveStored)
     }
 
     private var householdMemory: JanesPalace? = null
@@ -569,7 +571,7 @@ class RuntimeBuilder {
                         p, embeddingProvider, mc.embeddingModel, onWarning = mc.onWarning
                     )
                 }.fold(
-                    onSuccess = { palace -> MemoryPlugin(palace, onRecall = mc.onRecall, onHouseholdCandidate = mc.onHouseholdCandidate, household = householdMemory).also { pluginRegistry.register(it) } },
+                    onSuccess = { palace -> MemoryPlugin(palace, onRecall = mc.onRecall, onHouseholdCandidate = mc.onHouseholdCandidate, onSensitiveStored = mc.onSensitiveStored, household = householdMemory).also { pluginRegistry.register(it) } },
                     onFailure = { e ->
                         mc.onWarning("memory: disabled — couldn't open the memory database at $memoryHome (${e.message ?: "unknown error"})")
                         null
@@ -580,6 +582,7 @@ class RuntimeBuilder {
         memoryPlugin?.palace()?.let { palace -> registry.register(ListActionablePatternsTool(palace)) }
         memoryPlugin?.palace()?.let { palace -> registry.register(ListOpenCommitmentsTool(palace)) }
         memoryPlugin?.palace()?.let { palace -> registry.register(ListHabitsTool(palace)) }
+        memoryPlugin?.palace()?.let { palace -> registry.register(dev.sophi.memory.tools.ExplainMemoryTool(listOfNotNull(palace, householdMemory))) }
         val memorySection = if (memoryPlugin != null) MemoryPromptSection.TEXT else null
 
         val effectiveConfig = agentConfig.copy(
@@ -667,6 +670,7 @@ private data class MemoryConfig(
     val embeddingProvider: EmbeddingProvider? = null,
     val onRecall: (String, List<dev.sophi.memory.MemoryView>) -> Unit = { _, _ -> },
     val onHouseholdCandidate: (String, dev.sophi.memory.MemoryView) -> Unit = { _, _ -> },
+    val onSensitiveStored: (String, dev.sophi.memory.MemoryView) -> Unit = { _, _ -> },
 )
 
 /**

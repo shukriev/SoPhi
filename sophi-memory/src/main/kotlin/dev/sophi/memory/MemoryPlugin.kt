@@ -16,6 +16,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.CopyOnWriteArrayList
 
+private val SENSITIVE_TIERS = setOf("SENSITIVE", "RESTRICTED")
+
 /**
  * Harness adapter (spec §3.2): recall on the turn path via ContextContributor,
  * encoding fire-and-forget on AFTER_TURN. Memory must never break a turn — every
@@ -34,6 +36,9 @@ class MemoryPlugin(
     private val onRecall: (sessionId: String, memories: List<MemoryView>) -> Unit = { _, _ -> },
     /** Told once per memory a turn's encode newly stored that looks like it belongs to the household. */
     private val onHouseholdCandidate: (sessionId: String, memory: MemoryView) -> Unit = { _, _ -> },
+    /** Told once per memory a turn's encode newly stored at SENSITIVE or RESTRICTED (health, money, relationships…),
+     *  so the host can tell the user and offer to forget it. */
+    private val onSensitiveStored: (sessionId: String, memory: MemoryView) -> Unit = { _, _ -> },
     /** The household's shared memory, recalled after the personal one. The host owns it: [close] leaves it open. */
     private val household: MemoryTechnique? = null,
 ) : SophiPlugin, ContextContributor {
@@ -68,8 +73,10 @@ class MemoryPlugin(
                 runCatching {
                     val palace = palace()
                     if (palace == null) technique.observe(turn)
-                    else palace.observeStored(turn).filter { it.metadata["household"] == "candidate" }
-                        .forEach { m -> runCatching { onHouseholdCandidate(turn.sessionId, m) } }
+                    else palace.observeStored(turn).forEach { m ->
+                        if (m.metadata["household"] == "candidate") runCatching { onHouseholdCandidate(turn.sessionId, m) }
+                        if (m.metadata["sensitivity"] in SENSITIVE_TIERS) runCatching { onSensitiveStored(turn.sessionId, m) }
+                    }
                 }
             }
             inFlight += job
