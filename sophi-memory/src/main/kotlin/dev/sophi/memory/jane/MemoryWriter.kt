@@ -125,7 +125,6 @@ class MemoryWriter(
             id = "mem_" + UUID.randomUUID(), text = source.text, room = source.room,
             salience = source.salience, signals = source.signals, sensitivity = source.sensitivity,
             provenance = Provenance.USER_DIRECT, createdAt = nowMs, reinforcedAt = nowMs,
-            // The sharer's own words (excerpt) stay in their palace.
             sourceSessionId = source.sourceSessionId, sharedBy = listOf(by), origin = Origin.SHARED
         )
         store.putMemory(memory, embeddingModelName, vector)
@@ -225,8 +224,7 @@ class MemoryWriter(
                 // to the prompt, since provenance can be THIRD_PARTY even outside an ambient turn.
                 isCommitment = vm.commitment && provenance == Provenance.USER_DIRECT && !(turn.ambient && turn.inMeeting),
                 householdCandidate = vm.household && !turn.ambient && provenance == Provenance.USER_DIRECT && sensitivity <= Sensitivity.PERSONAL,
-                origin = originOf(turn),
-                excerpt = excerptOf(turn)
+                origin = originOf(turn)
             )
             store.putMemory(memory, embeddingModelName, vector)
             stored += memory

@@ -11,7 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 class ExplainMemoryTool(private val palaces: List<JanesPalace>) : Tool {
     override val name = "explain_memory"
     override val description = "Say where a remembered fact came from: the chat or meeting it was heard in, " +
-        "the user's own words, whether it was stated or inferred, how sure SoPhi is, and when it was saved. " +
+        "whether it was stated or inferred, how sure SoPhi is, and when it was saved. " +
         "Use it when the user asks why you think something about them. Pass the id shown on the memory line."
     override val parametersJson =
         """{"type":"object","properties":{"id":{"type":"string","description":"The memory's id, e.g. mem_..."}},"required":["id"]}"""

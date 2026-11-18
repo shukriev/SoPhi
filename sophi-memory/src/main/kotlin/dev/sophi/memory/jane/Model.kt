@@ -63,10 +63,9 @@ data class Memory(
     val householdCandidate: Boolean = false,
     /** Names of the household members who shared this into the household memory, in order shared. */
     val sharedBy: List<String> = emptyList(),
-    /** How it reached memory; null for memories written before it was recorded. */
-    val origin: Origin? = null,
-    /** The user's own chat words it was taken from (redacted, capped at [EXCERPT_CHARS]); never overheard speech. */
-    val excerpt: String? = null
+    /** How it reached memory; null for memories written before it was recorded, and for summaries of mixed origin.
+     *  No copy of the user's words is kept: [sourceSessionId] points at the local transcript instead. */
+    val origin: Origin? = null
 ) {
     /** Visible to retrieval and default browse. */
     val active: Boolean get() = supersededBy == null && softDeletedAt == null

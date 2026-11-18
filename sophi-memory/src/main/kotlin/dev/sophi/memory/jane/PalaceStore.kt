@@ -184,8 +184,7 @@ class PalaceStore(
     ) + // only when set, so a single-user record keeps its shape; neither is ever unset again
         (if (householdCandidate) mapOf("householdCandidate" to true) else emptyMap()) +
         (if (sharedBy.isNotEmpty()) mapOf("sharedBy" to sharedBy) else emptyMap()) +
-        (origin?.let { mapOf("origin" to it.name) } ?: emptyMap()) +
-        (excerpt?.let { mapOf("excerpt" to it) } ?: emptyMap())
+        (origin?.let { mapOf("origin" to it.name) } ?: emptyMap())
     private fun Map<String, Any?>.toMemory(): Memory = Memory(
         id = memoryId(), text = get("text") as String, room = Room.valueOf(get("room") as String),
         salience = (get("salience") as Number).toDouble(),
@@ -212,8 +211,7 @@ class PalaceStore(
         habitPreferredDayOfWeek = (get("habitPreferredDayOfWeek") as? Number)?.toInt(),
         householdCandidate = get("householdCandidate") as? Boolean ?: false,
         sharedBy = (get("sharedBy") as? List<*>)?.map { it as String } ?: emptyList(),
-        origin = (get("origin") as? String)?.let { o -> Origin.entries.firstOrNull { it.name == o } },
-        excerpt = get("excerpt") as? String
+        origin = (get("origin") as? String)?.let { o -> Origin.entries.firstOrNull { it.name == o } }
     )
 
     private fun CausalEdge.toProperties(): Map<String, Any?> =

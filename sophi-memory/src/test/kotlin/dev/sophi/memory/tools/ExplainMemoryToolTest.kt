@@ -14,6 +14,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import kotlinx.coroutines.runBlocking
 
 class ExplainMemoryToolTest : FunSpec({
@@ -31,7 +32,10 @@ class ExplainMemoryToolTest : FunSpec({
         val tool = ExplainMemoryTool(listOf(palace(), palace("mem_h")))
         tool.name shouldBe "explain_memory"
         tool.riskLevel("{}") shouldBe RiskLevel.SAFE
-        runBlocking { tool.execute("""{"id":"mem_h"}""") } shouldContain "shared into the household by Sam"
+        val why = runBlocking { tool.execute("""{"id":"mem_h"}""") }
+        why shouldContain "shared into the household by Sam"
+        why shouldContain "stated by Sam"   // a member asking must not hear that they said it
+        why shouldNotContain "stated by you"
         runBlocking { tool.execute("""{"id":"mem_x"}""") } shouldContain "No memory"
         runBlocking { tool.execute("{}") } shouldContain "No memory"
     }
