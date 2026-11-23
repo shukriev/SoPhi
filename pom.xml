@@ -363,4 +363,18 @@ java.util.logging.FileHandler.formatter = com.arcadedb.log.LogFormatter
             <url>https://repo.spring.io/milestone</url>
         </pluginRepository>
     </pluginRepositories>
+
+    <profiles>
+        <!-- On Windows the checkout path starts with a drive ("D:\..."), which can't follow the temp dir mid-path:
+             keep one folder per checkout and module, emptied every run, inside the module's own target folder. -->
+        <profile>
+            <id>windows-test-tmpdir</id>
+            <activation>
+                <os><family>windows</family></os>
+            </activation>
+            <properties>
+                <test.tmpdir>${project.build.directory}/test-tmp</test.tmpdir>
+            </properties>
+        </profile>
+    </profiles>
 </project>
