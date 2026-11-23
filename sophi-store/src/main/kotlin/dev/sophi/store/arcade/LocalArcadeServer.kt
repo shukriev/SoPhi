@@ -8,6 +8,10 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.AclEntry
+import java.nio.file.attribute.AclEntryPermission
+import java.nio.file.attribute.AclEntryType
+import java.nio.file.attribute.AclFileAttributeView
 import java.nio.file.attribute.PosixFilePermissions
 import java.security.SecureRandom
 import java.util.Base64
@@ -62,9 +66,9 @@ class LocalArcadeServer private constructor(
             val bytes = ByteArray(24).also { SecureRandom().nextBytes(it) }
             val secret = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
             val file = root.resolve("secret")
-            // Created 0600 from the start: no window where the password is readable by others.
+            // Owner-only before the password is written: no window where others can read it.
             Files.deleteIfExists(file)
-            Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+            createOwnerOnly(file)
             Files.writeString(file, secret)
             return secret
         }
@@ -94,6 +98,23 @@ class LocalArcadeServer private constructor(
     override fun close() = server.stop()
 }
 
+private val OWNER_ONLY = PosixFilePermissions.fromString("rw-------")
+
+private fun posix(file: Path) = "posix" in file.fileSystem.supportedFileAttributeViews()
+
+/** Creates [file] (it must not exist) readable by its owner only: 0600 on POSIX, created that way; a lone owner ACL entry on Windows. */
+internal fun createOwnerOnly(file: Path) {
+    if (posix(file)) Files.createFile(file, PosixFilePermissions.asFileAttribute(OWNER_ONLY))
+    else { Files.createFile(file); restrictToOwner(file) }
+}
+
+/** Makes [file] readable by its owner only: 0600 on POSIX, a lone owner ACL entry (no inherited ones) on Windows. */
 internal fun restrictToOwner(file: Path) {
-    Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"))
+    if (posix(file)) { Files.setPosixFilePermissions(file, OWNER_ONLY); return }
+    // ponytail: a FAT/exFAT volume has neither view, so the file keeps what its folder gives it.
+    val view = Files.getFileAttributeView(file, AclFileAttributeView::class.java) ?: return
+    view.acl = listOf(
+        AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(view.owner)
+            .setPermissions(AclEntryPermission.values().toSet()).build()
+    )
 }
