@@ -25,7 +25,7 @@ if ($Verify) {
     $tmp = Join-Path $Root "verify-$Target"
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     New-Item -ItemType Directory $tmp | Out-Null
-    tar xzf $Archive -C $tmp
+    & "$env:SystemRoot\System32\tar.exe" xzf $Archive -C $tmp
     if (-not (Test-Path (Join-Path $tmp $Exe))) { throw "$Exe missing from archive" }
     if ($Target -eq 'stream' -and -not (Test-Path (Join-Path $tmp 'SDL2.dll'))) { throw 'SDL2.dll missing from archive' }
 
@@ -77,5 +77,5 @@ try {
 
 Copy-Item (Join-Path $src "build\bin\Release\$Exe") $Dist
 if ($Target -eq 'stream') { Copy-Item (Join-Path $sdl "lib\$Arch\SDL2.dll") $Dist }
-tar czf $Archive -C $Dist (Get-ChildItem $Dist).Name
+& "$env:SystemRoot\System32\tar.exe" czf $Archive -C $Dist (Get-ChildItem $Dist).Name
 Write-Host "Packaged $Archive"
