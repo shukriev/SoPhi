@@ -16,6 +16,7 @@
 #   scripts/build-whisper-stream.sh --arch both     # both, if both SDL2 slices are installed
 #   scripts/build-whisper-stream.sh --no-manifest   # build and package only (what CI uses)
 #   scripts/build-whisper-stream.sh --publish       # also upload to the GitHub release
+#   scripts/build-whisper-stream.sh --os linux --no-manifest   # Linux, this machine's arch (CI)
 #
 # CI calls this from .github/workflows/voice-tools-release.yml, one architecture per native
 # runner. Prefer that over running it by hand: it builds on clean machines and publishes the whole
@@ -34,11 +35,13 @@ RELEASE_REPO="shukriev/SoPhi"
 MANIFEST_URL="https://github.com/$RELEASE_REPO/releases/download/$RELEASE_TAG/voice-tools-manifest.json"
 
 arch_arg="host"
+os_arg="macos"
 publish=false
 write_manifest=true
 while [ $# -gt 0 ]; do
     case "$1" in
         --arch) arch_arg="${2:-}"; shift 2 ;;
+        --os) os_arg="${2:-}"; shift 2 ;;
         --publish) publish=true; shift ;;
         # For CI: each runner builds its own architecture, and the publish job writes one manifest
         # covering all of them. A per-runner manifest would only ever be half a manifest.
@@ -49,6 +52,68 @@ while [ $# -gt 0 ]; do
         *) echo "Error: unknown argument '$1'. Try --help." >&2; exit 1 ;;
     esac
 done
+
+# Linux: one architecture per native runner, no manifest (the CI publish job writes it). SDL2 is
+# built from source and bundled as libSDL2-2.0.so.0 beside the binary with RPATH $ORIGIN. Audio
+# backends (PulseAudio, PipeWire, ALSA) are dlopen'd at runtime, so the binary does not need them
+# installed to start.
+build_linux() {
+    [ "$(uname -s)" = "Linux" ] || { echo "Error: --os linux must run on Linux." >&2; exit 1; }
+    [ "$write_manifest" = false ] || { echo "Error: --os linux needs --no-manifest." >&2; exit 1; }
+    case "$(uname -m)" in
+        x86_64) host_arch="x64" ;;
+        aarch64) host_arch="arm64" ;;
+        *) echo "Error: unsupported host architecture '$(uname -m)'." >&2; exit 1 ;;
+    esac
+    case "$arch_arg" in
+        host|"$host_arch") ;;
+        *) echo "Error: Linux builds natively; --arch must be $host_arch here." >&2; exit 1 ;;
+    esac
+
+    local sudo=""; [ "$(id -u)" = "0" ] || sudo="sudo"
+    $sudo apt-get update -qq
+    $sudo apt-get install -y -qq cmake git patchelf libpulse-dev libpipewire-0.3-dev libasound2-dev
+
+    local repo_root work_dir stage_dir out_dir sdl_prefix jobs
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    work_dir="$repo_root/.whisper-stream-build"
+    out_dir="$work_dir/dist"; stage_dir="$work_dir/stage-linux-$host_arch"
+    sdl_prefix="$work_dir/sdl2-linux-$host_arch"; jobs="$(nproc)"
+    rm -rf "$stage_dir"; mkdir -p "$out_dir" "$stage_dir"
+
+    [ -d "$work_dir/SDL" ] || git clone --quiet --branch release-2.30.9 --depth 1 \
+        https://github.com/libsdl-org/SDL "$work_dir/SDL"
+    cmake -S "$work_dir/SDL" -B "$work_dir/SDL/build" -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$sdl_prefix" -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF \
+        -DSDL_PULSEAUDIO_SHARED=ON -DSDL_PIPEWIRE_SHARED=ON -DSDL_ALSA_SHARED=ON >/dev/null
+    cmake --build "$work_dir/SDL/build" -j"$jobs" >/dev/null
+    cmake --install "$work_dir/SDL/build" >/dev/null
+
+    local src="$work_dir/whisper.cpp"
+    [ -d "$src" ] || git clone --quiet https://github.com/ggerganov/whisper.cpp "$src"
+    git -C "$src" fetch --quiet --tags origin
+    git -C "$src" checkout --quiet "$WHISPER_REF"
+    # GGML_NATIVE=OFF: don't tune for the runner's CPU, or the binary crashes on older CPUs.
+    cmake -S "$src" -B "$src/build-linux" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+        -DGGML_NATIVE=OFF -DWHISPER_SDL2=ON -DCMAKE_PREFIX_PATH="$sdl_prefix" >/dev/null
+    cmake --build "$src/build-linux" --target whisper-stream -j"$jobs" >/dev/null
+
+    local binary
+    binary="$(find "$src/build-linux" -name whisper-stream -type f -perm /111 | head -1)"
+    [ -n "$binary" ] || { echo "Error: whisper-stream was not produced (SDL2 not found?)." >&2; exit 1; }
+    cp "$binary" "$stage_dir/whisper-stream"
+    cp -L "$sdl_prefix/lib/libSDL2-2.0.so.0" "$stage_dir/"
+    patchelf --set-rpath '$ORIGIN' "$stage_dir/whisper-stream"
+
+    tar -czf "$out_dir/whisper-stream-linux-$host_arch.tar.gz" -C "$stage_dir" .
+    echo "Packaged $out_dir/whisper-stream-linux-$host_arch.tar.gz"
+}
+
+case "$os_arg" in
+    macos) ;;
+    linux) build_linux; exit 0 ;;
+    *) echo "Error: --os must be macos or linux." >&2; exit 1 ;;
+esac
 
 if [ "$(uname -s)" != "Darwin" ]; then
     echo "Error: this builds the macOS artifacts; run it on a Mac." >&2

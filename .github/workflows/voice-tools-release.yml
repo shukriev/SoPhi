@@ -23,8 +23,16 @@ jobs:
         include:
           - os: macos-15
             arch: arm64
+            platform: macos
           - os: macos-15-intel
             arch: x64
+            platform: macos
+          - os: ubuntu-22.04
+            arch: x64
+            platform: linux
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            platform: linux
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout whisper.cpp
@@ -36,7 +44,9 @@ jobs:
 
       - name: Configure (static link, no dylib relocation problem)
         working-directory: whisper.cpp
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+        run: |
+          # GGML_NATIVE=OFF: don't tune for the runner's CPU, or older user CPUs crash.
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF
 
       - name: Build whisper-cli
         working-directory: whisper.cpp
@@ -55,13 +65,13 @@ jobs:
           ./whisper-cli --help
 
       - name: Package
-        run: tar czf whisper-cli-macos-${{ matrix.arch }}.tar.gz -C dist whisper-cli
+        run: tar czf whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz -C dist whisper-cli
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: whisper-cli-macos-${{ matrix.arch }}
-          path: whisper-cli-macos-${{ matrix.arch }}.tar.gz
+          name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           retention-days: 1
 
   build-whisper-stream:
@@ -71,8 +81,16 @@ jobs:
         include:
           - os: macos-15
             arch: arm64
+            platform: macos
           - os: macos-15-intel
             arch: x64
+            platform: macos
+          - os: ubuntu-22.04
+            arch: x64
+            platform: linux
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            platform: linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -83,16 +101,29 @@ jobs:
       # package a binary that still points into the build host. Calling the script rather than
       # inlining those steps keeps one implementation of that logic.
       - name: Build and package whisper-stream
-        run: ./scripts/build-whisper-stream.sh --arch ${{ matrix.arch }} --no-manifest
+        run: ./scripts/build-whisper-stream.sh --os ${{ matrix.platform }} --arch ${{ matrix.arch }} --no-manifest
 
       # Deliberately does not run the binary. whisper-stream opens the microphone and blocks, and a
       # runner has no capture device, so a launch attempt either hangs or exits silently depending
       # on the image — it proves nothing and fails at random. These checks are deterministic and
       # cover exactly what this packaging can break.
-      - name: Verify the packaged artifact (relocated outside the build tree)
+      - name: Verify the packaged artifact (Linux, relocated outside the build tree)
+        if: matrix.platform == 'linux'
         run: |
           mkdir -p /tmp/stream-smoke
-          tar xzf .whisper-stream-build/dist/whisper-stream-macos-${{ matrix.arch }}.tar.gz \
+          tar xzf .whisper-stream-build/dist/whisper-stream-linux-${{ matrix.arch }}.tar.gz \
+            -C /tmp/stream-smoke
+          cd /tmp/stream-smoke
+          test -f whisper-stream
+          test -f libSDL2-2.0.so.0
+          ldd whisper-stream | grep -q 'libSDL2-2.0.so.0 => /tmp/stream-smoke/' || { ldd whisper-stream; exit 1; }
+          ! ldd whisper-stream | grep -q 'not found'
+
+      - name: Verify the packaged artifact (relocated outside the build tree)
+        if: matrix.platform == 'macos'
+        run: |
+          mkdir -p /tmp/stream-smoke
+          tar xzf .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz \
             -C /tmp/stream-smoke
           cd /tmp/stream-smoke
           test -f whisper-stream
@@ -119,8 +150,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: whisper-stream-macos-${{ matrix.arch }}
-          path: .whisper-stream-build/dist/whisper-stream-macos-${{ matrix.arch }}.tar.gz
+          name: whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           retention-days: 1
 
   build-piper-runtime:
