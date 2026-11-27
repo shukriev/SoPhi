@@ -94,8 +94,9 @@ build_linux() {
     git -C "$src" fetch --quiet --tags origin
     git -C "$src" checkout --quiet "$WHISPER_REF"
     # GGML_NATIVE=OFF: don't tune for the runner's CPU, or the binary crashes on older CPUs.
+    # GGML_OPENMP=OFF: no dynamic libgomp.so.1 dependency on the user's machine.
     cmake -S "$src" -B "$src/build-linux" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
-        -DGGML_NATIVE=OFF -DWHISPER_SDL2=ON -DCMAKE_PREFIX_PATH="$sdl_prefix" >/dev/null
+        -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DWHISPER_SDL2=ON -DCMAKE_PREFIX_PATH="$sdl_prefix" >/dev/null
     cmake --build "$src/build-linux" --target whisper-stream -j"$jobs" >/dev/null
 
     local binary
