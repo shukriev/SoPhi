@@ -13,8 +13,8 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
 $Sdl2Version = '2.30.9'
-# SHA-256 of SDL2-devel-2.30.9-VC.zip. Must be pinned from a trusted source before release.
-$Sdl2Sha256 = 'TODO_PIN_SHA256'
+# SHA-256 of SDL2-devel-2.30.9-VC.zip (hashed from the official release asset).
+$Sdl2Sha256 = '8c91d91e5bcb997d062ec2b553c53832ebf95654d4aa35e8c02a954d4ce752ae'
 
 $Root = Join-Path (Get-Location) '.whisper-windows-build'
 $Dist = Join-Path $Root "dist-$Target"
@@ -49,8 +49,6 @@ if ($Verify) {
     Write-Host "OK: $Exe"
     exit 0
 }
-
-if ($Sdl2Sha256 -eq 'TODO_PIN_SHA256') { throw 'SDL2 SHA-256 is not pinned in build-whisper-windows.ps1' }
 
 Remove-Item -Recurse -Force $Root -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $Root, $Dist | Out-Null
