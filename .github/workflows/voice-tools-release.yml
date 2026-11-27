@@ -239,6 +239,79 @@ jobs:
           path: piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           retention-days: 1
 
+  models:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and verify pinned models
+        run: |
+          base=https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1
+          while read -r file sha; do
+            curl -fL -o "$file" "$base/$file"
+            echo "$sha  $file" | sha256sum -c -
+          done <<'TABLE'
+          ggml-small.en.bin c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d
+          ggml-small.bin 1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
+          ggml-large-v3-turbo-q5_0.bin 394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2
+          TABLE
+
+      - name: Upload models
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-models
+          path: ggml-*.bin
+          retention-days: 1
+
+  smoke:
+    needs: [models, build-whisper-cli, build-piper-runtime]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, platform: macos, arch: arm64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: macos-15-intel, platform: macos, arch: x64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: ubuntu-22.04, platform: linux, arch: x64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: ubuntu-22.04-arm, platform: linux, arch: arm64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: windows-2025, platform: windows, arch: x64, exe: whisper-cli.exe, py: ./python/python.exe, tar: /c/Windows/System32/tar.exe}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: whisper-models
+
+      - name: Unpack
+        run: |
+          ${{ matrix.tar }} xzf whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          ${{ matrix.tar }} xzf piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+
+      - name: Fetch jfk.wav
+        run: curl -fL -o jfk.wav https://raw.githubusercontent.com/ggml-org/whisper.cpp/${{ env.WHISPER_CPP_REF }}/samples/jfk.wav
+
+      - name: Transcribe with each model (CPU only)
+        run: |
+          for m in small.en small large-v3-turbo-q5_0; do
+            lang=""
+            [ "$m" != small.en ] && lang="-l auto"
+            ./${{ matrix.exe }} -ng -m "ggml-$m.bin" -f jfk.wav -nt $lang > "out-$m.txt" 2>&1 || { cat "out-$m.txt"; exit 1; }
+            if ! grep -qi "ask not what your country can do" "out-$m.txt"; then
+              echo "::error::$m transcript missing the expected sentence"
+              cat "out-$m.txt"
+              exit 1
+            fi
+          done
+
+      - name: Piper runtime starts
+        run: ${{ matrix.py }} -s -m piper --help
+
   publish:
     needs: [build-whisper-cli, build-whisper-stream, build-piper-runtime]
     runs-on: ubuntu-latest
