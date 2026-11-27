@@ -17,6 +17,7 @@
 #   scripts/build-whisper-stream.sh --no-manifest   # build and package only (what CI uses)
 #   scripts/build-whisper-stream.sh --publish       # also upload to the GitHub release
 #   scripts/build-whisper-stream.sh --os linux --no-manifest   # Linux, this machine's arch (CI)
+#   scripts/build-whisper-stream.sh --ref b4938     # whisper.cpp ref (default b4938)
 #
 # CI calls this from .github/workflows/voice-tools-release.yml, one architecture per native
 # runner. Prefer that over running it by hand: it builds on clean machines and publishes the whole
@@ -42,6 +43,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --arch) arch_arg="${2:-}"; shift 2 ;;
         --os) os_arg="${2:-}"; shift 2 ;;
+        --ref) WHISPER_REF="${2:-}"; shift 2 ;;
         --publish) publish=true; shift ;;
         # For CI: each runner builds its own architecture, and the publish job writes one manifest
         # covering all of them. A per-runner manifest would only ever be half a manifest.

@@ -36,6 +36,8 @@ if ($Verify) {
     $out = & $dumpbin.FullName /dependents (Join-Path $tmp $Exe)
     $out | Write-Host
     $deps = $out | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' }
+    if (-not $deps -or $deps -notcontains 'KERNEL32.dll') { throw "dumpbin reported no usable dependencies (KERNEL32.dll missing): $($deps -join ', ')" }
+    if ($Target -eq 'stream' -and $deps -notcontains 'SDL2.dll') { throw 'whisper-stream must depend on SDL2.dll' }
     $allowed = '^(SDL2|KERNEL32|USER32|ADVAPI32|SHELL32|ole32|WINMM|api-ms-win-[\w-]+)\.dll$'
     foreach ($d in $deps) {
         if ($d -match 'VCRUNTIME|MSVCP|VCOMP|^ucrtbase') { throw "forbidden runtime dependency: $d" }

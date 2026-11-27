@@ -56,8 +56,8 @@ jobs:
       - name: Configure (static link, no dylib relocation problem)
         if: matrix.platform != 'windows'
         working-directory: whisper.cpp
-        # Linux only: GGML_NATIVE=OFF so it doesn't tune for the runner's CPU (older user CPUs
-        # would crash); GGML_OPENMP=OFF so it doesn't need libgomp1 on the user's machine.
+        # Linux only: GGML_NATIVE=OFF so ggml targets a fixed x86-64 baseline (AVX2/FMA/F16C,
+        # i.e. Haswell 2013+ CPUs) instead of the build runner's CPU; GGML_OPENMP=OFF so it doesn't need libgomp1 on the user's machine.
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF ${{ matrix.cmake_extra }}
 
       - name: Build whisper-cli
@@ -96,13 +96,23 @@ jobs:
         shell: pwsh
         run: ./scripts/build-whisper-windows.ps1 -Target cli -Arch ${{ matrix.arch }} -Verify
 
+      # One path per upload: with several paths v4 roots the artifact at their common ancestor
+      # and nests the files, which the smoke and publish jobs do not expect.
       - name: Upload artifact
+        if: matrix.platform != 'windows'
         uses: actions/upload-artifact@v4
         with:
           name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
-          path: |
-            whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
-            .whisper-windows-build/whisper-cli-windows-${{ matrix.arch }}.tar.gz
+          path: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload artifact (Windows)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .whisper-windows-build/whisper-cli-windows-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -137,7 +147,7 @@ jobs:
       # inlining those steps keeps one implementation of that logic.
       - name: Build and package whisper-stream
         if: matrix.platform != 'windows'
-        run: ./scripts/build-whisper-stream.sh --os ${{ matrix.platform }} --arch ${{ matrix.arch }} --no-manifest
+        run: ./scripts/build-whisper-stream.sh --os ${{ matrix.platform }} --arch ${{ matrix.arch }} --ref ${{ env.WHISPER_CPP_REF }} --no-manifest
 
       - name: Build and package whisper-stream (Windows)
         if: matrix.platform == 'windows'
@@ -195,12 +205,20 @@ jobs:
           codesign --verify --strict libSDL2-2.0.0.dylib
 
       - name: Upload artifact
+        if: matrix.platform != 'windows'
         uses: actions/upload-artifact@v4
         with:
           name: whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}
-          path: |
-            .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
-            .whisper-windows-build/whisper-stream-windows-${{ matrix.arch }}.tar.gz
+          path: .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload artifact (Windows)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .whisper-windows-build/whisper-stream-windows-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -229,7 +247,7 @@ jobs:
         run: ${{ matrix.py }} -m pip install onnxruntime==${{ env.ONNXRUNTIME_VERSION }} piper-tts==${{ env.PIPER_TTS_VERSION }}
 
       - name: Add piper's license (GPL-3.0 compliance — the redistributed bundle must carry it)
-        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o python/PIPER-LICENSE
+        run: curl -fsL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o python/PIPER-LICENSE
 
       - name: Smoke test (isolated invocation — -s is not optional, see Global Constraints)
         run: ${{ matrix.py }} -s -m piper --help
@@ -321,8 +339,9 @@ jobs:
     # Every row must be green to publish. A row that cannot be built is removed
     # from the matrix by an explicit commit; the glob manifest then omits it.
     # Do not add `if: always()` here.
+    # Runs on dry runs too, so the manifest is printed and validated every time; only
+    # "Create release" is skipped when dry_run is set.
     needs: [models, smoke, build-whisper-cli, build-whisper-stream, build-piper-runtime]
-    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -339,7 +358,7 @@ jobs:
         working-directory: artifacts
         run: |
           python3 <<'PYEOF'
-          import glob, hashlib, json, os
+          import glob, hashlib, json, os, sys
 
           MODELS = {
               "whisper-model-small.en": "ggml-small.en.bin",
@@ -352,6 +371,15 @@ jobs:
           missing = [k for k, f in MODELS.items() if f not in artifact_files]
           if missing:
               raise SystemExit(f"missing model files for: {missing}")
+          # Must mirror the build matrices (build-whisper-cli, build-whisper-stream,
+          # build-piper-runtime): every tool on every platform, nothing more.
+          PLATFORMS = ["macos-arm64", "macos-x64", "linux-x64", "linux-arm64", "windows-x64"]
+          EXPECTED = {f"{t}-{p}" for t in ("whisper-cli", "whisper-stream", "piper-runtime") for p in PLATFORMS}
+          binary_keys = {k for k, f in keys.items() if f.endswith(".tar.gz")} - set(MODELS)
+          if binary_keys != EXPECTED:
+              print(f"missing binary keys: {sorted(EXPECTED - binary_keys)}", file=sys.stderr)
+              print(f"unexpected binary keys: {sorted(binary_keys - EXPECTED)}", file=sys.stderr)
+              raise SystemExit(1)
           manifest = {
               "releaseTag": os.environ["RELEASE_TAG"],
               "whisperCppRef": os.environ["WHISPER_CPP_REF"],
@@ -380,9 +408,10 @@ jobs:
           PIPER_TTS_VERSION: ${{ env.PIPER_TTS_VERSION }}
 
       - name: Fetch piper's license as a standalone top-level asset
-        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o artifacts/PIPER-LICENSE
+        run: curl -fsL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o artifacts/PIPER-LICENSE
 
       - name: Create release
+        if: ${{ !inputs.dry_run }}
         working-directory: artifacts
         run: |
           gh release create "${{ inputs.release_tag }}" \
