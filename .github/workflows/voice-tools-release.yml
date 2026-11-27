@@ -35,9 +35,13 @@ jobs:
             arch: arm64
             platform: linux
             cmake_extra: -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF
+          - os: windows-2025
+            arch: x64
+            platform: windows
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout whisper.cpp
+        if: matrix.platform != 'windows'
         uses: actions/checkout@v4
         with:
           repository: ggml-org/whisper.cpp
@@ -45,21 +49,25 @@ jobs:
           path: whisper.cpp
 
       - name: Configure (static link, no dylib relocation problem)
+        if: matrix.platform != 'windows'
         working-directory: whisper.cpp
         # Linux only: GGML_NATIVE=OFF so it doesn't tune for the runner's CPU (older user CPUs
         # would crash); GGML_OPENMP=OFF so it doesn't need libgomp1 on the user's machine.
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF ${{ matrix.cmake_extra }}
 
       - name: Build whisper-cli
+        if: matrix.platform != 'windows'
         working-directory: whisper.cpp
         run: cmake --build build --config Release -j 4
 
       - name: Collect artifact
+        if: matrix.platform != 'windows'
         run: |
           mkdir -p dist
           cp whisper.cpp/build/bin/whisper-cli dist/
 
       - name: Smoke test (relocated outside the build tree)
+        if: matrix.platform != 'windows'
         run: |
           mkdir -p /tmp/smoke-test
           cp dist/whisper-cli /tmp/smoke-test/
@@ -67,13 +75,30 @@ jobs:
           ./whisper-cli --help
 
       - name: Package
+        if: matrix.platform != 'windows'
         run: tar czf whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz -C dist whisper-cli
+
+      - uses: actions/checkout@v4
+        if: matrix.platform == 'windows'
+
+      - name: Build and package whisper-cli (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target cli -Arch ${{ matrix.arch }} -WhisperRef ${{ env.WHISPER_CPP_REF }}
+
+      - name: Verify the packaged artifact (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target cli -Arch ${{ matrix.arch }} -Verify
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
-          path: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          path: |
+            whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+            .whisper-windows-build/whisper-cli-windows-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
           retention-days: 1
 
   build-whisper-stream:
@@ -93,6 +118,9 @@ jobs:
           - os: ubuntu-22.04-arm
             arch: arm64
             platform: linux
+          - os: windows-2025
+            arch: x64
+            platform: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -103,7 +131,18 @@ jobs:
       # package a binary that still points into the build host. Calling the script rather than
       # inlining those steps keeps one implementation of that logic.
       - name: Build and package whisper-stream
+        if: matrix.platform != 'windows'
         run: ./scripts/build-whisper-stream.sh --os ${{ matrix.platform }} --arch ${{ matrix.arch }} --no-manifest
+
+      - name: Build and package whisper-stream (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target stream -Arch ${{ matrix.arch }} -WhisperRef ${{ env.WHISPER_CPP_REF }}
+
+      - name: Verify the packaged artifact (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target stream -Arch ${{ matrix.arch }} -Verify
 
       # Deliberately does not run the binary. whisper-stream opens the microphone and blocks, and a
       # runner has no capture device, so a launch attempt either hangs or exits silently depending
@@ -154,7 +193,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}
-          path: .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          path: |
+            .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+            .whisper-windows-build/whisper-stream-windows-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
           retention-days: 1
 
   build-piper-runtime:
