@@ -7,6 +7,11 @@ on:
         description: 'Release tag for this voice-tools publish (e.g. voice-tools-v1)'
         required: true
         type: string
+      dry_run:
+        description: 'Build and test everything but do not create a release (default). Untick to publish.'
+        required: true
+        type: boolean
+        default: true
 
 env:
   WHISPER_CPP_REF: b4938
@@ -18,16 +23,30 @@ env:
 jobs:
   build-whisper-cli:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - os: macos-15
             arch: arm64
+            platform: macos
           - os: macos-15-intel
             arch: x64
+            platform: macos
+          - os: ubuntu-22.04
+            arch: x64
+            platform: linux
+            cmake_extra: -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            platform: linux
+            cmake_extra: -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF
+          - os: windows-2025
+            arch: x64
+            platform: windows
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout whisper.cpp
+        if: matrix.platform != 'windows'
         uses: actions/checkout@v4
         with:
           repository: ggml-org/whisper.cpp
@@ -35,19 +54,25 @@ jobs:
           path: whisper.cpp
 
       - name: Configure (static link, no dylib relocation problem)
+        if: matrix.platform != 'windows'
         working-directory: whisper.cpp
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+        # Linux only: GGML_NATIVE=OFF so ggml targets a fixed x86-64 baseline (AVX2/FMA/F16C,
+        # i.e. Haswell 2013+ CPUs) instead of the build runner's CPU; GGML_OPENMP=OFF so it doesn't need libgomp1 on the user's machine.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF ${{ matrix.cmake_extra }}
 
       - name: Build whisper-cli
+        if: matrix.platform != 'windows'
         working-directory: whisper.cpp
         run: cmake --build build --config Release -j 4
 
       - name: Collect artifact
+        if: matrix.platform != 'windows'
         run: |
           mkdir -p dist
           cp whisper.cpp/build/bin/whisper-cli dist/
 
       - name: Smoke test (relocated outside the build tree)
+        if: matrix.platform != 'windows'
         run: |
           mkdir -p /tmp/smoke-test
           cp dist/whisper-cli /tmp/smoke-test/
@@ -55,24 +80,62 @@ jobs:
           ./whisper-cli --help
 
       - name: Package
-        run: tar czf whisper-cli-macos-${{ matrix.arch }}.tar.gz -C dist whisper-cli
+        if: matrix.platform != 'windows'
+        run: tar czf whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz -C dist whisper-cli
 
+      - uses: actions/checkout@v4
+        if: matrix.platform == 'windows'
+
+      - name: Build and package whisper-cli (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target cli -Arch ${{ matrix.arch }} -WhisperRef ${{ env.WHISPER_CPP_REF }}
+
+      - name: Verify the packaged artifact (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target cli -Arch ${{ matrix.arch }} -Verify
+
+      # One path per upload: with several paths v4 roots the artifact at their common ancestor
+      # and nests the files, which the smoke and publish jobs do not expect.
       - name: Upload artifact
+        if: matrix.platform != 'windows'
         uses: actions/upload-artifact@v4
         with:
-          name: whisper-cli-macos-${{ matrix.arch }}
-          path: whisper-cli-macos-${{ matrix.arch }}.tar.gz
+          name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload artifact (Windows)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .whisper-windows-build/whisper-cli-windows-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
           retention-days: 1
 
   build-whisper-stream:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - os: macos-15
             arch: arm64
+            platform: macos
           - os: macos-15-intel
             arch: x64
+            platform: macos
+          - os: ubuntu-22.04
+            arch: x64
+            platform: linux
+          - os: ubuntu-22.04-arm
+            arch: arm64
+            platform: linux
+          - os: windows-2025
+            arch: x64
+            platform: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -83,16 +146,41 @@ jobs:
       # package a binary that still points into the build host. Calling the script rather than
       # inlining those steps keeps one implementation of that logic.
       - name: Build and package whisper-stream
-        run: ./scripts/build-whisper-stream.sh --arch ${{ matrix.arch }} --no-manifest
+        if: matrix.platform != 'windows'
+        run: ./scripts/build-whisper-stream.sh --os ${{ matrix.platform }} --arch ${{ matrix.arch }} --ref ${{ env.WHISPER_CPP_REF }} --no-manifest
+
+      - name: Build and package whisper-stream (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target stream -Arch ${{ matrix.arch }} -WhisperRef ${{ env.WHISPER_CPP_REF }}
+
+      - name: Verify the packaged artifact (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: ./scripts/build-whisper-windows.ps1 -Target stream -Arch ${{ matrix.arch }} -Verify
 
       # Deliberately does not run the binary. whisper-stream opens the microphone and blocks, and a
       # runner has no capture device, so a launch attempt either hangs or exits silently depending
       # on the image — it proves nothing and fails at random. These checks are deterministic and
       # cover exactly what this packaging can break.
-      - name: Verify the packaged artifact (relocated outside the build tree)
+      - name: Verify the packaged artifact (Linux, relocated outside the build tree)
+        if: matrix.platform == 'linux'
         run: |
           mkdir -p /tmp/stream-smoke
-          tar xzf .whisper-stream-build/dist/whisper-stream-macos-${{ matrix.arch }}.tar.gz \
+          tar xzf .whisper-stream-build/dist/whisper-stream-linux-${{ matrix.arch }}.tar.gz \
+            -C /tmp/stream-smoke
+          cd /tmp/stream-smoke
+          test -f whisper-stream
+          test -f libSDL2-2.0.so.0
+          ldd whisper-stream | grep -q 'libSDL2-2.0.so.0 => /tmp/stream-smoke/' || { ldd whisper-stream; exit 1; }
+          if ldd whisper-stream | grep -q 'not found'; then ldd whisper-stream; exit 1; fi
+          if ldd whisper-stream | grep -q libgomp; then ldd whisper-stream; exit 1; fi
+
+      - name: Verify the packaged artifact (relocated outside the build tree)
+        if: matrix.platform == 'macos'
+        run: |
+          mkdir -p /tmp/stream-smoke
+          tar xzf .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz \
             -C /tmp/stream-smoke
           cd /tmp/stream-smoke
           test -f whisper-stream
@@ -117,51 +205,143 @@ jobs:
           codesign --verify --strict libSDL2-2.0.0.dylib
 
       - name: Upload artifact
+        if: matrix.platform != 'windows'
         uses: actions/upload-artifact@v4
         with:
-          name: whisper-stream-macos-${{ matrix.arch }}
-          path: .whisper-stream-build/dist/whisper-stream-macos-${{ matrix.arch }}.tar.gz
+          name: whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .whisper-stream-build/dist/whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload artifact (Windows)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-stream-${{ matrix.platform }}-${{ matrix.arch }}
+          path: .whisper-windows-build/whisper-stream-windows-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
           retention-days: 1
 
   build-piper-runtime:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
-          - os: macos-15
-            arch: arm64
-            standalone_arch: aarch64
-          - os: macos-15-intel
-            arch: x64
-            standalone_arch: x86_64
+          - {os: macos-15, platform: macos, arch: arm64, standalone_triple: aarch64-apple-darwin, py: ./python/bin/python3, tar: tar}
+          - {os: macos-15-intel, platform: macos, arch: x64, standalone_triple: x86_64-apple-darwin, py: ./python/bin/python3, tar: tar}
+          - {os: ubuntu-22.04, platform: linux, arch: x64, standalone_triple: x86_64-unknown-linux-gnu, py: ./python/bin/python3, tar: tar}
+          - {os: ubuntu-22.04-arm, platform: linux, arch: arm64, standalone_triple: aarch64-unknown-linux-gnu, py: ./python/bin/python3, tar: tar}
+          # bsdtar explicitly: Git's GNU tar on the runner reads C:\... as a remote host
+          - {os: windows-2025, platform: windows, arch: x64, standalone_triple: x86_64-pc-windows-msvc, py: ./python/python.exe, tar: /c/Windows/System32/tar.exe}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Download embeddable CPython
         run: |
-          curl -sL "https://github.com/astral-sh/python-build-standalone/releases/download/${{ env.PYTHON_BUILD_STANDALONE_TAG }}/cpython-${{ env.PYTHON_VERSION }}+${{ env.PYTHON_BUILD_STANDALONE_TAG }}-${{ matrix.standalone_arch }}-apple-darwin-install_only.tar.gz" -o cpython.tar.gz
-          tar xzf cpython.tar.gz
+          curl -sL "https://github.com/astral-sh/python-build-standalone/releases/download/${{ env.PYTHON_BUILD_STANDALONE_TAG }}/cpython-${{ env.PYTHON_VERSION }}+${{ env.PYTHON_BUILD_STANDALONE_TAG }}-${{ matrix.standalone_triple }}-install_only.tar.gz" -o cpython.tar.gz
+          ${{ matrix.tar }} xzf cpython.tar.gz
 
       - name: Install pinned onnxruntime + piper-tts
-        run: ./python/bin/python3 -m pip install onnxruntime==${{ env.ONNXRUNTIME_VERSION }} piper-tts==${{ env.PIPER_TTS_VERSION }}
+        run: ${{ matrix.py }} -m pip install onnxruntime==${{ env.ONNXRUNTIME_VERSION }} piper-tts==${{ env.PIPER_TTS_VERSION }}
 
       - name: Add piper's license (GPL-3.0 compliance — the redistributed bundle must carry it)
-        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o python/PIPER-LICENSE
+        run: curl -fsL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o python/PIPER-LICENSE
 
       - name: Smoke test (isolated invocation — -s is not optional, see Global Constraints)
-        run: ./python/bin/python3 -s -m piper --help
+        run: ${{ matrix.py }} -s -m piper --help
 
       - name: Package
-        run: tar czf piper-runtime-macos-${{ matrix.arch }}.tar.gz python
+        run: ${{ matrix.tar }} czf piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz python
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: piper-runtime-macos-${{ matrix.arch }}
-          path: piper-runtime-macos-${{ matrix.arch }}.tar.gz
+          name: piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}
+          path: piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           retention-days: 1
 
+  models:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and verify pinned models
+        run: |
+          base=https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1
+          while read -r file sha; do
+            curl -fL -o "$file" "$base/$file"
+            echo "$sha  $file" | sha256sum -c -
+          done <<'TABLE'
+          ggml-small.en.bin c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d
+          ggml-small.bin 1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b
+          ggml-large-v3-turbo-q5_0.bin 394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2
+          TABLE
+
+      - name: Upload models
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-models
+          path: ggml-*.bin
+          retention-days: 1
+
+  smoke:
+    needs: [models, build-whisper-cli, build-piper-runtime]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, platform: macos, arch: arm64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: macos-15-intel, platform: macos, arch: x64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: ubuntu-22.04, platform: linux, arch: x64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: ubuntu-22.04-arm, platform: linux, arch: arm64, exe: whisper-cli, py: ./python/bin/python3, tar: tar}
+          - {os: windows-2025, platform: windows, arch: x64, exe: whisper-cli.exe, py: ./python/python.exe, tar: /c/Windows/System32/tar.exe}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: whisper-models
+
+      - name: Unpack
+        run: |
+          ${{ matrix.tar }} xzf whisper-cli-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          ${{ matrix.tar }} xzf piper-runtime-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+
+      - name: Fetch jfk.wav
+        run: curl -fL -o jfk.wav https://raw.githubusercontent.com/ggml-org/whisper.cpp/${{ env.WHISPER_CPP_REF }}/samples/jfk.wav
+
+      - name: Transcribe with each model (CPU only)
+        run: |
+          for m in small.en small large-v3-turbo-q5_0; do
+            lang=""
+            [ "$m" != small.en ] && lang="-l auto"
+            ./${{ matrix.exe }} -ng -m "ggml-$m.bin" -f jfk.wav -nt $lang > "out-$m.txt" 2>&1 || { cat "out-$m.txt"; exit 1; }
+            if ! grep -qi "ask not what your country can do" "out-$m.txt"; then
+              echo "::error::$m transcript missing the expected sentence"
+              cat "out-$m.txt"
+              exit 1
+            fi
+          done
+
+      - name: Piper runtime starts
+        run: ${{ matrix.py }} -s -m piper --help
+
   publish:
-    needs: [build-whisper-cli, build-whisper-stream, build-piper-runtime]
+    # Every row must be green to publish. A row that cannot be built is removed
+    # from the matrix by an explicit commit; the glob manifest then omits it.
+    # Do not add `if: always()` here.
+    # Runs on dry runs too, so the manifest is printed and validated every time; only
+    # "Create release" is skipped when dry_run is set.
+    needs: [models, smoke, build-whisper-cli, build-whisper-stream, build-piper-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -178,30 +358,45 @@ jobs:
         working-directory: artifacts
         run: |
           python3 <<'PYEOF'
-          import hashlib, json, os
+          import glob, hashlib, json, os, sys
 
-          artifact_files = [
-              "whisper-cli-macos-arm64.tar.gz",
-              "whisper-cli-macos-x64.tar.gz",
-              "whisper-stream-macos-arm64.tar.gz",
-              "whisper-stream-macos-x64.tar.gz",
-              "piper-runtime-macos-arm64.tar.gz",
-              "piper-runtime-macos-x64.tar.gz",
-          ]
+          MODELS = {
+              "whisper-model-small.en": "ggml-small.en.bin",
+              "whisper-model-small": "ggml-small.bin",
+              "whisper-model-large-v3-turbo-q5_0": "ggml-large-v3-turbo-q5_0.bin",
+          }
+          artifact_files = sorted(glob.glob("*.tar.gz") + glob.glob("ggml-*.bin"))
+          keys = {f.removesuffix(".tar.gz"): f for f in artifact_files if f.endswith(".tar.gz")}
+          keys.update(MODELS)
+          missing = [k for k, f in MODELS.items() if f not in artifact_files]
+          if missing:
+              raise SystemExit(f"missing model files for: {missing}")
+          # Must mirror the build matrices (build-whisper-cli, build-whisper-stream,
+          # build-piper-runtime): every tool on every platform, nothing more.
+          PLATFORMS = ["macos-arm64", "macos-x64", "linux-x64", "linux-arm64", "windows-x64"]
+          EXPECTED = {f"{t}-{p}" for t in ("whisper-cli", "whisper-stream", "piper-runtime") for p in PLATFORMS}
+          binary_keys = {k for k, f in keys.items() if f.endswith(".tar.gz")} - set(MODELS)
+          if binary_keys != EXPECTED:
+              print(f"missing binary keys: {sorted(EXPECTED - binary_keys)}", file=sys.stderr)
+              print(f"unexpected binary keys: {sorted(binary_keys - EXPECTED)}", file=sys.stderr)
+              raise SystemExit(1)
           manifest = {
               "releaseTag": os.environ["RELEASE_TAG"],
               "whisperCppRef": os.environ["WHISPER_CPP_REF"],
               "piperTtsVersion": os.environ["PIPER_TTS_VERSION"],
               "artifacts": {},
           }
-          for filename in artifact_files:
-              key = filename.removesuffix(".tar.gz")
+          for key, filename in sorted(keys.items()):
+              h = hashlib.sha256()
+              size = 0
               with open(filename, "rb") as f:
-                  data = f.read()
+                  while chunk := f.read(1 << 20):
+                      h.update(chunk)
+                      size += len(chunk)
               manifest["artifacts"][key] = {
                   "file": filename,
-                  "sha256": hashlib.sha256(data).hexdigest(),
-                  "sizeBytes": len(data),
+                  "sha256": h.hexdigest(),
+                  "sizeBytes": size,
               }
           with open("voice-tools-manifest.json", "w") as f:
               json.dump(manifest, f, indent=2)
@@ -213,22 +408,18 @@ jobs:
           PIPER_TTS_VERSION: ${{ env.PIPER_TTS_VERSION }}
 
       - name: Fetch piper's license as a standalone top-level asset
-        run: curl -sL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o artifacts/PIPER-LICENSE
+        run: curl -fsL "https://raw.githubusercontent.com/OHF-Voice/piper1-gpl/v${{ env.PIPER_TTS_VERSION }}/COPYING" -o artifacts/PIPER-LICENSE
 
       - name: Create release
+        if: ${{ !inputs.dry_run }}
         working-directory: artifacts
         run: |
           gh release create "${{ inputs.release_tag }}" \
-            whisper-cli-macos-arm64.tar.gz \
-            whisper-cli-macos-x64.tar.gz \
-            whisper-stream-macos-arm64.tar.gz \
-            whisper-stream-macos-x64.tar.gz \
-            piper-runtime-macos-arm64.tar.gz \
-            piper-runtime-macos-x64.tar.gz \
+            *.tar.gz ggml-*.bin \
             voice-tools-manifest.json \
             PIPER-LICENSE \
             --repo "${{ github.repository }}" \
             --title "${{ inputs.release_tag }}" \
-            --notes "Voice tools: whisper.cpp ${{ env.WHISPER_CPP_REF }}, piper-tts ${{ env.PIPER_TTS_VERSION }} (onnxruntime ${{ env.ONNXRUNTIME_VERSION }})"
+            --notes "Voice tools: whisper.cpp ${{ env.WHISPER_CPP_REF }}, piper-tts ${{ env.PIPER_TTS_VERSION }} (onnxruntime ${{ env.ONNXRUNTIME_VERSION }}); whisper models small.en, small, large-v3-turbo-q5_0 (pinned ggml files)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
